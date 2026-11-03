@@ -276,6 +276,25 @@ describe('WatchDetailsPage save bar', () => {
   })
 })
 
+describe('WatchDetailsPage save bar and the schedule check', () => {
+  const bar = () => document.querySelector('[data-slot="save-bar"]')
+
+  it('does not send the skipper to a highlighted field when the schedule check itself failed', async () => {
+    preview = () => { throw new Error('offline') }
+    renderPage()
+    fireEvent.change(await screen.findByDisplayValue('Overnight check'), { target: { value: 'Renamed' } })
+    await waitFor(() => expect(bar()).toHaveTextContent('Save waits until the schedule can be checked.'))
+    expect(bar()).not.toHaveTextContent('Fix the highlighted fields first.')
+  })
+
+  it('still asks for the highlighted field when the schedule is refused', async () => {
+    preview = () => ({ valid: false, error: '"* * * * *" runs more often than every 15 minutes', boat_time_known: true, next: [] })
+    renderPage()
+    fireEvent.change(await screen.findByDisplayValue('Overnight check'), { target: { value: 'Renamed' } })
+    await waitFor(() => expect(bar()).toHaveTextContent('Fix the highlighted fields first.'))
+  })
+})
+
 describe('WatchDetailsPage new watch', () => {
   it('opens pre-filled from a template and saves nothing until Create', async () => {
     const onCreated = vi.fn()

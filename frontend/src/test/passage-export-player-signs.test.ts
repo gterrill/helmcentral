@@ -414,6 +414,24 @@ describe('keeping a card inside the map', () => {
     expect(r.bottom).toBeLessThanOrEqual(map.h - 6 + 1e-6)
   }
 
+  it('places a paused card again for the new size when MapLibre says move before resize, as map.resize() does', () => {
+    const { root, map: fake } = mount([sign('a', T0 + 600)])
+    fake.size = { w: 900, h: 480 }
+    fake.fire('resize')
+    fake.projected = { x: 450, y: 300 }
+    click(root.querySelector('.hcp-sign-pin'))
+    fake.fire('move')
+    const box = root.querySelector('.hcp-sign-box') as HTMLElement
+    const before = box.style.left
+    // The point is now near the right edge of a narrower map; 'move' arrives while the old size still stands.
+    fake.size = { w: 400, h: 480 }
+    fake.projected = { x: 390, y: 300 }
+    fake.fire('move')
+    fake.fire('resize')
+    const left = 390 + parseFloat(box.style.left)
+    expect(box.style.left).not.toBe(before)
+    expect(left + card.w).toBeLessThanOrEqual(400)
+  })
   it('leaves a card in the middle where it is, above its point, the leader running up to it', () => {
     const r = open(450, 300)
     expect(r.left).toBe(340)

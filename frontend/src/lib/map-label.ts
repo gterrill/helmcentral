@@ -62,9 +62,12 @@ export interface MapLabelOptions {
   durationS: number
   /** The corner the overview map is shown in, if it is: in a bottom one the label narrows to keep clear of it. */
   insetCorner?: InsetCorner | null
-  /** An area the page keeps clear, which the label gives way to sideways if it would sit over it. */
-  reserved?: ReservedArea | null
+  /** Areas the page keeps clear (default none), which the label gives way to sideways if it would sit over them. A page that knows where its own overview map really is (the exported card's is smaller than the app's) passes that box here, with no `insetCorner`. */
+  reserved?: readonly ReservedArea[]
 }
+
+/** Whether a label has room for any text between its padding. With no more width than the padding it would be an empty pill, so the page and a video's canvas draw nothing. */
+export const labelHasRoom = (box: Pick<MapLabelBox, 'maxW' | 'padX'>) => box.maxW > 2 * box.padX
 
 /** How tall a label is: one line of its text and the padding. */
 const labelHeight = () => MAP_LABEL.fontPx * MAP_LABEL.lineHeight + 2 * MAP_LABEL.padY
@@ -88,7 +91,7 @@ export function mapLabelStyle(box: MapLabelBox) {
 /** Where a label sits in a frame of `container`'s size, and how big: quiet,
  * small, low, clear of the cards at the sides and of the overview map in a
  * bottom corner. */
-export function mapLabelBox(container: { w: number; h: number }, { align, elapsedS, durationS, insetCorner = null, reserved = null }: MapLabelOptions): MapLabelBox {
+export function mapLabelBox(container: { w: number; h: number }, { align, elapsedS, durationS, insetCorner = null, reserved = [] }: MapLabelOptions): MapLabelBox {
   const e = Math.max(0, Math.min(durationS, elapsedS))
   let left: number = MAP_LABEL.edge
   let right = container.w - MAP_LABEL.edge
@@ -96,9 +99,11 @@ export function mapLabelBox(container: { w: number; h: number }, { align, elapse
   if (insetCorner === 'bottom-right') right = Math.min(right, container.w - INSET.side - INSET.w - MAP_LABEL.insetGap)
   const y = container.h - MAP_LABEL.aboveFoot
   // Over something the page keeps clear: the label narrows from the side that thing is on.
-  if (reserved && reserved.y < y + labelHeight() && reserved.y + reserved.h > y) {
-    if (reserved.x + reserved.w / 2 < container.w / 2) left = Math.max(left, reserved.x + reserved.w + MAP_LABEL.insetGap)
-    else right = Math.min(right, reserved.x - MAP_LABEL.insetGap)
+  for (const area of reserved) {
+    if (area.y < y + labelHeight() && area.y + area.h > y) {
+      if (area.x + area.w / 2 < container.w / 2) left = Math.max(left, area.x + area.w + MAP_LABEL.insetGap)
+      else right = Math.min(right, area.x - MAP_LABEL.insetGap)
+    }
   }
   return {
     x: align === 'center' ? (left + right) / 2 : left,

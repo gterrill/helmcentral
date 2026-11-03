@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PoiMapTile } from '@/components/poi-map-tile'
@@ -294,6 +294,65 @@ describe('Vessels group layout', () => {
     listPaneWidth = 600
     await renderTile()
     expect(screen.getByTestId('poi-list-groups').dataset.stacked).toBe('false')
+  })
+})
+
+describe('Vessels group order on a pane that cannot hold both groups', () => {
+  beforeEach(() => { usePoiMock.mockReturnValue(poiResult([feature('p1', 'Cid Harbour', 1200)])) })
+  const alarms = new globalThis.Map<string, AlarmState>([['a', 'alarm']])
+
+  it('puts the Vessels group first on a short narrow pane when a listed vessel is alarmed', async () => {
+    listPaneWidth = 500
+    await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms })
+    const groups = screen.getByTestId('poi-list-groups')
+    expect(groups.dataset.vesselsFirst).toBe('true')
+    expect(groups.firstElementChild?.querySelector('[data-testid="poi-vessel-row"]')).not.toBeNull()
+  })
+
+  it('keeps the places first when the group shows a message instead of its rows', async () => {
+    listPaneWidth = 500
+    await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms, gnssCriticalAlert: true })
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
+    cleanup()
+    await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms, nearbyVesselFeed: { source: 'other', maxRangeM: 5000 } as NearbyVesselFeed })
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
+  })
+
+  it('puts the divider between the two groups, whichever comes first', async () => {
+    listPaneWidth = 500
+    const { rerender } = await renderTile({ nearbyVessels: [ves('a', 100)] })
+    expect(screen.getByTestId('poi-vessel-group').className).toContain('border-t')
+    rerender(tile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms }))
+    const group = screen.getByTestId('poi-vessel-group')
+    expect(group.className).toContain('border-b')
+    expect(group.className).not.toContain('border-t')
+  })
+
+  it('keeps the rows mounted when the order changes', async () => {
+    listPaneWidth = 500
+    const { rerender } = await renderTile({ nearbyVessels: [ves('a', 100)] })
+    const row = screen.getByTestId('poi-vessel-row')
+    rerender(tile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms }))
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('true')
+    expect(screen.getByTestId('poi-vessel-row')).toBe(row)
+  })
+
+  it('keeps the places first when no listed vessel is alarmed or warned', async () => {
+    listPaneWidth = 500
+    await renderTile({ nearbyVessels: [ves('a', 100)] })
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
+  })
+
+  it('keeps the places first on a tall narrow pane, where everything fits', async () => {
+    listPaneWidth = 500
+    listPaneHeight = 450
+    await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms })
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
+  })
+
+  it('keeps the places first on a short wide pane, where the groups sit side by side', async () => {
+    await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms })
+    expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
   })
 })
 

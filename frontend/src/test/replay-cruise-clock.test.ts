@@ -88,16 +88,17 @@ describe('cruisePaceSpans', () => {
     }
   })
 
-  it('slows a shot\'s pace on top of the passage\'s share, and carries it on into the next passage as shots do', () => {
-    const resolved = [shot(500, 0.5)]
+  it('slows a shot\'s pace on top of the passage\'s share, and returns to full pace at the end of that passage', () => {
+    const resolved = [{ ...shot(500, 0.5), entryId: 'b' }]
     const plain = cruisePaceSpans([], timeline, 60)
     const slowed = cruisePaceSpans(resolved, timeline, 60)
     const wall = (spans: typeof plain, clock: number) => wallAtTimeline(timeline.total, 60, spans, clock)
     const b0 = timeline.entries[1].offset
-    // Before the shot nothing changes; after it the same sailing takes twice as long, to the end of the replay.
+    // Before the shot nothing changes; after it the same sailing takes twice as long, to the end of its passage.
     expect(wall(slowed, b0 + 400)).toBeCloseTo(wall(plain, b0 + 400))
     expect(wall(slowed, b0 + 1400) - wall(slowed, b0 + 400)).toBeCloseTo(2 * (wall(plain, b0 + 1400) - wall(plain, b0 + 400)))
+    // The next passage runs at its own share again.
     const c0 = timeline.entries[2].offset
-    expect(wall(slowed, c0 + 100) - wall(slowed, c0)).toBeCloseTo(2 * (wall(plain, c0 + 100) - wall(plain, c0)))
+    expect(wall(slowed, c0 + 100) - wall(slowed, c0)).toBeCloseTo(wall(plain, c0 + 100) - wall(plain, c0))
   })
 })

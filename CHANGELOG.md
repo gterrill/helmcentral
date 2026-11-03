@@ -25,6 +25,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   receiver reads `boat_time` or `since` as a date and time, change it to read
   `generated_at` and `since_at` instead. Both are UTC times written for a
   program, like 2026-10-28T14:00:00Z, and they don't change.
+- **Saved Engine Cluster tiles need the alternator chosen again.** The
+  alternator is now one choice for the whole tile, so the alternator choices a
+  tile had saved row by row are no longer used. Until you save, the tile's
+  alternator part shows nothing, and the alarms raised from its readings don't
+  run. Re-save each tile straight after upgrading. Open each Engine Cluster
+  tile's settings, check that the alternator filled in from Roles, and choose
+  **Save**. If it didn't fill in, choose the alternator on the **Alternator &
+  more** tab first. Readings already on the tile are kept.
+- **Anchorage cards saved in a Mate chat before this version show an error
+  instead of the card.** Ask Mate for the anchorage again to get a fresh card.
 
 ### Added
 
@@ -35,11 +45,59 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   last 2d ago" for vessels you have met. A vessel in a collision alarm or warning
   takes the same red or amber as the Nearby Vessels tile and is listed even
   outside the tile's range, and a position more than three minutes old says so.
+  On a narrow, short tile the Vessels group goes first while one of them is in
+  alarm or warning, so the alarm isn't the part that's cut off.
   Ship markers now show the vessel's name. When the group can't list vessels it
   says why: "Vessels need a GNSS fix", "AIS
   unavailable" or "No vessels within 5 km". If your AIS receiver goes silent
   while SignalK is still running, Helmcentral can't tell, and the group reads as
   no vessels.
+
+- **Mate keeps lasting facts about your boat.** Say "remember that" and a fact,
+  such as "the fuel polisher has no sampling port on its discharge manifold",
+  and Mate keeps it and reads it in every conversation and every watch review.
+  A card under the reply has an **Undo** button. If Mate works out a fact for
+  itself, it offers it on a card and keeps it only when you tap **Remember
+  this**. A fact that contradicts one already kept shows both and waits for you
+  to tap **Replace fact**.
+  Where you are and other things that change aren't kept. Settings → Mate lists
+  the facts under the standing notes, with **Edit**, **Remove** and **Add
+  fact**. The list holds 50. Outside assistants can read it but not change it.
+- **Mate's morning report stops asking what you've already answered.** The next
+  review gets its own last review and is told not to repeat a question unless the
+  figures changed. If you tapped **Ask Mate about this run** and told Mate
+  something, the next review also gets what you said, marked as your words and
+  not as instructions. Only your messages about the last run are passed on, and
+  never Mate's replies.
+- **A cruise replay frames each passage, and names it.** In the replay of a
+  cruise, or of passages you select together, the camera now frames the passage
+  the boat is on, rather than the whole trip. At each stay it pulls out to the
+  whole cruise, so the route so far builds up on the screen, and comes back in
+  on the next passage. As each passage sets sail, a small label names it, such
+  as "Day 3 · Funnel Bay → Thomas Island", with the day counted by the boat's own
+  dates from the first departure. A camera shot you saved still takes over
+  wherever it applies, on the passage you saved it in. The video you export from
+  a cruise does the same, in landscape and portrait. A single passage replay is
+  as it was.
+
+- **A cruise replay now stops at each anchorage.** The replay of a cruise, or
+  of passages you select together, used to jump from one passage's end to the
+  next one's start. Now it holds for a moment at each stay, with the sun and
+  sky running from the day you arrived to the day you left, so a night at
+  anchor passes as dusk, dark and dawn, and a small label says how long you
+  stayed and where, such as "2 nights · Blue Pearl Bay". Every passage also
+  gets at least four seconds of the length you chose, so a short hop doesn't
+  flash past, and the length list for a cruise adds 2 and 3 minutes and starts
+  on 60 seconds. A single passage replay is as it was. The video you export
+  from a cruise holds at each stay the same way.
+
+- **Documents open full screen.** The document viewer has a **Full screen**
+  button beside **Download** that fills the whole window, so a network diagram
+  or an engine drawing is big enough to read without opening it in another
+  tab. Tapping a picture in the viewer does the same, and the picture then
+  scales to fit the window, even a small one. **Exit full screen** takes you
+  back to the side panel, and closing the viewer does too. A PDF fills the
+  window as well. See [Documents](docs/features/documents.md).
 
 ### Changed
 
@@ -71,17 +129,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   water fell between 02:00 and 04:00 when it fell at 1.30 PM on the boat. Mate now
   receives every time already written on the boat's clock, and quotes it as given
   instead of working it out.
-- **Saved Engine Cluster tiles need the alternator chosen again.** The
-  alternator is now one choice for the whole tile, so the alternator choices a
-  tile had saved row by row are no longer used. Until you save, the tile's
-  alternator part shows nothing, and the alarms raised from its readings don't
-  run. Re-save each tile straight after upgrading. Open each Engine Cluster
-  tile's settings, check that the alternator filled in from Roles, and choose
-  **Save**. If it didn't fill in, choose the alternator on the **Alternator &
-  more** tab first. Readings already on the tile are kept.
-
-### Changed
-
 - **An Engine Cluster tile asks for the alternator once.** The tile's **Footer**
   tab is now called **Alternator & more**. You choose the alternator at the top
   of it, and the current, output power, temperature, charge stage and charge
@@ -168,56 +215,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   credit now drops onto a line of its own, when it would otherwise push a
   figure off the strip.
 
-### Added
-
-- **Mate keeps lasting facts about your boat.** Say "remember that" and a fact,
-  such as "the fuel polisher has no sampling port on its discharge manifold",
-  and Mate keeps it and reads it in every conversation and every watch review.
-  A card under the reply has an **Undo** button. If Mate works out a fact for
-  itself, it offers it on a card and keeps it only when you tap **Remember
-  this**. A fact that contradicts one already kept shows both and waits for you
-  to tap **Replace fact**.
-  Where you are and other things that change aren't kept. Settings → Mate lists
-  the facts under the standing notes, with **Edit**, **Remove** and **Add
-  fact**. The list holds 50. Outside assistants can read it but not change it.
-- **Mate's morning report stops asking what you've already answered.** The next
-  review gets its own last review and is told not to repeat a question unless the
-  figures changed. If you tapped **Ask Mate about this run** and told Mate
-  something, the next review also gets what you said, marked as your words and
-  not as instructions. Only your messages about the last run are passed on, and
-  never Mate's replies.
-- **A cruise replay frames each passage, and names it.** In the replay of a
-  cruise, or of passages you select together, the camera now frames the passage
-  the boat is on, rather than the whole trip. At each stay it pulls out to the
-  whole cruise, so the route so far builds up on the screen, and comes back in
-  on the next passage. As each passage sets sail, a small label names it, such
-  as "Day 3 · Funnel Bay → Thomas Island", with the day counted by the boat's own
-  dates from the first departure. A camera shot you saved still takes over
-  wherever it applies, on the passage you saved it in. The video you export from
-  a cruise does the same, in landscape and portrait. A single passage replay is
-  as it was.
-
-- **A cruise replay now stops at each anchorage.** The replay of a cruise, or
-  of passages you select together, used to jump from one passage's end to the
-  next one's start. Now it holds for a moment at each stay, with the sun and
-  sky running from the day you arrived to the day you left, so a night at
-  anchor passes as dusk, dark and dawn, and a small label says how long you
-  stayed and where, such as "2 nights · Blue Pearl Bay". Every passage also
-  gets at least four seconds of the length you chose, so a short hop doesn't
-  flash past, and the length list for a cruise adds 2 and 3 minutes and starts
-  on 60 seconds. A single passage replay is as it was. The video you export
-  from a cruise holds at each stay the same way.
-
-- **Documents open full screen.** The document viewer has a **Full screen**
-  button beside **Download** that fills the whole window, so a network diagram
-  or an engine drawing is big enough to read without opening it in another
-  tab. Tapping a picture in the viewer does the same, and the picture then
-  scales to fit the window, even a small one. **Exit full screen** takes you
-  back to the side panel, and closing the viewer does too. A PDF fills the
-  window as well. See [Documents](docs/features/documents.md).
-
-### Changed
-
 - **The Nearby map stays still and draws an arrow to the highlighted match.**
   The map used to fly in to each match in turn, which was too slow on the wall
   display. Now it holds still while the boat marker moves, and reframes with a
@@ -256,8 +253,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the warning now clears after about a minute, once Helmcentral can read the
   profiles, instead of describing the old state. If SignalK lets Helmcentral
   read the profiles but refuses the switch, for example over its login,
-  Helmcentral retries at longer and longer gaps, up to every ten minutes. The log gets a line when the refusal or its cause
-  changes, not one a minute. A profile you pick by hand still clears the
+  Helmcentral retries at longer and longer gaps, up to every ten minutes. If
+  the boat moves to a state that wants a different profile, that profile is
+  tried at once, without waiting out the gap. The log gets a line when the
+  refusal or its cause changes, not one a minute. A profile you pick by hand still clears the
   warning at the next check. See [Alarms](docs/features/alarms.md).
 
 ## [0.59.0] - 2026-11-02

@@ -67,7 +67,10 @@ Vessels group next to the places. Here is what it shows:
   adds "position 5m old". Anchored vessels report about every three minutes, so a
   younger position is normal.
 - Layout: on a short tile, such as a wall display, the Vessels group sits to the
-  right of the places. On a tall tile it stacks underneath. Places keep their
+  right of the places. On a tall tile it stacks underneath. On a narrow tile that
+  is also short, the group goes above the places whenever a listed vessel has a
+  collision alarm or warning, so the alarm is never the part that's cut off.
+  Places keep their
   numbers, and the vessels aren't part of the highlight cycle, the arrow or how
   the map is framed.
 - Names on the map: each ship marker shows the vessel's name below it. A place's

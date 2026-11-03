@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -91,19 +92,19 @@ var errMateMemoryDuplicate = errors.New("that fact is already kept")
 func notKeptReason(err error) string {
 	switch {
 	case errors.Is(err, errMateMemoryFull):
-		return "Not kept. " + mateMemoryFullError().Error() + "."
+		return "Not kept. " + mateMemoryFullMessage() + "."
 	case errors.Is(err, errMateMemoryDuplicate):
 		return "Not kept. That fact was already kept."
 	}
 	return ""
 }
 
+func mateMemoryFullMessage() string {
+	return fmt.Sprintf("Mate's memory already holds %d facts, which is the most it keeps. Someone who can open Settings, under Mate, can remove one, then try again", maxMateMemories)
+}
+
 func mateMemoryFullError() error {
-	return &fieldedError{
-		Field:   "text",
-		Message: fmt.Sprintf("Mate's memory already holds %d facts, which is the most it keeps. Someone who can open Settings, under Mate, can remove one, then try again", maxMateMemories),
-		cause:   errMateMemoryFull,
-	}
+	return &fieldedError{Field: "text", Message: mateMemoryFullMessage(), cause: errMateMemoryFull}
 }
 
 func mateMemoryVersion(m mateMemory) string { return m.UpdatedAt.UTC().Format(time.RFC3339Nano) }
@@ -465,6 +466,7 @@ var factStopWords = map[string]bool{
 	"that": true, "this": true, "it": true, "its": true, "of": true, "on": true, "in": true, "at": true, "to": true,
 	"for": true, "and": true, "or": true, "with": true, "by": true, "as": true, "we": true, "our": true, "my": true,
 	"i": true, "so": true, "from": true, "there": true, "which": true, "has": true, "have": true, "had": true,
+	"do": true, "does": true, "did": true,
 }
 
 // factWords lowercases text and splits it into words and numbers, dropping an
@@ -480,40 +482,117 @@ func factWords(text string) []string {
 	return words
 }
 
-// factInSkipperWords says whether a fact is what the skipper said: the fact's
-// content words are mostly in their message, and every number in it is there
-// exactly. A reworded fact passes ("400 litres" for "400 L": one unit word may
-// differ); a conclusion Mate drew, or a document's text, does not. A unit of
-// up to two letters straight after a number (L, m, kg) is not counted. A fact
-// that says "no" or "not" where the message does not, or the other way round,
-// is a different fact. When in doubt it says no, and the fact becomes a card
-// the skipper taps.
+// factInSkipperWords says whether a fact is what the skipper said. The message
+// is split into clauses (at a full stop, semicolon, "!" or "?" followed by a
+// space or the end, so 12.5 stays whole; at commas; and at "and" and "but"),
+// and the fact is theirs only if ONE clause holds at least 70% of its content
+// words, holds every number in it exactly, and agrees with it on negation. So
+// "the watermaker has no filter; the genset has a filter" does not give
+// "the genset has no filter". A reworded fact passes ("400 litres" for "400 L":
+// a unit of up to two letters straight after a number is not counted; "does
+// not have" for "has no"); a conclusion Mate drew, or a document's text, does
+// not. "Don't forget ..." asks to remember and is not a negation. When in
+// doubt it says no, and the fact becomes a card the skipper taps.
 func factInSkipperWords(message, fact string) bool {
-	said := map[string]bool{}
-	saidNo := false
-	for _, w := range factWords(message) {
-		said[w] = true
-		saidNo = saidNo || factNegators[w]
-	}
-	total, matched, factNo := 0, 0, false
+	var content []string
 	prevNumber := false
-	for _, w := range factWords(fact) {
+	for _, w := range normalisedFactWords(fact) {
 		isNumber := unicode.IsDigit(rune(w[0]))
 		unit := prevNumber && len(w) <= 2 && !isNumber
 		prevNumber = isNumber
-		factNo = factNo || factNegators[w]
 		if factStopWords[w] || unit {
 			continue
 		}
-		total++
-		if said[w] {
-			matched++
-		} else if isNumber {
-			return false
+		content = append(content, w)
+	}
+	if len(content) == 0 {
+		return false
+	}
+	factNo := slices.Contains(content, negationWord)
+	for _, clause := range messageClauses(message) {
+		said := map[string]bool{}
+		for _, w := range clause {
+			said[w] = true
+		}
+		if said[negationWord] != factNo {
+			continue
+		}
+		matched, numberMissing := 0, false
+		for _, w := range content {
+			if said[w] {
+				matched++
+			} else if unicode.IsDigit(rune(w[0])) {
+				numberMissing = true
+			}
+		}
+		if !numberMissing && matched*10 >= len(content)*7 {
+			return true
 		}
 	}
-	return total > 0 && factNo == saidNo && matched*10 >= total*7
+	return false
 }
+
+// messageClauses splits a message into the word lists of its clauses.
+func messageClauses(message string) [][]string {
+	var clauses [][]string
+	var cur []rune
+	flush := func() {
+		var words []string
+		for _, w := range normalisedFactWords(string(cur)) {
+			if w == "and" || w == "but" {
+				if len(words) > 0 {
+					clauses = append(clauses, words)
+				}
+				words = nil
+				continue
+			}
+			words = append(words, w)
+		}
+		if len(words) > 0 {
+			clauses = append(clauses, words)
+		}
+		cur = cur[:0]
+	}
+	runes := []rune(message)
+	for i, r := range runes {
+		switch {
+		case r == ',':
+			flush()
+		case r == '.' || r == ';' || r == '!' || r == '?':
+			if i+1 == len(runes) || unicode.IsSpace(runes[i+1]) {
+				flush()
+			} else {
+				cur = append(cur, r)
+			}
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return clauses
+}
+
+// normalisedFactWords is factWords with each negator replaced by the one word
+// negationWord, so "does not have" matches "has no" and the negation is a word
+// like any other. A negator that begins "don't forget" is an instruction to
+// remember and negates nothing, so it is dropped.
+func normalisedFactWords(text string) []string {
+	words := factWords(text)
+	out := make([]string, 0, len(words))
+	for i, w := range words {
+		switch {
+		case !factNegators[w]:
+			out = append(out, w)
+		case i+1 < len(words) && words[i+1] == "forget":
+		default:
+			out = append(out, negationWord)
+		}
+	}
+	return out
+}
+
+// negationWord stands for every negator when facts are compared.
+const negationWord = "\x00no"
 
 // factNegators are the words that turn a fact round.
 var factNegators = map[string]bool{

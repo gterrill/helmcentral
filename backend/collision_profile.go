@@ -182,18 +182,17 @@ type collisionProfileSyncer struct {
 
 	// The fields below are touched only by check() on the alarm service loop.
 
-	// saveRetry spaces out save retries after a failed save.
-	saveRetry saveBackoff
+	// saveFailures holds, per wanted profile, the backoff of its failed saves
+	// since the refusal began. A profile not in the map has not failed and is
+	// tried at once; one in it waits for its own backoff, so a state that flaps
+	// between two profiles brings no PUT per flip.
+	saveFailures map[string]saveBackoff
 
 	// unmappedSince is when the boat entered a state with no mapped profile,
 	// zero while it is in a mapped one. A standing refusal resolves only once
 	// the state has stayed unmapped for a poll interval, so a one-tick blip
 	// does not clear and re-raise it.
 	unmappedSince time.Time
-
-	// lastSaveErr is the last save failure since the refusal began, so the card
-	// can be reworded without another PUT while the retry is backed off.
-	lastSaveErr error
 
 	// lastRefusalLog and lastReadErr are the text last logged, so a repeated
 	// refusal or a persistently failing read is logged once, not every poll.
@@ -208,15 +207,18 @@ type collisionProfileSyncer struct {
 type saveBackoff struct {
 	delay time.Duration
 	until time.Time
+	// err is why the last try failed, so the card can be reworded without
+	// another PUT.
+	err error
 }
 
-func (b *saveBackoff) reset() { *b = saveBackoff{} }
-
-// due reports whether a save may be tried at now.
-func (b *saveBackoff) due(now time.Time) bool { return !now.Before(b.until) }
+// due reports whether a save may be tried at now. The zero value, a profile
+// that has not failed, is always due.
+func (b saveBackoff) due(now time.Time) bool { return !now.Before(b.until) }
 
 // fail records a failed save at now and schedules the next try.
-func (b *saveBackoff) fail(now time.Time) {
+func (b *saveBackoff) fail(now time.Time, err error) {
+	b.err = err
 	if b.delay == 0 {
 		b.delay = collisionProfilePollInterval
 	} else {
@@ -431,14 +433,19 @@ func (s *collisionProfileSyncer) evaluate(state, want, current string, profiles 
 	// A failed save backs off: a plugin that allows reads but refuses the
 	// write would otherwise take a failed PUT every minute. Reads and the
 	// checks above still run on every poll.
-	if !s.saveRetry.due(s.checkedAt) && s.lastSaveErr != nil {
+	// Each profile has its own backoff; a profile not yet tried is due at once.
+	failed := s.saveFailures[want]
+	if !failed.due(s.checkedAt) {
 		// No PUT, but the card still says what is true now: the state and the
 		// reason may have moved since the last failure.
-		return s.refuse(want, current, s.lastSaveErr, saveFailureMessage(want, state, s.lastSaveErr))
+		return s.refuse(want, current, failed.err, saveFailureMessage(want, state, failed.err))
 	}
 	if err := s.save(want); err != nil {
-		s.saveRetry.fail(s.checkedAt)
-		s.lastSaveErr = err
+		if s.saveFailures == nil {
+			s.saveFailures = map[string]saveBackoff{}
+		}
+		failed.fail(s.checkedAt, err)
+		s.saveFailures[want] = failed
 		return s.refuse(want, current, err, saveFailureMessage(want, state, err))
 	}
 
@@ -593,8 +600,8 @@ func (s *collisionProfileSyncer) refuse(profile, current string, cause error, me
 }
 
 func (s *collisionProfileSyncer) resolve() []alarmEvent {
-	s.saveRetry.reset()
-	s.lastRefusalLog, s.lastReadErr, s.lastSaveErr = "", "", nil
+	s.saveFailures = nil
+	s.lastRefusalLog, s.lastReadErr = "", ""
 	s.mu.Lock()
 	if !s.standing {
 		s.mu.Unlock()

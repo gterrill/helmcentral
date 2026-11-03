@@ -146,8 +146,9 @@ describe('the card\'s replay', () => {
 
     it('keeps stays out of the paces', () => {
       const r = replay({ passages: [passage('a', T0), passage('b', T0 + 2 * DAY)], shots: [shot('a', T0, { pace: 0.5 })] })
-      expect(r.config.time.sailingWallAt(r.config.time.total)).toBeCloseTo(60, 6)
-      expect(r.config.time.totalWall).toBeCloseTo(60 + STAY_S, 6)
+      // Half pace holds to the end of the shot's own passage (15 s of the 30 becomes 30), and the next passage runs at full pace.
+      expect(r.config.time.sailingWallAt(r.config.time.total)).toBeCloseTo(45, 6)
+      expect(r.config.time.totalWall).toBeCloseTo(45 + STAY_S, 6)
     })
   })
 

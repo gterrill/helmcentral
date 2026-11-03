@@ -5,7 +5,7 @@
 // HTML and a video draws the same with a canvas.
 
 import { localDaysSince } from '@/lib/boat-nights'
-import { mapLabelBox, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
+import { mapLabelBox, type MapLabelBox, type MapLabelOptions } from '@/lib/map-label'
 import type { InsetCorner } from '@/lib/passage-inset-view'
 import { isMultiPassage, type Timeline } from '@/lib/passages'
 import { boatOffsetHours, type StayPassage } from '@/lib/replay-stay'
@@ -65,6 +65,6 @@ export function passageLabelView(label: ReplayPassageLabel, elapsedS: number): P
  * on the line the stay's label is on, and clear of the overview map in a bottom
  * corner. It is up while the boat sails and the stay's label while it is in
  * port, so the two are never up together. */
-export function passageLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: ReservedArea | null = null): MapLabelBox {
+export function passageLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: MapLabelOptions['reserved'] = []): MapLabelBox {
   return mapLabelBox(container, { align: 'left', elapsedS, durationS: PASSAGE_LABEL_S, insetCorner, reserved })
 }

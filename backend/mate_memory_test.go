@@ -309,6 +309,18 @@ func TestFactInSkipperWords(t *testing.T) {
 		{"Remember that the fuel polisher has no sampling port.", "Endurance is 40 hours.", false},
 		{"Remember that the polisher has no sampling port", "The polisher has a sampling port", false},
 		{"Remember that the polisher has a sampling port", "The polisher has no sampling port", false},
+		{"Remember that the polisher has no sampling port", "The polisher has no port", true},
+		{"Don't forget the fuel polisher has a sampling port", "The fuel polisher has no sampling port", false},
+		{"Don't forget the fuel polisher has a sampling port", "The fuel polisher has a sampling port", true},
+		{"Remember the polisher has a sampling port, not on the tank", "The polisher has no sampling port", false},
+		{"Remember the polisher has a sampling port, not on the tank", "The polisher has a sampling port", true},
+		{"Remember the watermaker has no filter; the genset has a filter", "The genset has no filter", false},
+		{"Remember the watermaker has no filter; the genset has a filter", "The genset has a filter", true},
+		{"Remember that the polisher has no sampling port", "The polisher does not have a sampling port", true},
+		{"Remember the house bank is 12.5 V at rest", "The house bank is 12.5 V at rest", true},
+		{"Remember the house bank is 12.5 V at rest", "The house bank is 12.6 V at rest", false},
+		{"Remember that the polisher has no sampling port. The genset has one.", "The polisher has no sampling port", true},
+		{"Remember the tank holds 400 L but the day tank holds 40 L", "The day tank holds 400 L and the main tank 40 L", false},
 		{"Remember that.", "The hatch sticks.", false},
 		{"remember that the hatch sticks", "", false},
 		{"remember that the hatch sticks", "the", false},
@@ -841,5 +853,12 @@ func TestCreateConversationHandler_StoresTheRunLink(t *testing.T) {
 	got, _, _ := env.asst.GetConversation(conv.ID)
 	if got.WatchRunID == nil || *got.WatchRunID != "run-7" {
 		t.Errorf("link %v", got.WatchRunID)
+	}
+}
+
+func TestNotKeptReasonHasNoFieldPrefix(t *testing.T) {
+	got := notKeptReason(mateMemoryFullError())
+	if strings.Contains(got, "text:") || !strings.HasPrefix(got, "Not kept. Mate's memory already holds") {
+		t.Errorf("reason %q", got)
 	}
 }

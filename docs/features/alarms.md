@@ -248,7 +248,10 @@ for a minute and Helmcentral can read the profiles.
 
 SignalK can let Helmcentral read the profiles but refuse the switch itself, for
 example over a login. Helmcentral then tries again at longer and longer gaps,
-from a minute up to ten minutes. A profile you pick by hand still clears the
+from a minute up to ten minutes. If the boat moves to a state that wants a
+different profile, that one is tried at once, unless it has already failed.
+A profile that has failed waits out its own gap, however often the state flips
+back and forth. A profile you pick by hand still clears the
 warning at the next check.
 
 Those numbers are yours, and the shipped harbor profile needs attention before a

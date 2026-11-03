@@ -50,7 +50,7 @@ pane the two groups sit side by side, vessels on the right. From 420 px of pane
 height they stack. That figure is the worst case of the stacked content
 (footer, five place rows, the highlighted row's three-line summary, the group
 heading and four vessel rows) with a small margin, so the tile stacks only when
-everything fits. The tile's grid row is fixed, so the list's content cannot
+everything fits. A pane under 600 px wide stacks whatever its height, because two columns would be too narrow. If such a pane is also under 420 px tall, the kiosk cannot scroll to what is cut off, so when a listed vessel is in collision alarm or warning the Vessels group goes first. The tile's grid row is fixed, so the list's content cannot
 stretch the map beside it and re-frame the camera. The pane's height comes from a
 ResizeObserver, as the map pane's size already does, rather than a container
 query, because the test suite can drive it and can read the chosen layout from

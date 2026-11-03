@@ -9,7 +9,7 @@
 // and a video of it show the same stay.
 
 import { midnightsSince } from '@/lib/boat-nights'
-import { mapLabelBox, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
+import { mapLabelBox, type MapLabelBox, type MapLabelOptions } from '@/lib/map-label'
 import type { InsetCorner } from '@/lib/passage-inset-view'
 import { fmtDuration, type Timeline } from '@/lib/passages'
 import { STAY_S } from '@/lib/replay-time'
@@ -139,6 +139,6 @@ export function staysAtOffset(timeline: Timeline, passages: readonly StayPassage
 // ── where it goes ────────────────────────────────────────────────────────
 
 /** Where the stay's label sits in a frame of `container`'s size, `elapsedS` into the stay: in the middle, and clear of the overview map in a bottom corner. */
-export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: ReservedArea | null = null): MapLabelBox {
+export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: MapLabelOptions['reserved'] = []): MapLabelBox {
   return mapLabelBox(container, { align: 'center', elapsedS, durationS: STAY_S, insetCorner, reserved })
 }

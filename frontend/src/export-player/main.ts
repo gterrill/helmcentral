@@ -19,7 +19,7 @@ import type * as MapLibre from 'maplibre-gl'
 
 import { createBoatLayer, type BoatLayer } from '@/lib/boat-layer'
 import { boatMarkerKind } from '@/lib/boat-model'
-import { MAP_LABEL, mapLabelStyle, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
+import { MAP_LABEL, labelHasRoom, mapLabelStyle, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
 import type { ExportData } from '@/lib/passage-export'
 import { exportColour } from '@/lib/passage-export-style'
 import { isMultiPassage } from '@/lib/passages'
@@ -32,6 +32,7 @@ import { addSpecLayer, addWholeTrack, createFramePainter } from '@/lib/replay-ov
 import { passageLabelBox } from '@/lib/replay-passage-label'
 import { stayLabelBox } from '@/lib/replay-stay'
 import { playedIds } from '@/lib/replay-time'
+import { formatHourMinute } from '@/lib/vessel-time'
 import {
   HILLSHADE_LAYER_ID,
   REPLAY_3D_MAX_PITCH,
@@ -58,7 +59,6 @@ const TAP_PX = 10
 /** The properties of a label's style that are pixels. */
 const PX = new Set(['left', 'top', 'fontSize', 'borderRadius', 'maxWidth'])
 
-const pad = (n: number) => (n < 10 ? '0' : '') + n
 
 /** Writes text only where it has changed. */
 function setText(e: HTMLElement, text: string) {
@@ -95,7 +95,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
 
   const fmtLocal = (unix: number) => {
     const d = new Date((unix + data.zone.o * 3600) * 1000)
-    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} ${data.zone.l}`
+    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${formatHourMinute(d.getUTCHours(), d.getUTCMinutes())} ${data.zone.l}`
   }
 
   const { plan, config } = buildReplay(data)
@@ -144,7 +144,12 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     size = { w: c.clientWidth, h: c.clientHeight }
   }
   measureMap()
-  map.on('resize', measureMap)
+  // The sign layer places its cards again once the size is read: it is told here, not by its own listener, so the order of listeners does not matter.
+  map.on('resize', () => {
+    measureMap()
+    measureInset()
+    signLayer?.resized()
+  })
 
   // MapLibre opens its compact credit as a long strip the first time it fills,
   // which the readout would sit on. Keep it as the small icon until the reader
@@ -254,7 +259,8 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   const stayLabel = makeLabel()
   const passageLabel = makeLabel()
   function showLabel(label: { e: HTMLElement; drawn: string }, text: string | null, box: MapLabelBox | null) {
-    if (text === null || box === null) {
+    // No room between what it keeps clear of: no label, not an empty pill (a video skips it too).
+    if (text === null || box === null || !labelHasRoom(box)) {
       if (!label.e.hidden) { label.e.hidden = true; label.drawn = '' }
       return
     }
@@ -348,6 +354,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   // The part of the map the readout covers, and how far up it a bottom-corner
   // overview map sits; measured when the readout changes, not at every frame.
   let readoutBox: ReservedArea | null = null
+  // The overview map's real box, measured with the readout (it sits above it) and when the map resizes, never at a frame.
+  let insetBox: ReservedArea | null = null
+  // Both boxes, built where they are measured and read at every frame.
+  let reserved: ReservedArea[] = []
   function showFrame(frame: ReplayFrame) {
     paint(frame, playedIds(config.timeline, player.clock))
 
@@ -365,9 +375,11 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
       setText(els.time, fmtLocal(frame.stay ? frame.stay.sunAt : frame.here.at))
     }
 
-    const corner = data.inset ? data.insetCorner : null
-    showLabel(stayLabel, frame.stay ? frame.stay.stay.label : null, frame.stay ? stayLabelBox(size, frame.stay.elapsed, corner, readoutBox) : null)
-    showLabel(passageLabel, frame.passageLabel ? frame.passageLabel.label.text : null, frame.passageLabel ? passageLabelBox(size, frame.passageLabel.elapsed, corner, readoutBox) : null)
+    // The overview map is smaller on this page than in the app and sits above
+    // the readout, so the labels keep clear of the boxes measured for them
+    // (`reserved`), not of the app's corner rule.
+    showLabel(stayLabel, frame.stay ? frame.stay.stay.label : null, frame.stay ? stayLabelBox(size, frame.stay.elapsed, null, reserved) : null)
+    showLabel(passageLabel, frame.passageLabel ? frame.passageLabel.label.text : null, frame.passageLabel ? passageLabelBox(size, frame.passageLabel.elapsed, null, reserved) : null)
 
     // Where the replay has run to its end the signs are pins again, as they were before it, so a reader can open a photo.
     const rest = player.ended
@@ -381,6 +393,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   function makeInset() {
     if (!data.inset || insetMap) return
     els.inset.hidden = false
+    measureInset()
     insetMap = new lib.Map({
       container: els.inset, style: data.map.style, center: centre, zoom: data.insetZoom,
       interactive: false, attributionControl: false,
@@ -410,10 +423,18 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     if (els.readout.hidden) {
       readoutBox = null
       root.style.removeProperty('--hcp-ro-gap')
-      return
+    } else {
+      readoutBox = { x: els.readout.offsetLeft, y: els.readout.offsetTop, w: els.readout.offsetWidth, h: els.readout.offsetHeight }
+      root.style.setProperty('--hcp-ro-gap', `${part('stage').clientHeight - readoutBox.y + 8}px`)
     }
-    readoutBox = { x: els.readout.offsetLeft, y: els.readout.offsetTop, w: els.readout.offsetWidth, h: els.readout.offsetHeight }
-    root.style.setProperty('--hcp-ro-gap', `${part('stage').clientHeight - readoutBox.y + 8}px`)
+    measureInset()
+  }
+  // Read after the gap above is set: the overview map's place depends on it. Not shown yet, or with no size, it reserves nothing.
+  function measureInset() {
+    insetBox = data.inset && !els.inset.hidden && els.inset.offsetWidth > 0
+      ? { x: els.inset.offsetLeft, y: els.inset.offsetTop, w: els.inset.offsetWidth, h: els.inset.offsetHeight }
+      : null
+    reserved = [readoutBox, insetBox].filter((a): a is ReservedArea => a !== null)
   }
   doc.defaultView?.addEventListener('resize', measureReadout)
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measureReadout).observe(els.readout)
