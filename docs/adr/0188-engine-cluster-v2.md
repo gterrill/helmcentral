@@ -7,7 +7,7 @@ whose equipment model the tile's slots use. Supersedes the layout in ADR 0054
 section 5a (the telltale strip) and ADR 0061 (the straight fuel rail). The rest
 of ADR 0054 stands: one tile is one engine, every slot is a `GaugeWidgetConfig`,
 zones are the alarm source (ADR 0050), skin tokens (ADR 0060), colour is state
-only (ADR 0080), engine off (ADR 0163).
+only (ADR 0080), engine off (ADR 0163-a).
 
 ## Context
 
@@ -119,7 +119,7 @@ battery, the alternator and the exhaust are not the engine.
     feed is lost, its rpm is stale, missing or zero, or the tile is stale, so a
     stale border never has RUN beside it.
 15. **Off is said once.** An engine that is off shows `--` for its own readings,
-    no state of its own and the muted OFF pill in the title (ADR 0163). A slot
+    no state of its own and the muted OFF pill in the title (ADR 0163-a). A slot
     reading another item (the starter battery, a tank) is live and still lights
     the border. The card's status chip is for a
     running engine and is not drawn when it is off, so OFF does not appear twice.

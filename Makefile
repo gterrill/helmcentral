@@ -19,9 +19,11 @@ help-stage:
 # Prose lint for the operator help pages, with the rules in .vale/styles/Helm.
 # Errors (dashes, semicolons, "widget", ADR citations, filler, named code
 # technology) fail. Long sentences and other implementation words warn, and
-# reading grade and plainer-word swaps are suggestions. CI runs the same
-# command. Install with `brew install vale`.
+# reading grade and plainer-word swaps are suggestions. It first checks that
+# no two ADRs share a number, which needs no vale. CI runs both checks as
+# separate steps. Install vale with `brew install vale`.
 docs-lint:
+	sh scripts/check-adr-numbers.sh
 	@command -v vale >/dev/null || { echo "docs-lint: vale not installed (brew install vale)"; exit 1; }
 	vale --no-global docs
 

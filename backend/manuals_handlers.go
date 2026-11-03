@@ -164,7 +164,7 @@ func reorderManualHandler(c echo.Context) error {
 // Each row carries its own auth tier (docs/adr/0177).
 func manualRoutes() []apiRoute {
 	return []apiRoute{
-		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116): a
+		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116-a): a
 		// manual is a document_folders row with role='manual'
 		// (manuals_store.go). "/api/manuals/:id/tree" registered after the
 		// bare "/api/manuals" for readability only - see documentRoutes

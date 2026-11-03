@@ -3,15 +3,15 @@
 ## Status
 
 Accepted (2026-09-20). Phase 2b of the plan
-[ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) opened:
-the note editor. ADR 0116 built the substrate (a note is a Markdown file
+[ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) opened:
+the note editor. ADR 0116-a built the substrate (a note is a Markdown file
 with YAML frontmatter) and [ADR 0118](0118-a-checklist-is-a-run-not-a-checkbox.md)
 covers checklist runs (Phase 4); this one covers what actually writes the
 bytes.
 
 ## Context
 
-ADR 0116 made a note a plain Markdown file for the reasons that ADR gives in
+ADR 0116-a made a note a plain Markdown file for the reasons that ADR gives in
 full: portability to a next owner with no Helmcentral installed, and reuse of
 the document store's existing indexing pipeline. Neither reason has anything
 to do with what the skipper types.
@@ -20,7 +20,7 @@ Most boat owners do not write Markdown, and the two places a raw-text editor
 fails them hardest are exactly the two a manual most needs: a table (tank
 capacities, cruise RPM against fuel burn) and a link between two notes (a
 start-up procedure pointing at the fuel valve layout). Handing the operator a
-`Textarea` and the GFM cheat sheet satisfies ADR 0116's storage decision and
+`Textarea` and the GFM cheat sheet satisfies ADR 0116-a's storage decision and
 fails its own R1 requirement — capture and, by extension, authoring, has to
 demand nothing the skipper doesn't already know.
 
@@ -61,7 +61,7 @@ footnote reference has nowhere to put its definition once the editor
 represents it as a Plate node instead of a pair of Markdown constructs; a
 reference-style link (`[text][ref]` plus a `[ref]: url` definition
 elsewhere in the document) has the identical problem; raw HTML re-opens the
-`disallowedElements={['img']}` argument ADR 0116 already made for
+`disallowedElements={['img']}` argument ADR 0116-a already made for
 `note-markdown-impl.tsx`, for a renderer that has no `disallowedElements`
 escape hatch at all because it's an editable DOM tree, not a read-only
 render pass.
@@ -131,7 +131,7 @@ documents for `recharts`.
 
 ### The serialiser configuration, measured
 
-The bytes of a note are its identity (ADR 0116): `documents.sha256` is what
+The bytes of a note are its identity (ADR 0116-a): `documents.sha256` is what
 names the blob, drives re-indexing and prices an embedding. A WYSIWYG editor
 that reformats a note on every save — a different bullet marker, a
 different emphasis delimiter, padded table columns — turns an edit that

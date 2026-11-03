@@ -93,7 +93,7 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 	alt := newTileItem(t, "Port alternator", "electrical.alternator.0", "")
 	fwd := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	if err := convertDashboardTilesToEquipment(); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 
 	// Survives a reload and does not run twice.
 	before, _ := os.ReadFile(path)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	if err := convertDashboardTilesToEquipment(); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestConvertDashboardTilesLeavesUnmatchedTilesWaitingForAnItem(t *testing.T)
 		t.Fatal(err)
 	}
 	vesselFixtureStore(t)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	if err := convertDashboardTilesToEquipment(); err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestConvertDashboardTilesConvertsUnitsAndDropsFuelBarZones(t *testing.T) {
 	port := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
 	tank := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	if err := convertDashboardTilesToEquipment(); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestConvertDashboardTilesKeepsZonesOnTilesWithNoItem(t *testing.T) {
 	}
 	vesselFixtureStore(t)
 	logs := captureLog(t)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	if err := convertDashboardTilesToEquipment(); err != nil {
 		t.Fatal(err)
 	}

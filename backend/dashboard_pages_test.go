@@ -19,7 +19,7 @@ func setupDashboardPagesTest(t *testing.T) {
 	t.Helper()
 	t.Setenv("DASHBOARD_PAGES_FILE", filepath.Join(t.TempDir(), "dashboard-pages.json"))
 	t.Setenv("DASHBOARD_LAYOUT_FILE", filepath.Join(t.TempDir(), "dashboard-layout.json"))
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	// loadDashboardPages now synthesizes a default "Anchored" page when
 	// neither file exists (see TestDashboardPages_MigrationHandlesNeitherFile).
@@ -29,23 +29,23 @@ func setupDashboardPagesTest(t *testing.T) {
 	dashboardPagesMu.Lock()
 	dashboardPagesState = make(map[string]*dashboardPageData)
 	dashboardPagesMu.Unlock()
+}
 
-	// dashboardRibbonState and displaysState are package-level state guarded
-	// by the same mutex (ADR 0082, ADR 0110), and a test that sets either
-	// through the real handlers (or, for displaysState, by writing to the map
-	// directly, since displays_test.go's helpers do that before the CRUD
-	// handlers exist) has no per-test file to isolate it the way
-	// DASHBOARD_PAGES_FILE isolates pages. Without this, state set by one
-	// test leaks into whichever test runs next and does not call this
-	// helper — in particular the gaugeBoundPaths tests, which manipulate
-	// dashboardPagesState directly and would otherwise pick up a stray
-	// ribbon's paths.
+// loadDashboardPagesForTest runs loadDashboardPages and puts the package-level
+// dashboard state back when the test ends. loadDashboardPages replaces the
+// pages, the ribbon, the displays and the conversion marker, so a test that
+// called it bare left its fixture's ribbon for whichever test ran next.
+func loadDashboardPagesForTest(t *testing.T) {
+	t.Helper()
+	dashboardPagesMu.Lock()
+	pages, ribbon, displays, converted := dashboardPagesState, dashboardRibbonState, displaysState, dashboardEquipmentConverted
+	dashboardPagesMu.Unlock()
 	t.Cleanup(func() {
 		dashboardPagesMu.Lock()
-		dashboardRibbonState = nil
-		displaysState = nil
+		dashboardPagesState, dashboardRibbonState, displaysState, dashboardEquipmentConverted = pages, ribbon, displays, converted
 		dashboardPagesMu.Unlock()
 	})
+	loadDashboardPages()
 }
 
 func newDashboardPagesRequest(t *testing.T, method, path string, body any) (echo.Context, *httptest.ResponseRecorder) {
@@ -788,7 +788,7 @@ func TestDashboardPages_AtomicWriteReloadRoundTrip(t *testing.T) {
 	second := createTestDashboardPage(t, "Page Two", sampleDashboardWidgets())
 
 	// Simulate a process restart: reload state from disk.
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
@@ -876,7 +876,7 @@ func TestDashboardPages_MigrationFromLegacyFile(t *testing.T) {
 	// Set env vars and load
 	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
 	t.Setenv("DASHBOARD_LAYOUT_FILE", layoutPath)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	// Verify exactly one page exists named "Anchored" with the same widgets
 	dashboardPagesMu.RLock()
@@ -970,7 +970,7 @@ func TestDashboardPages_MigrationIgnoresLegacyIfNewFileExists(t *testing.T) {
 	// Set env vars and load
 	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
 	t.Setenv("DASHBOARD_LAYOUT_FILE", layoutPath)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	// Verify exactly one page exists with the new file's content (not "Anchored")
 	dashboardPagesMu.RLock()
@@ -999,7 +999,7 @@ func TestDashboardPages_MigrationHandlesNeitherFile(t *testing.T) {
 	// Set env vars pointing at nonexistent paths
 	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
 	t.Setenv("DASHBOARD_LAYOUT_FILE", layoutPath)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	// Verify a single default "Anchored" page was synthesized from
 	// defaultDashboardLayout (no panic, no error) — a genuinely fresh
@@ -1076,7 +1076,7 @@ func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
 		t.Fatalf("failed to write pages file: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	page, ok := dashboardPagesState[pageID]
@@ -1171,7 +1171,7 @@ func TestDashboardPages_ForecastDaysAndSeaStateStrippedOnLoad(t *testing.T) {
 		t.Fatalf("failed to write pages file: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	page, ok := dashboardPagesState[pageID]
@@ -1277,7 +1277,7 @@ func TestLoadDashboardPages_ConvertsKioskFlaggedPagesToFlybridgeDisplay(t *testi
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	displays := orderedDisplaysLocked()
@@ -1347,7 +1347,7 @@ func TestLoadDashboardPages_DoesNotReconvertWhenDisplaysExist(t *testing.T) {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	dashboardPagesMu.RLock()
 	firstDisplays := orderedDisplaysLocked()
 	dashboardPagesMu.RUnlock()
@@ -1359,7 +1359,7 @@ func TestLoadDashboardPages_DoesNotReconvertWhenDisplaysExist(t *testing.T) {
 	// A second load reads back the already-converted file - no "kiosk" key
 	// survives the rewrite, so a second synthesis has nothing to trigger on
 	// even before checking loaded.Displays.
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	dashboardPagesMu.RLock()
 	secondDisplays := orderedDisplaysLocked()
 	p1 := dashboardPagesState["p1"]
@@ -1391,7 +1391,7 @@ func TestLoadDashboardPages_ClearsDanglingDisplayID(t *testing.T) {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	p1 := dashboardPagesState["p1"]
@@ -1442,7 +1442,7 @@ func TestLoadDashboardPages_ClearsHeroOnDisplayPages(t *testing.T) {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	p1 := dashboardPagesState["p1"]
@@ -1480,7 +1480,7 @@ func TestLoadDashboardPages_LeavesKioskFlagWithNoDwellUnassigned(t *testing.T) {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	displays := orderedDisplaysLocked()
@@ -1607,7 +1607,7 @@ func TestDashboardPages_EmbedConfigSurvivesReload(t *testing.T) {
 	})
 
 	// Simulate a process restart: reload state from disk.
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
@@ -1657,7 +1657,7 @@ func TestDashboardPages_EmbedFramelessSurvivesReload(t *testing.T) {
 	})
 
 	// Simulate a process restart: reload state from disk.
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
@@ -2001,7 +2001,7 @@ func TestDashboardPages_GaugeGroupSurvivesReload(t *testing.T) {
 		gaugeGroupWidget("gauge-group:abcd1234", validGaugeGroupConfig()),
 	})
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	reloaded, ok := dashboardPagesState[page.ID]
@@ -2193,7 +2193,7 @@ func TestDashboardPages_PoiMapConfigSurvivesReload(t *testing.T) {
 		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
 	})
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	reloaded, ok := dashboardPagesState[page.ID]
@@ -2498,7 +2498,7 @@ func TestDashboardRibbon_SurvivesPatchingAPageWidgets(t *testing.T) {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	ribbon := dashboardRibbonState
@@ -2532,7 +2532,7 @@ func TestDashboardRibbon_SurvivesReorderingPages(t *testing.T) {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	ribbon := dashboardRibbonState
@@ -3301,7 +3301,7 @@ func TestGaugeConfigRoundTripsEveryRenderedField(t *testing.T) {
 	page := createTestDashboardPage(t, "Engines", []dashboardLayoutItem{
 		gaugeWidget("gauge:abcd1234", &gauge),
 	})
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	reloaded := dashboardPagesState[page.ID]
@@ -3476,7 +3476,7 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 	page := createTestDashboardPage(t, "Engines", []dashboardLayoutItem{
 		clusterWidget("cluster:abcd1234", config),
 	})
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	reloaded := dashboardPagesState[page.ID]

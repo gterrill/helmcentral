@@ -45,7 +45,7 @@ import remarkGfm from 'remark-gfm'
 // whole contract. Deliberately absent: footnotes, reference-style links,
 // raw HTML, mentions, comments - every one of them is something Plate can
 // represent but Markdown cannot carry losslessly (or, for raw HTML,
-// something this project's threat model already excludes - ADR 0116's
+// something this project's threat model already excludes - ADR 0116-a's
 // `disallowedElements={['img']}` reasoning extends to "no raw HTML at all"
 // for the identical reason).
 //

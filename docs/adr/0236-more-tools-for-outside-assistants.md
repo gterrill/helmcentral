@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-31). Amends the tool table in ADR 0231. Leaves ADR 0232's
+Accepted (2026-10-31). Amends the tool table in ADR 0231. Leaves ADR 0232-a's
 Funnel route and ADR 0233's sign-in as they were.
 
 ## Context

@@ -176,4 +176,4 @@ ADR 0176).
   leave a sign outside every passage, where it is kept but not shown.
 - Photos for signs are ordinary documents: they are searchable, indexed like any
   image, and deleting one in Documents takes it off the sign.
-- Exports and the embedded player (ADR 0199) do not show signs yet.
+- Exports and the embedded player (ADR 0199-a) do not show signs yet.

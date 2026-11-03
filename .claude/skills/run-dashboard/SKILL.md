@@ -151,6 +151,35 @@ screenshot afterward instead:
 sips -c <height> <width> --cropOffset <y> <x> /tmp/shot.png --out /tmp/shot-crop.png
 ```
 
+## Driving a page
+
+To click, type or read a page rather than shoot it, write a Playwright script.
+`frontend/node_modules` has no Playwright. Require it from the `npx` cache and
+pass that path in, so the script holds no hash. Take the highest version: the
+browsers installed in `~/Library/Caches/ms-playwright` match the newest copy,
+and an older one can fail to launch.
+
+```bash
+PW=$(for d in ~/.npm/_npx/*/node_modules/playwright; do
+  echo "$(node -p "require('$d/package.json').version") $d"
+done | sort -V | tail -1 | cut -d' ' -f2)
+node <scratchpad>/drive.js "$PW"
+```
+
+```js
+const { chromium } = require(process.argv[2]);
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  // From a worktree, use its own preview port in place of 5173.
+  await page.goto('http://localhost:5173/');
+  console.log(await page.title());
+  await browser.close();
+})();
+```
+
+Keep the script in the session scratchpad, not the repo.
+
 ## Gotchas
 
 - **Live vs. placeholder data**: if the SignalK server is unreachable,

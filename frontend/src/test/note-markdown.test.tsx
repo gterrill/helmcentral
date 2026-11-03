@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 
 import { NoteMarkdown } from '@/components/note-markdown'
 
-// ADR 0116, plan §5/§6: a note's own renderer, trusted with exactly one
+// ADR 0116-a, plan §5/§6: a note's own renderer, trusted with exactly one
 // image src shape (`hc-doc:<uuid>`, rewritten to a same-origin content URL)
 // and nothing else. NoteMarkdown is a React.lazy wrapper (kiosk bundle-split,
 // commit 70acb53's pattern) so, as with help-markdown.test.tsx, the first

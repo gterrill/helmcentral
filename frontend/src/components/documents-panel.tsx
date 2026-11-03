@@ -949,7 +949,7 @@ export function DocumentsPanel({
   // ONE New menu's contents, now in the page's overflow menu: Folder first
   // (Manual is a checkbox inside its dialog when browsing the root) and Note
   // carrying its kinds in a submenu. Auto leads that submenu, and picking it
-  // sends no `type` at all so the Go classifier answers (ADR 0116). ADR 0121
+  // sends no `type` at all so the Go classifier answers (ADR 0116-a). ADR 0121
   // made this the only path in for a note: a note is a document, and this is
   // where every other document this panel creates already starts.
   const secondaryActions: PageAction[] = [

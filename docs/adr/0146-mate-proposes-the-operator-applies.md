@@ -5,7 +5,7 @@
 Accepted (2026-09-30). Amends [ADR 0145](0145-mate-reads-the-maintenance-list.md)
 and [ADR 0138](0138-maintenance-rules-list-and-service-log.md), whose
 consequences left Mate unable to change the maintenance schedule. Builds on
-[ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) and
+[ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) and
 [ADR 0119](0119-notes-in-the-mate-panel.md) (Save as note, the precedent for
 "Mate writes nothing, the operator's tap does") and on
 [ADR 0120](0120-mate-on-is-the-consent.md).
@@ -20,7 +20,7 @@ setting a schedule up, and it is exactly what Mate is good at.
 The obstacle is a rule, not an oversight. Every Mate tool is read-only
 (`runToolRound`): a round's tool calls run in parallel with no locks, and a
 retried or cancelled call has no idempotency key. A `draft_note` tool was
-designed once and dropped for a Save as note button (ADRs 0116 and 0119) for
+designed once and dropped for a Save as note button (ADRs 0116-a and 0119) for
 that reason, and a duplicated rule is no better than a duplicated note.
 
 Two other things in the code shape the answer.
@@ -199,7 +199,7 @@ the stored status, so it is correct after a reload.
 
 ## Alternatives considered
 
-**Give Mate a write tool.** Rejected for the reason ADR 0116 rejected
+**Give Mate a write tool.** Rejected for the reason ADR 0116-a rejected
 `draft_note`: parallel tool calls with no locks and no idempotency key.
 Locking and keying it would work, but it also puts a language model's
 unreviewed output straight into the service schedule of a boat.

@@ -59,6 +59,29 @@ jobs:
         working-directory: backend
         run: sh ../scripts/go-test-shard.sh ${{ matrix.shard }} 3
 
+  # One shuffled run of the whole suite, on pushes to main only. The shards
+  # above run tests in file order, so a test that leaks process-wide state into
+  # the next one can pass there and fail on another ordering. A random seed
+  # must not turn an unrelated PR red, so a PR does not run it; a failure
+  # surfaces in main's CI run, which `ship` step 8 checks after a merge. The
+  # seed is printed in the log ("-test.shuffle <seed>"); rerun with
+  # -shuffle=<seed> to reproduce.
+  backend-test-shuffled:
+    name: Backend tests (shuffled)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test
+        working-directory: backend
+        run: go test -short -shuffle=on ./...
+
   # The boat's time zone comes from a position lookup whose index is built the
   # first time anything needs a zone (backend/boat_time.go). The boat runs on a
   # Raspberry Pi 5, so this builds it on a native arm64 runner and fails if the
@@ -148,6 +171,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # See scripts/check-adr-numbers.sh.
+      - name: ADR numbers are unique
+        run: sh scripts/check-adr-numbers.sh
+
       # Pinned to the version `brew install vale` gave on 2026-10-25, and
       # checked against the release's published sha256 before it runs.
       - name: Install Vale
@@ -156,7 +183,8 @@ jobs:
           echo "4bf5c5176b682b1da0830f471584d3494f1c2e27ee3029e1ad6f6661d4962182  vale.tar.gz" | sha256sum -c -
           sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
 
-      # Same command as `make docs-lint`. Only errors fail the job.
+      # Same checks as `make docs-lint`: the ADR number check above, then vale.
+      # Only vale errors fail the job.
       - name: Lint
         run: vale --no-global docs
 

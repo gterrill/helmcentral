@@ -159,6 +159,24 @@ func TestComputeAnomalyReadingBatteryNotSetUpWithoutLinkedProfile(t *testing.T) 
 
 // --- Engine differential wiring ---------------------------------------------
 
+// isolateEngineBaselineCache gives the test an empty global baseline cache
+// (nothing learned yet) and puts the previous one back, loaded or not, when it
+// ends. Restoring only a loaded cache left a test's own baseline in place for
+// every test that expects none.
+func isolateEngineBaselineCache(t *testing.T) {
+	t.Helper()
+	c := globalEngineBaselineCache
+	c.mu.Lock()
+	prev, prevLoaded := c.baseline, c.loaded
+	c.baseline, c.loaded = engineBaseline{}, false
+	c.mu.Unlock()
+	t.Cleanup(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.baseline, c.loaded = prev, prevLoaded
+	})
+}
+
 func setUpTwinEngineVessel(t *testing.T) string {
 	t.Helper()
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
@@ -242,6 +260,7 @@ func TestComputeAnomalyReadingEngineDifferentialGateNotYetHeld(t *testing.T) {
 // qualifying minutes" rule extended to "no bucket learned yet at all".
 func TestComputeAnomalyReadingEngineDifferentialNeedsALearnedBaseline(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
+	isolateEngineBaselineCache(t)
 
 	ticks := int(twinGateMinRunFor.Seconds()) + 5
 	reading := tickTwinGateSteady(t, settingsPath, 388100, 385600, ticks, anomalyDetectorTestNow)
@@ -255,12 +274,7 @@ func TestComputeAnomalyReadingEngineDifferentialNeedsALearnedBaseline(t *testing
 func TestComputeAnomalyReadingEngineDifferentialPublishesOnceGateHolds(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
@@ -310,12 +324,7 @@ func TestComputeAnomalyReadingEngineDifferentialPublishesOnceGateHolds(t *testin
 func TestComputeAnomalyReadingEngineDifferentialAbsentWhenInputsAreStale(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
@@ -371,12 +380,7 @@ func TestComputeAnomalyReadingEngineDifferentialSuppressedBySilentSourceNotJustI
 	// silent-source gate at work, not merely "no baseline to publish
 	// against" (which would hide the residual regardless of validity and
 	// make that assertion pass for the wrong reason).
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {
@@ -458,12 +462,7 @@ func TestComputeAnomalyReadingEngineDifferentialSuppressedBySilentSourceNotJustI
 func TestComputeAnomalyReadingEngineDifferentialRunningForRestartsAfterALongGap(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
@@ -549,12 +548,7 @@ func TestFormatEngineResidualEvidenceUsesDeltaUnitsNotAbsoluteOnes(t *testing.T)
 func TestComputeAnomalyReadingEngineDifferentialUsesLearnedBaseline(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 2000, Minutes: 40}}},
@@ -589,12 +583,7 @@ func TestComputeAnomalyReadingEngineDifferentialUsesLearnedBaseline(t *testing.T
 func TestComputeAnomalyReadingEngineDifferentialPressureEvidenceUsesConsistentUnits(t *testing.T) {
 	settingsPath := setUpTwinEngineVessel(t)
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 2000, Minutes: 40}}},
@@ -651,12 +640,7 @@ func TestComputeAnomalyReadingEngineResidualPathStaysStableAcrossRename(t *testi
 		t.Fatalf("saveVesselSettings: %v", err)
 	}
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},
@@ -757,12 +741,7 @@ func TestComputeAnomalyReadingEngineDifferentialAbsentWhenAnInputIsFrozen(t *tes
 	trackers := newAnomalyTrackers()
 	trackers.frozenPaths["propulsion.port.temperature"] = true
 
-	prevBaseline, prevLoaded := globalEngineBaselineCache.get()
-	t.Cleanup(func() {
-		if prevLoaded {
-			globalEngineBaselineCache.set(prevBaseline)
-		}
-	})
+	isolateEngineBaselineCache(t)
 	globalEngineBaselineCache.set(engineBaseline{
 		Engines: map[string]map[string][]engineBaselineBucket{
 			"port": {"oilPressure": {{RPMBucket: 1800, Median: 0, Minutes: 40}}},

@@ -10,7 +10,7 @@ import (
 )
 
 // Tailscale Funnel is the documented way to give Claude's phone and web
-// connectors a public address for /mcp (ADR 0232). The operator mounts only
+// connectors a public address for /mcp (ADR 0232-a). The operator mounts only
 // /mcp and the sign-in paths on it (ADR 0233), but a mistyped command can mount
 // the whole port. This guard is the second line: a request that arrived through
 // Funnel is answered 404 unless its path is exactly one of funnelPaths.

@@ -20,10 +20,6 @@ with the worktree's path. If it refuses (a session already in another
 worktree, or a subagent, whose switch never moves its parent), review
 `git diff origin/main...HEAD` inside the worktree by hand for steps 5 and 7.
 
-An isolated worktree session refuses Bash commands it cannot verify stay
-inside the worktree. Run one plain command per call with absolute paths, and
-make edits with `Edit`. Put this in the brief of any subagent you start there.
-
 **Done:** all three true, and the session's directory is the worktree. If
 the first two are not, stop and ask.
 
@@ -58,7 +54,20 @@ Run every suite the change touches:
 Run the two check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
 non-zero on any failure. A failure under load needs confirming by rerunning
-that test file alone before you call it a flake.
+that test file alone before you call it a flake. Reproduce a failure this way:
+
+- One frontend file: `npm --prefix <worktree>/frontend test --
+  src/test/x.test.tsx`. `npx vitest` outside `frontend/` fetches an unrelated
+  vitest.
+- A backend failure that passes alone is not yet a flake. Reproduce it with
+  `sh ../scripts/go-test-shard.sh <shard> 3` from `backend/`, the way CI deals
+  the tests.
+- A failure in a CI job: rerun the failed job too. Failing twice the same way
+  means it is real.
+- A failure in "Backend tests (shuffled)", which runs on main only: run `go
+  test -short -count=1 -shuffle=<seed> .` from `backend/`, with the
+  `-test.shuffle <seed>` printed in its log. A rerun draws a new seed, so a
+  passing rerun proves nothing, and it is never called a flake.
 
 **Done:** every suite you ran is green. Keep the pass counts for the PR body.
 
@@ -78,11 +87,13 @@ on the fixed tree.
 
 ## 6. Commit and open the PR
 
-Stage by path and commit. Push the branch. Open the PR with `gh pr
-create`, or, when the branch already has one, the push updates it. The
-body says what the operator will notice, then gives each design point agreed in this conversation and where it landed (file, screen,
-or "dropped, because…"). End with the test pass counts. No "Generated with"
-footer.
+Stage by path and commit. Push the branch. Open the PR with `gh pr create
+--body-file <path>`, or, when the branch already has one, the push updates it.
+Write the body to a file in the session's scratchpad: the worktree guard
+refuses inline bodies. The body says what the operator will notice, then gives
+each design point agreed in this conversation and where it landed (file,
+screen, or "dropped, because…"). End with the test pass counts. No "Generated
+with" footer.
 
 **Done:** the PR URL is in hand, and no preview server from this worktree is
 still running.
@@ -110,8 +121,11 @@ once; act only on a line that differs from the last.
   go back to step 4.
 - `CONFLICTING`: rebase onto `origin/main`, go back to step 4.
 - `CLOSED`: stop and tell the operator.
-- `MERGED`: tell the operator it merged and pick up whatever comes next in
-  the plan you are working from.
+- `MERGED`: tell the operator it merged. Get the merge commit with `gh pr
+  view <N> --json mergeCommit`, find its run with `gh run list --workflow CI
+  --commit <sha>`, and wait on it with `gh run watch <id> --exit-status`.
+  Report a red run to the operator as a real failure before picking up
+  whatever comes next in the plan you are working from.
 
 The operator merges. The PR is theirs to merge, tag and deploy.
 

@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-09-21). Supersedes the per-note default this ADR names
-below, which [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md)
+below, which [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md)
 §8 shipped and the plan's §8/§9 built the two backfill endpoints against.
 
 ## Context
@@ -34,7 +34,7 @@ Two bugs sat underneath the nagging, not just the UX of it:
    and `reindexDocumentHandler` (`backend/documents_handlers.go`) - used
    `documentEnrichReadinessProblem(readiness) == ""`: enrich when Mate can
    actually do the work, don't when it can't. A note was the one exception,
-   on the reasoning (ADR 0116 §8) that a one-tap capture at the helm isn't
+   on the reasoning (ADR 0116-a §8) that a one-tap capture at the helm isn't
    the same deliberate act as an upload. Automatic embedding only ever
    looks at `enrich = 1` documents (`processEmbedBatch`,
    `documents_embed.go`), so a boat that captures far more notes than it
@@ -74,7 +74,7 @@ check failure (a broken settings file, a secrets-store read error) fails
 the note-create request outright, the same fail-fast AGENTS.md's fallback
 policy already required of the two document paths - no silent default to
 "not enriched" on an infra error. There is no separate per-note consent
-step left to build: ADR 0116's "capturing a note is not a deliberate act
+step left to build: ADR 0116-a's "capturing a note is not a deliberate act
 the way an upload is" reasoning is retired along with the banner it
 justified - the deliberate act already happened, at Settings → Assistant.
 
@@ -245,7 +245,7 @@ three screens away.
 
 ## Related
 
-- [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) is the
+- [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) is the
   plan §8/§9 substrate this revises - the per-note `enrich = false`
   default and the two backfill endpoints it specified.
 - [ADR 0106](0106-documents-in-the-binary.md) is where `StartBackfill`,

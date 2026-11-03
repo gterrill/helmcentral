@@ -4,7 +4,7 @@
 
 Accepted (2026-10-05). Builds on [ADR 0161](0161-mate-recalls-earlier-conversations.md) (Mate searches and
 reads earlier conversations) and [ADR 0146](0146-mate-proposes-the-operator-applies.md) (Mate proposes,
-the operator applies). The notes themselves are those of [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md).
+the operator applies). The notes themselves are those of [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md).
 
 ## Context
 

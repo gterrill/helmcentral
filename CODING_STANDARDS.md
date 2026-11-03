@@ -87,7 +87,10 @@ tiles. Build and extend them from `frontend/src/components/patterns`
 `FormSection`, `ChoiceList`, `ChoiceCheckbox`, `SaveBar`, `EmptyState`, `ConfirmDelete`) rather than reaching for
 `components/ui/table` or hand-rolling a toolbar - an ESLint rule enforces
 this for `ui/table` already, with a shrinking allowlist for surfaces not yet
-migrated. The "Do not introduce new primitives" rule under High-Density
+migrated. A second rule does the same for choices: `<input type="checkbox">`,
+`<input type="radio">` and the `ui` `Checkbox` and `RadioGroup` primitives
+give way to `ChoiceList` or `ChoiceCheckbox`, with its own allowlist in
+`eslint.config.js`. The "Do not introduce new primitives" rule under High-Density
 Tailwind UI/UX below is about dashboard tiles specifically (no shared
 `MetricTile`/`StatCard`); it does not apply to these CRUD pages, which are
 exactly what `components/patterns` exists to share. Every settings section

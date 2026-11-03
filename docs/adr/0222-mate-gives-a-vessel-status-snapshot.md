@@ -56,7 +56,7 @@ shows it reads it.
   already had, so a silent barometer no longer repeats its last value.
 - **Boat.** Each configured engine is running, off or unknown. Speed is read from
   `.revolutions` only, as the Engine Cluster does. An engine whose
-  readings have stopped is off only when the engine state says so (ADR 0163).
+  readings have stopped is off only when the engine state says so (ADR 0163-a).
   Silence alone is unknown. The anchor watch gives down or not, its radius and
   when it was set, and how far the boat is from it, or `distance_missing` when there is no fresh position.
 - **Alarms.** Active alarms by the presenter's label, message and state, and the

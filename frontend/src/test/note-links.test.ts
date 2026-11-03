@@ -1,5 +1,5 @@
 /**
- * Table-driven tests for resolveNoteHref (ADR 0116). Pure module, no React -
+ * Table-driven tests for resolveNoteHref (ADR 0116-a). Pure module, no React -
  * mirrors app-location.test.ts and help-links.test.ts's resolveHelpHref
  * suite in shape.
  */
@@ -8,7 +8,7 @@ import { resolveNoteHref, type NoteLink } from '@/lib/note-links'
 import { slugifyHeading as slugifyFromHelpLinks } from '@/lib/help-links'
 import { slugifyHeading as slugifyFromMarkdownLinks } from '@/lib/markdown-links'
 
-// A genuine v4 UUID, matching ADR 0116's own worked frontmatter example -
+// A genuine v4 UUID, matching ADR 0116-a's own worked frontmatter example -
 // version nibble "4", variant nibble "9".
 const UUID = '0f3b1c2e-8a4d-4f21-9c33-1d2e3f4a5b6c'
 
@@ -25,7 +25,7 @@ const cases: Array<[string, string, NoteLink]> = [
     { kind: 'note', id: UUID, hash: 'warm-start' },
   ],
 
-  // hc-doc: -> a document (almost always a photo per ADR 0116).
+  // hc-doc: -> a document (almost always a photo per ADR 0116-a).
   ['hc-doc: with a valid uuid', `hc-doc:${UUID}`, { kind: 'document', id: UUID }],
 
   // Allow-listed schemes -> external, href unchanged.

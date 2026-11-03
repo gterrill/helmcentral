@@ -1,4 +1,4 @@
-# ADR 0252: One time format, and tools give boat-time labels
+# ADR 0252-a: One time format, and tools give boat-time labels
 
 ## Status
 

@@ -45,6 +45,10 @@
   `make worktree NAME=<short-name>` creates one alongside this directory with
   `frontend/node_modules` symlinked, so tests run immediately. Only one
   checkout can run the dev stack; use the one that is already up.
+- An isolated worktree session refuses Bash commands it cannot verify stay
+  inside the worktree. Run one plain command per call with absolute paths,
+  make edits with `Edit`, and put this in the brief of any subagent you start
+  there.
 - To check a UI change made in a worktree, follow "Preview from a worktree" in
   the `run-dashboard` skill.
 - Once a branch's PR is merged, `make prune-merged` lists the worktrees and

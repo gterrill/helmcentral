@@ -92,6 +92,6 @@ mentions.
 - [ADR 0119](0119-capture-is-an-action-not-a-place.md) is the decision this
   one reverses, in part - the sheet, the `Auto` default and local-only
   classification it built all stand unchanged.
-- [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) is why
+- [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) is why
   a note is a document in the first place, which is the premise this
   decision follows through on.

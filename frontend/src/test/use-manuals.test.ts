@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 
 import { findManualTreeNode, useManuals } from '@/hooks/use-manuals'
 
-// ADR 0116 / plan §7: use-manuals.ts owns the Manuals panel's data layer -
+// ADR 0116-a / plan §7: use-manuals.ts owns the Manuals panel's data layer -
 // the library-wide list (for the none/one/several state and the switcher)
 // and the currently-open manual's own ordered tree. Same routedFetch idiom
 // as use-notes.test.ts/use-documents.test.ts.

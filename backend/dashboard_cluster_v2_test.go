@@ -28,7 +28,7 @@ func TestLoadTrimsAnOldClusterWithinTheCaps(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()

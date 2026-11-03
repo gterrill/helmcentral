@@ -212,7 +212,7 @@ export function DocumentViewerSheet({
   const [viewerChecklistRunning, setViewerChecklistRunning] = useState(false)
   useEffect(() => { setViewerChecklistRunning(false) }, [viewerId])
 
-  // A link inside a rendered note's markdown (ADR 0116): switch the viewer
+  // A link inside a rendered note's markdown (ADR 0116-a): switch the viewer
   // to that id. An anchor scrolls within whatever is already rendered.
   const handleNoteNavigate = useCallback((link: NoteLink) => {
     if (link.kind === 'note' || link.kind === 'document') {
@@ -344,7 +344,7 @@ export function DocumentViewerSheet({
               className={fullscreen ? 'min-h-0 w-full flex-1 object-contain' : 'block max-w-full cursor-zoom-in'}
             />
           )}
-          {/* ADR 0116: a filed note is a document with mime: 'text/markdown'.
+          {/* ADR 0116-a: a filed note is a document with mime: 'text/markdown'.
               Routed through the same NoteMarkdown the deleted
               notes-panel.tsx's own reader used, so a note reads the same
               way wherever it's opened from. text/plain, text/csv and

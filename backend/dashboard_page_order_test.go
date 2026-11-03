@@ -50,7 +50,7 @@ func TestDashboardPageOrder_PersistsAndPreservesCRUD(t *testing.T) {
 			t.Fatalf("response page %d = %+v", i, page)
 		}
 	}
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	assertDashboardPageOrder(t, want...)
 	if !reflect.DeepEqual(dashboardPagesState[a.ID].Widgets, a.Widgets) {
 		t.Fatal("reorder changed page widgets")
@@ -72,7 +72,7 @@ func TestDashboardPageOrder_PersistsAndPreservesCRUD(t *testing.T) {
 	}
 	p := createTestDashboardPage(t, "Cluster Preview", nil)
 	assertDashboardPageOrder(t, a.ID, u.ID, p.ID)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	assertDashboardPageOrder(t, a.ID, u.ID, p.ID)
 }
 
@@ -156,14 +156,14 @@ func TestDashboardPageOrder_MigratesUnpositionedPagesDeterministically(t *testin
 	if err := os.WriteFile(dashboardPagesFilePath(), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	assertDashboardPageOrder(t, "a", "b", "c")
 	for i, id := range []string{"a", "b", "c"} {
 		if dashboardPagesState[id].Position != i {
 			t.Fatalf("position for %s = %d", id, dashboardPagesState[id].Position)
 		}
 	}
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	assertDashboardPageOrder(t, "a", "b", "c")
 	d := createTestDashboardPage(t, "Fourth", nil)
 	assertDashboardPageOrder(t, "a", "b", "c", d.ID)

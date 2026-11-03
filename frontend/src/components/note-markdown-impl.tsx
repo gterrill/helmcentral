@@ -12,7 +12,7 @@ import { resolveNoteHref, type NoteLink } from '@/lib/note-links'
 // for the same reason that file gives: react-markdown v10 always passes
 // `node` (toJsxRuntime's hardcoded `passNode: true`), and this is a small
 // enough hast walk that owning a second copy here is cheaper than exporting
-// a help-sheet internal into a module that, per ADR 0116, must not import
+// a help-sheet internal into a module that, per ADR 0116-a, must not import
 // anything from the help tree at all (the wrong dependency direction - a
 // note is not help content).
 function headingText(node: unknown): string {

@@ -97,6 +97,45 @@ export default [
     },
   },
   {
+    // CODING_STANDARDS.md "CRUD Pattern Library": a choice is built from
+    // ChoiceList / ChoiceCheckbox, not a hand-made <input type="checkbox|radio">
+    // or the ui Checkbox / RadioGroup primitive. The primitives, the choice
+    // list itself and its gallery are where those are allowed; tests are too.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      '**/*.test.*',
+      'src/test/**',
+      '**/__tests__/**',
+      'src/components/ui/**',
+      'src/components/patterns/choice-list.tsx',
+      'src/components/patterns/gallery.tsx',
+    ],
+    rules: {
+      'helm/prefer-choice-list': 'error',
+    },
+  },
+  {
+    // Existing hand-built choices. A file leaves this list when it moves onto
+    // ChoiceList or is shown not to fit; do not add a file to it.
+    files: [
+      // Row-selection checkbox in the IndexTable header and body.
+      'src/components/patterns/index-table.tsx',
+      // Per-row include/skip checkbox on each staged import row.
+      'src/components/import/import-log-step.tsx',
+      'src/components/import/import-notes-step.tsx',
+      'src/components/import/import-vessel-step.tsx',
+      // Checklist item inside the note editor's own element renderer.
+      'src/components/note-editor-impl.tsx',
+      // Lone on/off toggles in a toolbar, a drawer and a per-lamp row.
+      'src/components/lamp-strip-config-dialog.tsx',
+      'src/components/radar-drawer.tsx',
+      'src/components/settings/sections/logs-section.tsx',
+    ],
+    rules: {
+      'helm/prefer-choice-list': 'off',
+    },
+  },
+  {
     // Pending migration to components/patterns (ADR 0142's own migration
     // order: Equipment, Locations and Documents done; Profiles, Maintenance,
     // Wall displays remain). Remove an entry here as each

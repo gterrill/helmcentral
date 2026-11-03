@@ -18,7 +18,7 @@ func setupDisplaysTest(t *testing.T) {
 	t.Helper()
 	t.Setenv("DASHBOARD_PAGES_FILE", filepath.Join(t.TempDir(), "dashboard-pages.json"))
 	t.Setenv("DASHBOARD_LAYOUT_FILE", filepath.Join(t.TempDir(), "dashboard-layout.json"))
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	dashboardPagesMu.Lock()
 	dashboardPagesState = make(map[string]*dashboardPageData)
@@ -687,7 +687,7 @@ func TestPutDisplayViewport_StoresMeasurementAndLeavesGeometryAlone(t *testing.T
 		t.Fatalf("a measurement must not bump updated_at")
 	}
 	// Persisted: a reload sees it.
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 	if v := displaysState[d.ID].Viewport; v == nil || v.W != 1536 {

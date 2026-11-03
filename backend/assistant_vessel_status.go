@@ -701,7 +701,7 @@ func (d assistantToolDeps) vesselStatusBoatFor(t telemetryReader, vessel vesselV
 
 // engineStatus judges one engine. An engine whose readings have stopped is off
 // only when the engine state says so (the key is off and the connection is
-// alive, ADR 0163); silence on its own is unknown, not off.
+// alive, ADR 0163-a); silence on its own is unknown, not off.
 func engineStatus(t telemetryReader, e vesselEngineSetting, info engineStateInfo) vesselStatusEngine {
 	out := vesselStatusEngine{Name: e.Name}
 	prefix := "propulsion." + e.Instance

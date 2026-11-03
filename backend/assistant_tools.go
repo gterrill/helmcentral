@@ -158,7 +158,7 @@ type assistantToolDeps struct {
 	// (today it records self only).
 	signalKPositionHistory func(mmsi string, from, to time.Time, resolutionSeconds int) ([]signalKHistoryPoint, error)
 	// signalKDiagnostics is check_signalk_paths' whole view of the live
-	// SignalK snapshot (Mate diagnostics, ADR 0131): connection status, last
+	// SignalK snapshot (Mate diagnostics, ADR 0131-a): connection status, last
 	// message time, and every leaf currently in the self tree with its
 	// value/source/declared timestamp. Production wires
 	// signalKDiagnosticsFromGlobalSnapshot (assistant_diagnostics.go); tests
@@ -265,7 +265,7 @@ type assistantToolDeps struct {
 	// trueWindGustKts is the strongest true wind recorded in the last ten
 	// minutes, the Wind tile's gust figure.
 	trueWindGustKts func() (float64, bool)
-	// engineStates says which engines are keyed off (ADR 0163).
+	// engineStates says which engines are keyed off (ADR 0163-a).
 	engineStates func(now time.Time) map[string]engineStateInfo
 	// ignoredAlarms are the titles of the network alarms the operator stopped
 	// showing (ADR 0207).

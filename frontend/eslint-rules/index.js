@@ -1,6 +1,7 @@
 import textSizeScale from './text-size-scale.js';
 import noArbitraryColor from './no-arbitrary-color.js';
 import noWidgetInUiText from './no-widget-in-ui-text.js';
+import preferChoiceList from './prefer-choice-list.js';
 import noZonelessTime from './no-zoneless-time.js';
 
 // Local ESLint plugin, registered as `helm` in eslint.config.js. Each rule
@@ -11,5 +12,6 @@ export default {
     'no-arbitrary-color': noArbitraryColor,
     'no-widget-in-ui-text': noWidgetInUiText,
     'no-zoneless-time': noZonelessTime,
+    'prefer-choice-list': preferChoiceList,
   },
 };

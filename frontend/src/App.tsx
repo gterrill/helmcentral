@@ -186,7 +186,7 @@ import { cn } from '@/lib/utils'
  * Help below it, both rendered separately in the sidebar.
  *
  * Revision "one panel, not three" (2026-09-20): Notes and Manuals no longer
- * have rows here. ADR 0116 already decided a note is a document and a
+ * have rows here. ADR 0116-a already decided a note is a document and a
  * manual is a folder; this revision finishes that thought by having
  * Documents render both, rather than splitting the same underlying table
  * back into three sidebar destinations. Capture (what the Notes row used
