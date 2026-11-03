@@ -200,6 +200,13 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
   const dirty =
     canWrite && !oneOff && baseline !== null && (mode.kind === 'new' || !sameDraft(draft, baseline))
   const saveDisabled = hasDraftErrors(errors) || schedulePreviewBlocksSave(preview)
+  // Why Save is off, when a person has something to do about it. A field at
+  // fault is highlighted; a failed schedule check has no field to point at (the
+  // picker already shows what went wrong), so the bar only says Save waits.
+  const fieldAtFault = hasDraftErrors(errors) || (preview.preview !== null && !preview.preview.valid)
+  const saveBlockedReason = fieldAtFault
+    ? 'Fix the highlighted fields first.'
+    : saveDisabled && preview.error !== null ? 'Save waits until the schedule can be checked.' : null
 
   const update = (patch: Partial<WatchDraft>) => setDraft((d) => ({ ...d, ...patch }))
   const setThreshold = (key: keyof WatchThresholds, n: number) =>
@@ -549,7 +556,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
             dirty={dirty}
             saving={saving}
             // Below lg the field at fault can sit under the whole run history.
-            error={saveError ?? (saveDisabled && !preview.pending && (mode.kind === 'existing' || nameTouched) ? 'Fix the highlighted fields first.' : null)}
+            error={saveError ?? (!preview.pending && (mode.kind === 'existing' || nameTouched) ? saveBlockedReason : null)}
             saveDisabled={saveDisabled}
             saveLabel={mode.kind === 'new' ? 'Create watch' : 'Save'}
             onSave={() => { void performSave().catch(() => {}) }}

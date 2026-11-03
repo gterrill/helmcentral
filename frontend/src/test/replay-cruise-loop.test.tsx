@@ -120,6 +120,8 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (cb: (n: number) => void) => { frames.push(cb); return frames.length })
   vi.stubGlobal('cancelAnimationFrame', () => {})
   vi.spyOn(performance, 'now').mockImplementation(() => now)
+  // A map with a width: a label with no room is not drawn.
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 400, x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 400, toJSON: () => ({}) })
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args.map(String).join(' ')) })
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })

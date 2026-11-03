@@ -1162,20 +1162,47 @@ func TestCollisionProfileSyncerATransitionHonoursAHandPick(t *testing.T) {
 	}
 }
 
-// A new wanted profile still waits for the running backoff, but the card is
-// reworded at once.
-func TestCollisionProfileSyncerATransitionDuringBackoffRewordsWithoutASave(t *testing.T) {
+// A wanted profile that has not been tried is saved at once, whatever backoff
+// another profile is serving; the card then names the new profile.
+func TestCollisionProfileSyncerANewWantedProfileDuringBackoffIsTriedAtOnce(t *testing.T) {
 	syncer, _, saves, _ := failedSaveSyncer(t)
 	syncer.check(alarmNow.Add(1 * time.Minute))
 	syncer.check(alarmNow.Add(3 * time.Minute))
 	before := *saves
-	syncer.snapshot = snapshotInState("moored")
+	syncer.snapshot = snapshotInState("moored") // wants harbor, not coastal
 	events := syncer.check(alarmNow.Add(3*time.Minute + time.Second))
-	if *saves != before {
-		t.Fatalf("the save must wait for the backoff, saves %d -> %d", before, *saves)
+	if *saves != before+1 {
+		t.Fatalf("a profile not yet tried must be saved at once, saves %d -> %d", before, *saves)
 	}
 	if len(events) != 1 || events[0].Kind != alarmEventChanged || !strings.Contains(events[0].Status.Message, "harbor") {
-		t.Fatalf("the card must be reworded for the new state, got %+v", events)
+		t.Fatalf("the card must say harbor, got %+v", events)
+	}
+	// Harbor's own failure now backs off: the same profile waits.
+	syncer.check(alarmNow.Add(3*time.Minute + 2*time.Second))
+	if *saves != before+1 {
+		t.Fatalf("a repeat try of the same profile must wait, saves %d", *saves)
+	}
+}
+
+// A state that flips between two mapped profiles while the plugin refuses the
+// write must not bring back a PUT per flip: each profile waits for its own
+// backoff once it has failed.
+func TestCollisionProfileSyncerFlappingBetweenTwoProfilesDoesNotSavePerFlip(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t) // sailing -> coastal failed at alarmNow
+	at := alarmNow
+	for i, state := range []string{"moored", "sailing", "moored", "sailing", "moored"} {
+		at = at.Add(time.Second)
+		syncer.snapshot = snapshotInState(state)
+		syncer.check(at)
+		if *saves != 1 {
+			t.Fatalf("flip %d to %s: harbor is tried once and coastal already failed, saves %d", i+1, state, *saves)
+		}
+	}
+	// Harbor's own backoff ends: it is tried again.
+	syncer.snapshot = snapshotInState("moored")
+	syncer.check(at.Add(collisionProfilePollInterval + time.Second))
+	if *saves != 2 {
+		t.Fatalf("harbor is due again after its backoff, saves %d", *saves)
 	}
 }
 

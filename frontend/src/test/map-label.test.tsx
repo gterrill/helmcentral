@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { MapLabel } from '@/components/passages/map-label'
-import { MAP_LABEL, mapLabelBox, mapLabelStyle } from '@/lib/map-label'
+import { MAP_LABEL, labelHasRoom, mapLabelBox, mapLabelStyle } from '@/lib/map-label'
 import { CARD_FADE_S } from '@/lib/replay-signs'
 import { PASSAGE_LABEL_S, passageLabelBox } from '@/lib/replay-passage-label'
 import { stayLabelBox } from '@/lib/replay-stay'
@@ -85,6 +85,30 @@ describe('MapLabel', () => {
   })
 })
 
+describe('labelHasRoom', () => {
+  const boxOf = (maxW: number) => ({ ...mapLabelBox(size, { align: 'left', elapsedS: 1, durationS: 2 }), maxW })
+
+  it('needs more width than the padding on both sides, or only an empty pill would show', () => {
+    expect(labelHasRoom(boxOf(0))).toBe(false)
+    expect(labelHasRoom(boxOf(2 * MAP_LABEL.padX))).toBe(false)
+    expect(labelHasRoom(boxOf(2 * MAP_LABEL.padX + 1))).toBe(true)
+  })
+
+  it('draws no pill in the app where the width is only the padding', () => {
+    render(<MapLabel text="Hello" box={boxOf(20)} testId="narrow" />)
+    expect(screen.queryByTestId('narrow')).toBeNull()
+  })
+})
+
+describe('MapLabel with no room', () => {
+  it('draws nothing when the width left is zero, not an empty pill', () => {
+    const box = mapLabelBox({ w: 200, h: 400 }, { align: 'center', elapsedS: 1, durationS: 2, insetCorner: 'bottom-left' })
+    expect(box.maxW).toBe(0)
+    render(<MapLabel text="Hello" box={box} testId="ml" />)
+    expect(screen.queryByTestId('ml')).toBeNull()
+  })
+})
+
 describe('mapLabelBox and an area the page keeps clear', () => {
   const size = { w: 800, h: 480 }
   // The exported card's readout: bottom left, 150 px wide, 60 tall, standing on the line the labels are on.
@@ -93,7 +117,7 @@ describe('mapLabelBox and an area the page keeps clear', () => {
 
   it('starts a left label to the right of the area it would sit over', () => {
     const clear = mapLabelBox(size, { ...opts, align: 'left' })
-    const box = mapLabelBox(size, { ...opts, align: 'left', reserved: readout })
+    const box = mapLabelBox(size, { ...opts, align: 'left', reserved: [readout] })
     expect(clear.x).toBe(MAP_LABEL.edge)
     expect(box.x).toBe(readout.x + readout.w + MAP_LABEL.insetGap)
     expect(box.maxW).toBe(clear.maxW - (box.x - clear.x))
@@ -102,7 +126,7 @@ describe('mapLabelBox and an area the page keeps clear', () => {
   it('narrows a centred label the same way, on a phone-sized card', () => {
     const phone = { w: 360, h: 420 }
     const area = { x: 10, y: 420 - 28 - 60, w: 150, h: 60 }
-    const box = mapLabelBox(phone, { ...opts, align: 'center', reserved: area })
+    const box = mapLabelBox(phone, { ...opts, align: 'center', reserved: [area] })
     const left = box.x - box.maxW / 2
     expect(left).toBeGreaterThanOrEqual(area.x + area.w + MAP_LABEL.insetGap - 1e-9)
     expect(box.x + box.maxW / 2).toBeLessThanOrEqual(phone.w - MAP_LABEL.edge + 1e-9)
@@ -110,14 +134,22 @@ describe('mapLabelBox and an area the page keeps clear', () => {
 
   it('gives way from the right when the area is on the right', () => {
     const right = { x: 640, y: 480 - 28 - 60, w: 150, h: 60 }
-    const box = mapLabelBox(size, { ...opts, align: 'left', reserved: right })
+    const box = mapLabelBox(size, { ...opts, align: 'left', reserved: [right] })
     expect(box.x).toBe(MAP_LABEL.edge)
     expect(box.x + box.maxW).toBe(right.x - MAP_LABEL.insetGap)
   })
 
+  it('keeps clear of several areas at once, from the side each is on', () => {
+    const left = { x: 10, y: 480 - 72, w: 100, h: 40 }
+    const rightArea = { x: 700, y: 480 - 72, w: 90, h: 40 }
+    const box = mapLabelBox(size, { ...opts, align: 'left', reserved: [left, rightArea] })
+    expect(box.x).toBe(left.x + left.w + MAP_LABEL.insetGap)
+    expect(box.x + box.maxW).toBe(rightArea.x - MAP_LABEL.insetGap)
+  })
+
   it('leaves a label alone when the area is not on its line', () => {
     const high = { x: 10, y: 20, w: 150, h: 60 }
-    expect(mapLabelBox(size, { ...opts, align: 'left', reserved: high })).toEqual(mapLabelBox(size, { ...opts, align: 'left' }))
+    expect(mapLabelBox(size, { ...opts, align: 'left', reserved: [high] })).toEqual(mapLabelBox(size, { ...opts, align: 'left' }))
   })
 
   it('gives the style the page and the exported card both draw with', () => {

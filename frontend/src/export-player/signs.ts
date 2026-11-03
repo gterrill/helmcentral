@@ -25,6 +25,8 @@ export interface SignView {
 
 export interface SignLayer {
   update(view: SignView): void
+  /** Tell the layer the map's size has just been measured: cards are placed again for it. MapLibre fires 'move' before 'resize', so the move places them for the old size. */
+  resized(): void
 }
 
 export interface SignLayerOptions {
@@ -301,6 +303,9 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     update(next) {
       view = next
       render()
+    },
+    resized() {
+      place(slots)
     },
   }
 }

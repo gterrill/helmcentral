@@ -6,7 +6,7 @@
 import { FONT_STACK, fitText, paintOverlay, roundRectPath, wrapLines, type Measure } from '@/lib/passage-export-layout'
 import { measureWithCanvas } from '@/lib/text-measure'
 import type { ClosingLayout } from '@/lib/passage-video/closing'
-import { MAP_LABEL, type MapLabelBox } from '@/lib/map-label'
+import { MAP_LABEL, labelHasRoom, type MapLabelBox } from '@/lib/map-label'
 import type { Box, OverlayCard, OverlayModel } from '@/lib/passage-video/overlay'
 import { NOTE_FONT } from '@/lib/sign-note'
 import type { VideoSize } from '@/lib/passage-video/schedule'
@@ -180,7 +180,7 @@ function drawMoment(ctx: CanvasRenderingContext2D, m: NonNullable<OverlayModel['
 
 /** The small label of a stay or a passage: the page's own (components/passages/map-label), in the page's card and text colours. */
 function drawLabel(ctx: CanvasRenderingContext2D, text: string, box: MapLabelBox, t: Theme) {
-  if (box.alpha <= 0 || box.maxW <= 0) return
+  if (box.alpha <= 0 || !labelHasRoom(box)) return
   const labelFont = font(MAP_LABEL.weight, box.fontPx)
   const shown = fitText(text, box.maxW - 2 * box.padX, labelFont, (s, f) => { ctx.font = f; return ctx.measureText(s).width })
   ctx.font = labelFont

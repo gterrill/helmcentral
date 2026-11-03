@@ -6,7 +6,7 @@ import { MapPin, Settings2, Ship } from 'lucide-react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
-import { VesselGroup } from '@/components/nearby-vessel-group'
+import { VesselGroup, vesselGroupMessage } from '@/components/nearby-vessel-group'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, suppressedIdsEqual, type MarkerLabelPoint } from '@/lib/marker-labels'
@@ -22,7 +22,7 @@ import { type AlarmState } from '@/hooks/use-alarms'
 import { type TrailPoint } from '@/hooks/use-server-trails'
 import { type DistanceUnits } from '@/config/app-config'
 import { formatPoiDistance } from '@/lib/format'
-import { selectListedVessels, sortByCollisionAlarm } from '@/lib/nearby-vessel-display'
+import { collisionTier, selectListedVessels, sortByCollisionAlarm } from '@/lib/nearby-vessel-display'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 import { hasWebGL2 } from '@/lib/webgl'
@@ -96,14 +96,17 @@ const POI_FETCH_LIMIT = 50
 const RANKED_LIST_SIZE = 5
 
 // The list pane height from which the Vessels group stacks under the places
-// instead of sitting beside them. The kiosk list cannot scroll, so stacking
-// must never be chosen unless everything fits. Worst case, in pixels: footer
+// instead of sitting beside them. The kiosk list cannot scroll, so a tall pane
+// is the only one where stacking is known to fit everything. Worst case, in pixels: footer
 // 24, five place rows 130, the highlighted row's three-line summary 50, group
 // heading 16, four two-line vessel rows 160 and gaps 16, which is 396. The
 // 272 px wall tile has about 230 px for the list, and a 12 x 22 tile has well
 // over this.
 const VESSELS_STACK_MIN_HEIGHT_PX = 420
-// The list pane width below which the two groups stack even when the pane is short.
+// The list pane width below which the two groups stack even when the pane is
+// short, because side by side each column would be too narrow. Such a pane may
+// cut off what is stacked last, so it puts the Vessels group first while a
+// listed vessel is in collision alarm or warning.
 const VESSELS_SIDE_BY_SIDE_MIN_WIDTH_PX = 600
 
 // Vessel label ids in the declutter pass carry this prefix, so a vessel id can
@@ -424,6 +427,13 @@ export default function PoiMapTileImpl({
   // pane stays side by side.
   const stackVessels = listPaneBox.height >= VESSELS_STACK_MIN_HEIGHT_PX
     || (listPaneBox.width > 0 && listPaneBox.width < VESSELS_SIDE_BY_SIDE_MIN_WIDTH_PX)
+  // A narrow pane that is also short cannot hold both groups, and the kiosk
+  // cannot scroll to what is cut off. If a listed vessel is in collision alarm
+  // or warning, its group goes first so the alarm stays in view.
+  // Only when the group lists vessels: a message in their place has no alarm to keep in view.
+  const vesselsFirst = stackVessels && listPaneBox.height < VESSELS_STACK_MIN_HEIGHT_PX
+    && vesselGroupMessage({ vessels: qualifyingVessels, gnssCriticalAlert, feed: nearbyVesselFeed, limitM: vesselLimitM, distanceUnits }) === null
+    && qualifyingVessels.some((v) => collisionTier(aisCollisionAlarms?.get(v.id)) !== null)
 
   const title = config.title.trim() || 'Nearby'
   const stale = isStale(positionLastUpdateAgeS)
@@ -446,6 +456,23 @@ export default function PoiMapTileImpl({
         expanded={feature.id === expandedPoiId}
       />
     ))
+  )
+
+  const placesGroup = <div key="places" className="flex min-h-0 flex-col gap-1">{placesContent}</div>
+  const vesselGroup = (
+    <VesselGroup
+      key="vessels"
+      vessels={qualifyingVessels}
+      ownLat={latitude}
+      ownLon={longitude}
+      gnssCriticalAlert={gnssCriticalAlert}
+      feed={nearbyVesselFeed}
+      limitM={vesselLimitM}
+      distanceUnits={distanceUnits}
+      aisCollisionAlarms={aisCollisionAlarms}
+      stacked={stackVessels}
+      first={vesselsFirst}
+    />
   )
 
   return (
@@ -668,20 +695,10 @@ export default function PoiMapTileImpl({
               <div
                 data-testid="poi-list-groups"
                 data-stacked={stackVessels}
+                data-vessels-first={vesselsFirst}
                 className={cn('grid min-h-0 flex-1 gap-2', stackVessels ? 'grid-cols-1 content-start' : 'grid-cols-2')}
               >
-                <div className="flex min-h-0 flex-col gap-1">{placesContent}</div>
-                <VesselGroup
-                  vessels={qualifyingVessels}
-                  ownLat={latitude}
-                  ownLon={longitude}
-                  gnssCriticalAlert={gnssCriticalAlert}
-                  feed={nearbyVesselFeed}
-                  limitM={vesselLimitM}
-                  distanceUnits={distanceUnits}
-                  aisCollisionAlarms={aisCollisionAlarms}
-                  stacked={stackVessels}
-                />
+                {vesselsFirst ? [vesselGroup, placesGroup] : [placesGroup, vesselGroup]}
               </div>
             ) : placesContent}
             <div className="mt-auto border-t border-border/60 pt-1 text-xs text-muted-foreground">

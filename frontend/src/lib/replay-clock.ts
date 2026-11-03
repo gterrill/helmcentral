@@ -173,22 +173,28 @@ export function passageShares(durations: readonly number[], lengthS: number, min
  * by that ratio, on top of any shot's pace. A single passage is the shots'
  * spans as they are. */
 export function cruisePaceSpans(resolved: readonly ResolvedShot[], timeline: Timeline, lengthS: number): PaceSpan[] {
-  const shots = paceSpans(resolved)
-  if (!isMultiPassage(timeline) || !(timeline.total > 0) || !(lengthS > 0)) return shots
+  if (!isMultiPassage(timeline) || !(timeline.total > 0) || !(lengthS > 0)) return paceSpans(resolved)
   const lengths = timeline.entries.map((e) => Math.max(0, e.end - e.start))
   const shares = passageShares(lengths, lengthS)
   // Relative to the pace the whole length would run at: 1 for a passage that gets what it earns.
   const base = timeline.total / lengthS
   const relative = lengths.map((d, i) => (d > 0 && shares[i] > 0 ? d / shares[i] / base : 1))
-  const sortedShots = [...shots].sort((a, b) => a.from - b.from)
-  // The pace in force at a position: that of the last shot at or before it.
-  const shotPaceAt = (clock: number) => {
-    const n = lowerBound(sortedShots, (s) => s.from, clock, true)
-    return n > 0 ? sortedShots[n - 1].pace : 1
-  }
-  const points = [...new Set([...timeline.entries.map((e) => e.offset), ...sortedShots.map((s) => Math.max(0, s.from))])].filter((c) => c < timeline.total).sort((a, b) => a - b)
+  const sortedShots = [...resolved].sort((a, b) => a.clock - b.clock)
   // The passage a clock position is in, by the rule the replay locates the boat by.
   const indexOf = new Map(timeline.entries.map((e, i) => [e.id, i]))
   const passageAt = (clock: number) => indexOf.get(locate(timeline, clock)!.entry.id)!
-  return points.map((from) => ({ from, pace: shotPaceAt(from) * relative[passageAt(from)] }))
+  // The pace in force at a position: that of the last shot at or before it,
+  // but only within that shot's own passage. A shot holds "until the next shot
+  // or the end of that passage", so a later passage starts at pace 1.
+  const shotPaceAt = (clock: number, passage: number) => {
+    const n = lowerBound(sortedShots, (s) => s.clock, clock, true)
+    if (n === 0) return 1
+    const last = sortedShots[n - 1]
+    return indexOf.get(last.entryId) === passage ? last.shot.pace : 1
+  }
+  const points = [...new Set([...timeline.entries.map((e) => e.offset), ...sortedShots.map((s) => Math.max(0, s.clock))])].filter((c) => c < timeline.total).sort((a, b) => a - b)
+  return points.map((from) => {
+    const passage = passageAt(from)
+    return { from, pace: shotPaceAt(from, passage) * relative[passage] }
+  })
 }

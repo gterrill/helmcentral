@@ -27,6 +27,36 @@ const VESSEL_LIST_SIZE = 4
 const VESSEL_OLD_POSITION_S = 180
 
 /**
+ * What the group says in place of its rows, or null when it lists vessels. The
+ * tile asks too, so it only puts the group first when alarm rows really show.
+ */
+export function vesselGroupMessage({
+  vessels,
+  gnssCriticalAlert,
+  feed,
+  limitM,
+  distanceUnits,
+}: {
+  vessels: readonly NearbyVessel[]
+  gnssCriticalAlert: boolean
+  feed: NearbyVesselFeed | null
+  limitM: number
+  distanceUnits: DistanceUnits
+}): string | null {
+  if (feed === null) return 'Loading…'
+  // First among the failures: when SignalK itself is down the backend raises
+  // the GNSS alert too, and blaming the fix would send the operator to the
+  // wrong fault.
+  if (feed.source !== 'signalk') return 'AIS unavailable'
+  // Under the -1,-1 position sentinel every contact's range is wrong.
+  if (gnssCriticalAlert) return 'Vessels need a GNSS fix'
+  if (vessels.length === 0) {
+    return feed.maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(limitM, distanceUnits)}`
+  }
+  return null
+}
+
+/**
  * The Vessels group of the list: the AIS contacts with their sighting history.
  * A plain, non-interactive display (the kiosk has no input). When it cannot
  * list vessels it says why, in this order: feed not heard yet, feed not coming
@@ -42,6 +72,7 @@ export function VesselGroup({
   distanceUnits,
   aisCollisionAlarms,
   stacked,
+  first = false,
 }: {
   vessels: NearbyVessel[]
   ownLat: number | null
@@ -52,28 +83,20 @@ export function VesselGroup({
   distanceUnits: DistanceUnits
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
   stacked: boolean
+  /** Stacked above the places: the divider goes under the group, not over it. */
+  first?: boolean
 }) {
-  let message: string | null = null
-  if (feed === null) {
-    message = 'Loading…'
-  } else if (feed.source !== 'signalk') {
-    // First among the failures: when SignalK itself is down the backend raises
-    // the GNSS alert too, and blaming the fix would send the operator to the
-    // wrong fault.
-    message = 'AIS unavailable'
-  } else if (gnssCriticalAlert) {
-    // Under the -1,-1 position sentinel every contact's range is wrong.
-    message = 'Vessels need a GNSS fix'
-  } else if (vessels.length === 0) {
-    message = feed.maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(limitM, distanceUnits)}`
-  }
+  const message = vesselGroupMessage({ vessels, gnssCriticalAlert, feed, limitM, distanceUnits })
   const shown = message === null ? vessels.slice(0, VESSEL_LIST_SIZE) : []
   const more = message === null ? vessels.length - shown.length : 0
 
   return (
     <div
       data-testid="poi-vessel-group"
-      className={cn('flex min-h-0 min-w-0 flex-col gap-1', stacked ? 'border-t border-border/60 pt-1' : 'border-l border-border/60 pl-2')}
+      className={cn(
+        'flex min-h-0 min-w-0 flex-col gap-1',
+        !stacked ? 'border-l border-border/60 pl-2' : first ? 'border-b border-border/60 pb-1' : 'border-t border-border/60 pt-1',
+      )}
     >
       <div className="flex items-baseline justify-between gap-1">
         <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Vessels</span>

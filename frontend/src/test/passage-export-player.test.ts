@@ -81,7 +81,7 @@ describe('what drives it', () => {
     // 30 s of sailing and one stay, with no clock, night counter or heading of its own.
     expect(api.config.time.totalWall).toBeCloseTo(30 + STAY_S, 6)
     expect(api.plan.stays.map((s) => s.label)).toEqual(['2 nights · Anchorage 1'])
-    expect(api.fmtLocal(T0)).toBe('14 Sep 10:00 UTC+10')
+    expect(api.fmtLocal(T0)).toBe('14 Sep 10.00 AM UTC+10')
   })
 
   it('spends the chosen play length underway', () => {
@@ -113,7 +113,7 @@ describe('tapping play', () => {
     expect((root.querySelector('.hcp-readout') as HTMLElement).hidden).toBe(false)
     expect(FakeMarker.last.added).toBe(true)
     expect(root.className).toContain('hcp-playing')
-    expect((root.querySelector('.hcp-time') as HTMLElement).textContent).toMatch(/^14 Sep 10:0\d UTC\+10$/)
+    expect((root.querySelector('.hcp-time') as HTMLElement).textContent).toMatch(/^14 Sep 10\.0\d AM UTC\+10$/)
     expect((root.querySelector('.hcp-passage') as HTMLElement).textContent).toBe('Leg 1')
     // A cruise comes down on its first passage, so the opening move lands on a camera of its own.
     expect(map.jumps().some((j) => j.zoom === 11)).toBe(true)
@@ -186,19 +186,23 @@ describe('tapping play', () => {
     expect((card.root.querySelector('.hcp-passage') as HTMLElement).textContent).toBe('Leg 2')
   })
 
-  it('keeps the labels clear of the overview map in a bottom corner, by the replay\'s own rule', () => {
-    const left = (inset: boolean, corner: 'bottom-left' | 'top-right') => {
+  it('keeps the labels clear of the overview map where the page measures it', () => {
+    const left = (inset: boolean, corner: 'bottom-left' | 'top-right', box: Record<string, number>) => {
       document.body.innerHTML = ''
       resetFakes()
       const card = mount(base({ inset, insetView: { corner, zoomOffset: 0 } }))
+      const el = card.root.querySelector('.hcp-inset') as HTMLElement
+      for (const [name, value] of Object.entries(box)) Object.defineProperty(el, name, { configurable: true, value })
       startPlaying(card, driver.advance)
       driver.advance(200)
       return labels(card.root).find((e) => !e.hidden)?.style.left
     }
-    expect(left(false, 'top-right')).toBe('24px')
-    expect(left(true, 'top-right')).toBe('24px')
-    // 8 px from the side, the overview's 176 px width and a gap of 12.
-    expect(left(true, 'bottom-left')).toBe('196px')
+    // The overview's real box: 132 wide, 10 px from the side, on the label's line (480 high: y 408).
+    const bottomLeft = { offsetLeft: 10, offsetTop: 400, offsetWidth: 132, offsetHeight: 30 }
+    expect(left(false, 'top-right', bottomLeft)).toBe('24px')
+    expect(left(true, 'top-right', { ...bottomLeft, offsetTop: 10 })).toBe('24px')
+    // Its right edge at 142 and a gap of 12.
+    expect(left(true, 'bottom-left', bottomLeft)).toBe('154px')
   })
 
   it.each([
@@ -446,5 +450,59 @@ describe('where the camera is left when the opening move is cut short', () => {
     card.map.cam.zoom = 9
     card.map.fire('movestart', { originalEvent: {} })
     expect(card.map.cam.zoom).toBe(9)
+  })
+})
+
+describe('keeping clear of the overview map', () => {
+  const measure = (el: HTMLElement, box: Record<string, number>) => {
+    for (const [name, value] of Object.entries(box)) Object.defineProperty(el, name, { configurable: true, value })
+  }
+  const phoneCard = () => {
+    const card = mount(base({ inset: true, insetCorner: 'bottom-right' } as never))
+    card.map.size = { w: 390, h: 420 }
+    card.map.fire('resize')
+    return card
+  }
+
+  it('is not narrowed by an overview map that is not on the label\'s line', () => {
+    const card = phoneCard()
+    // The real overview map: 104 wide, 10 px from the right, standing above the readout and above the label's line.
+    measure(card.root.querySelector('.hcp-inset') as HTMLElement, { offsetLeft: 390 - 10 - 104, offsetTop: 420 - 140 - 74, offsetWidth: 104, offsetHeight: 74 })
+    startPlaying(card, driver.advance)
+    driver.advance(15_000)
+    const stay = labels(card.root).find((e) => !e.hidden && e.textContent?.includes('nights')) as HTMLElement
+    expect(stay).toBeDefined()
+    expect(parseFloat(stay.style.maxWidth)).toBeCloseTo(390 - 2 * 24)
+  })
+
+  it('measures the overview map when it changes, not at every frame', () => {
+    const card = phoneCard()
+    const inset = card.root.querySelector('.hcp-inset') as HTMLElement
+    let reads = 0
+    for (const [name, value] of Object.entries({ offsetLeft: 276, offsetTop: 206, offsetWidth: 104, offsetHeight: 74 })) {
+      Object.defineProperty(inset, name, { configurable: true, get: () => { reads++; return value } })
+    }
+    startPlaying(card, driver.advance)
+    reads = 0
+    driver.advance(5_000)
+    expect(reads).toBe(0)
+  })
+
+  it('draws no label where only the padding is left of the line', () => {
+    const card = phoneCard()
+    // An overview map that leaves 20 px of line, less than the label's own padding either side.
+    measure(card.root.querySelector('.hcp-inset') as HTMLElement, { offsetLeft: 24 + 20 + 12, offsetTop: 420 - 72, offsetWidth: 330, offsetHeight: 60 })
+    startPlaying(card, driver.advance)
+    driver.advance(15_000)
+    expect(labels(card.root).find((e) => !e.hidden && e.textContent?.includes('nights'))).toBeUndefined()
+  })
+
+  it('draws no label at all where nothing is left of the line', () => {
+    const card = phoneCard()
+    // An overview map as wide as the card, on the label's line.
+    measure(card.root.querySelector('.hcp-inset') as HTMLElement, { offsetLeft: 0, offsetTop: 420 - 72, offsetWidth: 390, offsetHeight: 60 })
+    startPlaying(card, driver.advance)
+    driver.advance(15_000)
+    expect(labels(card.root).filter((e) => !e.hidden)).toEqual([])
   })
 })
