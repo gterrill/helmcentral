@@ -168,6 +168,13 @@ type windRoseModelBand struct {
 	Percent float64 `json:"percent"`
 }
 
+// windRoseModelGust is the strongest gust as Mate reads it: the time is a
+// boat-time label. The card keeps the instant (windRoseStrongest).
+type windRoseModelGust struct {
+	Speed float64 `json:"speed"`
+	At    string  `json:"at"`
+}
+
 type windRoseModelResult struct {
 	Title           string                `json:"title"`
 	Range           string                `json:"range"`
@@ -179,7 +186,7 @@ type windRoseModelResult struct {
 	CalmPercent     float64               `json:"calm_percent"`
 	VariablePercent float64               `json:"variable_percent,omitempty"`
 	MeanSpeed       *float64              `json:"mean_speed,omitempty"`
-	StrongestGust   *windRoseStrongest    `json:"strongest_gust,omitempty"`
+	StrongestGust   *windRoseModelGust    `json:"strongest_gust,omitempty"`
 	Unpaired        int                   `json:"unpaired_buckets,omitempty"`
 	Note            string                `json:"note"`
 	Instruction     string                `json:"instruction"`
@@ -348,10 +355,12 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 
 	boat := d.boatTime()
 	loc, tz := boat.Loc, boat.Name
+	var strongestGust *windRoseModelGust
 	if strongest != nil {
 		t, _ := time.Parse(time.RFC3339, strongest.At)
 		strongest.At = t.In(loc).Format(time.RFC3339)
 		strongest.Speed = round2(strongest.Speed)
+		strongestGust = &windRoseModelGust{Speed: strongest.Speed, At: boat.DayClock(t)}
 	}
 
 	tally := buildWindRose(samples, sectors, edges, windRoseCalmBelow)
@@ -399,8 +408,8 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 	sort.SliceStable(order, func(i, j int) bool { return tally.SectorN[order[i]] > tally.SectorN[order[j]] })
 	model := &windRoseModelResult{
 		Title: title, Unit: unit, Samples: tally.Samples, BucketMinutes: int(width / time.Minute),
-		Range:       rng.from.In(loc).Format("Mon 2 Jan 15:04") + " to " + rng.to.In(loc).Format("Mon 2 Jan 15:04"),
-		CalmPercent: pct(tally.Calm), VariablePercent: pct(tally.Variable), MeanSpeed: &mean, StrongestGust: strongest,
+		Range:       boatDayClock(rng.from, loc) + " to " + boatDayClock(rng.to, loc),
+		CalmPercent: pct(tally.Calm), VariablePercent: pct(tally.Variable), MeanSpeed: &mean, StrongestGust: strongestGust,
 		Unpaired:    unpaired,
 		Note:        fmt.Sprintf("wind direction is where the wind blows from, in degrees true. Each sample is a %d-minute average. Percentages are of all samples; calm is under %g %s and has no direction.", int(width/time.Minute), windRoseCalmBelow, unit),
 		Instruction: windRoseInstr,

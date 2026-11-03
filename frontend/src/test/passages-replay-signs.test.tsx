@@ -245,7 +245,7 @@ describe('ReplayPanel signs: the editor', () => {
   it('draws a diamond tick for each sign and a click seeks there and opens its fields', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    const tick = await screen.findByRole('button', { name: /^Sign Sign s1 at 22 Oct 09:04/ })
+    const tick = await screen.findByRole('button', { name: /^Sign Sign s1 at 22 Oct 9.04 AM/ })
     expect(tick).toHaveStyle({ left: '25%' })
     fireEvent.click(tick)
     expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('250')
@@ -510,7 +510,7 @@ describe('ReplayPanel signs: photos', () => {
     fireEvent.change(screen.getByLabelText('Photo file for a new sign'), { target: { files: [photo('2026:10:22 09:10:00')] } })
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].body).toMatchObject({ t_ms: (start + 600) * 1000, title: 'IMG 0412', document_id: 'doc1' })
-    expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 09:10 UTC+10 (the photo has no time zone, so boat time is used).')
+    expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 9.10 AM UTC+10 (the photo has no time zone, so boat time is used).')
     await waitFor(() => expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('600'))
   })
 
@@ -531,7 +531,7 @@ describe('ReplayPanel signs: photos', () => {
     fireEvent.change(screen.getByLabelText('Photo file for a new sign'), { target: { files: [photo('2026:10:25 09:10:00')] } })
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].body).toMatchObject({ t_ms: (start + 300) * 1000 })
-    expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo was taken 25 Oct 09:10 UTC+10, outside this replay, so the sign is at the current position.')
+    expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo was taken 25 Oct 9.10 AM UTC+10, outside this replay, so the sign is at the current position.')
   })
 
   it('changing the photo of a sign keeps it where it is', async () => {
@@ -568,7 +568,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     expect(writes[0]).toMatchObject({ method: 'PATCH', body: { t_ms: t(400) } })
     expect(screen.getByLabelText('Sign title')).toHaveValue('Sign s1')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Move sign here' })).toBeDisabled())
-    expect(screen.getByText(/^At 22 Oct 09:06/)).toBeInTheDocument()
+    expect(screen.getByText(/^At 22 Oct 9.06 AM/)).toBeInTheDocument()
   })
 
   it('shows the server\'s reason when the move is refused', async () => {
@@ -773,7 +773,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       await open()
       await waitFor(() => expect(writes).toHaveLength(1))
       expect(writes[0]).toMatchObject({ method: 'PATCH', body: { t_ms: t(600) } })
-      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 09:10 UTC+10')
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 9.10 AM UTC+10')
       await waitFor(() => expect(atTime()).toBe('600'))
     })
 
@@ -781,7 +781,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       signs = [sign('s1', 600, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
       stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:22 09:10:00') })
       await open()
-      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 09:10 UTC+10')
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 9.10 AM UTC+10')
       expect(writes).toHaveLength(0)
       await waitFor(() => expect(atTime()).toBe('600'))
     })
@@ -798,7 +798,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       withPhoto()
       stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:25 09:10:00') })
       await open()
-      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo was taken 25 Oct 09:10 UTC+10, outside this replay, so the sign was not moved.')
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo was taken 25 Oct 9.10 AM UTC+10, outside this replay, so the sign was not moved.')
       expect(writes).toHaveLength(0)
     })
 

@@ -129,7 +129,7 @@ describe('Outside assistants section', () => {
     hook.tokens = [laptop]
     render(<OutsideAssistantsSection />)
     expect(screen.getByText('Laptop')).toBeInTheDocument()
-    expect(screen.getByText(/last used 30 Oct 2026 08:30/i)).toBeInTheDocument()
+    expect(screen.getByText(/last used 30 Oct 2026 8.30 AM/i)).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Vessel status for Laptop' })).toBeChecked()
     expect(screen.getByRole('switch', { name: 'Live SignalK paths for Laptop' })).not.toBeChecked()
   })

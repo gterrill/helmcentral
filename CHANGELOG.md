@@ -19,9 +19,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   charging wasn't checked. If your generator feeds standalone chargers instead
   of the inverter, its charging isn't seen, so a night it charged can sit in the
   comparison.
+- **A watch's webhook writes its times the new way.** In the report it sends,
+  `boat_time` and `since` now read like Thu 29 Oct 3.00 AM UTC+13, the same way
+  as everywhere else in Helmcentral, and the run's `boat_time` does too. If a
+  receiver reads `boat_time` or `since` as a date and time, change it to read
+  `generated_at` and `since_at` instead. Both are UTC times written for a
+  program, like 2026-10-28T14:00:00Z, and they don't change.
 
 ### Changed
 
+- **Every time reads the same way, like 1.30 PM.** Reports, Mate's answers,
+  alarm text, emails, schedules and tiles all use one form, with a dot between
+  the hour and minutes, AM or PM in capitals, and the minutes always shown. Chart
+  axes keep it short, as in 1 PM, and what you see when you point at a chart gives the full
+  time. There is no setting for 12 or 24 hours. The time boxes on forms and the
+  cron fields for a watch keep your browser's format. Reports and alarm messages
+  already saved keep their old wording.
+- **Mate no longer mixes up UTC and boat time.** A morning report once said fresh
+  water fell between 02:00 and 04:00 when it fell at 1.30 PM on the boat. Mate now
+  receives every time already written on the boat's clock, and quotes it as given
+  instead of working it out.
 - **The morning report compares the late night, and counts generator charging.**
   The overnight finding now measures each night from 10.00 PM to dawn, so an
   evening spent charging doesn't make the usual drain look lighter than it is.

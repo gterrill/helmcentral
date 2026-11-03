@@ -141,7 +141,7 @@ which spell of flood or ebb you'll be in, not how fast it runs.
 
 When you're choosing where to anchor, Mate can look an anchorage over for the
 time you'll be there. Ask about a bay or a position, and say when you'll arrive
-and when you'll leave. If you don't say when you'll leave, Mate assumes 08:00
+and when you'll leave. If you don't say when you'll leave, Mate assumes 8.00 AM
 local time at the anchorage, the first one at least six hours after you arrive,
 and tells you that's what it assumed. A stay can be up to seven days. Here's what Mate reads for you:
 
@@ -929,7 +929,7 @@ the same tile you have on the dashboard, in the same units.
   until you ask something else.
 - **Older answers:** Once you ask again, or when you reopen a chat from the Chats
   list or reload the page, the tile shows the readings as they were when Mate answered, with the time they were
-  taken, for example 14:03. That way the picture still matches the words beside
+  taken, for example 2.03 PM. That way the picture still matches the words beside
   it.
 - **Missing readings:** If the sounder has no depth, or no tide station is set up,
   the tile shows a dash where it would on the dashboard, and Mate says which
@@ -946,7 +946,7 @@ can show for now.
 A watch follows up to six live readings once a second for between one and
 thirty minutes. While it runs, a line above the composer says what Mate is
 watching and when it ends. For example: "Watching Port engine load and Starboard
-engine load · ends 14:35", with a **Stop** button. The end time is on the boat's
+engine load · ends 2.35 PM", with a **Stop** button. The end time is on the boat's
 clock, the same time Mate gives you. You can keep asking other questions in the
 same conversation meanwhile, or leave the page altogether.
 

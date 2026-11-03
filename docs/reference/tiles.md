@@ -62,7 +62,7 @@ The clock's arrival time follows whatever you're steering to:
   you're heading for. So the time shown is the arrival at that waypoint, not
   the end of the passage.
 
-An arrival that falls on another day carries the day, as in "Thu 09:40 AM".
+An arrival that falls on another day carries the day, as in "Thu 9.40 AM".
 
 ## Tiles you configure yourself
 

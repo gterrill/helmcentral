@@ -65,21 +65,28 @@ func skippedCheck(reason string) anchorageCheck {
 
 type anchorageClearanceCheck struct {
 	anchorageCheck
-	LowestWaterAt string   `json:"lowest_water_at"`
-	LowestWaterM  *float64 `json:"lowest_water_height_m"`
+	// LowestWaterAt is the time as a boat-time label, for Mate to quote;
+	// LowestWaterISO is the same instant, RFC 3339, for the card.
+	LowestWaterAt  string   `json:"lowest_water_at"`
+	LowestWaterISO string   `json:"lowest_water_iso"`
+	LowestWaterM   *float64 `json:"lowest_water_height_m"`
 	DepthAtLowM   *float64 `json:"depth_at_low_m"`
 	DraftM        *float64 `json:"draft_m"`
 	ClearanceM    *float64 `json:"clearance_m"`
 	WantedM       *float64 `json:"wanted_m"`
-	// TideCheckedUntil is when the tide prediction ends, RFC 3339, when it ends
-	// before the stay does: a lower or higher water may follow. Empty otherwise.
-	TideCheckedUntil string `json:"tide_checked_until"`
+	// TideCheckedUntil is when the tide prediction ends, as a boat-time label,
+	// when it ends before the stay does: a lower or higher water may follow.
+	// Empty otherwise. TideCheckedUntilISO is the instant, RFC 3339, for the card.
+	TideCheckedUntil    string `json:"tide_checked_until"`
+	TideCheckedUntilISO string `json:"tide_checked_until_iso"`
 }
 
 type anchorageRodeCheck struct {
 	anchorageCheck
-	HighestWaterAt string   `json:"highest_water_at"`
-	HighestWaterM  *float64 `json:"highest_water_height_m"`
+	// HighestWaterAt is a boat-time label; HighestWaterISO the instant for the card.
+	HighestWaterAt  string   `json:"highest_water_at"`
+	HighestWaterISO string   `json:"highest_water_iso"`
+	HighestWaterM   *float64 `json:"highest_water_height_m"`
 	DepthAtHighM   *float64 `json:"depth_at_high_m"`
 	Method         string   `json:"method"`
 	WindKts        *float64 `json:"wind_kts"`
@@ -89,11 +96,14 @@ type anchorageRodeCheck struct {
 	ShortByM       *float64 `json:"short_by_m"`
 	// TideCheckedUntil is as for the clearance check: the highest water was
 	// found only in the predicted part of the stay.
-	TideCheckedUntil string `json:"tide_checked_until"`
-	// WindCheckedUntil is when the forecast ends, RFC 3339, when it ends before
-	// the stay does: the wind was checked only up to then. Empty when the
-	// forecast covers the whole stay.
-	WindCheckedUntil string `json:"wind_checked_until"`
+	TideCheckedUntil    string `json:"tide_checked_until"`
+	TideCheckedUntilISO string `json:"tide_checked_until_iso"`
+	// WindCheckedUntil is when the forecast ends, as a boat-time label, when it
+	// ends before the stay does: the wind was checked only up to then. Empty when
+	// the forecast covers the whole stay. WindCheckedUntilISO is the instant,
+	// RFC 3339, for the card.
+	WindCheckedUntil    string `json:"wind_checked_until"`
+	WindCheckedUntilISO string `json:"wind_checked_until_iso"`
 }
 
 type anchorageSwingCheck struct {
@@ -106,7 +116,8 @@ type anchorageSwingCheck struct {
 	// then for all the chain aboard, not the rode needed.
 	AllChainOut bool `json:"all_chain_out"`
 	// TideCheckedUntil is as for the rode check it is worked from.
-	TideCheckedUntil string `json:"tide_checked_until"`
+	TideCheckedUntil    string `json:"tide_checked_until"`
+	TideCheckedUntilISO string `json:"tide_checked_until_iso"`
 }
 
 // anchorageDepthSection is what the tool result and the card both carry. Every
@@ -255,7 +266,7 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 	}
 	depth := *s.DepthM
 	loc := stay.zone.Loc
-	at := func(t time.Time) string { return t.In(loc).Format(toolTimeLayout) }
+	at := func(t time.Time) string { return boatDayClock(t, loc) }
 
 	var settings anchorageBoatSettings
 	settingsErr := ""
@@ -296,7 +307,7 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 		draft := *boat.draftM
 		depthAtLow := depth + low.heightM
 		clearance := depthAtLow - draft
-		c.LowestWaterAt, c.LowestWaterM = low.at.In(loc).Format(time.RFC3339), ptr2(low.heightM)
+		c.LowestWaterAt, c.LowestWaterISO, c.LowestWaterM = at(low.at), low.at.In(loc).Format(time.RFC3339), ptr2(low.heightM)
 		c.DepthAtLowM, c.DraftM, c.ClearanceM, c.WantedM = ptr2(depthAtLow), ptr2(draft), ptr2(clearance), floatPtr(settings.MinClearanceAtLowM)
 		c.Status = checkOK
 		verdict := fmt.Sprintf("at least the %.1f m wanted", settings.MinClearanceAtLowM)
@@ -356,16 +367,16 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 	// water the checks could not see: each check that ran says so. The swing is
 	// worked from the rode at the highest water seen, so it carries it too.
 	if !tide.endsAt.IsZero() {
-		until := tide.endsAt.In(loc).Format(time.RFC3339)
+		until, untilISO := at(tide.endsAt), tide.endsAt.In(loc).Format(time.RFC3339)
 		caveat := " " + tide.section.Note + " A lower or higher water may follow."
 		if c.Status != checkSkipped {
-			c.Text, c.TideCheckedUntil = c.Text+caveat, until
+			c.Text, c.TideCheckedUntil, c.TideCheckedUntilISO = c.Text+caveat, until, untilISO
 		}
 		if r.Status != checkSkipped {
-			r.Text, r.TideCheckedUntil = r.Text+caveat, until
+			r.Text, r.TideCheckedUntil, r.TideCheckedUntilISO = r.Text+caveat, until, untilISO
 		}
 		if w.Status != checkSkipped {
-			w.Text, w.TideCheckedUntil = w.Text+caveat, until
+			w.Text, w.TideCheckedUntil, w.TideCheckedUntilISO = w.Text+caveat, until, untilISO
 		}
 	}
 	return s
@@ -409,14 +420,15 @@ func fillRodeCheck(r *anchorageRodeCheck, settings anchorageBoatSettings, foreca
 	needed := res.RecommendedRodeM
 	checkedNote := ""
 	if forecastEndsBeforeLeave(forecast.lastHour, stay) {
-		r.WindCheckedUntil = forecast.lastHour.In(stay.zone.Loc).Format(time.RFC3339)
-		checkedNote = fmt.Sprintf(" The forecast ends at %s, before the stay does, so the wind was only checked up to then.", forecast.lastHour.In(stay.zone.Loc).Format(toolTimeLayout))
+		r.WindCheckedUntil = boatDayClock(forecast.lastHour, stay.zone.Loc)
+		r.WindCheckedUntilISO = forecast.lastHour.In(stay.zone.Loc).Format(time.RFC3339)
+		checkedNote = fmt.Sprintf(" The forecast ends at %s, before the stay does, so the wind was only checked up to then.", r.WindCheckedUntil)
 	}
-	r.HighestWaterAt, r.HighestWaterM = high.at.In(stay.zone.Loc).Format(time.RFC3339), ptr2(high.heightM)
+	r.HighestWaterAt, r.HighestWaterISO, r.HighestWaterM = boatDayClock(high.at, stay.zone.Loc), high.at.In(stay.zone.Loc).Format(time.RFC3339), ptr2(high.heightM)
 	r.DepthAtHighM, r.WindKts = ptr2(depthAtHigh), floatPtr(planKts)
 	r.RodeNeededM, r.ScopeRatio, r.ChainAboardM = ptr1(needed), ptr1(res.ScopeRatio), floatPtr(settings.ChainOnboardM)
 	where := fmt.Sprintf("At the highest water in the stay (%s at %s, %.2f m) there is %.1f m of water, %.1f m from the bow roller",
-		high.what, high.at.In(stay.zone.Loc).Format(toolTimeLayout), high.heightM, depthAtHigh, depthAtHigh+settings.BowRollerHeightM)
+		high.what, boatDayClock(high.at, stay.zone.Loc), high.heightM, depthAtHigh, depthAtHigh+settings.BowRollerHeightM)
 	basis := fmt.Sprintf("so about %.0f m of rode (%.1f:1) by the ratio method, planned at %.0f kts (the strongest forecast gust in the stay, rounded up to its band), against %.0f m of chain aboard",
 		needed, res.ScopeRatio, planKts, settings.ChainOnboardM)
 	if needed <= settings.ChainOnboardM {

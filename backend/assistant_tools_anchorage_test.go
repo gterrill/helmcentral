@@ -117,10 +117,14 @@ func TestAnchorageDetails_AssessesTheStay(t *testing.T) {
 	d, p := anchorageDeps(t, butterflyBayFeatures(t))
 	raw, res := runAnchorage(t, d, anchorageArgs)
 
-	if res.Arrive != "2026-11-02T14:00:00+10:00" || res.Leave != "2026-11-03T08:00:00+10:00" || !res.LeaveDefaulted || res.Timezone != "Australia/Lindeman" {
-		t.Errorf("stay = %s to %s defaulted %v in %s", res.Arrive, res.Leave, res.LeaveDefaulted, res.Timezone)
+	if res.ArriveISO != "2026-11-02T14:00:00+10:00" || res.LeaveISO != "2026-11-03T08:00:00+10:00" || !res.LeaveDefaulted || res.Timezone != "Australia/Lindeman" {
+		t.Errorf("stay = %s to %s defaulted %v in %s", res.ArriveISO, res.LeaveISO, res.LeaveDefaulted, res.Timezone)
 	}
-	if !strings.Contains(res.Reading, "08:00 local time, the first at least six hours after arrival") {
+	// Mate quotes the label; the instant is kept for a later call.
+	if res.Arrive != "Mon 2 Nov 2.00 PM" || res.Leave != "Tue 3 Nov 8.00 AM" {
+		t.Errorf("arrive and leave are boat-time labels, got %q and %q", res.Arrive, res.Leave)
+	}
+	if !strings.Contains(res.Reading, "8.00 AM local time, the first at least six hours after arrival") {
 		t.Errorf("a defaulted leave must be named in the reading: %q", res.Reading)
 	}
 	if res.Shelter == nil || len(res.Shelter.Arcs) == 0 {
@@ -343,7 +347,7 @@ func TestAnchorageDetails_AForecastThatEndsBeforeTheStayDoesIsNotedNotStretched(
 	wx.bundle.Hourly = wx.bundle.Hourly[:18] // to 17:00Z, 03:00 on the 3rd local
 	d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
 	_, res := runAnchorage(t, d, anchorageArgs)
-	if !strings.Contains(res.Forecast.Note, "The forecast ends at Tue 3 Nov 03:00, before the stay does.") {
+	if !strings.Contains(res.Forecast.Note, "The forecast ends at Tue 3 Nov 3.00 AM, before the stay does.") {
 		t.Errorf("note = %q", res.Forecast.Note)
 	}
 	if n := len(res.Forecast.Hourly); n != 5 {
@@ -357,7 +361,7 @@ func TestAnchorageDetails_AForecastThatEndsBeforeTheStayDoesIsNotedNotStretched(
 func TestAnchorageDetails_LeaveGivenIsKept(t *testing.T) {
 	d, _ := anchorageDeps(t, butterflyBayFeatures(t))
 	_, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-02T14:00:00+10:00","leave":"2026-11-02T19:00:00+10:00"}`)
-	if res.LeaveDefaulted || res.Leave != "2026-11-02T19:00:00+10:00" || strings.Contains(res.Reading, "08:00") {
+	if res.LeaveDefaulted || res.LeaveISO != "2026-11-02T19:00:00+10:00" || res.Leave != "Mon 2 Nov 7.00 PM" || strings.Contains(res.Reading, "08:00") {
 		t.Errorf("leave %s defaulted %v reading %q", res.Leave, res.LeaveDefaulted, res.Reading)
 	}
 	if len(res.Forecast.Hourly) != 3 {
@@ -408,8 +412,8 @@ func TestAnchorageDetails_ForecastRowsFollowArrivalNotTheClock(t *testing.T) {
 		ts = append(ts, r.T)
 	}
 	// Leave at 14:30 is a tie between 14:00 and 15:00: the one at or before.
-	if len(ts) != 2 || !strings.Contains(ts[0], "13:00") || !strings.Contains(ts[1], "14:00") {
-		t.Errorf("rows = %v, want 13:00 and 14:00", ts)
+	if len(ts) != 2 || !strings.Contains(ts[0], "1.00 PM") || !strings.Contains(ts[1], "2.00 PM") {
+		t.Errorf("rows = %v, want 1.00 PM and 2.00 PM", ts)
 	}
 
 	_, res = runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-02T14:40:00+10:00","leave":"2026-11-02T21:00:00+10:00"}`)
@@ -418,7 +422,7 @@ func TestAnchorageDetails_ForecastRowsFollowArrivalNotTheClock(t *testing.T) {
 		ts = append(ts, r.T)
 	}
 	// Nearest to 14:40 is 15:00; then every three hours, then the hour of leaving.
-	want := []string{"15:00", "18:00", "21:00"}
+	want := []string{"3.00 PM", "6.00 PM", "9.00 PM"}
 	if len(ts) != len(want) {
 		t.Fatalf("rows = %v, want %v", ts, want)
 	}
@@ -727,7 +731,7 @@ func TestAnchorageDetailsTool_IsRegisteredAndDescribed(t *testing.T) {
 	if lookupMateTool("anchorage_shelter") != nil {
 		t.Fatal("anchorage_shelter is replaced by anchorage_details")
 	}
-	for _, want := range []string{"find_places", "arrive", "RFC 3339", "mapped", "no-go", "08:00"} {
+	for _, want := range []string{"find_places", "arrive", "RFC 3339", "mapped", "no-go", "8.00 AM"} {
 		if !strings.Contains(tool.function.Description, want) && !strings.Contains(strings.ToLower(tool.function.Description), strings.ToLower(want)) {
 			t.Errorf("description lacks %q", want)
 		}
@@ -840,21 +844,22 @@ func TestAnchorageCard_AnAreaWithNoShapesEmitsAnEmptyList(t *testing.T) {
 }
 
 func TestAnchorageDetails_ACachedLookupSaysSoAndKeepsOverpassDataTime(t *testing.T) {
+	useFreshBoatZone(t) // no fix, so the lookup time reads on UTC whatever an earlier test remembered
 	f := butterflyBayFeatures(t)
 	f.Cached, f.CachedAt = true, time.Date(2026, 11, 1, 1, 2, 3, 0, time.UTC)
 	d, _ := anchorageDeps(t, f)
 	_, res := runAnchorage(t, d, anchorageArgs)
 	b := res.Features.AnchorageFeaturesBody
-	if b == nil || !b.Cached || b.CachedAt != "2026-11-01T01:02:03Z" || b.DataAsOf != f.DataAsOf {
+	if b == nil || !b.Cached || b.CachedAt != "Sun 1 Nov 1.02 AM" || b.DataAsOf != f.DataAsOf {
 		t.Errorf("features = %+v", b)
 	}
-	if !strings.Contains(b.Reading, "lookup made at 2026-11-01T01:02:03Z, kept for six hours") {
+	if !strings.Contains(b.Reading, "lookup made at Sun 1 Nov 1.02 AM, kept for six hours") {
 		t.Errorf("reading must say the lookup was kept: %q", b.Reading)
 	}
 }
 
 func TestReadingAnchorageFeatures_FreshLookupSaysNothingAboutKeeping(t *testing.T) {
-	if got := readingAnchorageFeatures(nil, false, time.Time{}); strings.Contains(got, "kept for six hours") {
+	if got := readingAnchorageFeatures(nil, false, time.Time{}, time.UTC); strings.Contains(got, "kept for six hours") {
 		t.Errorf("fresh reading mentions a kept lookup: %q", got)
 	}
 }

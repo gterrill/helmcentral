@@ -17,20 +17,20 @@ describe('placeByCapture', () => {
     const r = placeByCapture({ ...base, offsetMinutes: null }, 10, timeline, cursor)
     expect(r.at).toBe(Date.UTC(2026, 9, 22, 1, 30) / 1000)
     expect(r.placedByPhoto).toBe(true)
-    expect(r.message).toBe('Placed at the time the photo was taken: 22 Oct 11:30 UTC+10 (the photo has no time zone, so boat time is used).')
+    expect(r.message).toBe('Placed at the time the photo was taken: 22 Oct 11.30 AM UTC+10 (the photo has no time zone, so boat time is used).')
   })
 
   it('uses the photo\'s own zone when it has one', () => {
     const r = placeByCapture({ ...base, hour: 9, minute: 30, offsetMinutes: 480 }, 10, timeline, cursor)
     expect(r.at).toBe(Date.UTC(2026, 9, 22, 1, 30) / 1000)
-    expect(r.message).toBe('Placed at the time the photo was taken: 22 Oct 09:30 UTC+08:00.')
+    expect(r.message).toBe('Placed at the time the photo was taken: 22 Oct 9.30 AM UTC+08:00.')
   })
 
   it('otherwise sits at the cursor and says why', () => {
     const outside = placeByCapture({ ...base, day: 25, offsetMinutes: null }, 10, timeline, cursor)
     expect(outside.at).toBe(cursor)
     expect(outside.placedByPhoto).toBe(false)
-    expect(outside.message).toBe('The photo was taken 25 Oct 11:30 UTC+10, outside this replay, so the sign is at the current position.')
+    expect(outside.message).toBe('The photo was taken 25 Oct 11.30 AM UTC+10, outside this replay, so the sign is at the current position.')
     expect(placeByCapture(null, 10, timeline, cursor).message).toBe('The photo has no capture time, so the sign is at the current position.')
   })
 

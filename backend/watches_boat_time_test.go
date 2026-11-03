@@ -24,11 +24,11 @@ func TestWatchRun_ARunCarriesTheBoatClockItWasMadeOn(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("runs %+v", runs)
 	}
-	if runs[0].BoatTime != "Thu 29 Oct 22:00 UTC+12" || runs[0].Timezone != "UTC+12" {
+	if runs[0].BoatTime != "Thu 29 Oct 10.00 PM UTC+12" || runs[0].Timezone != "UTC+12" {
 		t.Fatalf("boat time %q zone %q", runs[0].BoatTime, runs[0].Timezone)
 	}
 	raw, _ := json.Marshal(runs[0])
-	if !strings.Contains(string(raw), `"boat_time":"Thu 29 Oct 22:00 UTC+12"`) || !strings.Contains(string(raw), `"timezone":"UTC+12"`) {
+	if !strings.Contains(string(raw), `"boat_time":"Thu 29 Oct 10.00 PM UTC+12"`) || !strings.Contains(string(raw), `"timezone":"UTC+12"`) {
 		t.Fatalf("the API returns both: %s", raw)
 	}
 }
@@ -42,7 +42,7 @@ func TestWatchRun_ASkipForWantOfPositionSaysItIsUTCAndNotBoatTime(t *testing.T) 
 	if len(runs) != 1 || runs[0].Outcome != watchOutcomeSkipped {
 		t.Fatalf("runs %+v", runs)
 	}
-	if runs[0].BoatTime != "Thu 29 Oct 10:00 UTC (boat time not known)" || runs[0].Timezone != "" {
+	if runs[0].BoatTime != "Thu 29 Oct 10.00 AM UTC (boat time not known)" || runs[0].Timezone != "" {
 		t.Fatalf("boat time %q zone %q", runs[0].BoatTime, runs[0].Timezone)
 	}
 }
@@ -52,7 +52,7 @@ func TestWatchRun_ARunSavedWithNoZoneIsLabelledUTCRatherThanLeftBlank(t *testing
 	f.add("Hourly", "0 * * * *")
 	f.ran("id-Hourly", watchTestTime(29, 9, 0))
 	runs := f.runsOf("id-Hourly")
-	if runs[0].BoatTime != "Thu 29 Oct 09:00 UTC (boat time not known)" {
+	if runs[0].BoatTime != "Thu 29 Oct 9.00 AM UTC (boat time not known)" {
 		t.Fatalf("boat time %q", runs[0].BoatTime)
 	}
 }

@@ -49,7 +49,7 @@ func reviewConfig(t *testing.T) watchConfig {
 func reviewInputs() (savedWatch, watchReport, []watchFinding) {
 	w := savedWatch{ID: "w1", Name: "Overnight check", LookOutFor: "the fridge and the anchor", Sections: allSections(), Thresholds: defaultWatchThresholds()}
 	report, findings := buildWatchReport(w, baseInput())
-	return w, report, append(findings, watchFinding{Section: "tanks", Rule: "tank_change", Text: "Diesel is down 14 points since 03:00.", By: watchByRules})
+	return w, report, append(findings, watchFinding{Section: "tanks", Rule: "tank_change", Text: "Diesel is down 14 points since 3.00 AM.", By: watchByRules})
 }
 
 func submitArgs(review string, added ...string) json.RawMessage {
@@ -100,7 +100,7 @@ func TestWatchReview_ParsesTheSubmittedReviewAndAddedFindings(t *testing.T) {
 		t.Fatalf("history %+v", fake.history)
 	}
 	msg := string(fake.history[0].Content)
-	for _, want := range []string{"the fridge and the anchor", "Overnight check", "Diesel is down 14 points since 03:00.", `"sections"`} {
+	for _, want := range []string{"the fridge and the anchor", "Overnight check", "Diesel is down 14 points since 3.00 AM.", `"sections"`} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the message lacks %q:\n%s", want, msg)
 		}
@@ -226,9 +226,9 @@ func TestWatchReviewPrompt(t *testing.T) {
 	prompt := buildWatchReviewPrompt(pc, "imperial", now, loc, false)
 	for _, want := range []string{
 		"Sea Biscuit", "Leopard 40", "power catamaran", "12.2 m", "Coral Cove", "Never anchor north of the reef.",
-		"Boat time: Thu 29 Oct 2026 06:00 AEST", "units are imperial",
+		"Boat time: Thu 29 Oct 6.00 AM AEST", "units are imperial",
 		"never remove", "can never remove", "Where you are unsure, say so and ask", "Never guess a cause", "do not raise it again",
-		"not an all clear", "02:00",
+		"not an all clear", "2.00 AM",
 		"Lead with your judgement", "At most four short sentences", "up to three questions",
 		"Do not restate the report",
 		"When the report names an alarm's source, use it; don't offer another cause.",

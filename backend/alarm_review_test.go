@@ -562,7 +562,7 @@ func TestAlarmReview_TodayIsTheBoatsDate(t *testing.T) {
 	if !ok || tools.today.Format("2006-01-02") != "2026-10-30" {
 		t.Fatalf("today %v", tools.today)
 	}
-	if !strings.Contains(fake.system, "Boat time: Fri 30 Oct 2026 09:00 NZDT") {
+	if !strings.Contains(fake.system, "Boat time: Fri 30 Oct 9.00 AM NZDT") {
 		t.Fatalf("the prompt gives the boat's time:\n%s", fake.system)
 	}
 }

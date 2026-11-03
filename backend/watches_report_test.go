@@ -101,13 +101,35 @@ func TestWatchReport_OnlyTheChosenSectionsAppearInOrder(t *testing.T) {
 func TestWatchReport_SinceTheLastRun(t *testing.T) {
 	in := baseInput()
 	report, _ := buildWatchReport(baseWatch(), in)
-	if !strings.Contains(report.Since, "03:00") || report.SinceNote != "" {
+	if !strings.Contains(report.Since, "3.00 AM") || report.SinceNote != "" {
 		t.Errorf("since %q note %q", report.Since, report.SinceNote)
 	}
 	in.FirstRun = true
 	report, _ = buildWatchReport(baseWatch(), in)
 	if !strings.Contains(report.SinceNote, "first report") || !strings.Contains(report.SinceNote, "24 hours") {
 		t.Errorf("a first run says so: %q", report.SinceNote)
+	}
+}
+
+// The webhook carries the report as JSON, and a receiver reads times from it:
+// since is a label for people, since_at is the same instant for programs.
+func TestWatchReport_SinceHasAMachineTwinInTheJSON(t *testing.T) {
+	in := baseInput()
+	report, _ := buildWatchReport(baseWatch(), in)
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := in.Since.UTC().Format(time.RFC3339)
+	if got["since_at"] != want {
+		t.Fatalf("since_at = %v, want %q", got["since_at"], want)
+	}
+	if got["generated_at"] != in.Now.UTC().Format(time.RFC3339) {
+		t.Fatalf("generated_at = %v", got["generated_at"])
 	}
 }
 
@@ -120,7 +142,7 @@ func TestWatchReport_AlarmsRaisedSinceTheLastRun(t *testing.T) {
 	if len(got) != 1 || got[0].Rule != "alarms_raised" || got[0].By != watchByRules {
 		t.Fatalf("findings %+v", got)
 	}
-	if !strings.Contains(got[0].Text, "2 alarms raised since 03:00") || !strings.Contains(got[0].Text, "Anchor Dragging, once (03:40)") {
+	if !strings.Contains(got[0].Text, "2 alarms raised since 3.00 AM") || !strings.Contains(got[0].Text, "Anchor Dragging, once (3.40 AM)") {
 		t.Errorf("text %q", got[0].Text)
 	}
 	// A higher threshold is respected.
@@ -344,15 +366,15 @@ func TestWatchReport_AlarmsAreGroupedByTitleAndMarkedActiveNow(t *testing.T) {
 	text := strings.Join(s.Lines, "|")
 	for _, want := range []string{
 		"49 alarms raised in the last 24 hours",
-		"Collision Profile Not Changed, 46 times (first yesterday 15:42, last 02:23), active now",
-		"House Bank Low, 2 times (first yesterday 20:00, last yesterday 21:00)",
-		"Anchor Dragging, once (yesterday 07:00)",
+		"Collision Profile Not Changed, 46 times (first yesterday 3.42 PM, last 2.23 AM), active now",
+		"House Bank Low, 2 times (first yesterday 8.00 PM, last yesterday 9.00 PM)",
+		"Anchor Dragging, once (yesterday 7.00 AM)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q in %q", want, text)
 		}
 	}
-	if strings.Contains(text, "House Bank Low, 2 times (first yesterday 20:00, last yesterday 21:00), active") || strings.Contains(text, "cleared") || strings.Contains(text, "still open") {
+	if strings.Contains(text, "House Bank Low, 2 times (first yesterday 8.00 PM, last yesterday 9.00 PM), active") || strings.Contains(text, "cleared") || strings.Contains(text, "still open") {
 		t.Errorf("only an alarm in the active list is marked, and nothing is said about clearing: %q", text)
 	}
 	if strings.Index(text, "Collision") > strings.Index(text, "House Bank") || strings.Index(text, "House Bank") > strings.Index(text, "Anchor") {
@@ -369,6 +391,12 @@ func TestWatchReport_AlarmsAreGroupedByTitleAndMarkedActiveNow(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "cleared") || strings.Contains(string(raw), `"open"`) {
 		t.Errorf("figures say nothing about clearing: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"first":"Wed 28 Oct 3.42 PM `) || !strings.Contains(string(raw), `"last":"Thu 29 Oct 2.23 AM `) {
+		t.Errorf("first and last are boat time labels: %s", raw)
+	}
+	if strings.Contains(string(raw), "2026-10-") {
+		t.Errorf("figures carry no RFC3339 instant: %s", raw)
 	}
 	if got := findingsFor(findings, "alarms"); len(got) != 1 || !strings.Contains(got[0].Text, "Collision Profile Not Changed, 46 times") {
 		t.Errorf("finding %+v", got)
@@ -387,8 +415,8 @@ func TestWatchReport_AlarmTimesCarryTheirDayAndTheListIsCapped(t *testing.T) {
 	s := sectionOf(t, report, "alarms")
 	text := strings.Join(s.Lines, "|")
 	for _, want := range []string{
-		"raised since Wed 21 Oct 06:00",
-		"Alarm A, once (yesterday 06:00)", "Alarm B, once (Tue 06:00)", "Alarm F, 3 times (first Fri 06:00", "Alarm G, 4 times (first Thu 22 Oct 06:00",
+		"raised since Wed 21 Oct 6.00 AM",
+		"Alarm A, once (yesterday 6.00 AM)", "Alarm B, once (Tue 6.00 AM)", "Alarm F, 3 times (first Fri 6.00 AM", "Alarm G, 4 times (first Thu 22 Oct 6.00 AM",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lacks %q in %q", want, text)
@@ -419,7 +447,7 @@ func TestWatchReport_RepeatedCollisionRiskSaysHowManyVessels(t *testing.T) {
 	report, findings := buildWatchReport(baseWatch(), in)
 	text := strings.Join(sectionOf(t, report, "alarms").Lines, "|")
 	for _, want := range []string{
-		"Collision Risk, 111 times from 31 vessels, AIS closest approach (first yesterday 06:45, last 05:10; most: Bella Breeza 4, Encore 4, Whitsunday Bullet 4)",
+		"Collision Risk, 111 times from 31 vessels, AIS closest approach (first yesterday 6.45 AM, last 5.10 AM; most: Bella Breeza 4, Encore 4, Whitsunday Bullet 4)",
 		"Tide Alarm, 6 times from 3 sources (first",
 		"House Bank Low, once (",
 	} {
@@ -461,7 +489,7 @@ func TestWatchReport_ASingleCollisionRiskNamesItsVesselAndTheFiguresAgree(t *tes
 	report, _ := buildWatchReport(baseWatch(), in)
 	s := sectionOf(t, report, "alarms")
 	text := strings.Join(s.Lines, "|")
-	if !strings.Contains(text, "Collision Risk, once from Encore, AIS closest approach (05:10)") {
+	if !strings.Contains(text, "Collision Risk, once from Encore, AIS closest approach (5.10 AM)") {
 		t.Errorf("%q", text)
 	}
 	raw, _ := json.Marshal(s.Figures)

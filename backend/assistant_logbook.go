@@ -116,14 +116,15 @@ func parseLogbookRange(from, to string) (logbookRange, error) {
 }
 
 // localTime is t on the clock of the zone it was recorded in, such as
-// "2026-10-27 10:16 AEST (UTC+10)". The label is worked out at t, because
-// daylight saving makes it depend on the date. With no zone it is empty: a
+// "Tue 27 Oct 10.16 AM AEST (UTC+10)", with the year named when t is not in
+// the boat's current year. The label is worked out at t, because daylight
+// saving makes it depend on the date. With no zone it is empty: a
 // passage with no recorded position has no local time to give.
-func localTime(t time.Time, zone *placeZone) string {
+func localTime(t time.Time, zone *placeZone, year int) string {
 	if zone == nil {
 		return ""
 	}
-	return t.In(zone.Loc).Format("2006-01-02 15:04") + " " + zone.Label(t)
+	return boatDayYearClock(t, zone.Loc, year) + " " + zone.Label(t)
 }
 
 // passageZone is the zone a recorded passage keeps: the one at its first
@@ -206,8 +207,14 @@ type logbookView struct {
 	cruiseNames map[string]string
 	hidden      [][2]time.Time
 	total       int
+	// year is the boat's current year; a label for a record in another year
+	// names its year.
+	year        int
 	first, last time.Time // whole logbook, not just the range
-	open        *logbookOpen
+	// firstZone and lastZone are the zones those two instants were recorded in,
+	// for their labels; nil when the record has none.
+	firstZone, lastZone *placeZone
+	open                *logbookOpen
 }
 
 func readLogbook(ctx context.Context, d assistantToolDeps, tool string, r logbookRange) (logbookView, error) {
@@ -241,15 +248,17 @@ func readLogbook(ctx context.Context, d assistantToolDeps, tool string, r logboo
 		return v, fmt.Errorf("%s: %w", tool, err)
 	}
 	v.total = len(all)
+	v.year = d.now().In(d.boatTime().Loc).Year()
 	if len(all) > 0 {
 		v.first = all[len(all)-1].Start
+		v.firstZone, _ = passageZone(all[len(all)-1].Timezone, all[len(all)-1].TimezoneError)
 	}
 	for i := len(all) - 1; i >= 0; i-- {
 		p := all[i]
-		if p.End.After(v.last) {
-			v.last = p.End
-		}
 		zone, reason := passageZone(p.Timezone, p.TimezoneError)
+		if p.End.After(v.last) {
+			v.last, v.lastZone = p.End, zone
+		}
 		if !r.has(p.Start, zone) {
 			continue
 		}
@@ -320,7 +329,7 @@ func (v logbookView) addUnderWay(res map[string]any) {
 		return
 	}
 	underWay := map[string]any{
-		"start": rfc3339(v.open.start), "start_local": localTime(v.open.start, v.open.zone),
+		"start_iso": rfc3339(v.open.start), "start_local": localTime(v.open.start, v.open.zone, v.year),
 		"distance_nm_so_far": round1(v.open.nm),
 	}
 	if note := zoneUnknownNote(v.open.zoneReason); note != "" {
@@ -340,6 +349,16 @@ func (v logbookView) cruiseName(p passageRecord) string {
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
+// label is an instant for Mate to quote: on the clock of the zone the
+// passage was recorded in, or, when the record has no zone, on UTC with UTC
+// said, so it is never read as boat time.
+func (v logbookView) label(t time.Time, zone *placeZone) string {
+	if zone == nil {
+		return boatDayYearClock(t, time.UTC, v.year) + " UTC"
+	}
+	return localTime(t, zone, v.year)
+}
+
 // emptyResult is the plain statement for a logbook with nothing to read. It
 // is given as it is: the tools do not go looking in the telemetry instead.
 func (v logbookView) emptyResult() map[string]any {
@@ -350,8 +369,8 @@ func (v logbookView) emptyResult() map[string]any {
 		return res
 	}
 	res["status"] = "none_in_range"
-	res["logbook_first_departure"] = rfc3339(v.first)
-	res["logbook_last_arrival"] = rfc3339(v.last)
+	res["logbook_first_departure"] = v.label(v.first, v.firstZone)
+	res["logbook_last_arrival"] = v.label(v.last, v.lastZone)
 	res["note"] = "The logbook holds passages, but none departed in the range asked for. Say what range the logbook does cover (logbook_first_departure to logbook_last_arrival)."
 	return res
 }
@@ -363,8 +382,8 @@ type assistantPassagesArgs struct {
 }
 
 type assistantPassageJSON struct {
-	Start         string   `json:"start"`
-	End           string   `json:"end"`
+	Start         string   `json:"start_iso"`
+	End           string   `json:"end_iso"`
 	StartLocal    string   `json:"start_local"`
 	EndLocal      string   `json:"end_local"`
 	From          string   `json:"from"`
@@ -388,7 +407,7 @@ type assistantPassageJSON struct {
 func (v logbookView) passageJSON(p logbookPassage) assistantPassageJSON {
 	return assistantPassageJSON{
 		Start: rfc3339(p.Start), End: rfc3339(p.End),
-		StartLocal: localTime(p.Start, p.zone), EndLocal: localTime(p.End, p.zone),
+		StartLocal: localTime(p.Start, p.zone, v.year), EndLocal: localTime(p.End, p.zone, v.year),
 		From: p.FromName, To: p.ToName, Title: p.Title,
 		Cruise: v.cruiseName(p.passageRecord), Rating: ratingLabel(p.Rating), Notes: p.Notes,
 		DurationHours: round1(p.End.Sub(p.Start).Hours()),
@@ -452,9 +471,9 @@ func (d assistantToolDeps) executeListPassages(ctx context.Context, raw json.Raw
 		}
 		res = map[string]any{
 			"status": "ok", "found": found, "returned": len(out), "passages": out,
-			"logbook_first_departure": rfc3339(v.first),
-			"logbook_last_arrival":    rfc3339(v.last),
-			"note": "From the Passages logbook, most recent first. Times are UTC. A null figure was not recorded; do not estimate it. " +
+			"logbook_first_departure": v.label(v.first, v.firstZone),
+			"logbook_last_arrival":    v.label(v.last, v.lastZone),
+			"note": "From the Passages logbook, most recent first. Times in start_local and end_local are boat time, quote them as given; start_iso and end_iso are UTC for working out a range, never to quote. A null figure was not recorded; do not estimate it. " +
 				"from and to are the place names on the record; a blank is a place that has no name.",
 		}
 	}
@@ -476,13 +495,13 @@ type cruiseStay struct {
 	HiddenBetween bool `json:"hidden_passage_between,omitempty"`
 }
 
-// logbookStays is the gaps of at least logbookMinStay between one passage's
+// stays is the gaps of at least logbookMinStay between one passage's
 // end and the next one's start, longest first. The place is where the earlier
 // passage arrived. When the next one departed from a differently named place,
 // both are given and neither is preferred. A hidden passage inside the gap was
 // a move of the boat the operator chose to leave off the page, so the stay is
 // flagged and not quietly merged or split.
-func logbookStays(ps []logbookPassage, hidden [][2]time.Time) (all []cruiseStay) {
+func (v logbookView) stays(ps []logbookPassage, hidden [][2]time.Time) (all []cruiseStay) {
 	for i := 0; i+1 < len(ps); i++ {
 		a, b := ps[i], ps[i+1]
 		gap := b.Start.Sub(a.End)
@@ -490,7 +509,7 @@ func logbookStays(ps []logbookPassage, hidden [][2]time.Time) (all []cruiseStay)
 			continue
 		}
 		s := cruiseStay{
-			Place: a.ToName, Arrived: rfc3339(a.End), Departed: rfc3339(b.Start),
+			Place: a.ToName, Arrived: v.label(a.End, a.zone), Departed: v.label(b.Start, b.zone),
 			Days: round1(gap.Hours() / 24),
 		}
 		if a.ToName != "" && b.FromName != "" && a.ToName != b.FromName {
@@ -597,7 +616,7 @@ func (v logbookView) summary() map[string]any {
 		longest = append(longest, v.passageJSON(p))
 	}
 
-	stays := logbookStays(ps, v.hidden)
+	stays := v.stays(ps, v.hidden)
 	hiddenInStay := false
 	for _, st := range stays {
 		hiddenInStay = hiddenInStay || st.HiddenBetween
@@ -611,7 +630,7 @@ func (v logbookView) summary() map[string]any {
 		stays = stays[:logbookTopStays]
 	}
 
-	note := "From the Passages logbook. Times are UTC. Places are the names on the records, in order in route. " +
+	note := "From the Passages logbook. Times are boat time, each on the clock of the zone its passage was recorded in (the year is named when it is not this year); quote them as given. A time with UTC after it has no recorded zone. start_iso and end_iso on the longest passages are UTC for working out a range, never to quote. Places are the names on the records, in order in route. " +
 		"Stays are the gaps of six hours or more between one passage's end and the next one's start: the logbook does not record whether the boat was at anchor, on a mooring or at a dock. " +
 		"underway_hours is time under way, not engine hours. Fuel is added up only over the passages that recorded it. Do not infer a direction of travel or regional geography beyond these records."
 	if unnamed {
@@ -627,8 +646,8 @@ func (v logbookView) summary() map[string]any {
 	}
 	return map[string]any{
 		"status": "ok", "passage_count": len(ps),
-		"first_place": ps[0].FromName, "first_departure": rfc3339(ps[0].Start),
-		"last_place": ps[lastIdx].ToName, "last_arrival": rfc3339(ps[lastIdx].End),
+		"first_place": ps[0].FromName, "first_departure": v.label(ps[0].Start, ps[0].zone),
+		"last_place": ps[lastIdx].ToName, "last_arrival": v.label(ps[lastIdx].End, ps[lastIdx].zone),
 		"total_distance_nm": round1(nm), "underway_hours": round1(underwaySec / 3600),
 		"fuel": map[string]any{
 			"burned_l": fuelTotal, "passages_with_fuel": withFuel, "passages_without_fuel": len(ps) - withFuel,
@@ -636,7 +655,7 @@ func (v logbookView) summary() map[string]any {
 		"route": logbookRoute(ps), "cruises": cruises,
 		"longest_passages": longest,
 		"stays_total":      total, "stay_days_total": round1(stayDays), "longest_stays": stays,
-		"logbook_first_departure": rfc3339(v.first), "logbook_last_arrival": rfc3339(v.last),
+		"logbook_first_departure": v.label(v.first, v.firstZone), "logbook_last_arrival": v.label(v.last, v.lastZone),
 		"note": note,
 	}
 }
@@ -648,7 +667,7 @@ var mateToolListPassages = mateTool{
 	name: "list_passages",
 	function: openRouterFunctionDef{
 		Description: "List passages from the Passages logbook, the record the operator sees on the Passages page: " +
-			"start and end (UTC, and on the boat's clock as start_local and end_local), the place it left and arrived at, cruise, rating, notes, distance in NM, time " +
+			"start and end (start_local and end_local, boat time to quote as given; start_iso and end_iso, UTC, for the range of a later get_path_history call), the place it left and arrived at, cruise, rating, notes, distance in NM, time " +
 			"under way, speeds, wind and fuel burned in litres (null where not recorded), most recent first. " +
 			"The logbook goes back as far as it was kept, with no ceiling on how far back to ask. Use it for " +
 			"\"the last passage\", \"the passages in August\" and \"when were we last underway\", then call " +

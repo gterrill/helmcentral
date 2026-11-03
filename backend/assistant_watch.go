@@ -302,13 +302,13 @@ type assistantWatchInfo struct {
 	StartReadings []assistantWatchReading `json:"-"`
 }
 
-// assistantWatchClock formats a watch time as Mate states it: HH:MM on the
+// assistantWatchClock formats a watch time as Mate states it: "1.30 PM" on the
 // vessel-local clock.
 func assistantWatchClock(t time.Time, loc *time.Location) string {
 	if loc == nil {
 		loc = time.UTC
 	}
-	return t.In(loc).Format("15:04")
+	return boatClock(t, loc)
 }
 
 type assistantWatchRequest struct {
@@ -850,8 +850,8 @@ func buildAssistantWatchReport(info assistantWatchInfo, series [][]assistantWatc
 		WatchID:         info.ID,
 		Reason:          info.Reason,
 		Timezone:        info.TimezoneLabel,
-		Started:         info.StartedAt.In(loc).Format("Mon 2 Jan 15:04:05"),
-		Ended:           info.EndsAt.In(loc).Format("Mon 2 Jan 15:04:05"),
+		Started:         boatDayClockSeconds(info.StartedAt, loc),
+		Ended:           boatDayClockSeconds(info.EndsAt, loc),
 		Minutes:         info.Minutes,
 		SampleIntervalS: int(assistantWatchSampleInterval / time.Second),
 		Note:            assistantWatchReportNote,
@@ -981,8 +981,8 @@ func assistantWatchGaps(samples []assistantWatchSample, loc *time.Location) ([]a
 		total += seconds
 		if len(gaps) < assistantWatchMaxListedGaps {
 			gaps = append(gaps, assistantWatchGap{
-				From:    samples[i].T.In(loc).Format("15:04:05"),
-				To:      samples[j].T.In(loc).Format("15:04:05"),
+				From:    boatClockSeconds(samples[i].T, loc),
+				To:      boatClockSeconds(samples[j].T, loc),
 				Seconds: seconds,
 				Reason:  samples[i].Reason,
 			})
@@ -1080,7 +1080,7 @@ func detectAssistantWatchExcursions(samples []assistantWatchSample, loc *time.Lo
 			direction = "below"
 		}
 		out = append(out, assistantWatchExcursion{
-			Start:     e.start.In(loc).Format("15:04:05"),
+			Start:     boatClockSeconds(e.start, loc),
 			Seconds:   int(e.end.Sub(e.start)/time.Second) + 1,
 			Peak:      roundTo4(values[e.peakIdx]),
 			Baseline:  roundTo4(medians[e.peakIdx]),

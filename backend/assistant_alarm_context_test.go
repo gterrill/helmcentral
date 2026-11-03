@@ -291,7 +291,7 @@ func TestGetAlarmContext_HistoryHasShapeAndBoatLocalTimes(t *testing.T) {
 	if h.Shape.BucketCount != 5 || h.Shape.BucketMinutes != 1 || h.Shape.MaxStep == nil || *h.Shape.MaxStep != 10 || h.Shape.LongestFlatMinute != 3 {
 		t.Errorf("shape %+v max_step %v", h.Shape, h.Shape.MaxStep)
 	}
-	if h.Start != "Tue 20 Oct 01:30" || h.End == "" || h.FirstLoc == "" || h.LastLoc == "" || out.Timezone == "" {
+	if h.Start != "Tue 20 Oct 1.30 AM" || h.End == "" || h.FirstLoc == "" || h.LastLoc == "" || out.Timezone == "" {
 		t.Errorf("boat-local strings missing: %+v tz %q", h, out.Timezone)
 	}
 }

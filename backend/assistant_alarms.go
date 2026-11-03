@@ -124,10 +124,10 @@ func (d assistantToolDeps) executeGetActiveAlarms(ctx context.Context, _ json.Ra
 			item.Value = &v
 		}
 		if !a.RaisedAt.IsZero() {
-			item.RaisedAt = a.RaisedAt.In(loc).Format("Mon 2 Jan 15:04")
+			item.RaisedAt = boatDayClock(a.RaisedAt, loc)
 		}
 		if !a.AckedAt.IsZero() {
-			item.AckedAt = a.AckedAt.In(loc).Format("Mon 2 Jan 15:04")
+			item.AckedAt = boatDayClock(a.AckedAt, loc)
 		}
 		result.Alarms = append(result.Alarms, item)
 	}

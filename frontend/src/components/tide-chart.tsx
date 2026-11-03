@@ -8,6 +8,7 @@ import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { classifyTidePhase } from '@/lib/tide-phase'
+import { formatAxisTime, formatTimeOfDay } from '@/lib/vessel-time'
 import { metersToFeet } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
@@ -259,7 +260,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         const x = CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
         return {
           x,
-          label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true, timeZone }).replace(' ', ''),
+          label: formatAxisTime(t, timeZone),
         }
       }),
     [chartStartMs, chartEndMs, CHART_RIGHT, timeZone],
@@ -292,11 +293,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             timeZone,
           })}
           primary={`${tideTooltipHeight.toFixed(1)} ${unit}`}
-          secondary={tideTooltipTime.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZone,
-          })}
+          secondary={formatTimeOfDay(tideTooltipTime, timeZone)}
         />
       )}
       <div className="relative h-[175px] w-full touch-none overflow-hidden rounded-sm bg-muted/15">
@@ -416,7 +413,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             const t = new Date(extreme.time).getTime()
             const x = xFor(t)
             const y = yFor(toDisplay(extreme.heightM))
-            const label = new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone })
+            const label = formatTimeOfDay(extreme.time, timeZone)
             const aboveLine = y > CHART_TOP + 16
             return (
               <g key={extreme.time}>

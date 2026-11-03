@@ -743,10 +743,10 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			notChecked["daylight"] = true
 		case arrive.Before(rise):
 			consider(passageCandidate{2, 1, "daylight", "",
-				fmt.Sprintf("Arrives %s, before sunrise %s · %s", arrive.In(as.loc).Format("15:04"), rise.In(as.loc).Format("15:04"), plan.name)})
+				fmt.Sprintf("Arrives %s, before sunrise %s · %s", boatClock(arrive, as.loc), boatClock(rise, as.loc), plan.name)})
 		case arrive.After(set):
 			consider(passageCandidate{2, 1, "daylight", "",
-				fmt.Sprintf("Arrives %s, after sunset %s · %s", arrive.In(as.loc).Format("15:04"), set.In(as.loc).Format("15:04"), plan.name)})
+				fmt.Sprintf("Arrives %s, after sunset %s · %s", boatClock(arrive, as.loc), boatClock(set, as.loc), plan.name)})
 		}
 	}
 
@@ -973,7 +973,7 @@ func newPassageModelResult(p passageWindowPayload, withCard bool) *passageModelR
 		if err != nil {
 			return ""
 		}
-		return t.Format("15:04")
+		return boatClock(t, t.Location())
 	}
 	for i, r := range p.Rows {
 		row := passageModelRow{DepartDate: r.DepartDate, Verdict: r.Verdict, Cells: make([]passageModelCell, len(r.Cells))}

@@ -227,7 +227,7 @@ func TestAnchorageDepth_TheStrongestHourlyGustPlansTheRode(t *testing.T) {
 	wx.bundle.Hourly[3].WindGustMS = 15
 	d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
 	_, res = runAnchorage(t, d, anchorageWithDepth("4"))
-	if r := res.Depth.Rode; r.WindKts == nil || *r.WindKts != 20 || r.WindCheckedUntil != "" {
+	if r := res.Depth.Rode; r.WindKts == nil || *r.WindKts != 20 || r.WindCheckedUntil != "" || r.WindCheckedUntilISO != "" {
 		t.Errorf("rode = %+v", r)
 	}
 }
@@ -239,14 +239,17 @@ func TestAnchorageDepth_ForecastEndingBeforeTheStaySaysHowFarTheWindWasChecked(t
 	d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
 	raw, res := runAnchorage(t, d, anchorageWithDepth("4"))
 	r := res.Depth.Rode
-	if r.Status != "short" || r.WindCheckedUntil != "2026-11-02T23:00:00+10:00" {
+	if r.Status != "short" || r.WindCheckedUntilISO != "2026-11-02T23:00:00+10:00" {
 		t.Fatalf("rode = %+v", r)
+	}
+	if r.WindCheckedUntil != "Mon 2 Nov 11.00 PM" {
+		t.Errorf("wind_checked_until is a boat-time label for Mate, got %q", r.WindCheckedUntil)
 	}
 	if !strings.Contains(r.Text, "only checked up to") {
 		t.Errorf("rode text = %q", r.Text)
 	}
-	if card := string(d.takeCards(raw)[0].Payload); !strings.Contains(card, `"wind_checked_until":"2026-11-02T23:00:00+10:00"`) {
-		t.Errorf("card lacks wind_checked_until")
+	if card := string(d.takeCards(raw)[0].Payload); !strings.Contains(card, `"wind_checked_until_iso":"2026-11-02T23:00:00+10:00"`) {
+		t.Errorf("card lacks wind_checked_until_iso")
 	}
 }
 
@@ -262,11 +265,20 @@ func TestAnchorageDepth_TidePredictionEndingBeforeTheStayCaveatsClearanceAndRode
 			t.Errorf("%s text lacks the tide caveat: %q", name, text)
 		}
 	}
-	if c.TideCheckedUntil != "2026-11-03T06:00:00+10:00" || r.TideCheckedUntil != c.TideCheckedUntil || w.TideCheckedUntil != c.TideCheckedUntil {
-		t.Errorf("tide_checked_until: clearance %q, rode %q", c.TideCheckedUntil, r.TideCheckedUntil)
+	if c.TideCheckedUntilISO != "2026-11-03T06:00:00+10:00" || r.TideCheckedUntilISO != c.TideCheckedUntilISO || w.TideCheckedUntilISO != c.TideCheckedUntilISO {
+		t.Errorf("tide_checked_until_iso: clearance %q, rode %q", c.TideCheckedUntilISO, r.TideCheckedUntilISO)
 	}
-	if card := string(d.takeCards(raw)[0].Payload); strings.Count(card, `"tide_checked_until":"2026-11-03T06:00:00+10:00"`) != 3 {
-		t.Errorf("card lacks tide_checked_until on both checks")
+	if c.TideCheckedUntil != "Tue 3 Nov 6.00 AM" || r.TideCheckedUntil != c.TideCheckedUntil || w.TideCheckedUntil != c.TideCheckedUntil {
+		t.Errorf("tide_checked_until is a boat-time label: clearance %q, rode %q", c.TideCheckedUntil, r.TideCheckedUntil)
+	}
+	if c.LowestWaterAt == "" || strings.Contains(c.LowestWaterAt, "2026-") || c.LowestWaterISO == "" {
+		t.Errorf("lowest_water_at is a label (%q) and lowest_water_iso the instant (%q)", c.LowestWaterAt, c.LowestWaterISO)
+	}
+	if r.HighestWaterAt == "" || strings.Contains(r.HighestWaterAt, "2026-") || r.HighestWaterISO == "" {
+		t.Errorf("highest_water_at is a label (%q) and highest_water_iso the instant (%q)", r.HighestWaterAt, r.HighestWaterISO)
+	}
+	if card := string(d.takeCards(raw)[0].Payload); strings.Count(card, `"tide_checked_until_iso":"2026-11-03T06:00:00+10:00"`) != 3 {
+		t.Errorf("card lacks tide_checked_until_iso on both checks")
 	}
 }
 
@@ -280,7 +292,7 @@ func TestAnchorageDepth_TideCaveatUsesTheStaysZoneNotTheStations(t *testing.T) {
 	d.tides = func() (tideProvider, string, error) { return tp, "bom", nil }
 	_, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-03T01:00:00+10:00","leave":"2026-11-03T09:00:00+10:00","depth_m":4}`)
 	for name, text := range map[string]string{"clearance": res.Depth.Clearance.Text, "rode": res.Depth.Rode.Text} {
-		if !strings.Contains(text, "prediction ends at Tue 3 Nov 06:00") || strings.Contains(text, "20:00") {
+		if !strings.Contains(text, "prediction ends at Tue 3 Nov 6.00 AM") || strings.Contains(text, "20:00") {
 			t.Errorf("%s text = %q: the caveat should be in the stay's zone", name, text)
 		}
 	}
@@ -307,7 +319,7 @@ func TestAnchorageTide_NoteIsInTheStaysZoneWhateverTheStationsIs(t *testing.T) {
 	tp.result.Extremes = tp.result.Extremes[:4]
 	d.tides = func() (tideProvider, string, error) { return tp, "bom", nil }
 	_, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-03T01:00:00+10:00","leave":"2026-11-03T09:00:00+10:00","depth_m":4}`)
-	if n := res.Tide.Note; !strings.Contains(n, "ends at Tue 3 Nov 06:00") {
+	if n := res.Tide.Note; !strings.Contains(n, "ends at Tue 3 Nov 6.00 AM") {
 		t.Errorf("note = %q: want the stay's clock", n)
 	}
 }

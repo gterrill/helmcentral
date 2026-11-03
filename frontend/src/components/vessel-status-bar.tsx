@@ -9,7 +9,7 @@ interface VesselStatusBarProps {
   isDark?: boolean
   /** Which button state to show. Absent means plain Day or Night from isDark. */
   themeMode?: 'day' | 'night' | 'auto'
-  /** In auto mode, when the theme in effect ends ("6:12 AM"); null when sunrise and sunset are unavailable. */
+  /** In auto mode, when the theme in effect ends ("6.12 AM"); null when sunrise and sunset are unavailable. */
   autoUntil?: string | null
   /** Steps Day, Night, Auto, Day. */
   onToggleDarkMode?: () => void

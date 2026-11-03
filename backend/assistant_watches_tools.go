@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 )
 
 // Mate's tools for watches (ADR 0227): list what the boat has, read what the
@@ -52,6 +51,7 @@ func (d assistantToolDeps) executeListWatches(ctx context.Context, _ json.RawMes
 		if err != nil {
 			return err
 		}
+		boat := d.boatTime()
 		for _, w := range list {
 			if w.Kind != watchKindScheduled {
 				continue
@@ -61,7 +61,7 @@ func (d assistantToolDeps) executeListWatches(ctx context.Context, _ json.RawMes
 				Thresholds: w.Thresholds, LookOutFor: w.LookOutFor, Enabled: w.Enabled, Notify: w.Notify, Send: w.Send, Version: savedWatchVersion(w),
 			}
 			if w.LastRunAt != nil {
-				e.LastRun = w.LastRunAt.UTC().Format(time.RFC3339)
+				e.LastRun = boat.DayClock(*w.LastRunAt)
 			}
 			last, err := lastRunSummaryQ(q, w.ID)
 			if err != nil {

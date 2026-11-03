@@ -109,7 +109,7 @@ func TestPlanTidalDeparture_FloodSettingWithCourseRanksLowWaterBestHighWaterWors
 	if res.Note != "" {
 		t.Errorf("expected no note for an along-stream course, got %q", res.Note)
 	}
-	if !strings.HasPrefix(res.Best[0].Departure, "Sat 12 Sep 02:00") {
+	if !strings.HasPrefix(res.Best[0].Departure, "Sat 12 Sep 2.00 AM") {
 		t.Errorf("expected local departure label, got %q", res.Best[0].Departure)
 	}
 }

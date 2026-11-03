@@ -60,8 +60,8 @@ function buildDay(idx: number) {
     precipitation: 5,
     humidityPct: 58,
     visibilityNm: 9.5,
-    sunriseTime: "6:32AM",
-    sunsetTime: "5:47PM",
+    sunriseTime: "2026-06-15T06:32:00+10:00",
+    sunsetTime: "2026-06-15T17:47:00+10:00",
     moonPhase: null,
     hourlyWind: [],
     hourlyPrecip: [],
@@ -201,6 +201,21 @@ describe("ForecastDrawer stay view", () => {
       screen.queryByTestId("forecast-stay-pending-day"),
     ).not.toBeInTheDocument();
     expect(screen.getAllByTestId("forecast-stay-day-marker")).toHaveLength(3);
+  });
+
+  it("shows sunrise and sunset in the stay's zone, not the boat's", () => {
+    render(
+      <ForecastDrawer
+        forecast={tenDays()}
+        loading={false}
+        error={null}
+        unit="metric"
+        stay={{ ...STAY, timezone: "Pacific/Auckland" }}
+      />,
+    );
+    // 06:32+10:00 and 17:47+10:00 are 8.32 AM and 7.47 PM in Auckland winter.
+    expect(screen.getByText("8.32 AM")).toBeInTheDocument();
+    expect(screen.getByText("7.47 PM")).toBeInTheDocument();
   });
 
   it("shows no stay marks without a stay", () => {

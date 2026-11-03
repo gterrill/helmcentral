@@ -123,7 +123,7 @@ describe('coastlineStatusLine', () => {
     const line = lineIn(status({
       state: 'paused', pause_reason: 'The map server is rate-limiting requests from this boat', retry_at: '2026-10-23T09:05:00Z',
     }))
-    expect(line).toMatch(/^The map server is rate-limiting requests from this boat\. Trying again about \d\d:\d\d$/)
+    expect(line).toMatch(/^The map server is rate-limiting requests from this boat\. Trying again about \d{1,2}\.\d\d [AP]M$/)
   })
 
   it('says when switched on but nothing is held yet', () => {
@@ -200,7 +200,7 @@ describe('inlandSkippedLine', () => {
 describe('editCheckPauseLine', () => {
   it('says the edit check is on hold, not the whole job', () => {
     const line = editCheckPauseLine(status({ state: 'downloading', check_pause_reason: 'The server has nothing new to check', check_retry_at: '2026-10-23T09:05:00Z' }), 'UTC', new Date('2026-10-23T09:00:00Z'))
-    expect(line).toMatch(/^Edit check on hold: The server has nothing new to check\. Trying again about \d\d:\d\d\.$/)
+    expect(line).toMatch(/^Edit check on hold: The server has nothing new to check\. Trying again about \d{1,2}\.\d\d [AP]M\.$/)
   })
   it('says it is trying again now once the retry time has passed', () => {
     const line = editCheckPauseLine(status({ state: 'idle', check_pause_reason: 'Why', check_retry_at: '2026-10-23T09:05:00Z' }), 'UTC', new Date('2026-10-23T10:00:00Z'))

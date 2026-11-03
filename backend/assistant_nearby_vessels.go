@@ -111,7 +111,7 @@ type assistantNearbyVesselOut struct {
 	Lat          float64  `json:"lat"`
 	Lon          float64  `json:"lon"`
 
-	// InRangeSince is the sighting log's current-encounter start (RFC3339) -
+	// InRangeSince is the sighting log's current-encounter start (a boat-time label) -
 	// absent when the vessel has not yet sat through the sighting log's
 	// confirmation dwell, or when there is no sighting log at all. It is a
 	// LOWER BOUND on how long the vessel has actually been in range: the
@@ -273,6 +273,7 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 	}
 
 	vessels := make([]assistantNearbyVesselOut, 0, len(matched))
+	boat := d.boatTime()
 	for _, v := range matched {
 		out := assistantNearbyVesselOut{
 			Name:         v.Name,
@@ -295,7 +296,7 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 
 		if store != nil {
 			if key, ok := vesselContactKey(v.Mmsi); ok {
-				if err := fillAssistantSightingHistory(store, key, v.Name, includeHistory, &out); err != nil {
+				if err := fillAssistantSightingHistory(store, key, v.Name, includeHistory, boat, &out); err != nil {
 					return "", fmt.Errorf("get_nearby_vessels: %w", err)
 				}
 			}
@@ -411,7 +412,7 @@ func isPlaceholderVesselContactName(name, vesselKey string) bool {
 // sighting log. A pending (unconfirmed) candidate encounter never has
 // in_range_since set to the previous encounter's start - see isPending's own
 // doc comment for why that distinction matters.
-func fillAssistantSightingHistory(store *nearbyContactStore, vesselKey, liveName string, includeHistory bool, out *assistantNearbyVesselOut) error {
+func fillAssistantSightingHistory(store *nearbyContactStore, vesselKey, liveName string, includeHistory bool, boat boatTime, out *assistantNearbyVesselOut) error {
 	sightings, err := store.listSightings(vesselKey)
 	if err != nil {
 		return fmt.Errorf("read sighting history for %s: %w", vesselKey, err)
@@ -453,7 +454,7 @@ func fillAssistantSightingHistory(store *nearbyContactStore, vesselKey, liveName
 	pending := store.isPending(vesselKey)
 	priorSightings := sightings
 	if !pending {
-		since := sightings[0].SeenAt.UTC().Format(time.RFC3339)
+		since := boat.DayClock(sightings[0].SeenAt)
 		out.InRangeSince = &since
 		priorSightings = sightings[1:]
 	}
@@ -465,7 +466,7 @@ func fillAssistantSightingHistory(store *nearbyContactStore, vesselKey, liveName
 				break
 			}
 			out.PastSightings = append(out.PastSightings, assistantVesselSighting{
-				SeenAt:  s.SeenAt.UTC().Format(time.RFC3339),
+				SeenAt:  boat.DayClock(s.SeenAt),
 				Geoname: s.Geoname,
 				Lat:     s.Lat,
 				Lon:     s.Lon,
@@ -506,9 +507,10 @@ func fillAssistantPositionHistory(d assistantToolDeps, mmsi string, out *assista
 		out.PositionHistory = "under way - not currently stationary"
 		return
 	}
-	since := sinceAt.UTC().Format(time.RFC3339)
+	boat := d.boatTime()
+	since := boat.DayClock(sinceAt)
 	out.StationarySince = &since
-	coversFrom := from.UTC().Format(time.RFC3339)
+	coversFrom := boat.DayClock(from)
 	out.HistoryCoversFrom = &coversFrom
 }
 
@@ -636,11 +638,12 @@ func assistantSearchNotInRange(d assistantToolDeps, nameQuery string, limit int)
 	}
 
 	out := make([]assistantVesselNotInRange, 0, len(latest))
+	boat := d.boatTime()
 	for _, l := range latest {
 		out = append(out, assistantVesselNotInRange{
 			Name:       l.Name,
 			Mmsi:       l.VesselKey,
-			LastSeenAt: l.SeenAt.UTC().Format(time.RFC3339),
+			LastSeenAt: boat.DayClock(l.SeenAt),
 			Geoname:    l.Geoname,
 			Lat:        l.Lat,
 			Lon:        l.Lon,

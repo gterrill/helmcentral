@@ -33,10 +33,10 @@ func firstWatch(t *testing.T, docs *documentStore) savedWatch {
 func TestWatchRecord_CreateReadsInWordsAndAppliesWithDefaults(t *testing.T) {
 	env := newProposalEnv(t)
 	p := env.propose(t, watchCreateArgs)
-	if got, want := p.Ops[0].Description, "Add watch Morning report: every day at 06:00 boat time, covering power and tanks"; got != want {
+	if got, want := p.Ops[0].Description, "Add watch Morning report: every day at 6.00 AM boat time, covering power and tanks"; got != want {
 		t.Fatalf("description %q, want %q", got, want)
 	}
-	if p.Ops[0].After["schedule"] != "Every day at 06:00 boat time" {
+	if p.Ops[0].After["schedule"] != "Every day at 6.00 AM boat time" {
 		t.Errorf("the card shows the schedule in words, got %v", p.Ops[0].After)
 	}
 	for _, k := range []string{"last_run", "schedule_sentence"} {
@@ -344,10 +344,10 @@ func TestWatchREST_SchedulePreview(t *testing.T) {
 	}
 	var out watchPreviewResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if !out.Valid || out.Sentence != "Every day at 06:00 boat time" || !out.BoatTimeKnown || len(out.Next) != 3 {
+	if !out.Valid || out.Sentence != "Every day at 6.00 AM boat time" || !out.BoatTimeKnown || len(out.Next) != 3 {
 		t.Fatalf("%+v", out)
 	}
-	if !strings.Contains(out.Next[0].Local, "06:00 AEST") {
+	if !strings.Contains(out.Next[0].Local, "6.00 AM AEST") {
 		t.Errorf("run times are on the boat's clock: %+v", out.Next)
 	}
 	if _, err := time.Parse(time.RFC3339, out.Next[0].At); err != nil {
@@ -406,7 +406,7 @@ func TestMateWatchTools_ListReadAndRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		t.Fatal(err)
 	}
-	if list.Total != 1 || list.Limit != 20 || list.Watches[0].ScheduleSentence != "Every day at 06:00 boat time" || list.Watches[0].ID != w.ID ||
+	if list.Total != 1 || list.Limit != 20 || list.Watches[0].ScheduleSentence != "Every day at 6.00 AM boat time" || list.Watches[0].ID != w.ID ||
 		list.Watches[0].Schedule != "0 6 * * *" || list.Watches[0].Version == "" || list.Watches[0].LookOutFor != "the fridge and the bilge" {
 		t.Fatalf("%s", out)
 	}

@@ -202,6 +202,10 @@ func TestShowWindRoseBuildsASnapshotCardInTheOperatorsUnits(t *testing.T) {
 	if strings.Contains(res, "environment.wind") {
 		t.Errorf("a result must not show raw paths: %s", res)
 	}
+	// Mate reads the gust time as a boat-time label; the card keeps the instant.
+	if m.StrongestGust == nil || m.StrongestGust.At == "" || strings.Contains(res, "2026-10-12T") || strings.Contains(m.StrongestGust.At, "2026-") {
+		t.Errorf("strongest_gust.at should be a label, not an instant: %s", res)
+	}
 }
 
 func TestShowWindRoseHonoursSectorsAndSpeedBins(t *testing.T) {

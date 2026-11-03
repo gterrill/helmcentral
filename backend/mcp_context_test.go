@@ -137,6 +137,30 @@ func TestMCPInstructions_CarryTheRulesThatApplyOutsideMate(t *testing.T) {
 	}
 }
 
+// A time label is quoted as given and any other time is written the one way
+// the operator reads it. The old line said times were boat-local unless a
+// result said UTC, which let a model read a UTC stamp as boat time.
+func TestMCPInstructions_TimesAreLabelsQuotedAsGiven(t *testing.T) {
+	for _, want := range []string{"as given", "1.30 PM"} {
+		if !strings.Contains(mcpInstructions, want) {
+			t.Errorf("instructions lack %q:\n%s", want, mcpInstructions)
+		}
+	}
+	if strings.Contains(mcpInstructions, "boat-local unless") {
+		t.Errorf("instructions still say times are boat-local unless a result says UTC:\n%s", mcpInstructions)
+	}
+}
+
+func TestBoatContext_TimesAreBoatLabels(t *testing.T) {
+	md, err := buildBoatContext(contextTestDeps(t), mcpAllOn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(md, "02:00") || strings.Contains(md, "2026-10-30 ") || strings.Contains(md, "boat-local unless") {
+		t.Errorf("context carries a 24-hour or UTC time:\n%s", md)
+	}
+}
+
 func mcpAllOn(string) bool { return true }
 
 func TestBoatContext_FollowsTheTokensToolList(t *testing.T) {

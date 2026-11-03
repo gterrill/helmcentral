@@ -22,7 +22,7 @@ beforeEach(() => {
 describe('AssistantAnchorageCard', () => {
   it('shows the stay in the anchorage\'s own time', () => {
     render(<AssistantAnchorageCard card={anchorageCard()} />)
-    expect(screen.getByTestId('anchorage-stay')).toHaveTextContent('Mon 2 Nov 14:00 to Tue 3 Nov 08:00')
+    expect(screen.getByTestId('anchorage-stay')).toHaveTextContent('Mon 2 Nov 2.00 PM to Tue 3 Nov 8.00 AM')
     expect(screen.getByText('West Butterfly Bay')).toBeInTheDocument()
   })
 
@@ -81,7 +81,7 @@ describe('AssistantAnchorageCard', () => {
     const table = screen.getByRole('table')
     const rows = within(table).getAllByRole('row')
     expect(rows).toHaveLength(8) // header + seven
-    expect(rows[1]).toHaveTextContent('Mon 14:00')
+    expect(rows[1]).toHaveTextContent('Mon 2.00 PM')
     expect(rows[1]).toHaveTextContent('15 g19')
     expect(rows[1]).toHaveTextContent('N 005°')
     expect(rows[1]).toHaveTextContent(/Exposed|Sheltered|Partly sheltered/)
@@ -105,9 +105,9 @@ describe('AssistantAnchorageCard', () => {
   })
 
   it('says when the tide prediction ends before the stay does', () => {
-    const card = anchorageCard({ tide: { ...(anchoragePayload().tide as object), note: 'The tide prediction ends at Tue 3 Nov 06:00, before the stay does.' } })
+    const card = anchorageCard({ tide: { ...(anchoragePayload().tide as object), note: 'The tide prediction ends at Tue 3 Nov 6.00 AM, before the stay does.' } })
     render(<AssistantAnchorageCard card={card} />)
-    expect(screen.getByTestId('anchorage-tide-note')).toHaveTextContent('The tide prediction ends at Tue 3 Nov 06:00, before the stay does.')
+    expect(screen.getByTestId('anchorage-tide-note')).toHaveTextContent('The tide prediction ends at Tue 3 Nov 6.00 AM, before the stay does.')
   })
 
   it('says outside the stay for the extremes added to give a range, and what a missing height means', () => {
@@ -237,7 +237,7 @@ describe('AssistantAnchorageCard', () => {
   it('dates the forecast, the coastline and the map in the footer', () => {
     render(<AssistantAnchorageCard card={anchorageCard()} />)
     const footer = screen.getByTestId('anchorage-footer')
-    expect(footer).toHaveTextContent('Forecast fetched Mon 11:00')
+    expect(footer).toHaveTextContent('Forecast fetched Mon 11.00 AM')
     expect(footer).toHaveTextContent('Coastline downloaded 3 Oct 2026')
     expect(footer).toHaveTextContent('OpenStreetMap · data as of 31 Oct 2026')
   })

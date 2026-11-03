@@ -216,7 +216,7 @@ in passage time.
 
 Shots show as marks on the slider. Pick one to jump to it and edit it. The
 picked mark is larger and ringed, and a line above its settings names it, for
-example "Shot 2 of 3 · from 09:41 to 10:20". Hover a mark to see its number
+example "Shot 2 of 3 · from 9.41 AM to 10.20 AM". Hover a mark to see its number
 and time, and on a replay that spans more than one day the date too. The
 camera eases into each shot over about a second and a half. Scrubbing puts the
 camera straight into the shot you land in.
@@ -409,7 +409,7 @@ stays:
   light you sailed in. Two passages less than a minute apart have no stay.
 - **The label:** A small label shows during the stay: how long it was, and where.
   A stay across midnight counts nights by the boat's own dates, so arriving at
-  22:00 and leaving at 07:00 is "1 night". Nights are counted the way the cruise
+  10.00 PM and leaving at 7.00 AM is "1 night". Nights are counted the way the cruise
   figures count them. A stay that crosses no midnight reads like the rest of the
   app, such as "3 h 05 m" or "42 m". The place is where the passage before it ended, or where
   the next one set out from. If neither has a name, the label gives the time

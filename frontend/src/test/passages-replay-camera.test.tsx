@@ -261,9 +261,9 @@ describe('ReplayPanel camera robustness', () => {
     expect(within(editor).queryByTestId('camera-shot-heading')).toBeNull()
     expect(within(editor).getByText(/Pick a mark on the scrubber/)).toBeInTheDocument()
     fireEvent.click(marks[0])
-    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 1 of 2 · from 09:04 to 09:10')
+    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 1 of 2 · from 9.04 AM to 9.10 AM')
     fireEvent.click(screen.getAllByRole('button', { name: /^Camera shot/ })[1])
-    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 2 of 2 · from 09:10 to end')
+    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 2 of 2 · from 9.10 AM to end')
   })
 
   it('puts dates on the titles and heading once the shots span days', async () => {
@@ -271,19 +271,19 @@ describe('ReplayPanel camera robustness', () => {
     const day2 = { ...passage, id: 'p2', start: new Date((start + 86_000) * 1000).toISOString(), end: new Date((start + 87_000) * 1000).toISOString(), track_times: [[start + 86_000, start + 87_000]], replay_times: [[start + 86_000, start + 86_500, start + 87_000]] }
     render(<ReplayPanel passages={[passage, day2]} isDarkTheme={false} />)
     const marks = await screen.findAllByRole('button', { name: /^Camera shot/ })
-    expect(marks[0].getAttribute('title')).toMatch(/^Shot 1 · \d+ \w{3} 09:04$/)
+    expect(marks[0].getAttribute('title')).toMatch(/^Shot 1 · \d+ \w{3} 9\.04 AM$/)
     fireEvent.click(screen.getByRole('button', { name: 'Camera' }))
     fireEvent.click(marks[0])
     // The first shot ends with its own passage, not at the next day's shot.
-    expect(screen.getByTestId('camera-shot-heading').textContent).toMatch(/^Shot 1 of 2 · from \d+ \w{3} 09:04 to \d+ \w{3} 09:16$/)
+    expect(screen.getByTestId('camera-shot-heading').textContent).toMatch(/^Shot 1 of 2 · from \d+ \w{3} 9\.04 AM to \d+ \w{3} 9\.16 AM$/)
   })
 
   it('titles each mark with its number and time and rings the selected one', async () => {
     shots = [shot('s1', 250), shot('s2', 600)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     const marks = await screen.findAllByRole('button', { name: /^Camera shot/ })
-    expect(marks[0]).toHaveAttribute('title', 'Shot 1 · 09:04')
-    expect(marks[1]).toHaveAttribute('title', 'Shot 2 · 09:10')
+    expect(marks[0]).toHaveAttribute('title', 'Shot 1 · 9.04 AM')
+    expect(marks[1]).toHaveAttribute('title', 'Shot 2 · 9.10 AM')
     expect(marks[1].className).not.toContain('ring-2')
     fireEvent.click(marks[1])
     const picked = screen.getAllByRole('button', { name: /^Camera shot/ })

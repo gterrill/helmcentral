@@ -7,6 +7,7 @@
 // new MIME type or unit. formatDocumentTime below is Details-page only so
 // far, but lives here rather than in the component file because it is a
 // display helper of the same kind, not page logic.
+import { formatTimeOfDay } from '@/lib/vessel-time'
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -97,9 +98,9 @@ export function mimeLabel(mime: string): string {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /**
- * "D Mon YYYY HH:MM" for the Details page's Uploaded/Last indexed rows.
+ * "D Mon YYYY 2.05 PM" for the Details page's Uploaded/Last indexed rows.
  * alarm-display.ts's formatAlarmTime is built for an alarm raised minutes
- * ago (bare HH:MM for today, no year at all otherwise) - a document library
+ * ago (bare time for today, no year at all otherwise) - a document library
  * is the opposite case, where "uploaded eighteen months back" is the normal
  * reading, so this always carries the full date. Same null-not-a-placeholder
  * contract as formatAlarmTime: a missing or unparseable value is null, and
@@ -111,10 +112,10 @@ export function formatDocumentTime(iso: string | null | undefined): string | nul
   if (Number.isNaN(date.getTime())) return null
 
   // helm-browser-zone: a document's upload and index times record when the operator did it, so they read on the device's clock, not the boat's.
-  const local = { day: date.getDate(), month: MONTHS[date.getMonth()], year: date.getFullYear(), hours: date.getHours(), minutes: date.getMinutes() }
-  const hh = String(local.hours).padStart(2, '0')
-  const mm = String(local.minutes).padStart(2, '0')
-  return `${local.day} ${local.month} ${local.year} ${hh}:${mm}`
+  const local = { day: date.getDate(), month: MONTHS[date.getMonth()], year: date.getFullYear() }
+  // helm-browser-zone: the same device clock, named so the time can be written in the one form.
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return `${local.day} ${local.month} ${local.year} ${formatTimeOfDay(date, deviceZone)}`
 }
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif', 'bmp'])

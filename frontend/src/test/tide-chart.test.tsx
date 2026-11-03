@@ -266,7 +266,7 @@ describe('TideChart', () => {
     expect(screen.queryByText('Now')).not.toBeInTheDocument()
   })
 
-  it('shows 12AM/6AM/12PM/6PM hour ticks across the window', () => {
+  it('shows 12 AM/6 AM/12 PM/6 PM hour ticks across the window', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
@@ -285,10 +285,10 @@ describe('TideChart', () => {
 
     // Ticks run 0/6/12/18/24h from window start, so "12AM" legitimately
     // appears twice (the window's start and end midnights).
-    expect(screen.getAllByText('12AM').length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('6AM')).toBeInTheDocument()
-    expect(screen.getByText('12PM')).toBeInTheDocument()
-    expect(screen.getByText('6PM')).toBeInTheDocument()
+    expect(screen.getAllByText('12 AM').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('6 AM')).toBeInTheDocument()
+    expect(screen.getByText('12 PM')).toBeInTheDocument()
+    expect(screen.getByText('6 PM')).toBeInTheDocument()
   })
 
   // Task 4 (visual polish): Tide should share the same faint horizontal
@@ -656,7 +656,7 @@ describe('TideChart pointer tooltip accuracy', () => {
   })
 
   function parseClockTime(text: string): number {
-    const match = text.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/)
+    const match = text.match(/^(\d{1,2})\.(\d{2}) (AM|PM)$/)
     if (!match) throw new Error(`unexpected time text: "${text}"`)
     let hour = Number(match[1]) % 12
     if (match[3] === 'PM') hour += 12
@@ -706,7 +706,7 @@ describe('TideChart pointer tooltip accuracy', () => {
     // Within one 5-minute sample step of the true cursor time (10:00 AM) -
     // the old uniform-index mapping landed on 5:15 AM for this exact cursor
     // position (index 16 of 39, inside the unequal 13h segment).
-    expect(Math.abs(parseClockTime(secondaryText) - parseClockTime('10:00 AM'))).toBeLessThanOrEqual(5)
+    expect(Math.abs(parseClockTime(secondaryText) - parseClockTime('10.00 AM'))).toBeLessThanOrEqual(5)
   })
 
   // The tide refresh line ("Data: ... updated ...") used to sit in

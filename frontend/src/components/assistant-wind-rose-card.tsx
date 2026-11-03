@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 
 import type { WindRoseCard } from '@/lib/mate-cards'
 import { formatRange } from '@/lib/telemetry-chart'
+import { formatTimeOfDay } from '@/lib/vessel-time'
 import { polar, ringTicks, wedgePath, windRoseModel } from '@/lib/wind-rose'
 
 // One hue, light to strong with the speed band. The hue is the same chart token
@@ -26,11 +27,9 @@ function bandOpacity(i: number, n: number): number {
 }
 
 function whenText(iso: string, timeZone: string): string {
-  const ps = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(
-    new Date(iso),
-  )
+  const ps = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short' }).formatToParts(new Date(iso))
   const get = (t: string) => ps.find((p) => p.type === t)?.value ?? ''
-  return `${get('weekday')} ${get('day')} ${get('month')} ${get('hour')}:${get('minute')}`
+  return `${get('weekday')} ${get('day')} ${get('month')} ${formatTimeOfDay(iso, timeZone)}`
 }
 
 function averages(minutes: number): string {

@@ -73,7 +73,7 @@ describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
     const cursorRef = { current: null as ReplayCursor | null }
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} cursorRef={cursorRef} />)
-    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 09:00 UTC+10')
+    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 9.00 AM UTC+10')
     fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
     // The straight display line would put her at 149.5; the replay track shows her stopped.
     expect(lastBoat).toEqual({ lat: 0, lon: 149.2 })
@@ -376,7 +376,7 @@ describe('ReplayPanel with passages given newest first', () => {
     }
     render(<ReplayPanel passages={[later, earlier]} isDarkTheme={false} />)
     // 23:00 UTC on the 13th is 09:00 on the 14th in Brisbane, whichever passage came first in the list.
-    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 09:00 UTC+10')
+    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 9.00 AM UTC+10')
   })
 })
 

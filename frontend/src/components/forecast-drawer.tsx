@@ -24,6 +24,8 @@ import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { formatDayMonth, formatStayRange, formatWeekday, isStayDay, pendingStayDays } from '@/lib/stay'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatHourMinute, formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 
 interface ForecastDay {
   dayKey: string
@@ -603,6 +605,9 @@ export function ForecastDrawer({
   stay,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
+  const vesselZone = useVesselStateSelector(selectTimeZone)
+  // A stay's forecast keeps the stay's time; the boat's forecast keeps the boat's.
+  const forecastZone = stay ? stay.timezone : vesselZone
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const windAreaGradientId = useId()
   const waveAreaGradientId = useId()
@@ -1616,13 +1621,13 @@ export function ForecastDrawer({
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <Sunrise size={12} className="text-gauge-primary" />
-                    Sunrise <span className="font-semibold tabular-nums">{selectedDay.sunriseTime}</span>
+                    Sunrise <span className="font-semibold tabular-nums">{formatTimeOfDay(selectedDay.sunriseTime, forecastZone)}</span>
                   </span>
                 )}
                 {selectedDay.sunsetTime && (
                   <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <Sunset size={12} className="text-gauge-primary" />
-                    Sunset <span className="font-semibold tabular-nums">{selectedDay.sunsetTime}</span>
+                    Sunset <span className="font-semibold tabular-nums">{formatTimeOfDay(selectedDay.sunsetTime, forecastZone)}</span>
                   </span>
                 )}
                 {selectedDay.moonPhase && (
@@ -2289,7 +2294,7 @@ export function ForecastDrawer({
             {upperAirTooltipEntry && (
               <ChartTooltipBubble
                 pixelX={upperAirTooltip.tooltipPixelX ?? 0}
-                time={`${upperAirTickLabels.get(upperAirDayStarts.find((d) => d.dayKey === upperAirTooltipEntry.dayKey)?.idx ?? 0) ?? upperAirTooltipEntry.dayKey} ${String(upperAirTooltipEntry.localHour).padStart(2, '0')}:00`}
+                time={`${upperAirTickLabels.get(upperAirDayStarts.find((d) => d.dayKey === upperAirTooltipEntry.dayKey)?.idx ?? 0) ?? upperAirTooltipEntry.dayKey} ${formatHourMinute(upperAirTooltipEntry.localHour, 0)}`}
                 primary={`${Math.round(upperAirTooltipEntry.height500M)} m`}
                 secondary={`Jet ${Math.round(upperAirTooltipEntry.wind500Kts)} kt${
                   upperAirTooltipEntry.thicknessM > 0 ? ` \u00b7 Thickness ${Math.round(upperAirTooltipEntry.thicknessM)} m` : ''

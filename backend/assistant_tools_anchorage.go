@@ -20,7 +20,7 @@ var mateToolAnchorageDetails = mateTool{
 			"range, and what OpenStreetMap records within a nautical mile: restricted areas and marine protected areas, public moorings " +
 			"(with the vessel size limit and class where tagged), anchorage areas, seabed areas and the bay. Use it whenever you choose, " +
 			"compare or assess an anchorage; resolve a name with find_places first and pass its lat and lon. Pass arrive as an RFC 3339 time " +
-			"(for example 2026-11-02T15:00:00+10:00) and leave as the time the boat leaves; without leave the stay ends at the first 08:00 local time " +
+			"(for example 2026-11-02T15:00:00+10:00) and leave as the time the boat leaves; without leave the stay ends at the first 8.00 AM local time " +
 			"at least six hours after arrival, and the result says so. The stay may be up to seven days. " + ruleAnchorageDetails + " Shelter must come " +
 			"from this tool: if it returns an error (turned off, outside coverage, still downloading), tell the operator what it says " +
 			"rather than guessing the shelter. With no depth known the swing and clearance checks are skipped.",
@@ -41,7 +41,7 @@ var mateToolAnchorageDetails = mateTool{
 						},
 						"leave": {
 							"type": "string",
-							"description": "When the boat leaves, an RFC 3339 time after arrive. Optional: default the first 08:00 local time at least six hours after arrive."
+							"description": "When the boat leaves, an RFC 3339 time after arrive. Optional: default the first 8.00 AM local time at least six hours after arrive."
 						},
 						"name": {"type": "string", "description": "Optional name of the anchorage, for display only."},
 						"depth_m": {"type": "number", "description": "Water depth at the anchorage in metres at chart datum, ONLY when the operator stated it in this conversation. Omit otherwise: never from your own knowledge."}
@@ -69,7 +69,7 @@ const (
 	// and a longer stay is several anchorages' worth of questions.
 	anchorageMaxStay = 7 * 24 * time.Hour
 	// anchorageMinDefaultStay is the shortest stay a default leave gives: the
-	// first 08:00 at least this long after arrival.
+	// first 8.00 AM at least this long after arrival.
 	anchorageMinDefaultStay = 6 * time.Hour
 	// anchorageDefaultLeaveHour is when the stay ends when the caller gives no
 	// leave time: the boat's morning, local to the anchorage.
@@ -187,8 +187,12 @@ type assistantAnchorageDetailsResult struct {
 	Name           string  `json:"name,omitempty"`
 	Lat            float64 `json:"lat"`
 	Lon            float64 `json:"lon"`
+	// Arrive and Leave are boat-time labels on the anchorage's clock;
+	// ArriveISO and LeaveISO are the instants, for passing to another tool.
 	Arrive         string  `json:"arrive"`
+	ArriveISO      string  `json:"arrive_iso"`
 	Leave          string  `json:"leave"`
+	LeaveISO       string  `json:"leave_iso"`
 	LeaveDefaulted bool    `json:"leave_defaulted,omitempty"`
 	Timezone       string  `json:"timezone"`
 	// Shelter is required: when it cannot be made the whole call fails.
@@ -214,7 +218,7 @@ type anchorageStay struct {
 }
 
 // parseAnchorageStay validates the window. The default leave is the first
-// 08:00 at least six hours after arrival, in the time zone at the anchorage (the same lat/lon
+// 8.00 AM at least six hours after arrival, in the time zone at the anchorage (the same lat/lon
 // zone the forecast and the passage tools use).
 func parseAnchorageStay(args assistantAnchorageDetailsArgs) (anchorageStay, error) {
 	var stay anchorageStay
@@ -340,8 +344,10 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 	}
 	result := assistantAnchorageDetailsResult{
 		Name: parts.name, Lat: lat, Lon: lon,
-		Arrive:         stay.arrive.In(stay.zone.Loc).Format(time.RFC3339),
-		Leave:          stay.leave.In(stay.zone.Loc).Format(time.RFC3339),
+		Arrive:         boatDayClock(stay.arrive, stay.zone.Loc),
+		ArriveISO:      stay.arrive.In(stay.zone.Loc).Format(time.RFC3339),
+		Leave:          boatDayClock(stay.leave, stay.zone.Loc),
+		LeaveISO:       stay.leave.In(stay.zone.Loc).Format(time.RFC3339),
 		LeaveDefaulted: stay.leaveDefaulted,
 		Timezone:       stay.zone.Name,
 		Shelter:        shelter,
@@ -493,7 +499,7 @@ func (d assistantToolDeps) anchorageForecast(lat, lon float64, stay anchorageSta
 		if win.last.IsZero() {
 			return fail("weather provider %q returned no hours", providerID)
 		}
-		return fail("the forecast does not cover arrival (it runs to %s)", win.last.In(stay.zone.Loc).Format(toolTimeLayout))
+		return fail("the forecast does not cover arrival (it runs to %s)", boatDayClock(win.last, stay.zone.Loc))
 	}
 
 	body := &AnchorageForecastBody{
@@ -502,7 +508,7 @@ func (d assistantToolDeps) anchorageForecast(lat, lon float64, stay anchorageSta
 		Days: win.days, Hourly: win.hourly,
 	}
 	if forecastEndsBeforeLeave(win.last, stay) {
-		body.Note = fmt.Sprintf("The forecast ends at %s, before the stay does.", win.last.In(stay.zone.Loc).Format(toolTimeLayout))
+		body.Note = fmt.Sprintf("The forecast ends at %s, before the stay does.", boatDayClock(win.last, stay.zone.Loc))
 	}
 	return anchorageForecastOut{
 		section: anchorageForecastSection{AnchorageForecastBody: body}, at: win.at, fetchedAt: bundle.CachedAt,
@@ -601,7 +607,7 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 	if n := len(sorted); n > 0 && sorted[n-1].Time.Before(stay.leave) {
 		endsAt = sorted[n-1].Time
 		// In the stay's zone, like the checks that quote it; the extremes below stay on the station's clock.
-		body.Note = fmt.Sprintf("The tide prediction ends at %s, before the stay does.", endsAt.In(stay.zone.Loc).Format(toolTimeLayout))
+		body.Note = fmt.Sprintf("The tide prediction ends at %s, before the stay does.", boatDayClock(endsAt, stay.zone.Loc))
 	}
 
 	// The height at arrival is read between the extremes either side of it,
@@ -611,10 +617,10 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 		body.HeightNote = "The provider returned no predicted high or low waters."
 	case stay.arrive.Before(sorted[0].Time) || !stay.arrive.Before(sorted[len(sorted)-1].Time):
 		body.HeightNote = fmt.Sprintf("Arrival is outside the predicted tides, which run from %s to %s.",
-			sorted[0].Time.In(loc).Format(toolTimeLayout), sorted[len(sorted)-1].Time.In(loc).Format(toolTimeLayout))
+			boatDayClock(sorted[0].Time, loc), boatDayClock(sorted[len(sorted)-1].Time, loc))
 	default:
 		h, dir := interpolateTideNow(sorted, stay.arrive)
-		body.AtArrival = &anchorageTideHeight{Time: stay.arrive.In(loc).Format(toolTimeLayout), HeightM: roundTo2(h), Direction: dir}
+		body.AtArrival = &anchorageTideHeight{Time: boatDayClock(stay.arrive, loc), HeightM: roundTo2(h), Direction: dir}
 	}
 
 	// With fewer than two extremes inside the stay there is no range, so the
@@ -712,10 +718,10 @@ func (d assistantToolDeps) anchorageFeatures(lat, lon float64) anchorageFeatures
 	var cachedAt time.Time
 	if found.Cached {
 		cachedAt = found.CachedAt
-		body.Cached, body.CachedAt = true, cachedAt.UTC().Format(time.RFC3339)
+		body.Cached, body.CachedAt = true, boatDayClock(cachedAt, d.boatTime().Loc)
 	}
 	body.Moorings = summariseMoorings(found.Moorings)
-	body.Reading = readingAnchorageFeatures(prohibited, found.Truncated, cachedAt)
+	body.Reading = readingAnchorageFeatures(prohibited, found.Truncated, cachedAt, d.boatTime().Loc)
 	return anchorageFeaturesOut{section: anchorageFeaturesSection{AnchorageFeaturesBody: body}, found: found}
 }
 

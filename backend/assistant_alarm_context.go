@@ -255,7 +255,7 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 		if t.IsZero() {
 			return ""
 		}
-		return t.In(loc).Format("Mon 2 Jan 15:04")
+		return boatDayClock(t, loc)
 	}
 
 	var res assistantAlarmContextResult
@@ -473,8 +473,8 @@ func alarmHistoryShape(buckets []assistantPathHistoryBucket, every string, disp 
 	run := 1
 	for i := range buckets {
 		b := &buckets[i]
-		t, err := time.Parse(time.RFC3339, b.T)
-		if err != nil || b.Mean == nil {
+		t := b.At
+		if b.Mean == nil {
 			prev, run = nil, 1
 			continue
 		}

@@ -398,7 +398,7 @@ func (d assistantToolDeps) buildVesselStatus() (vesselStatusResult, error) {
 		return vesselStatusResult{}, fmt.Errorf("get_vessel_status: the boat's state is unavailable: %w", err)
 	}
 
-	res := vesselStatusResult{GeneratedAt: now.Format(time.RFC3339), Units: system}
+	res := vesselStatusResult{GeneratedAt: d.boatTime().DayClock(now), Units: system}
 	alarms := d.activeAlarms()
 
 	if res.Power, err = vesselStatusPowerFor(t, vessel, system); err != nil {
@@ -688,7 +688,7 @@ func (d assistantToolDeps) vesselStatusBoatFor(t telemetryReader, vessel vesselV
 	case active:
 		out.Anchor = vesselStatusAnchor{
 			Down: true, Lat: watch.Lat, Lon: watch.Lon, RadiusM: watch.RadiusMeters,
-			SetAt: watch.SetAt.UTC().Format(time.RFC3339),
+			SetAt: d.boatTime().DayClock(watch.SetAt),
 		}
 		if noPosition == "" {
 			out.Anchor.DistanceFromAnchorM = floatPtr(roundTo(haversineMeters(lat, lon, watch.Lat, watch.Lon), 0))
@@ -891,14 +891,14 @@ func overnightDrawObservation(r overnightResult) *vesselObservation {
 		ChargingChecked:         r.ChargingChecked,
 		LastNightPlace:          placeNotKnown,
 	}
-	o.NightStart = lastNight.Start.UTC().Format(time.RFC3339)
+	o.NightStart = boatDayClock(lastNight.Start, r.Loc)
 	o.nightStart, o.nightEnd = lastNight.Start, lastNight.End
 	o.bankPath = strings.TrimSuffix(r.SocPath, ".capacity.stateOfCharge")
 
 	// computeOvernight sets the boat's zone whenever it rates a night.
 	loc := r.Loc
 	window := nightWindow{Start: lastNight.Start, End: lastNight.End}
-	o.Window = overnightClock(window.Start, loc) + " to dawn, boat time"
+	o.Window = boatClock(window.Start, loc) + " to dawn, boat time"
 	chargingLeftOut, shoreLeftOut := 0, 0
 	for _, n := range r.RuleNights {
 		if n.Latest {
@@ -943,21 +943,16 @@ type overnightDrawFigures struct {
 	ChargingChecked               bool
 }
 
-// overnightClock writes a time the way the report reads it: 10.00 PM.
-func overnightClock(t time.Time, loc *time.Location) string {
-	return t.In(loc).Format("3.04 PM")
-}
-
 func (f overnightDrawFigures) summary() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Between %s and dawn the house bank drained at %.2f %% of charge an hour, %.1f times the usual %.2f %%, compared over %d nights.",
-		overnightClock(f.Window.Start, f.Loc), f.Last, f.Ratio, f.Typical, f.Compared)
+		boatClock(f.Window.Start, f.Loc), f.Last, f.Ratio, f.Typical, f.Compared)
 	if h := f.Heaviest; h != nil {
 		end := "dawn"
 		if !h.End.Equal(f.Window.End) {
-			end = overnightClock(h.End, f.Loc)
+			end = boatClock(h.End, f.Loc)
 		}
-		fmt.Fprintf(&b, " Most of it fell between %s and %s.", overnightClock(h.Start, f.Loc), end)
+		fmt.Fprintf(&b, " Most of it fell between %s and %s.", boatClock(h.Start, f.Loc), end)
 	}
 	charging := f.LeftOutCharging
 	if !f.ChargingChecked {

@@ -17,7 +17,7 @@ function watch(overrides: Partial<WatchRecord>): WatchRecord {
     notify: ['ntfy'],
     send: 'findings',
     updated_at: '2026-10-29T00:00:00Z',
-    schedule_sentence: 'Every day at 06:00 boat time',
+    schedule_sentence: 'Every day at 6.00 AM boat time',
     last_run: null,
     has_finding: false,
     ...overrides,
@@ -52,8 +52,8 @@ describe('WatchesIndex', () => {
   it('starts empty with three templates that open the new-watch form pre-filled', () => {
     const { onNew } = renderIndex()
     expect(screen.getByText('No watches yet')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Morning report\s*Daily 06:00/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Overnight check\s*Hourly 22:00/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Morning report\s*Daily 6.00 AM/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Overnight check\s*Hourly 10.00 PM/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /At anchor\s*Every 2 hours/ }))
     expect(onNew).toHaveBeenCalledWith(expect.objectContaining({ id: 'anchor' }))
   })
@@ -70,7 +70,7 @@ describe('WatchesIndex', () => {
         watch({
           id: 'a',
           name: 'Overnight check',
-          schedule_sentence: 'Every hour from 22:00 to 06:00',
+          schedule_sentence: 'Every hour from 10.00 PM to 6.00 AM',
           has_finding: true,
           last_run: { id: 'r', started_at: new Date(Date.now() - 2 * 3600_000).toISOString(), outcome: 'ran', finding_count: 2, review_problem: null },
         }),
@@ -78,7 +78,7 @@ describe('WatchesIndex', () => {
       ],
     })
     const row = screen.getByText('Overnight check').closest('tr')!
-    expect(within(row).getByText('Every hour from 22:00 to 06:00')).toBeInTheDocument()
+    expect(within(row).getByText('Every hour from 10.00 PM to 6.00 AM')).toBeInTheDocument()
     expect(within(row).getByText('2 h ago')).toBeInTheDocument()
     expect(within(row).getByText('Found something')).toBeInTheDocument()
     const quiet = screen.getByText('Quiet').closest('tr')!

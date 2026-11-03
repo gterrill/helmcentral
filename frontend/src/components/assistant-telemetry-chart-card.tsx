@@ -23,7 +23,7 @@ import {
   seriesValues,
   zonedYmd,
 } from '@/lib/telemetry-chart'
-import { zonedDayStart } from '@/lib/vessel-time'
+import { formatAxisTime, formatTimeOfDay, zonedDayStart } from '@/lib/vessel-time'
 import { cn } from '@/lib/utils'
 
 // Series colours: the forecast charts' own series tokens, none of them alert
@@ -54,12 +54,8 @@ function topTickFormatter(ticks: number[], unit: string | null) {
 }
 
 function timeTickFormatter(spanMs: number, timeZone: string) {
-  const fmt = new Intl.DateTimeFormat(
-    'en-GB',
-    spanMs <= 2 * DAY_MS
-      ? { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
-      : { timeZone, day: 'numeric', month: 'short' },
-  )
+  if (spanMs <= 2 * DAY_MS) return (ms: number) => formatAxisTime(ms, timeZone)
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short' })
   return (ms: number) => fmt.format(new Date(ms))
 }
 
@@ -141,7 +137,7 @@ function TimePanel({
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
             labelFormatter={(ms: number) =>
-              new Intl.DateTimeFormat('en-GB', { timeZone: card.timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))
+              `${new Intl.DateTimeFormat('en-GB', { timeZone: card.timezone, day: 'numeric', month: 'short' }).format(new Date(ms))} ${formatTimeOfDay(ms, card.timezone)}`
             }
             formatter={(v: number, _n, item) => {
               const i = Number(String(item.dataKey).slice(1))

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useChecklistRun, type ChecklistItemState } from '@/hooks/use-checklist-run'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/errors'
+import { formatTimeOfDay } from '@/lib/vessel-time'
 
 // Plan "Notes and the Boat's Manual" §7, ADR 0118: the checklist runner -
 // "a mode of the reading view, not a panel." Both notes reading surfaces
@@ -35,7 +36,7 @@ function formatClockTime(iso: string): string {
   const parsed = new Date(iso)
   if (Number.isNaN(parsed.getTime())) return ''
   // helm-browser-zone: a checklist step records when the operator ticked it, on the device they ticked it from.
-  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatTimeOfDay(parsed, Intl.DateTimeFormat().resolvedOptions().timeZone)
 }
 
 // mm or hh:mm elapsed since startedIso, as of nowMillis - both passed in

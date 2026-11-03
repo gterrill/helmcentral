@@ -29,8 +29,8 @@ func watchRecordType() *recordType {
 		Summary: "A regular check of the boat on a schedule. Each run builds a report of the sections chosen, applies the " +
 			"operator's thresholds to reach findings, and has Mate review it. Findings and Mate's review appear on the Watches page. " +
 			"schedule is a five-field cron string on the boat's clock (minute hour day-of-month month day-of-week), for example " +
-			"\"0 6 * * *\" for every day at 06:00, \"0 * * * *\" for every hour, \"0 */2 * * *\" for every 2 hours, " +
-			"\"0 22-23,0-6 * * *\" for every hour from 22:00 to 06:00, \"30 7 * * 1,3,5\" for Monday, Wednesday and Friday at 07:30; " +
+			"\"0 6 * * *\" for every day at 6.00 AM, \"0 * * * *\" for every hour, \"0 */2 * * *\" for every 2 hours, " +
+			"\"0 22-23,0-6 * * *\" for every hour from 10.00 PM to 6.00 AM, \"30 7 * * 1,3,5\" for Monday, Wednesday and Friday at 7.30 AM; " +
 			"no more often than every 15 minutes. sections are the parts of the report: power, anchor, alarms, tanks, weather, instruments. " +
 			"The thresholds are optional and default to: any alarm raised, any sensor frozen or silent, a tank changed by 10 points, " +
 			"pressure down 3 hPa in 3 hours. At most 20 scheduled watches can exist. A watch reads the boat and never changes anything, " +
@@ -316,9 +316,18 @@ func deleteWatchRecord(env changeEnv, before recordSnapshot) error {
 	return deleteSavedWatchTx(env.tx, before.ID)
 }
 
+// lowerFirst lowers the first letter so a sentence can follow a colon. The rest
+// stays as written, because AM and PM in a time must stay capitals.
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
 func describeWatch(d describeInput) string {
 	schedule := func(f map[string]any) string {
-		return strings.ToLower(stringOf(f["schedule_sentence"]))
+		return lowerFirst(stringOf(f["schedule_sentence"]))
 	}
 	sections := func(f map[string]any) string { return watchJoinAnd(watchFieldList(f["sections"])) }
 	switch d.Op.Action {

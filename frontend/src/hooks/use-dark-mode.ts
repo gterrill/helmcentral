@@ -9,17 +9,17 @@ const AUTO_RECHECK_MS = 60_000
 export type ThemeMode = 'day' | 'night' | 'auto'
 
 export interface AutoThemeSun {
-  /** forecast[0].sunriseTime, the string the Clock tile shows. */
+  /** forecast[0].sunriseTime, an RFC3339 instant. */
   sunriseTime: string | null
   sunsetTime: string | null
-  /** The vessel's IANA zone, which the sunrise and sunset strings are written in. */
+  /** The vessel's IANA zone, in which the sunrise and sunset time of day is read. */
   timeZone: string | undefined
 }
 
 export interface ThemeState {
   mode: ThemeMode
   /**
-   * In auto mode: when the theme in effect ends ("6:12 AM"), or null when
+   * In auto mode: when the theme in effect ends ("6.12 AM"), or null when
    * sunrise and sunset are unavailable and auto cannot decide.
    */
   autoUntil: string | null

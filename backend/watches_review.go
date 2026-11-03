@@ -344,7 +344,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 	if place := strings.TrimSpace(pc.PlaceName); place != "" {
 		fmt.Fprintf(&b, "The boat is at or near %s.\n", place)
 	}
-	fmt.Fprintf(&b, "Boat time: %s. All times in the report are boat time.\n", clockWithZone(now, loc, "Mon 2 Jan 2006 15:04"))
+	fmt.Fprintf(&b, "Boat time: %s. All times in the report are boat time, written like 1.30 PM; quote them as given and write any other time the same way.\n", boatDayClockWithZone(now, loc))
 	fmt.Fprintf(&b, "The operator's units are %s. Quote figures as the report gives them; do not convert.\n", units)
 	if notes := strings.TrimSpace(pc.Notes); notes != "" {
 		b.WriteString("The operator's standing notes about the boat:\n" + clipRunes(notes, 1500) + "\n")
@@ -356,7 +356,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		"- Where you are unsure, say so and ask the skipper in the review. Never guess a cause you cannot see in the figures. When the report names an alarm's source, use it; don't offer another cause.\n" +
 		"- You do not stand in for an alarm. If an alarm is active, say it is active; do not raise it again.\n" +
 		"- A section marked unavailable is not an all clear. Mention it only when it bears on something you flag.\n" +
-		"- Write for someone reading at 02:00: the event in a few words, then where, how close, which way it is going, with the figures in the operator's units. " +
+		"- Write for someone reading at 2.00 AM: the event in a few words, then where, how close, which way it is going, with the figures in the operator's units. " +
 		"No track ids, paths, device keys or rule ids. No exclamation marks.\n" +
 		"- Lead with your judgement. At most four short sentences, then up to three questions for the skipper. Do not restate the report: the skipper reads it beside your review.\n" +
 		"- Never claim anything the report's figures do not show. Say an alarm is still going only when the report marks it active now; never say one cleared.\n" +

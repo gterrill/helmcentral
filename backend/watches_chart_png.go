@@ -355,7 +355,7 @@ func chartTimeTicks(from, to time.Time, loc *time.Location) []time.Time {
 
 func chartTimeLabel(t time.Time, span time.Duration, loc *time.Location) string {
 	if span > 36*time.Hour {
-		return t.In(loc).Format("Mon 15:04")
+		return t.In(loc).Format("Mon") + " " + boatAxisClock(t, loc)
 	}
-	return t.In(loc).Format("15:04")
+	return boatAxisClock(t, loc)
 }

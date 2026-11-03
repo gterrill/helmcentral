@@ -14,9 +14,9 @@ function tideValueDisplay(heightFt: number, isImperial: boolean): string {
   return isImperial ? heightFt.toFixed(1) : feetToMeters(heightFt).toFixed(2)
 }
 
-/** A tide time as the host reads it on the boat's clock, e.g. "9:13 AM". */
+/** A tide time as the host reads it on the boat's clock, e.g. "9.13 AM". */
 function clockTime(iso: string | number, timeZone: string | undefined): string {
-  return formatTimeOfDay(iso, timeZone, { hour12: true })
+  return formatTimeOfDay(iso, timeZone)
 }
 
 interface AnchorWatchReadingsProps {

@@ -135,7 +135,7 @@ export const DepthTideTile = memo(function DepthTideTile({
                     show its figure rather than being read as "no data" the
                     way the -1 sentinel once was. */}
                 <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
-                {' '}{formatTimeOfDay(extreme.time, timeZone, { hour12: true })}
+                {' '}{formatTimeOfDay(extreme.time, timeZone)}
               </p>
             ))}
           </div>

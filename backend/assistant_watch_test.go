@@ -235,8 +235,8 @@ func TestAssistantWatch_SamplesOncePerTickAndRecordsStaleGaps(t *testing.T) {
 	if s.GapCount != 1 || len(s.Gaps) != 1 || s.Gaps[0].Seconds != 5 || s.Gaps[0].Reason != "not updating" {
 		t.Fatalf("expected one 5 s 'not updating' gap, got %+v", s.Gaps)
 	}
-	if s.Gaps[0].From != "14:00:10" || s.Gaps[0].To != "14:00:14" {
-		t.Fatalf("expected the gap in vessel local time 14:00:10-14:00:14, got %+v", s.Gaps[0])
+	if s.Gaps[0].From != "2.00.10 PM" || s.Gaps[0].To != "2.00.14 PM" {
+		t.Fatalf("expected the gap in vessel local time with its seconds, got %+v", s.Gaps[0])
 	}
 	if s.Min == nil || *s.Min != 13.0 || s.Max == nil || *s.Max != 13.2 {
 		t.Fatalf("expected min 13.0 and max 13.2 (the stale 13.1 not counted), got %v/%v", s.Min, s.Max)
@@ -244,7 +244,7 @@ func TestAssistantWatch_SamplesOncePerTickAndRecordsStaleGaps(t *testing.T) {
 	if s.Units != "V" || s.Label != "House voltage" {
 		t.Fatalf("expected units and label carried through, got %+v", s)
 	}
-	if f.report.Started != "Sun 4 Oct 14:00:00" || f.report.Timezone != "UTC+10" {
+	if f.report.Started != "Sun 4 Oct 2.00.00 PM" || f.report.Ended != "Sun 4 Oct 2.01.00 PM" || f.report.Timezone != "UTC+10" {
 		t.Fatalf("expected vessel-local start, got %q %q", f.report.Started, f.report.Timezone)
 	}
 
@@ -293,7 +293,7 @@ func TestDetectAssistantWatchExcursions_FindsSpikesAsEpisodes(t *testing.T) {
 		t.Fatalf("expected 2 excursion episodes, got %d: %+v", count, excursions)
 	}
 	first := excursions[0]
-	if first.Start != "04:01:41" || first.Seconds != 3 || first.Peak != 0.82 || first.Direction != "above" {
+	if first.Start != "4.01.41 AM" || first.Seconds != 3 || first.Peak != 0.82 || first.Direction != "above" {
 		t.Fatalf("unexpected first episode: %+v", first)
 	}
 	if math.Abs(first.Baseline-0.45) > 0.01 {
@@ -384,7 +384,7 @@ func TestAssistantWatch_OnePerConversationAndAConcurrentCap(t *testing.T) {
 		t.Fatalf("first start: %v", err)
 	}
 	_, err := h.reg.start(watchRequest("conv-1", raw))
-	if err == nil || !strings.Contains(err.Error(), "already running in this conversation") || !strings.Contains(err.Error(), "14:05") {
+	if err == nil || !strings.Contains(err.Error(), "already running in this conversation") || !strings.Contains(err.Error(), "2.05 PM") {
 		t.Fatalf("expected a rejection naming the running watch's end time, got %v", err)
 	}
 
@@ -504,7 +504,7 @@ func TestExecuteStartWatch_StartsInThisConversation(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("unmarshal: %v (%s)", err, out)
 	}
-	if result.WatchID == "" || result.EndsAt != "14:05" || !strings.Contains(result.Note, "restart") {
+	if result.WatchID == "" || result.EndsAt != "2.05 PM" || !strings.Contains(result.Note, "restart") {
 		t.Fatalf("unexpected result: %s", out)
 	}
 	info, ok := h.reg.get("conv-1")
@@ -951,8 +951,8 @@ func TestGetAssistantWatchHandler_CarriesTheVesselLocalEndTime(t *testing.T) {
 		t.Fatalf("unmarshal: %v (%s)", err, rec.Body.String())
 	}
 	// t0 is 04:00 UTC; the request's vessel zone is UTC+10; five minutes on.
-	if body.Watch.EndsAtLocal != "14:05" {
-		t.Fatalf("expected ends_at_local 14:05, got %s", rec.Body.String())
+	if body.Watch.EndsAtLocal != "2.05 PM" {
+		t.Fatalf("expected ends_at_local 2.05 PM, got %s", rec.Body.String())
 	}
 }
 

@@ -2,6 +2,7 @@ import { ChartLine } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { axisTicks } from '@/lib/telemetry-chart'
+import { formatAxisTime, formatTimeOfDay } from '@/lib/vessel-time'
 import { panelRows } from '@/lib/watch-chart'
 import type { WatchChartData } from '@/lib/watches'
 
@@ -15,15 +16,13 @@ const TOOLTIP_STYLE = { background: 'hsl(var(--card))', border: '1px solid hsl(v
 const PANEL_HEIGHT = 150
 
 /** A time on the boat's clock: the offset is added and the result read as UTC. */
-function boatFormatter(offsetSeconds: number, withDay: boolean) {
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'UTC',
-    ...(withDay ? { weekday: 'short' } : {}),
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  })
-  return (ms: number) => fmt.format(new Date(ms + offsetSeconds * 1000))
+function boatFormatter(offsetSeconds: number, withDay: boolean, axis: boolean) {
+  const day = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short' })
+  const clock = axis ? formatAxisTime : formatTimeOfDay
+  return (ms: number) => {
+    const shifted = new Date(ms + offsetSeconds * 1000)
+    return `${withDay ? `${day.format(shifted)} ` : ''}${clock(shifted, 'UTC')}`
+  }
 }
 
 function withUnit(label: string, unit: string): string {
@@ -46,8 +45,9 @@ export function WatchChart({ chart }: { chart: WatchChartData }) {
   }
 
   const span = to - from
-  const dayFmt = boatFormatter(chart.utc_offset_seconds, true)
-  const clockFmt = boatFormatter(chart.utc_offset_seconds, span > 36 * 3_600_000)
+  // The title and tooltip give the full time, the axis the short one.
+  const dayFmt = boatFormatter(chart.utc_offset_seconds, true, false)
+  const clockFmt = boatFormatter(chart.utc_offset_seconds, span > 36 * 3_600_000, true)
   const ticks = Array.from({ length: 5 }, (_, i) => from + (span * i) / 4)
 
   // One panel for each unit, in the order the units first appear.

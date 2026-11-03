@@ -175,6 +175,7 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 
 	now := time.Now().UTC()
 	result := assistantFindEquipmentResult{Equipment: make([]assistantEquipmentHit, 0, len(items)), Total: total}
+	boat := d.boatTime()
 	for _, it := range items {
 		hours, err := equipmentHourReading(it, now)
 		if err != nil {
@@ -194,7 +195,7 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 			g := hours.Gauge
 			hit.CurrentMeterReading = &g
 			if hours.AsOf != nil {
-				hit.HoursAsOf = hours.AsOf.UTC().Format(time.RFC3339)
+				hit.HoursAsOf = boat.DayClock(*hours.AsOf)
 			}
 		}
 		hit.RuleCount = len(hit.Rules)
