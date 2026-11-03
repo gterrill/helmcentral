@@ -11,6 +11,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The Documents folders and Cruises panes now match the Rode Planner.** They
+  sit in the same style of panel on the left, with a small arrow at the top to
+  hide them. Hidden, a thin strip stays down the edge instead of a button above
+  the list, so the list keeps its full height. If you had a pane hidden, it
+  stays hidden until you open it. The Tags column on the Documents page is also
+  narrower, so Size and each row's menu fit on a laptop screen when the main
+  menu is collapsed. With the main menu open, the table still scrolls sideways.
+  Long folder names no longer show a sliver of a third line.
+
 ### Fixed
 
 - **Discovery no longer says a named battery has no name.** "The boat gives it

@@ -895,7 +895,10 @@ export function DocumentsPanel({
       enableSorting: false,
       accessorFn: (doc) => doc.tags.map((t) => t.tag).join(', '),
       cell: ({ row }) => (
-        <div className="flex min-w-0 flex-nowrap gap-1" title={row.original.tags.map((t) => t.tag).join(', ')}>
+        // Capped, not fixed, so short or empty tags reserve no blank space:
+        // three full badges asked the auto-layout table for ~400px and pushed
+        // Size off the right edge.
+        <div className="flex max-w-64 flex-nowrap gap-1" title={row.original.tags.map((t) => t.tag).join(', ')}>
           <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
             {row.original.tags.slice(0, MAX_LISTED_TAGS).map((t) => (
               <Badge key={t.tag} variant={t.source === 'operator' ? 'secondary' : 'outline'} className="min-w-0 max-w-32 shrink">
@@ -1068,7 +1071,7 @@ export function DocumentsPanel({
 
   return (
     <Page
-      className="h-full min-h-0 p-4"
+      className="h-full min-h-0"
       title={view === 'unfiled' ? 'Unfiled notes' : currentFolder ? currentFolder.name : 'Documents'}
       primaryAction={{
         label: 'Upload',

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Link } from 'lucide-react'
+import { Link } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
@@ -36,8 +36,8 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
 } from '@/components/ui/sidebar'
+import { SidebarPaneHeader, SidebarPaneRail } from '@/components/patterns/sidebar-pane'
 
 const RODE_PLANNER_OPEN_KEY = 'anchorWatch.rodePlanner.open'
 const RODE_PLANNER_CONTENT_ID = 'rode-planner-content'
@@ -513,43 +513,23 @@ export function AnchorRodePlanner({
 
   if (!open) {
     return (
-      <button
-        type="button"
-        aria-expanded={false}
-        aria-controls={RODE_PLANNER_CONTENT_ID}
-        aria-label="Expand Rode Planner"
-        onClick={() => setOpen(true)}
-        className="flex w-10 shrink-0 flex-col items-center gap-2 rounded-xl border bg-sidebar py-3 text-sidebar-foreground hover:bg-sidebar-accent"
-      >
-        <Link className="h-4 w-4" />
-        <ChevronLeft className="h-4 w-4" />
-      </button>
+      <SidebarPaneRail side="right" icon={Link} label="Expand Rode Planner" onShow={() => setOpen(true)} />
     )
   }
 
   return (
     <div className="w-full shrink-0 lg:w-(--sidebar-width)" style={{ '--sidebar-width': '20rem' } as CSSProperties}>
       <Sidebar side="right" collapsible="none" className="h-full w-full rounded-xl border">
-        <SidebarHeader className="flex-row items-center justify-between border-b">
-          {/* A chain link, the rode itself — same icon the collapsed rail
-              shows, so the expanded and collapsed states read as one control. */}
-          <span className="inline-flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            <Link className="h-3.5 w-3.5 shrink-0" />
-            Rode Planner
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Collapse rode planner"
-            aria-expanded
-            aria-controls={RODE_PLANNER_CONTENT_ID}
-            className="h-7 w-7"
-            onClick={() => setOpen(false)}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </SidebarHeader>
+        {/* A chain link, the rode itself — same icon the collapsed rail
+            shows, so the expanded and collapsed states read as one control. */}
+        <SidebarPaneHeader
+          side="right"
+          icon={Link}
+          label="Rode Planner"
+          hideLabel="Collapse rode planner"
+          controlsId={RODE_PLANNER_CONTENT_ID}
+          onHide={() => setOpen(false)}
+        />
 
         <SidebarContent id={RODE_PLANNER_CONTENT_ID}>
           <SidebarGroup>

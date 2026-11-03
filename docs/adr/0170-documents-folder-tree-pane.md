@@ -77,3 +77,46 @@ could not see the shape of the library at any point.
 - A subfolder of a manual cannot be reached from the pane, only from inside the manual.
 - `IndexTable` gains optional row-drag props. `TreeLayout` and `FolderTree` appear in the
   dev `/patterns` gallery. The operator-facing description is in `docs/features/documents.md`.
+
+## Amendment (2026-11-04): the pane takes the sidebar form
+
+The wide-screen pane was a hand-built `w-56` card, and its hidden state was an outline
+button in a row above the content, which cost the list a row of height. It now matches the
+Rode Planner on the Anchor Watch page, mirrored to the left, so the two read as one kind
+of control.
+
+- `TreeLayout` renders the shared `Sidebar` (`side="left"`, `collapsible="none"`) inside a
+  `w-64 shrink-0` wrapper, so a long folder name cannot stretch the pane. The header holds
+  the pane's icon and name and a ghost chevron button; the tree sits in `SidebarContent`.
+  The hide button is 40px square because of the control floor.
+- Hidden, the pane becomes the planner's slim rail: a `w-10` strip beside the content
+  rather than above it, with a button at its top showing the icon and a chevron. Only that
+  button reopens the pane, so a stray tap beside a long list does nothing. The button
+  scrolls with the page: sticky has no effect here, because the app's page card sets
+  `overflow-y-auto` without a bounded height, and the document does the scrolling. Only the
+  header's hide button carries `aria-controls`, pointing at
+  the pane's content. The rail keeps `aria-expanded={false}` but has no `aria-controls`,
+  because its target is not mounted while the pane is hidden. Both controls also carry a
+  `title` equal to their `aria-label`, because the help pages name them.
+- The rail and header are shared with the Rode Planner through
+  `patterns/sidebar-pane.tsx`. The chevron follows the side: a left pane hides with a left
+  chevron and its rail opens with a right one, and a right pane the reverse.
+- `TreeLayout` takes a `paneIcon` (default `Folder`). Cruises passes the `Route` icon its
+  "All passages" node already uses.
+- `Sidebar`'s `none` form no longer needs `SidebarProvider`, so the pane renders anywhere,
+  including the dev gallery. It never reaches the mobile branch, so it does not compete
+  with the phone Sheet.
+- The remembered hidden state and the phone Sheet are unchanged.
+
+`16rem`, not the planner's `20rem`, because the Documents table is tight. At a 1512px window
+with the main menu collapsed, the table needs 1091px and has 1140px at `16rem`, but only
+1076px at `20rem`, which would push the row menu off the edge. For the same reason the Tags
+column is now capped at `max-w-64`, a cap and not a fixed width, so a folder with no tags or
+short tags reserves no blank space. The figures above were measured with the cell at 256px.
+A first try at `w-40` squeezed three badges into fragments of a word. Badges still shorten
+to fit, and the cell's title lists every tag. With the main menu
+open the table still scrolls sideways. Documents also lost a stray `p-4` on its page wrapper,
+so its title and pane line up with Cruises.
+
+`FolderTree` names moved their vertical spacing from padding to margin. Padding on a
+`line-clamp-2` box showed the top of the hidden third line.

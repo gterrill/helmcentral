@@ -1,14 +1,17 @@
-import { Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { useCallback, useState, type ReactNode } from 'react'
+import { Folder, type LucideIcon } from 'lucide-react'
+import { useCallback, useId, useState, type ReactNode } from 'react'
 
+import { SidebarPaneHeader, SidebarPaneRail } from '@/components/patterns/sidebar-pane'
 import { Button } from '@/components/ui/button'
+import { Sidebar, SidebarContent } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 
 // ADR 0170: the CRUD pattern library's tree layout - a navigation pane
 // (typically a FolderTree) beside the content. On a wide screen the pane is
-// always there and can be hidden; below the mobile breakpoint it lives in a
+// the shared Sidebar, in the same form as the Rode Planner's (mirrored to the
+// left), and hides to a slim rail; below the mobile breakpoint it lives in a
 // left Sheet behind a "Folders" button, so the content keeps the full width.
 
 export interface TreeLayoutProps {
@@ -17,6 +20,8 @@ export interface TreeLayoutProps {
   pane: ReactNode | ((ctx: { dismiss: () => void }) => ReactNode)
   /** Names the pane: the button, the sheet title and the region label. */
   paneLabel?: string
+  /** The icon beside the pane's name in its header and on the collapsed rail. */
+  paneIcon?: LucideIcon
   /** localStorage key remembering whether the wide-screen pane is hidden. */
   collapsedStorageKey?: string
   children: ReactNode
@@ -41,8 +46,9 @@ function saveCollapsed(key: string | undefined, collapsed: boolean): void {
   }
 }
 
-export function TreeLayout({ pane, paneLabel = 'Folders', collapsedStorageKey, children, className }: TreeLayoutProps) {
+export function TreeLayout({ pane, paneLabel = 'Folders', paneIcon: PaneIcon = Folder, collapsedStorageKey, children, className }: TreeLayoutProps) {
   const isMobile = useIsMobile()
+  const contentId = useId()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => loadCollapsed(collapsedStorageKey))
   const dismiss = useCallback(() => setSheetOpen(false), [])
@@ -58,7 +64,7 @@ export function TreeLayout({ pane, paneLabel = 'Folders', collapsedStorageKey, c
       <div className={cn('flex min-h-0 flex-1 flex-col gap-4', className)}>
         <div>
           <Button type="button" variant="outline" size="sm" onClick={() => setSheetOpen(true)}>
-            <Folder className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+            <PaneIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             {paneLabel}
           </Button>
         </div>
@@ -78,37 +84,31 @@ export function TreeLayout({ pane, paneLabel = 'Folders', collapsedStorageKey, c
 
   return (
     <div className={cn('flex min-h-0 flex-1 gap-4', className)}>
-      {collapsed ? null : (
-        <aside
-          aria-label={paneLabel}
-          className="flex w-56 shrink-0 flex-col gap-1 rounded-md border border-border bg-card p-2"
-        >
-          <div className="flex items-center justify-between gap-2 px-1">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{paneLabel}</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Hide ${paneLabel.toLowerCase()}`}
-              onClick={() => setCollapsedAndRemember(true)}
-            >
-              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{renderPane({ dismiss: () => {} })}</div>
-        </aside>
+      {collapsed ? (
+        <SidebarPaneRail
+          side="left"
+          icon={PaneIcon}
+          label={`Show ${paneLabel.toLowerCase()}`}
+          onShow={() => setCollapsedAndRemember(false)}
+        />
+      ) : (
+        <div className="w-64 shrink-0">
+          <Sidebar side="left" collapsible="none" role="complementary" aria-label={paneLabel} className="h-full w-full rounded-xl border">
+            <SidebarPaneHeader
+              side="left"
+              icon={PaneIcon}
+              label={paneLabel}
+              hideLabel={`Hide ${paneLabel.toLowerCase()}`}
+              controlsId={contentId}
+              onHide={() => setCollapsedAndRemember(true)}
+            />
+            <SidebarContent id={contentId} className="p-2">
+              {renderPane({ dismiss: () => {} })}
+            </SidebarContent>
+          </Sidebar>
+        </div>
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-        {collapsed && (
-          <div>
-            <Button type="button" variant="outline" size="sm" onClick={() => setCollapsedAndRemember(false)}>
-              <PanelLeftOpen className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-              {`Show ${paneLabel.toLowerCase()}`}
-            </Button>
-          </div>
-        )}
-        {children}
-      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">{children}</div>
     </div>
   )
 }
