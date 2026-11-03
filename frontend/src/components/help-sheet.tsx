@@ -24,7 +24,7 @@ interface HelpSheetProps {
 
 // The group line under the title (Feature / How-to / Reference / Contents):
 // derived from the page id's own directory, the same three-way split
-// docs/ itself uses (AGENTS.md's Diátaxis table) plus the hand-written
+// docs/ itself uses (the help-pages skill's Diátaxis table) plus the hand-written
 // contents page.
 function helpGroupLabel(pageId: string): string {
   if (pageId === 'index') return 'Contents'

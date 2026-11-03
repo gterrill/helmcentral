@@ -1,6 +1,6 @@
 ---
 name: help-pages
-description: Voice and structure for Helmcentral's operator help pages. Use when writing or editing anything under docs/features, docs/how-to, docs/reference or docs/index.md, or CHANGELOG entries, or when asked to make help text read better.
+description: Voice and structure for Helmcentral's operator help pages. Use when writing or editing anything under docs/features, docs/how-to, docs/reference, docs/tutorials or docs/index.md, or CHANGELOG entries, when deciding where a new page goes, or when asked to make help text read better.
 ---
 
 # Help pages
@@ -28,6 +28,29 @@ never say it that way out loud, rewrite it.
 4. **Diff the page against the original** and confirm each fact from step 2
    is still there and still true. A rewrite that drops or bends a fact is not
    finished.
+
+## Where a page goes
+
+`docs/` follows the [Diátaxis](https://diataxis.fr/) split, indexed by
+`docs/index.md`:
+
+| Content | Location |
+| --- | --- |
+| What a feature does, what it gives the operator, where it stops | `docs/features/` |
+| Steps to accomplish a specific task | `docs/how-to/` |
+| Fields, formats, environment variables, state paths | `docs/reference/` |
+| Guided first run (none yet; create only when something needs it) | `docs/tutorials/` |
+
+A feature normally gets one `features/` page as its entry point, and grows
+`how-to/` and `reference/` pages as it needs them. Create a directory or page
+only when it has content.
+
+A page states the behaviour and the reason for it in its own words, with no ADR
+numbers. If it only makes sense once the reader has followed a decision record,
+it is not finished.
+
+A new page has no original to rewrite or diff, but it still passes `make docs-lint`
+before commit. Lint errors fail CI.
 
 ## The moves
 
