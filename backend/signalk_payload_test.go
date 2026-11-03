@@ -54,6 +54,13 @@ func seedSelfTree(t *testing.T, body string) {
 		t.Fatalf("seeding self tree: %v", err)
 	}
 
+	// Reading the seeded position runs it through the process-wide GNSS
+	// validation, whose critical latch outlives the test that tripped it (a
+	// -1,-1 sentinel, a missing self vessel). Start and end clean so a later
+	// test that seeds a good fix is not told to wait for a stable GPS.
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
 	snapshot := newSignalKSnapshot()
 	snapshot.contexts["vessels.self"] = payload
 	snapshot.setSelfContext("vessels.self")
