@@ -22,7 +22,7 @@ const traceApi: RunApi = {
   rounds: [
     {
       index: 0, kind: 'lookups', start_offset_ms: 0, latency_ms: 4100, prompt_tokens: 900, completion_tokens: 40, cached_tokens: 600, cost_usd: 0.004,
-      forced_final: false, progress: true, error: '',
+      forced_final: false, progress: true, error: '', check_trigger: '', check_draft: '',
       calls: [
         { seq: 0, name: 'find_places', args: '{"query":"Cairns"}', elapsed_ms: 2300, result_bytes: 812, error: '', cache: 'miss' },
         { seq: 1, name: 'find_places', args: '{"query":"Dunk Island"}', elapsed_ms: 3, result_bytes: 400, error: '', cache: 'hit' },
@@ -31,11 +31,11 @@ const traceApi: RunApi = {
     },
     {
       index: 1, kind: 'lookups', start_offset_ms: 72000, latency_ms: 9000, prompt_tokens: 1200, completion_tokens: 30, cached_tokens: 0, cost_usd: 0.006,
-      forced_final: false, progress: false, error: '', calls: [{ seq: 0, name: 'get_tides', args: '{"lat":1}', elapsed_ms: 10, result_bytes: 0, error: 'withheld', cache: '' }],
+      forced_final: false, progress: false, error: '', check_trigger: '', check_draft: '', calls: [{ seq: 0, name: 'get_tides', args: '{"lat":1}', elapsed_ms: 10, result_bytes: 0, error: 'withheld', cache: '' }],
     },
     {
       index: 2, kind: 'final', start_offset_ms: 90000, latency_ms: 30000, prompt_tokens: 1300, completion_tokens: 500, cached_tokens: 0, cost_usd: 0.02,
-      forced_final: true, progress: false, error: '', calls: [],
+      forced_final: true, progress: false, error: '', check_trigger: '', check_draft: '', calls: [],
     },
   ],
 }
@@ -124,6 +124,48 @@ describe('AssistantRunDetails', () => {
     expect(within(rounds[1]).getByText('sent back for correction')).toBeInTheDocument()
     expect(within(rounds[2]).getByText('answer')).toBeInTheDocument()
     expect(screen.getByText(/It ran for/)).toHaveTextContent('It ran for 2 min 13 s.')
+  })
+
+  it('shows the draft Mate was made to redo, and why, on the correction round only', async () => {
+    const base = traceApi.rounds![2]
+    stubFetch({
+      ok: true,
+      body: {
+        ...traceApi,
+        rounds: [
+          {
+            ...base, index: 0, kind: 'correction', forced_final: false,
+            check_trigger: 'anchorage shelter',
+            check_draft: 'Whites Bay is well sheltered from the north.\nThursday looks fine.',
+          },
+          { ...base, index: 1, kind: 'answer', forced_final: false },
+        ],
+      },
+    })
+    render(<AssistantRunDetails runId="run-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run details' }))
+
+    const rounds = await screen.findAllByTestId('run-round')
+    const first = within(rounds[0])
+    expect(first.getByText(/Sent back for anchorage shelter\./)).toBeInTheDocument()
+    const draft = first.getByTestId('run-round-draft')
+    expect(draft).toHaveTextContent('Whites Bay is well sheltered from the north.')
+    expect(draft).toHaveTextContent('Thursday looks fine.')
+    expect(within(rounds[1]).queryByTestId('run-round-draft')).not.toBeInTheDocument()
+  })
+
+  it('shows nothing extra on a correction round stored before drafts were kept', async () => {
+    const base = traceApi.rounds![2]
+    stubFetch({
+      ok: true,
+      body: { ...traceApi, rounds: [{ ...base, index: 0, kind: 'correction', forced_final: false, check_trigger: '', check_draft: '' }] },
+    })
+    render(<AssistantRunDetails runId="run-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run details' }))
+
+    const round = await screen.findByTestId('run-round')
+    expect(within(round).getByText('sent back for correction')).toBeInTheDocument()
+    expect(within(round).queryByTestId('run-round-draft')).not.toBeInTheDocument()
   })
 
   it('reports a failure to read the trace instead of showing nothing', async () => {

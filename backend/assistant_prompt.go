@@ -1166,6 +1166,12 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"from a tool you did not call in this turn (find_places, routes, distances, forecasts): label " +
 		"figures from earlier turns as from earlier, or fetch them again.\n\n" +
 
+		// A message that opens with the check label is Helmcentral's, not the
+		// operator's. A model once read one as the operator objecting and
+		// apologised for a comment it had not made.
+		"A message that opens with " + assistantCheckLabelText + " comes from Helmcentral. Do what it asks. " +
+		assistantCheckNotice + "\n\n" +
+
 		// Open-plan continuity: the operator asked about an outer-reef window,
 		// got "no window through Thursday, Friday possible"; moved anchorage
 		// and asked only "what do the conditions look like now?"; Mate ran a

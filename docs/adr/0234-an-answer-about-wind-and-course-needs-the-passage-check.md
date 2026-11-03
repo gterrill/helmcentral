@@ -118,3 +118,58 @@ yet. The guard's tests use its text.
   correction asks for.
 - The third claim, citing tools that weren't called, is still only a prompt
   rule.
+
+## Amendment, 2026-11-03: the correction says who sent it
+
+### Incident
+
+The operator said "We would be leaving the marina on Thursday" in a conversation
+that had already named Whites Bay with coordinates. Mate's first draft judged
+shelter and made no lookup, so the anchorage shelter trigger sent it back. The
+model (deepseek-v4-pro) read the correction as the operator objecting. It replied
+"You're right — I restated arcs from an earlier turn" and asked where the boat
+was bound and when it would clear the marina. That reply held no shelter claim,
+so it passed the check and reached the operator, who had to repeat the
+destination. In the same conversation a second send-back produced an answer
+opening "My earlier comment on Whites Bay's shelter was guesswork", though no
+such comment existed. The rejected draft was not stored, so neither case can be
+read back.
+
+### Decision
+
+The label `[Helmcentral check, not from the operator]` was true but too faint
+for a model that treats every user-role turn as the operator speaking. Five
+changes follow, and none alters what the check accepts.
+
+- **The correction talks about the draft.** Each instruction opened "This answer",
+  which reads as an objection to something delivered. They now open "Your draft".
+- **Every send-back closes with one notice**, whatever the number of triggers.
+  It says the operator did not write the message, that the reply must not refer to
+  it or the draft, and that the model must not ask for what the operator already
+  gave. It stops short of three things that would have been simpler to say. "Write
+  as if this was never sent" would cancel the correction. "The operator has not
+  seen the draft" is false once a draft has streamed. "Take figures from the
+  conversation" would send the model to the old figures a correction may want
+  fetched again.
+- **The stable prompt carries the same notice**, built from the same constants,
+  so the two cannot drift apart.
+- **The loop logs a correction that changed nothing.** An answer that follows a
+  send-back with no new tool result logs "answer after the <trigger> correction
+  made no lookups; accepted as is". A call that failed or never ran does not count
+  as a lookup, and a forced final answer can log the line too. The answer is still
+  accepted, because a question back can be right. A second draft that still trips
+  a trigger logs this line and the existing "still has" line, since each says
+  something different.
+- **The run trace keeps the rejected draft.** A correction round stores its
+  trigger and the draft text, cut at 64 kB like a call's arguments and results,
+  in two columns added to `assistant_run_rounds`. Rounds stored before read back
+  empty. The run details show the draft under the correction round.
+
+### What this does not do
+
+The notice is wording. A model can still ignore it, and nothing in the loop
+checks that the second answer is an answer rather than a question. The log line
+and the stored draft exist so the next occurrence can be counted and read. If
+they show it recurring, the next step is to reject a reply that asks for
+something already in the conversation, which needs a way to tell that from a
+legitimate question.

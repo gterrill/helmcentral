@@ -76,6 +76,12 @@ type assistantTraceRound struct {
 	// Error is why the round's completion or tools failed, if they did.
 	Error string              `json:"error"`
 	Calls []assistantToolCall `json:"calls"`
+	// CheckTrigger and CheckDraft are set on a correction round: what the draft
+	// check found and the draft it sent back. The draft is kept up to
+	// assistantToolCallMaxBytes. Both are empty on every other round, and on
+	// a round stored before they existed.
+	CheckTrigger string `json:"check_trigger"`
+	CheckDraft   string `json:"check_draft"`
 }
 
 // assistantRunTrace is one stored run.

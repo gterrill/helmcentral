@@ -1414,8 +1414,11 @@ reply, the tokens used, the cost, and whether the round found anything new.
 Under each round are the lookups it made, how long each took and how big the
 answer was. A place search also says whether the answer was already in memory
 or had to be looked up. Each round says what it was: lookups, a draft sent back for
-correction, the answer, the final answer, or cut off by time. The top of the
-details says how the run ended and what limits it was given.
+correction, the answer, the final answer, or cut off by time. A draft that was
+sent back shows its text under that round, with the check that stopped it, so you
+can read what Mate wrote before it was withdrawn. Details saved before this was
+kept show the round without the text. The top of the details says how the run ended
+and what limits it was given.
 
 Helmcentral keeps the details of an answer for a week, unless you've rated the
 answer, when they stay as long as the rating does. The details of a question
