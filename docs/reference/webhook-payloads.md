@@ -53,7 +53,7 @@ newer report from the same watch replaces an older one that's still waiting.
 | --- | --- | --- |
 | `kind` | string | Always `watch_report`. |
 | `vessel` | string | The boat's name, empty if it isn't known. |
-| `title` | string | The same title the other channels use, such as `Overnight check: 2 findings`. |
+| `title` | string | The same title the other channels use, such as `Overnight check: 2 to look at`, or `Overnight check: nothing to report`. |
 | `summary` | string | The short message: up to three findings, then the opening sentence of Mate's review. Lines are separated by a newline. |
 | `watch.id` | string | The watch's id. |
 | `watch.name` | string | The watch's name. |
@@ -63,14 +63,20 @@ newer report from the same watch replaces an older one that's still waiting.
 | `run.outcome` | string | Always `ran`, because a skipped run is never sent. |
 | `findings` | array | Every finding of the run, possibly empty. Each has `section`, `rule`, `text` and `by`, which is `rules` or `mate`. |
 | `charts` | array | The run's charts, possibly empty. See [Charts](#charts). |
-| `report` | object or null | The report: `generated_at`, `boat_time`, `since`, `since_at` and `sections`. Each section has `name`, `title`, and either `lines` or `unavailable`, and sometimes `figures`. `generated_at` and `since_at` are UTC times like `2026-10-28T14:00:00Z`, for a program to read. `boat_time` and `since` are the same instants written for a person, like `Thu 29 Oct 3.00 AM UTC+13`. |
+| `report` | object or null | The report: `generated_at`, `boat_time`, `since`, `since_at` and `sections`. Each section has `name`, `title`, and either `lines` or `unavailable`, and sometimes `figures`, `rows`, `summary` and `not_checked`. `generated_at` and `since_at` are UTC times like `2026-10-28T14:00:00Z`, for a program to read. `boat_time` and `since` are the same instants written for a person, like `Thu 29 Oct 3.00 AM UTC+13`. |
 | `review` | string or null | Mate's full review, or null when Mate didn't review the run. |
+| `questions` | array | Mate's questions for you, as strings, possibly empty. |
 | `path` | string | Where the run is in the app, such as `/watches/<watch id>?run=<run id>`. |
 | `link` | string | The full link, `path` after the address you set as **Address for links**. Left out when no address is set. |
 
 Each finding can also have a `chart_problem` string, which says why a chart that
 was asked for could not be drawn, for example `No history to chart: the barometer
-history is empty`.
+history is empty`. A finding Mate adds to another also has an `extends` number,
+which says which finding it adds to, counting from 0 in `findings`.
+
+A section's `rows` are its readings, one object each. A row always has `label` and
+`value`, and can also have `when`, `detail`, `change`, `flagged` and `not_checked`.
+`not_checked` on a section lists a sentence for each check that couldn't run.
 
 ### Charts
 
@@ -100,7 +106,7 @@ front of `path`.
 {
   "kind": "watch_report",
   "vessel": "Pikorua",
-  "title": "Overnight check: 1 finding",
+  "title": "Overnight check: 1 to look at",
   "summary": "House bank drained 40 Ah overnight, more than usual.\nThe fridge ran longer than the night before.",
   "watch": { "id": "3f1c", "name": "Overnight check", "schedule_sentence": "Every hour" },
   "run": { "id": "9a7e", "boat_time": "Thu 29 Oct 3.00 AM UTC+13", "outcome": "ran" },
@@ -119,6 +125,7 @@ front of `path`.
     ]
   },
   "review": "The fridge ran longer than the night before. Nothing else looks different.",
+  "questions": [],
   "path": "/watches/3f1c?run=9a7e",
   "link": "http://boat.local:9091/watches/3f1c?run=9a7e"
 }

@@ -114,6 +114,7 @@ why when it can't.
   still going. Times say "yesterday" or the day when they aren't today. The
   five most frequent titles are named and the rest are counted.
 - **Tanks:** Each tank's level, and how much it has moved since the last report.
+  Fresh water comes first, then fuel, then black water.
 - **Weather:** Pressure, how it has moved over three hours, and the true wind.
   If you have a planned stay, it also shows the forecast wind there for your
   dates.
@@ -124,7 +125,10 @@ last 24 hours and says so.
 
 A section that can't report says why. Two examples are "pressure history still
 filling" and "the alarm log is not open". It never fills a gap with an older
-reading, and an unavailable section is not an all clear.
+reading, and an unavailable section is not an all clear. When a check can't run,
+for example the overnight draw on a night with no usable record, the report also
+names it under **Not checked**. A reading that no check depends on, such as solar
+on a boat without any, just says it isn't available in its own section.
 
 ## Findings
 
@@ -199,13 +203,20 @@ for any question you ask.
 Mate gets the report, the findings and your **What to look out for** text. Here
 is what it does with them:
 
-- **Judges in context:** It says what changed and what matters, in a few
-  sentences.
+- **Judges in context:** It says what changed and what matters in at most four
+  sentences, and it leads with its judgement because the first sentence is what
+  you read first.
 - **Adds findings:** If it sees something the rules missed, it adds a finding.
-  The page marks it as Mate's. It can't remove or soften a finding the rules
-  reached.
-- **Asks when it isn't sure:** It asks you rather than guessing, and it never
-  names a cause it can't see in the figures.
+  If it has something to add to a finding the rules reached, its words sit under
+  that finding. The page marks them as Mate's. It can't remove or soften a
+  finding the rules reached.
+- **Doesn't draw a reading twice:** If a finding already has a chart of a
+  reading, Mate can't add a second chart of that same reading.
+- **Asks when it isn't sure:** It asks you rather than guessing, up to three
+  questions, and it never names a cause it can't see in the figures. Each
+  question has an **Answer** button. It opens a chat about that run with the
+  question in your message, ready for you to finish. Nothing is sent until you
+  send it.
 - **Reads only:** It can look at the boat, the alarms, the history, the forecast
   and your logbook. It can't change anything or propose anything.
 - **Remembers what it said:** Mate also gets its own review of the last report,
@@ -279,14 +290,15 @@ never got that finding, because the report before it didn't reach you.
 
 What you receive depends on the channel:
 
-- **The title:** The watch name, then "3 findings", "1 finding" or "nothing to
-  report", for example "Overnight check: 2 findings".
+- **The title:** The watch name, then how many things there are to look at, or
+  "nothing to report", for example "Overnight check: 2 to look at". A finding
+  that Mate adds to one the rules reached counts as the same thing.
 - **ntfy and phone push:** The title, then up to three findings and the opening
   sentence of Mate's review. Tapping a phone push opens that run on the Watches
   page. They arrive at normal priority, so they don't break through
   do-not-disturb the way an alarm can.
 - **Email:** The title is the subject, and the body is the whole report: every
-  finding, Mate's review and every section's lines. When a finding has a chart,
+  finding, Mate's review and questions, and every section's lines. When a finding has a chart,
   the email also comes as a page with the chart as a picture under that finding.
   The plain text is still there for mail programs that want it.
 - **When a chart can't be drawn:** The report still goes out without it. The
@@ -328,14 +340,18 @@ whether it ran or was skipped and why, and its cost.
 
 - **An open run:** It shows the time and the period it covers. Under that, the
   first sentence of Mate's review stands out in large type, so you can tell how
-  the morning looks before you read on. If Mate didn't review the run, that line says why,
-  and if the run was skipped, it gives the reason. Below that come **Needs a look**, the rest of **Mate's review**, and
-  **Readings**, with each section in the same place every time. Who was told
-  and what the review cost are at the foot of the run.
+  the morning looks before you read on. If Mate didn't review the run, that line
+  says why, and if the run was skipped, it gives the reason.
+- **What comes next:** **Needs a look** lists what to attend to, with anything
+  Mate adds to a finding directly under it. **Not checked** names each check
+  that couldn't run and why, in a dashed box so that it can't pass for a reading.
+  Then come the rest of **Mate's review**, Mate's questions, and **Readings**,
+  with each section in the same place every time. Who was told and what the
+  review cost are at the foot of the run.
 - **Folded runs:** The newest run is open when you arrive, unless you came by a
   link to a run, which then sits open at the top. Every other run sits under
-  **Earlier reports**, folded to its time, how many findings it had and the first
-  sentence of Mate's review. A folded run also says **Not delivered**, **Not
+  **Earlier reports**, folded to its time, how many things it has for you to look
+  at and the first sentence of Mate's review. A folded run also says **Not delivered**, **Not
   sent** or **No review** when that happened. Tap a run to open it, and open as
   many as you like to compare them. When a new run arrives it opens in place of
   the last one that opened by itself. Any you opened yourself stay open.

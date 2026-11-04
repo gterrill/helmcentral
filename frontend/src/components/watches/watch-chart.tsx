@@ -69,7 +69,7 @@ export function WatchChart({ chart }: { chart: WatchChartData }) {
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <ChartLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Chart</span>
-        <span className="min-w-0 flex-1 line-clamp-2 text-sm font-medium text-foreground" title={chart.title}>
+        <span className="min-w-0 flex-1 basis-40 line-clamp-2 text-sm font-medium text-foreground" title={chart.title}>
           {chart.title}
         </span>
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">

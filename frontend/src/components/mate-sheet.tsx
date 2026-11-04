@@ -1,5 +1,5 @@
 import { ArrowUpRight, MessageSquarePlus, Search, Square } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
@@ -7,7 +7,7 @@ import { OverlayCloseContext } from '@/components/fullscreen-alarm-banner'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
-import { useMateSession } from '@/hooks/use-mate-session'
+import { useMateSession, type MateSendOptions } from '@/hooks/use-mate-session'
 import { useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { extractSpokenSummary } from '@/lib/spoken-summary'
@@ -40,6 +40,10 @@ interface MateSheetProps {
    * empty chat") rather than resuming whatever thread was last active. */
   initialQuestion?: string
   newConversation?: boolean
+  /** `initialQuestion` is text to finish, not a question to send: it goes in the
+   * composer of a blank conversation, which is focused, and nothing is sent
+   * until the operator sends it. The screen context stays on until then. */
+  draft?: boolean
   /** `initialQuestion` came in by voice (ADR 0093 voice phase): Mate writes
    * a spoken summary for it, and the sheet reads that aloud when
    * `readAloud` is on. Questions from Help, Settings or a selection are
@@ -86,7 +90,7 @@ interface MateSheetProps {
  * keep whatever conversation was last active across every later close and
  * reopen, for the rest of the session - see the reset-on-open effect below.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, spoken = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange, onContextDone }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, draft = false, spoken = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange, onContextDone }: MateSheetProps) {
   const session = useMateSession({ screen })
   const watch = useMateTelemetryWatch(session.activeId)
   const speechOutput = useSpeechOutput()
@@ -100,6 +104,9 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // in the composer rather than being lost.
   const [queuedQuestion, setQueuedQuestion] = useState<{ text: string; key: number } | null>(null)
   const { send, startNew, select, reload, isAnswering, loading } = session
+  const sending = session.status.sending
+  // The chat a draft opened has not had its first message sent yet.
+  const draftChatPendingRef = useRef(false)
 
   // Same pattern as AssistantDrawer's own effect of the same name: waits on
   // `loading` so a transient null (before the mount fetch has resolved)
@@ -121,6 +128,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // is what autoFocus alone can't do, since that only ever fires on mount.
   const handleNewConversation = useCallback(() => {
     startNew()
+    draftChatPendingRef.current = false
     onContextDone?.()
     composerRef.current?.focus()
   }, [startNew, onContextDone])
@@ -148,6 +156,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // its thread into this same sheet, exactly as clicking a row in the /mate
   // page's own list does.
   const handleSelectFromSearch = useCallback((id: string) => {
+    draftChatPendingRef.current = false
     onContextDone?.()
     void select(id)
   }, [select, onContextDone])
@@ -198,13 +207,30 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   useEffect(() => {
     if (!open) {
       sentQuestionRef.current = null
+      // Used once: a draft left unsent is not offered again on a later open.
+      draftChatPendingRef.current = false
+      setQueuedQuestion(null)
       return
     }
     if (!initialQuestion || !canWrite || loading) return
 
-    const key = `${newConversation ? 'new:' : 'existing:'}${initialQuestion}`
+    const key = `${draft ? 'draft:' : newConversation ? 'new:' : 'existing:'}${initialQuestion}`
     if (sentQuestionRef.current === key) return
+    // Text to finish, not a question: it always goes in a new chat linked to
+    // the run, so it waits for a reply still arriving. `sending` is a
+    // dependency, so this runs again when that reply ends.
+    if (draft && isAnswering()) return
     sentQuestionRef.current = key
+
+    if (draft) {
+      // A blank conversation (the run is linked when it is created, on the
+      // first send) with the text in the composer.
+      startNew()
+      draftChatPendingRef.current = true
+      setQueuedQuestion({ text: initialQuestion, key: Date.now() })
+      composerRef.current?.focus()
+      return
+    }
 
     void (async () => {
       const result = await send(initialQuestion, { newConversation, spoken })
@@ -221,7 +247,23 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
         speechOutput.speak(extractSpokenSummary(result.message.content) ?? result.message.content.slice(0, SPOKEN_FALLBACK_LENGTH))
       }
     })()
-  }, [open, initialQuestion, newConversation, spoken, canWrite, loading, send, readAloud, speechOutput, onContextDone])
+  }, [open, initialQuestion, newConversation, draft, spoken, canWrite, loading, sending, send, isAnswering, startNew, readAloud, speechOutput, onContextDone])
+
+  // A draft's chat is linked to its run on the first send; after that the run
+  // is dropped from the screen, as for a question the sheet sent itself. The
+  // screen is read as the send begins, so the chat is created with the link.
+  const threadSession = useMemo(() => ({
+    ...session,
+    send: async (text: string, options?: MateSendOptions) => {
+      const firstOfDraftChat = draftChatPendingRef.current
+      const result = await session.send(text, options)
+      if (firstOfDraftChat && !result.refused) {
+        draftChatPendingRef.current = false
+        onContextDone?.()
+      }
+      return result
+    },
+  }), [session, onContextDone])
 
   // Closing the sheet stops whatever it was reading - the operator has
   // moved on, and a voice answer trailing off after the panel that gave it
@@ -333,10 +375,11 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
             <OverlayCloseContext.Provider value={() => onOpenChange(false)}>
               <AssistantThread
                 canWrite={canWrite}
-                session={session}
+                session={threadSession}
                 queuedQuestion={queuedQuestion}
+                onQueuedQuestionTaken={() => setQueuedQuestion(null)}
                 watch={watch}
-                autoFocus={!initialQuestion}
+                autoFocus={!initialQuestion || draft}
                 composerRef={composerRef}
                 onHasDraftChange={onHasDraftChange}
               />

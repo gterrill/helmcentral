@@ -123,6 +123,10 @@ type watchFinding struct {
 	// words, so the same issue is the same finding from one run to the next
 	// whatever Mate's wording. Empty on a finding the rules reached.
 	Key string `json:"key,omitempty"`
+	// Extends is the index, in the rules' findings of the same run, of the one
+	// this finding of Mate's adds to. Rule findings come first in a run's
+	// findings, so the index points at the same finding there.
+	Extends *int `json:"extends,omitempty"`
 	// ChartProblem says why a chart that was asked for could not be drawn.
 	ChartProblem string `json:"chart_problem,omitempty"`
 	// chart is what the finding wants drawn; it is resolved into a watchChart
@@ -151,6 +155,8 @@ type watchRun struct {
 	// is none. Exactly one of them is set on a run that produced a report.
 	Review        *string `json:"review"`
 	ReviewProblem *string `json:"review_problem"`
+	// Questions are what Mate asked the skipper in this run's review.
+	Questions []string `json:"questions,omitempty"`
 	// ReviewOpening and ReviewRest are Review in two parts, worked out when a
 	// run is read for the page (forPage) and never stored.
 	ReviewOpening string   `json:"review_opening,omitempty"`
@@ -333,6 +339,9 @@ func createWatchesSchema(db *sql.DB) error {
 		"not_sent":     "TEXT NOT NULL DEFAULT ''",
 		"charts":       "TEXT NOT NULL DEFAULT '[]'",
 		"notify_notes": "TEXT NOT NULL DEFAULT '[]'",
+		// questions is NULL on a run saved before Mate's questions were kept
+		// apart from the review.
+		"questions": "TEXT",
 	} {
 		if err := addColumnIfMissing(db, "watch_runs", col, decl); err != nil {
 			return err
@@ -538,7 +547,7 @@ func countScheduledWatchesQ(q sqlQueryer) (int, error) {
 // ── runs ────────────────────────────────────────────────────────────────
 
 const watchRunColumns = `id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report, findings,
-	review, review_problem, cost_usd, cost_known, model, boat_time, timezone, notified, told_keys, not_sent, charts, notify_notes`
+	review, review_problem, cost_usd, cost_known, model, boat_time, timezone, notified, told_keys, not_sent, charts, notify_notes, questions`
 
 func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 	var (
@@ -550,10 +559,16 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		known                 int
 		notified, told        string
 		charts, notes         string
+		questions             sql.NullString
 	)
 	if err := row.Scan(&r.ID, &r.WatchID, &started, &finished, &r.Outcome, &r.SkipReason, &r.ReportKind, &report, &findings,
-		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone, &notified, &told, &r.NotSent, &charts, &notes); err != nil {
+		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone, &notified, &told, &r.NotSent, &charts, &notes, &questions); err != nil {
 		return watchRun{}, err
+	}
+	if questions.Valid && questions.String != "" {
+		if err := json.Unmarshal([]byte(questions.String), &r.Questions); err != nil {
+			return watchRun{}, fmt.Errorf("run %s: the saved questions are unreadable: %w", r.ID, err)
+		}
 	}
 	if err := json.Unmarshal([]byte(notified), &r.Notified); err != nil {
 		return watchRun{}, fmt.Errorf("run %s: the saved notifications are unreadable: %w", r.ID, err)
@@ -629,11 +644,15 @@ func insertWatchRunTx(x alarmSQLExecer, r watchRun, countsAsRun bool) error {
 	if err != nil {
 		return err
 	}
+	questionsJSON, err := json.Marshal(nonNilStrings(r.Questions))
+	if err != nil {
+		return err
+	}
 	if _, err := x.Exec(`INSERT INTO watch_runs (id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report,
-		findings, has_finding, review, review_problem, cost_usd, cost_known, model, boat_time, timezone, charts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		findings, has_finding, review, review_problem, cost_usd, cost_known, model, boat_time, timezone, charts, questions)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WatchID, watchStoreTime(r.StartedAt), watchStoreTime(r.FinishedAt), r.Outcome, r.SkipReason, r.ReportKind, string(r.Report),
-		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model, r.BoatTime, r.Timezone, string(chartsJSON)); err != nil {
+		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model, r.BoatTime, r.Timezone, string(chartsJSON), string(questionsJSON)); err != nil {
 		return fmt.Errorf("record watch run: %w", err)
 	}
 	column := "last_skip_at"

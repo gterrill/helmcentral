@@ -89,6 +89,43 @@ export interface WatchFinding {
   by: 'rules' | 'mate'
   /** Why a chart that was asked for could not be drawn. */
   chart_problem?: string
+  /** The index in the run's findings of the finding this one adds to. */
+  extends?: number
+}
+
+/** The findings that stand on their own, which is the count the operator is told to look at. */
+export function findingsToLookAt(findings: WatchFinding[]): number {
+  return findings.filter((f) => f.extends == null).length
+}
+
+export interface WatchFindingGroup {
+  /** Index in the run's findings. */
+  index: number
+  finding: WatchFinding
+  /** The findings that add to this one, in the order they came. */
+  adds: Array<{ index: number; finding: WatchFinding }>
+}
+
+/**
+ * Findings in the order the server sent them, each with the findings that add
+ * to it. The server checks `extends` when it stores a run and puts the rules'
+ * findings first, so a parent comes before its children. A finding whose parent
+ * is not found is shown as its own group: nothing is hidden.
+ */
+export function groupFindings(findings: WatchFinding[]): WatchFindingGroup[] {
+  const groups: WatchFindingGroup[] = []
+  const byIndex = new Map<number, WatchFindingGroup>()
+  findings.forEach((finding, index) => {
+    const parent = finding.extends == null ? undefined : byIndex.get(finding.extends)
+    if (parent) {
+      parent.adds.push({ index, finding })
+      return
+    }
+    const group = { index, finding, adds: [] }
+    groups.push(group)
+    byIndex.set(index, group)
+  })
+  return groups
 }
 
 /** A finding's chart as data: the points, never an image. */
@@ -106,11 +143,37 @@ export interface WatchChartData {
   threshold?: { label: string; value: number }
 }
 
+/** One reading in a section. Absent from runs saved before rows existed, which have only `lines`. */
+export interface WatchReportRow {
+  label: string
+  value: string
+  when?: string
+  detail?: string
+  /** Tanks: the change since the last report ("+4", "−11", "no change"). */
+  change?: string
+  flagged?: boolean
+  not_checked?: boolean
+}
+
 export interface WatchReportSection {
   name: string
   title: string
   unavailable?: string
   lines?: string[]
+  rows?: WatchReportRow[]
+  summary?: string
+  /** Sentences saying what in this section could not be checked. */
+  not_checked?: string[]
+}
+
+/** What the report could not check, in section order: an unavailable section's reason, then its own sentences. */
+export function notCheckedEntries(report: Pick<WatchSectionsReport, 'sections'> | null): string[] {
+  const entries: string[] = []
+  for (const s of report?.sections ?? []) {
+    if (s.unavailable) entries.push(`${s.title}: ${s.unavailable}`)
+    entries.push(...(s.not_checked ?? []))
+  }
+  return entries
 }
 
 export interface WatchSectionsReport {
@@ -168,6 +231,8 @@ export interface WatchRun {
   review_opening?: string
   review_rest?: string
   review_problem: string | null
+  /** What Mate asked the skipper in its review. Absent on a run saved before questions were kept. */
+  questions?: string[]
   cost_usd: number | null
   cost_known: boolean
   model?: string

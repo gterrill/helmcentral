@@ -440,6 +440,135 @@ describe('MateSheet', () => {
     expect(sent).toBe(false)
   })
 
+  // A watch report's question: "Answer" hands the sheet text to finish, not a
+  // question to send. It goes in the composer of a new chat, still tied to the run.
+  describe('draft', () => {
+    const watchScreen = { panel: 'watches', watch_run_id: 'r1', watch_name: 'Morning report' }
+    const DRAFT = 'About "Did you run the watermaker?": '
+
+    function spyOnFetch() {
+      const base = buildFetch((conversationId) => sseMessageResponse(
+        { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: 'Noted.', created_at: '' },
+        { id: conversationId, title: 'Watermaker', created_at: '', updated_at: '' },
+      ))
+      const seen: Array<{ method: string; url: string; body: Record<string, unknown> | null }> = []
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push({ method: init?.method ?? 'GET', url, body: init?.body ? JSON.parse(init.body as string) : null })
+        return base(url, init)
+      }))
+      return seen
+    }
+    const messagePosts = (seen: ReturnType<typeof spyOnFetch>) => seen.filter((c) => c.method === 'POST' && c.url.endsWith('/messages'))
+
+    it('puts the text in the composer, focused, and sends nothing', async () => {
+      const seen = spyOnFetch()
+      const onContextDone = vi.fn()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} initialQuestion={DRAFT} draft newConversation screen={watchScreen}
+          canWrite readAloud={false} onOpenPanel={vi.fn()} onContextDone={onContextDone} />,
+      )
+      const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+      await waitFor(() => expect(textarea.value).toBe(DRAFT))
+      await waitFor(() => expect(textarea).toHaveFocus())
+      await act(async () => { await flushMicrotasks() })
+      expect(messagePosts(seen)).toHaveLength(0)
+      // The run stays attached until the skipper sends.
+      expect(onContextDone).not.toHaveBeenCalled()
+    })
+
+    it('starts from a blank thread, not the one that was open', async () => {
+      const seen = spyOnFetch()
+      const props = { onOpenChange: vi.fn(), screen: watchScreen, canWrite: true, readAloud: false, onOpenPanel: vi.fn() }
+      const { rerender } = render(<MateSheet open {...props} />)
+      const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: 'Earlier question' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      await screen.findByText('Noted.')
+      rerender(<MateSheet open {...props} initialQuestion={DRAFT} draft newConversation />)
+      await waitFor(() => expect(textarea.value).toBe(DRAFT))
+      await waitFor(() => expect(screen.queryByText('Noted.')).not.toBeInTheDocument())
+      expect(messagePosts(seen)).toHaveLength(1)
+    })
+
+    it('sends what the skipper finishes, into a new conversation linked to the run', async () => {
+      const seen = spyOnFetch()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} initialQuestion={DRAFT} draft newConversation screen={watchScreen}
+          canWrite readAloud={false} onOpenPanel={vi.fn()} />,
+      )
+      const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+      await waitFor(() => expect(textarea.value).toBe(DRAFT))
+      fireEvent.change(textarea, { target: { value: `${DRAFT}No, it was off.` } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      await waitFor(() => expect(messagePosts(seen)).toHaveLength(1))
+      expect(messagePosts(seen)[0].body).toMatchObject({ content: `${DRAFT}No, it was off.`, screen: watchScreen })
+      const created = seen.filter((c) => c.method === 'POST' && c.url.endsWith('/api/assistant/conversations'))
+      expect(created.map((c) => c.body)).toEqual([{ watch_run_id: 'r1' }])
+    })
+
+    it('waits for a reply still arriving, then opens a new chat linked to the run with the draft', async () => {
+      const stream = controllableSseStream()
+      const seen: Array<{ method: string; url: string; body: Record<string, unknown> | null }> = []
+      const base = buildFetch(() => ({ ok: true, body: stream.stream }))
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push({ method: init?.method ?? 'GET', url, body: init?.body ? JSON.parse(init.body as string) : null })
+        return base(url, init)
+      }))
+      const props = { onOpenChange: vi.fn(), screen: watchScreen, canWrite: true, readAloud: false, onOpenPanel: vi.fn() }
+      const { rerender } = render(<MateSheet open {...props} />)
+      const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      await waitFor(() => expect(messagePosts(seen)).toHaveLength(1))
+
+      rerender(<MateSheet open {...props} initialQuestion={DRAFT} draft newConversation />)
+      await act(async () => { await flushMicrotasks() })
+      // Not dropped into the chat that is still being answered.
+      expect(textarea.value).toBe('')
+
+      await act(async () => {
+        stream.push(`data: ${JSON.stringify({
+          message: { id: 'm1', conversation_id: 'new-1', seq: 1, role: 'assistant', content: 'Fine tomorrow.', created_at: '' },
+          conversation: { id: 'new-1', title: 'What about tomorrow?', created_at: '', updated_at: '' },
+        })}\n\n`)
+        stream.close()
+        await flushMicrotasks()
+      })
+
+      await waitFor(() => expect(textarea.value).toBe(DRAFT))
+      await waitFor(() => expect(screen.queryByText('Fine tomorrow.')).not.toBeInTheDocument())
+    })
+
+    it('releases the run once the first message of the draft chat has been sent, not before', async () => {
+      const seen = spyOnFetch()
+      const onContextDone = vi.fn()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} initialQuestion={DRAFT} draft newConversation screen={watchScreen}
+          canWrite readAloud={false} onOpenPanel={vi.fn()} onContextDone={onContextDone} />,
+      )
+      const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+      await waitFor(() => expect(textarea.value).toBe(DRAFT))
+      expect(onContextDone).not.toHaveBeenCalled()
+      fireEvent.change(textarea, { target: { value: `${DRAFT}No.` } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      await waitFor(() => expect(onContextDone).toHaveBeenCalledTimes(1))
+      expect(messagePosts(seen)[0].body).toMatchObject({ screen: watchScreen })
+      const created = seen.filter((c) => c.method === 'POST' && c.url.endsWith('/api/assistant/conversations'))
+      expect(created.map((c) => c.body)).toEqual([{ watch_run_id: 'r1' }])
+    })
+
+    it('puts nothing in the composer of a session that cannot write', async () => {
+      const seen = spyOnFetch()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} initialQuestion={DRAFT} draft newConversation screen={watchScreen}
+          canWrite={false} readAloud={false} onOpenPanel={vi.fn()} />,
+      )
+      await screen.findByRole('heading', { name: 'Mate' })
+      await act(async () => { await flushMicrotasks() })
+      expect(messagePosts(seen)).toHaveLength(0)
+    })
+  })
+
   // The Sheet primitive (Base UI dialog) wires up Escape and an overlay
   // click itself - this only needs to prove MateSheet relays that dismissal
   // back through the onOpenChange prop App.tsx uses to close it. The

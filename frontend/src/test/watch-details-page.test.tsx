@@ -12,7 +12,7 @@ import { invalidateWatches } from '@/hooks/use-watches'
 import { resetQueryStore } from '@/lib/api-query'
 import { createAppRouter, memoryHistory } from '@/lib/app-router'
 import { clearPendingSetupFocus, peekPendingSetupFocus } from '@/lib/setup-status'
-import { runTimeLabel, WATCH_TEMPLATES, type WatchDetail, type WatchRecord, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
+import { runTimeLabel, WATCH_TEMPLATES, type WatchDetail, type WatchFinding, type WatchRecord, type WatchReportSection, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
 
 function record(overrides: Partial<WatchRecord> = {}): WatchRecord {
   return {
@@ -408,7 +408,7 @@ describe('WatchDetailsPage run history accordion', () => {
     expect(screen.queryByText('Older review text')).not.toBeInTheDocument()
     const closed = within(runItem('r2'))
     expect(closed.getByText('Wed 28 Oct 06:00 UTC+13')).toBeInTheDocument()
-    expect(closed.getByText('1 finding')).toBeInTheDocument()
+    expect(closed.getByText('1 to look at')).toBeInTheDocument()
     expect(closed.queryByText('$0.05')).not.toBeInTheDocument()
     expect(closed.queryByText('One older alarm')).not.toBeInTheDocument()
   })
@@ -772,7 +772,7 @@ describe('WatchDetailsPage report hierarchy', () => {
     await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
     const ran = triggerOf(runItem('r1')).textContent ?? ''
     expect(ran.indexOf('Thu 29 Oct 06:00 UTC+13')).toBe(0)
-    expect(ran.indexOf('2 findings')).toBeGreaterThan(0)
+    expect(ran.indexOf('2 to look at')).toBeGreaterThan(0)
     expect(ran).not.toContain('Skipped')
     expect(triggerOf(runItem('r2'))).toHaveTextContent('Skipped')
   })
@@ -1213,6 +1213,297 @@ describe('a new watch', () => {
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     expect(screen.queryByText(/changed elsewhere/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('Dawn check')
+  })
+})
+
+describe('WatchDetailsPage report data from the server', () => {
+  const sectionsRun = (sections: WatchReportSection[], over: Partial<WatchRun> = {}) =>
+    run('r1', {
+      report: { kind: 'sections', generated_at: '', boat_time: '', since: 'Wed 28 Oct 22:00 UTC+13', sections },
+      ...over,
+    })
+  const rule = (text: string): WatchFinding => ({ section: 'alarms', rule: 'alarms_raised', text, by: 'rules' })
+  const mate = (text: string, extend?: number): WatchFinding => ({ section: 'power', rule: 'mate', text, by: 'mate', ...(extend === undefined ? {} : { extends: extend }) })
+  const show = async (r: WatchRun) => {
+    detail = { ...detail, runs: [r] }
+    const view = renderPage()
+    const card = await screen.findByTestId('watch-run')
+    return { card, ...view }
+  }
+
+  describe('the count', () => {
+    it('counts only the findings that do not add to another', async () => {
+      await show(run('r1', { findings: [rule('Alarms'), mate('Adds to the first', 0), rule('Tanks'), mate('Alone')] }))
+      expect(triggerOf(runItem('r1'))).toHaveTextContent('3 to look at')
+      expect(triggerOf(runItem('r1'))).not.toHaveTextContent('findings')
+    })
+
+    it('says 1 to look at for a single one, in the amber the findings badge always had', async () => {
+      await show(run('r1', { findings: [rule('Alarms'), mate('Adds', 0)] }))
+      const badge = within(triggerOf(runItem('r1'))).getByText('1 to look at')
+      expect(badge.className).toContain('text-amber-700')
+    })
+
+    it('shows no count with no findings', async () => {
+      await show(run('r1', { findings: [] }))
+      expect(triggerOf(runItem('r1'))).not.toHaveTextContent('to look at')
+    })
+  })
+
+  describe('Needs a look', () => {
+    it('puts each finding that adds to another directly under it, then their charts problems, before the next finding', async () => {
+      const { card } = await show(run('r1', {
+        findings: [
+          rule('Rule one'),
+          { ...mate('Mate adds A', 0), chart_problem: 'Chart A could not be drawn' },
+          rule('Rule two'),
+          mate('Mate adds B', 0),
+        ],
+      }))
+      const groups = within(card).getAllByTestId('watch-finding-group')
+      expect(groups).toHaveLength(2)
+      expect(groups[0]).toHaveTextContent('Rule one')
+      expect(groups[0]).toHaveTextContent('Mate adds A')
+      expect(groups[0]).toHaveTextContent('Mate adds B')
+      expect(groups[0]).not.toHaveTextContent('Rule two')
+      const text = groups[0].textContent ?? ''
+      expect(text.indexOf('Rule one')).toBeLessThan(text.indexOf('Mate adds A'))
+      expect(text.indexOf('Mate adds A')).toBeLessThan(text.indexOf('Mate adds B'))
+      expect(text.indexOf('Mate adds B')).toBeLessThan(text.indexOf('Chart A could not be drawn'))
+      expect(groups[1]).toHaveTextContent('Rule two')
+      // The parent is the large line, the nested ones the small line with Mate's badge.
+      expect(within(groups[0]).getByText('Rule one').className).toContain('text-base')
+      expect(within(groups[0]).getByText('Rule one').className).toContain('font-medium')
+      const nested = within(groups[0]).getByText('Mate adds A').closest('div')!
+      expect(nested.className).toContain('text-sm')
+      expect(within(nested).getByText('Mate')).toBeInTheDocument()
+      // A divider and a gap between groups, none above the first.
+      expect(groups[1].className).toContain('border-t')
+      expect(groups[0].className).not.toContain('border-t')
+    })
+
+    it('shows a finding whose extends matches no finding as its own item, with the Mate badge', async () => {
+      const { card } = await show(run('r1', { findings: [rule('Only rule'), mate('Orphan', 7)] }))
+      const groups = within(card).getAllByTestId('watch-finding-group')
+      expect(groups).toHaveLength(2)
+      const orphan = within(card).getByText('Orphan')
+      expect(orphan.closest('[data-testid="watch-finding-group"]')).toBe(groups[1])
+      expect(within(groups[1]).getByText('Mate')).toBeInTheDocument()
+      expect(orphan.closest('div')!.className).toContain('text-sm')
+    })
+  })
+
+  describe('Not checked', () => {
+    const unavailable: WatchReportSection[] = [
+      { name: 'power', title: 'Power', lines: ['House bank 84% at 13.1 V'] },
+      { name: 'weather', title: 'Weather', unavailable: 'pressure history still filling' },
+      { name: 'tanks', title: 'Tanks', lines: ['Fuel 60 %'], not_checked: ['Tanks: Grey water is not measured', 'Nothing else was skipped'] },
+    ]
+
+    it('lists each unavailable section, then its not_checked sentences, in report order, with the part before the colon in medium weight', async () => {
+      const { card } = await show(sectionsRun(unavailable))
+      const box = within(card).getByTestId('watch-run-not-checked')
+      expect(within(box).getByText('Not checked')).toBeInTheDocument()
+      const sentences = [...box.querySelectorAll('li')].map((li) => li.textContent)
+      expect(sentences).toEqual([
+        'Weather: pressure history still filling',
+        'Tanks: Grey water is not measured',
+        'Nothing else was skipped',
+      ])
+      expect(within(box).getByText('Weather').className).toContain('font-medium')
+      expect(within(box).getByText('Weather').tagName).toBe('SPAN')
+      expect(within(box).getByText('Nothing else was skipped').className).toContain('text-sm')
+      expect(box.className).toContain('border-dashed')
+      expect(box.className).toContain('border-muted-foreground/60')
+      expect(box.className).not.toContain('amber')
+    })
+
+    it('keeps Unavailable in the section’s own place under Readings as well', async () => {
+      const { card } = await show(sectionsRun(unavailable))
+      const readings = within(card).getByTestId('watch-sections-report')
+      expect(within(readings).getByText('Unavailable: pressure history still filling')).toBeInTheDocument()
+    })
+
+    it('sits directly after Needs a look and before Mate’s review, and is not inside a folding block', async () => {
+      const { card } = await show(sectionsRun(unavailable, { review_rest: 'Rest of the review.' }))
+      const text = card.textContent ?? ''
+      const at = ['Needs a look', 'Not checked', "Mate's review", 'Readings'].map((s) => text.indexOf(s))
+      expect(at.every((i) => i >= 0)).toBe(true)
+      expect([...at].sort((a, b) => a - b)).toEqual(at)
+      expect(within(card).getByTestId('watch-run-not-checked').closest('[data-state]')).toBeNull()
+    })
+
+    it('shows on an old run, which has only unavailable sections to go on', async () => {
+      const { card } = await show(run('r1'))
+      expect(within(card).getByTestId('watch-run-not-checked')).toHaveTextContent('Weather: pressure history still filling')
+    })
+
+    it('is absent when nothing was left unchecked', async () => {
+      const { card } = await show(sectionsRun([{ name: 'power', title: 'Power', lines: ['House bank 84%'] }]))
+      expect(within(card).queryByTestId('watch-run-not-checked')).not.toBeInTheDocument()
+      expect(within(card).queryByText('Not checked')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Mate’s questions', () => {
+    const asked = (over: Partial<WatchRun> = {}) =>
+      run('r1', {
+        review: 'Opening. Rest of the review.',
+        review_opening: 'Opening.',
+        review_rest: 'Rest of the review.',
+        questions: ['Did you run the watermaker?', 'Is the fridge door sticking?'],
+        ...over,
+      })
+
+    it('lists each question in a row with an Answer button, under the review', async () => {
+      const { card } = await show(asked())
+      const review = within(card).getByTestId('watch-run-review')
+      expect(review).toHaveTextContent('Rest of the review.')
+      const question = within(review).getByText('Did you run the watermaker?')
+      expect(question.className).toContain('font-medium')
+      expect(question.className).toContain('text-sm')
+      const row = question.closest('[data-testid="watch-run-question"]') as HTMLElement
+      expect(row.className).toContain('bg-muted')
+      expect(row.className).toContain('rounded-md')
+      expect(within(row).getByRole('button', { name: /^Answer/ }).className).toContain('min-h-11')
+      expect(within(review).getAllByRole('button', { name: /^Answer/ })).toHaveLength(2)
+      const text = review.textContent ?? ''
+      expect(text.indexOf('Rest of the review.')).toBeLessThan(text.indexOf('Did you run the watermaker?'))
+    })
+
+    it('shows the section when only questions exist', async () => {
+      const { card } = await show(asked({ review_rest: undefined }))
+      const review = within(card).getByTestId('watch-run-review')
+      expect(review).toHaveTextContent('Is the fridge door sticking?')
+    })
+
+    it('shows no review section with neither', async () => {
+      const { card } = await show(asked({ review_rest: undefined, questions: [] }))
+      expect(within(card).queryByTestId('watch-run-review')).not.toBeInTheDocument()
+    })
+
+    it('hands Mate a draft for the question, tied to the run, and nothing is sent', async () => {
+      const { card, onAskMate } = await show(asked())
+      fireEvent.click(within(within(card).getAllByTestId('watch-run-question')[1]).getByRole('button', { name: /^Answer/ }))
+      expect(onAskMate).toHaveBeenCalledTimes(1)
+      expect(onAskMate).toHaveBeenCalledWith('About "Is the fridge door sticking?": ', {
+        newConversation: true,
+        watchRun: { id: 'r1', name: 'Overnight check' },
+        draft: true,
+      })
+      expect(sent('POST').filter((c) => c.url.includes('/api/assistant'))).toHaveLength(0)
+    })
+
+    it('shows the questions but no Answer button to a read-only session', async () => {
+      detail = { ...detail, runs: [asked()] }
+      renderPage({ canWrite: false })
+      const card = await screen.findByTestId('watch-run')
+      expect(within(card).getByText('Did you run the watermaker?')).toBeInTheDocument()
+      expect(within(card).queryByRole('button', { name: /^Answer/ })).not.toBeInTheDocument()
+    })
+
+    it('shows the questions but no Answer button when nothing can open Mate', () => {
+      const listProps = { hasOlder: false, canWrite: false, loadingOlder: false, olderError: null, onShowOlder: () => {}, onDeleteRun: async () => {} }
+      render(<WatchRunList runs={[asked()]} expandNewest {...listProps} />)
+      expect(screen.getByText('Did you run the watermaker?')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /^Answer/ })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Readings rows', () => {
+    it('draws rows where the server sent them, and the lines where it did not', async () => {
+      const { card } = await show(sectionsRun([
+        {
+          name: 'power', title: 'Power', lines: ['legacy power line'],
+          rows: [
+            { label: 'House bank', value: '84 %' },
+            { label: 'Solar', value: 'not checked', not_checked: true },
+            { label: 'Port alternator', value: '72 V', flagged: true, detail: 'Impossible reading' },
+          ],
+        },
+        { name: 'anchor', title: 'Anchor', lines: ['Anchor watch is off'] },
+      ]))
+      const readings = within(card).getByTestId('watch-sections-report')
+      const power = readings.querySelector('[data-section="power"]') as HTMLElement
+      expect(power.querySelector('dl')).not.toBeNull()
+      expect(power).not.toHaveTextContent('legacy power line')
+      expect(within(power).getByText('House bank').className).toContain('text-muted-foreground')
+      const value = within(power).getByText('84 %')
+      expect(value.className).toContain('tabular-nums')
+      expect(value.className).toContain('text-right')
+      expect(within(power).getByText('not checked').className).toContain('font-medium')
+      expect(within(power).getByText('72 V').className).toContain('text-amber-700')
+      const detail = within(power).getByText('Impossible reading')
+      expect(detail.className).toContain('text-xs')
+      expect(detail.className).toContain('text-muted-foreground')
+      expect(detail.className).toContain('col-span-2')
+      const anchor = readings.querySelector('[data-section="anchor"]') as HTMLElement
+      expect(anchor.querySelector('dl')).toBeNull()
+      expect(within(anchor).getByText('Anchor watch is off')).toBeInTheDocument()
+    })
+
+    it('draws an old run’s sections from their lines, with no list of rows', async () => {
+      const { card } = await show(run('r1'))
+      const readings = within(card).getByTestId('watch-sections-report')
+      expect(within(readings).getByText('House bank 84% at 13.1 V')).toBeInTheDocument()
+      expect(readings.querySelector('dl')).toBeNull()
+      expect(readings.querySelector('table')).toBeNull()
+    })
+
+    it('draws the tanks as a table with the change since the last report', async () => {
+      const { card } = await show(sectionsRun([{
+        name: 'tanks', title: 'Tanks', lines: ['legacy tank line'],
+        rows: [
+          { label: 'Fresh water STBD', value: '49 %', change: '−11', flagged: true },
+          { label: 'Fresh water PORT', value: '80 %', change: 'no change' },
+          { label: 'Fuel', value: '60 %', change: '+4' },
+        ],
+      }]))
+      const table = within(card).getByRole('table')
+      expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Tank', 'Now', 'Since last report'])
+      const rows = within(table).getAllByRole('row').slice(1)
+      expect(rows).toHaveLength(3)
+      const flagged = rows[0]
+      expect(flagged.className).toContain('font-semibold')
+      expect(within(flagged).getByText('−11').className).toContain('text-amber-700')
+      expect(within(flagged).getByText('49 %').className).toContain('tabular-nums')
+      expect(within(flagged).getByText('49 %').className).toContain('text-right')
+      expect(within(rows[1]).getByText('no change').className).toContain('text-muted-foreground')
+      expect(within(rows[2]).getByText('+4').className).not.toContain('amber')
+      expect(card).not.toHaveTextContent('legacy tank line')
+    })
+
+    it('leaves out the change column when no tank has a change', async () => {
+      const { card } = await show(sectionsRun([{
+        name: 'tanks', title: 'Tanks',
+        rows: [{ label: 'Fresh water STBD', value: '49 %' }, { label: 'Fuel', value: '60 %' }],
+      }]))
+      const table = within(card).getByRole('table')
+      expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Tank', 'Now'])
+      expect(within(table).getByText('Fuel')).toBeInTheDocument()
+    })
+
+    it('draws the alarms as a list under a heading that carries the summary', async () => {
+      const { card } = await show(sectionsRun([{
+        name: 'alarms', title: 'Alarms', lines: ['legacy alarm line'], summary: '217 raised, none active now',
+        rows: [
+          { label: 'Collision Risk', value: '211', when: 'yesterday 9.47 AM to 4.39 PM', detail: '27 vessels; most Delphi 13' },
+          { label: 'Depth', value: '6' },
+        ],
+      }]))
+      const alarms = within(card).getByTestId('watch-sections-report').querySelector('[data-section="alarms"]') as HTMLElement
+      const summary = within(alarms).getByText('217 raised, none active now')
+      expect(summary.className).toContain('font-normal')
+      expect(summary.className).toContain('text-muted-foreground')
+      expect(within(alarms).getByText('Alarms').compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      const items = within(alarms).getAllByRole('listitem')
+      expect(items).toHaveLength(2)
+      expect(within(items[0]).getByText('Collision Risk').className).toContain('font-medium')
+      expect(within(items[0]).getByText('211')).toBeInTheDocument()
+      expect(within(items[0]).getByText('yesterday 9.47 AM to 4.39 PM').className).toContain('text-xs')
+      expect(within(items[0]).getByText('27 vessels; most Delphi 13').className).toContain('text-muted-foreground')
+      expect(alarms).not.toHaveTextContent('legacy alarm line')
+    })
   })
 })
 

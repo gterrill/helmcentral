@@ -9,9 +9,15 @@ import { Button } from '@/components/ui/button'
 import { WatchChart } from '@/components/watches/watch-chart'
 import {
   channelLabel,
+  findingsToLookAt,
+  groupFindings,
+  notCheckedEntries,
   runCostLabel,
   runTimeLabel,
   WATCH_SECTIONS,
+  type WatchFinding,
+  type WatchReportRow,
+  type WatchReportSection,
   type WatchRun,
   type WatchSamplesReport,
   type WatchSectionsReport,
@@ -74,6 +80,131 @@ function SamplesReport({ report }: { report: WatchSamplesReport }) {
   )
 }
 
+const FLAGGED = 'text-amber-700 dark:text-amber-400'
+
+const rowValueClass = (row: WatchReportRow) =>
+  `text-right text-sm tabular-nums ${row.flagged ? FLAGGED : 'text-foreground'}${row.not_checked ? ' font-medium' : ''}`
+
+function ReadingRows({ rows }: { rows: WatchReportRow[] }) {
+  return (
+    <dl className="grid min-w-0 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 gap-y-0.5">
+      {rows.map((row, i) => (
+        <Fragment key={i}>
+          <dt className="min-w-0 text-sm text-muted-foreground">{row.label}</dt>
+          <dd className={rowValueClass(row)}>{row.value}</dd>
+          {row.detail && <dd className="col-span-2 min-w-0 text-xs text-muted-foreground">{row.detail}</dd>}
+        </Fragment>
+      ))}
+    </dl>
+  )
+}
+
+function TankRows({ rows }: { rows: WatchReportRow[] }) {
+  const hasChange = rows.some((r) => r.change)
+  const head = 'py-0.5 text-xs font-normal text-muted-foreground'
+  return (
+    <table className="w-full min-w-0 text-sm">
+      <thead>
+        <tr>
+          <th scope="col" className={`${head} pr-3 text-left`}>Tank</th>
+          <th scope="col" className={`${head} text-right`}>Now</th>
+          {hasChange && <th scope="col" className={`${head} pl-3 text-right`}>Since last report</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} className={row.flagged ? 'font-semibold' : ''}>
+            <th scope="row" className={`min-w-0 py-0.5 pr-3 text-left text-foreground ${row.flagged ? 'font-semibold' : 'font-normal'}`}>{row.label}</th>
+            <td className="whitespace-nowrap py-0.5 text-right tabular-nums text-foreground">{row.value}</td>
+            {hasChange && (
+              <td
+                className={`whitespace-nowrap py-0.5 pl-3 text-right tabular-nums ${
+                  row.change === 'no change' ? 'text-muted-foreground' : row.flagged ? FLAGGED : 'text-foreground'
+                }`}
+              >
+                {row.change}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function AlarmRows({ rows }: { rows: WatchReportRow[] }) {
+  return (
+    <ul className="flex min-w-0 flex-col gap-1.5">
+      {rows.map((row, i) => (
+        <li key={i} className="flex min-w-0 flex-col">
+          <div className="flex min-w-0 items-baseline justify-between gap-3">
+            <span className="min-w-0 text-sm font-medium text-foreground">{row.label}</span>
+            <span className={rowValueClass(row)}>{row.value}</span>
+          </div>
+          {row.when && <p className="min-w-0 text-xs text-muted-foreground">{row.when}</p>}
+          {row.detail && <p className="min-w-0 text-xs text-muted-foreground">{row.detail}</p>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function SectionBody({ section }: { section: WatchReportSection }) {
+  if (section.unavailable) {
+    return <p className="min-w-0 text-sm text-muted-foreground">Unavailable: {section.unavailable}</p>
+  }
+  // Runs saved before rows existed (and Anchor and Instruments, which have none) carry only lines.
+  const rows = section.rows ?? []
+  if (rows.length > 0) {
+    if (section.name === 'tanks') return <TankRows rows={rows} />
+    if (section.name === 'alarms') return <AlarmRows rows={rows} />
+    return <ReadingRows rows={rows} />
+  }
+  return <>{(section.lines ?? []).map((line, i) => <p key={i} className="min-w-0 text-sm text-foreground">{line}</p>)}</>
+}
+
+/** What the report could not check. It is never folded away, so a gap in the report is seen. */
+function NotChecked({ entries }: { entries: string[] }) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-1.5 rounded-md border border-dashed border-muted-foreground/60 px-4 py-3"
+      data-testid="watch-run-not-checked"
+    >
+      <p className={MICRO_LABEL}>Not checked</p>
+      <ul className="flex flex-col gap-1">
+        {entries.map((entry, i) => {
+          const at = entry.indexOf(': ')
+          return (
+            <li key={i} className="min-w-0 text-sm text-foreground">
+              {at > 0 ? (
+                <>
+                  <span className="font-medium">{entry.slice(0, at)}</span>
+                  {entry.slice(at)}
+                </>
+              ) : (
+                entry
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/** One finding's line: the large line for a finding that stands alone, the small one for Mate's and for those that add to another. */
+function FindingLine({ finding, nested }: { finding: WatchFinding; nested: boolean }) {
+  if (finding.by === 'mate') {
+    return (
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
+        <Badge variant="secondary">Mate</Badge>
+        <span className="min-w-0">{finding.text}</span>
+      </div>
+    )
+  }
+  return <span className={`min-w-0 ${nested ? 'text-sm' : 'text-base font-medium'}`}>{finding.text}</span>
+}
+
 /**
  * The report's sections in fixed places. One column on a phone, in the
  * report's own order. From sm up, and only when the report has a Tanks section,
@@ -110,12 +241,11 @@ function SectionsReport({ report }: { report: WatchSectionsReport }) {
               : 'sm:col-start-1'
         return (
           <div key={section.name} data-section={section.name} className={`flex min-w-0 flex-col gap-0.5 pb-3 ${place}`}>
-            <p className="text-sm font-semibold text-foreground">{section.title || sectionLabel(section.name)}</p>
-            {section.unavailable ? (
-              <p className="min-w-0 text-sm text-muted-foreground">Unavailable: {section.unavailable}</p>
-            ) : (
-              (section.lines ?? []).map((line, i) => <p key={i} className="min-w-0 text-sm text-foreground">{line}</p>)
-            )}
+            <p className="text-sm font-semibold text-foreground">
+              {section.title || sectionLabel(section.name)}
+              {section.summary && !section.unavailable && <span className="font-normal text-muted-foreground"> {section.summary}</span>}
+            </p>
+            <SectionBody section={section} />
           </div>
         )
       })}
@@ -128,6 +258,8 @@ export interface WatchRunCardProps {
   /** Set on the run a link points at: whether it is marked right now. */
   highlighted?: boolean
   onAskMate?: (run: WatchRun) => void
+  /** Opens Mate with an unsent draft about one of the run's questions. Without it the questions show with no button. */
+  onAnswer?: (run: WatchRun, question: string) => void
 }
 
 /**
@@ -135,7 +267,7 @@ export interface WatchRunCardProps {
  * went wrong, and (only while it is closed) the opening line of Mate's review.
  */
 function RunSummary({ run, opening }: { run: WatchRun; opening?: string }) {
-  const count = run.findings.length
+  const count = findingsToLookAt(run.findings)
   const undelivered = (run.notify_pending ?? []).length > 0
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -143,7 +275,7 @@ function RunSummary({ run, opening }: { run: WatchRun; opening?: string }) {
         <span className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</span>
         {count > 0 && (
           <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
-            {count === 1 ? '1 finding' : `${count} findings`}
+            {count} to look at
           </Badge>
         )}
         {undelivered && <Badge variant="outline" className="border-destructive/50 text-destructive">Not delivered</Badge>}
@@ -159,6 +291,7 @@ function RunSummary({ run, opening }: { run: WatchRun; opening?: string }) {
 interface RunBodyProps {
   run: WatchRun
   onAskMate?: (run: WatchRun) => void
+  onAnswer?: (run: WatchRun, question: string) => void
   /** Left out where the run can't be deleted. */
   onDelete?: (run: WatchRun) => void
 }
@@ -168,7 +301,7 @@ interface RunBodyProps {
  * told, and the actions. Memoised so opening one run doesn't redraw the charts
  * of the others.
  */
-const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps) {
+const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: RunBodyProps) {
   const sections = run.report && run.report_kind === 'sections' ? (run.report as WatchSectionsReport) : null
   const samples = run.report && run.report_kind === 'samples' ? (run.report as WatchSamplesReport) : null
   // The server owns the sentences: the opening is its split of the review, and
@@ -184,6 +317,9 @@ const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps
           ? `No review. ${run.review_problem || 'Mate did not review this run.'}`
           : null
   const reviewText = run.review_rest ?? ''
+  const questions = run.questions ?? []
+  const groups = groupFindings(run.findings)
+  const notChecked = notCheckedEntries(sections)
   const cost = run.outcome === 'ran' ? runCostLabel(run) : null
   const told = run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent || (run.notify_notes ?? []).length > 0
   const hasFooter = onAskMate || onDelete || told || cost
@@ -201,36 +337,72 @@ const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps
         </p>
       )}
 
-      {run.findings.length > 0 && (
+      {groups.length > 0 && (
         <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-4">
           <p className={MICRO_LABEL}>Needs a look</p>
-          <ul className="flex flex-col gap-3" aria-label="Findings">
-            {run.findings.map((f, i) => (
-              <li key={i} className="flex min-w-0 flex-col gap-1.5 text-foreground">
-                {f.by === 'mate' ? (
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
-                    <Badge variant="secondary">Mate</Badge>
-                    <span className="min-w-0">{f.text}</span>
-                  </div>
-                ) : (
-                  <span className="min-w-0 text-base font-medium">{f.text}</span>
-                )}
-                {(run.charts ?? [])
-                  .filter((c) => c.finding_index === i)
-                  .map((c, ci) => (
-                    <WatchChart key={ci} chart={c} />
-                  ))}
-                {f.chart_problem && <p className="min-w-0 text-xs text-muted-foreground">{f.chart_problem}</p>}
-              </li>
-            ))}
+          <ul className="flex flex-col" aria-label="Findings">
+            {groups.map((g, gi) => {
+              const members = [{ index: g.index, finding: g.finding }, ...g.adds]
+              return (
+                <li
+                  key={g.index}
+                  data-testid="watch-finding-group"
+                  className={`flex min-w-0 flex-col gap-1.5 text-foreground ${gi > 0 ? 'mt-3 border-t border-border pt-3' : ''}`}
+                >
+                  <FindingLine finding={g.finding} nested={false} />
+                  {g.adds.length > 0 && (
+                    <div className="flex min-w-0 flex-col gap-1.5 pl-4">
+                      {g.adds.map((a) => <FindingLine key={a.index} finding={a.finding} nested />)}
+                    </div>
+                  )}
+                  {members.flatMap((m) =>
+                    (run.charts ?? [])
+                      .filter((c) => c.finding_index === m.index)
+                      .map((c, ci) => <WatchChart key={`${m.index}-${ci}`} chart={c} />),
+                  )}
+                  {members.map((m) =>
+                    m.finding.chart_problem ? (
+                      <p key={m.index} className="min-w-0 text-xs text-muted-foreground">{m.finding.chart_problem}</p>
+                    ) : null,
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
 
-      {reviewText && (
+      {notChecked.length > 0 && <NotChecked entries={notChecked} />}
+
+      {(reviewText || questions.length > 0) && (
         <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-4" data-testid="watch-run-review">
           <p className={MICRO_LABEL}>Mate&apos;s review</p>
-          <AssistantMarkdown content={reviewText} />
+          {reviewText && <AssistantMarkdown content={reviewText} />}
+          {questions.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-2" aria-label="Questions from Mate">
+              {questions.map((q, i) => (
+                <li
+                  key={i}
+                  data-testid="watch-run-question"
+                  className="flex min-w-0 flex-col gap-2 rounded-md bg-muted px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                >
+                  <p className="min-w-0 text-sm font-medium text-foreground">{q}</p>
+                  {onAnswer && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 w-full sm:min-h-10 sm:w-auto sm:shrink-0"
+                      aria-label={`Answer: ${q}`}
+                      onClick={() => onAnswer(run, q)}
+                    >
+                      Answer
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -289,7 +461,7 @@ const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps
 })
 
 /** A run shown fully open, as the linked run is pinned above the list. */
-export function WatchRunCard({ run, highlighted = false, onAskMate }: WatchRunCardProps) {
+export function WatchRunCard({ run, highlighted = false, onAskMate, onAnswer }: WatchRunCardProps) {
   return (
     <article
       className={`flex min-w-0 flex-col gap-4 rounded-md border bg-card p-4 transition-colors ${
@@ -303,7 +475,7 @@ export function WatchRunCard({ run, highlighted = false, onAskMate }: WatchRunCa
       <h3 className="flex">
         <RunSummary run={run} />
       </h3>
-      <RunBody run={run} onAskMate={onAskMate} />
+      <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} />
     </article>
   )
 }
@@ -316,6 +488,7 @@ export interface WatchRunListProps {
   olderError: string | null
   onShowOlder: () => void
   onAskMate?: (run: WatchRun) => void
+  onAnswer?: (run: WatchRun, question: string) => void
   /** Deletes the run; a refusal throws with the server's own words. */
   onDeleteRun: (run: WatchRun) => Promise<void>
   /** Open the newest run when it arrives. Off while a linked run is pinned above the list. */
@@ -330,6 +503,7 @@ export function WatchRunList({
   olderError,
   onShowOlder,
   onAskMate,
+  onAnswer,
   onDeleteRun,
   expandNewest,
 }: WatchRunListProps) {
@@ -400,7 +574,7 @@ export function WatchRunList({
                 <RunSummary run={run} opening={openIds.includes(run.id) ? undefined : run.review_opening} />
               </AccordionTrigger>
               <AccordionContent className="pb-4 pt-2">
-                <RunBody run={run} onAskMate={onAskMate} onDelete={canWrite ? askToDelete : undefined} />
+                <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} onDelete={canWrite ? askToDelete : undefined} />
               </AccordionContent>
             </AccordionItem>
           </Fragment>
