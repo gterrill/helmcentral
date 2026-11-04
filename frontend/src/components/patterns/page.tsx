@@ -25,6 +25,10 @@ export interface PageAction {
   icon?: ReactNode
   destructive?: boolean
   disabled?: boolean
+  /** How the primary action's button looks. The default is the filled button. */
+  variant?: 'default' | 'outline'
+  /** The primary action button's tooltip, such as why it is disabled. */
+  title?: string
   /** Turns the entry into a submenu (Documents' "New note" and its kinds).
    * The parent's own onClick is not used then. */
   submenu?: PageAction[]
@@ -110,13 +114,13 @@ export function Page({
   return (
     <div className={cn('flex flex-col gap-4', className)}>
       {breadcrumb}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {onBack && (
           <Button type="button" variant="ghost" size="icon" aria-label={backLabel} onClick={onBack}>
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
         )}
-        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">{title}</h1>
+        <h1 className="min-w-0 flex-1 basis-40 truncate text-lg font-semibold text-foreground">{title}</h1>
         {hasPager && (
           <div className="flex shrink-0 items-center">
             <Button
@@ -144,7 +148,13 @@ export function Page({
           </div>
         )}
         {primaryAction && (
-          <Button type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled}>
+          <Button
+            type="button"
+            variant={primaryAction.variant ?? 'default'}
+            title={primaryAction.title}
+            onClick={primaryAction.onClick}
+            disabled={primaryAction.disabled}
+          >
             {primaryAction.icon}
             {primaryAction.label}
           </Button>

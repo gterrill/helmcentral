@@ -204,6 +204,7 @@ func getWatchHandler(c echo.Context) error {
 	if err != nil {
 		return watchError(c, err)
 	}
+	watchRunsForPage(resp.Runs)
 	if err := attachWatchNotifyPending(resp.Watch.ID, resp.Runs); err != nil {
 		// The runs are still right; only the "not delivered yet" lines are missing.
 		log.Printf("watches: could not read the notifications still being retried for %q: %v", resp.Watch.Name, err)
@@ -417,7 +418,7 @@ func runWatchHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, run)
+	return c.JSON(http.StatusOK, run.forPage())
 }
 
 type watchPreviewTime struct {
@@ -494,7 +495,7 @@ func getWatchRunHandler(c echo.Context) error {
 	}); err != nil {
 		return watchError(c, err)
 	}
-	runs := []watchRun{run}
+	runs := []watchRun{run.forPage()}
 	if err := attachWatchNotifyPending(run.WatchID, runs); err != nil {
 		log.Printf("watches: could not read the notifications still being retried for run %s: %v", run.ID, err)
 	}

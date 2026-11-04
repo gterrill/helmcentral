@@ -35,9 +35,10 @@ import {
 } from '@/lib/watches'
 
 // ADR 0227: one watch. The settings are one draft saved through the Save bar.
-// The name, what to look out for and the run history fill the main column; the
+// The reports fill the main column; the name, what to look out for, the
 // schedule, report sections and notifications sit in the aside beside it (below
-// everything on a phone). A scheduled watch is edited here, a one-off watch
+// everything on a phone). A watch not yet saved has no reports, so its name and
+// look-outs stay in the main column. A scheduled watch is edited here, a one-off watch
 // (started from a Mate chat) is read-only, has no aside, and can be deleted.
 
 /** How long a run a link points at stays marked. */
@@ -382,12 +383,125 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
     </>
   )
 
+  // The name, whether it is on, and what Mate looks out for.
+  const watchFields = (
+    <>
+      <FormSection title="Watch">
+        <Field>
+          <FieldLabel htmlFor="watch-name">Name</FieldLabel>
+          <Input
+            id="watch-name"
+            className="max-w-sm"
+            value={draft.name}
+            maxLength={MAX_WATCH_NAME + 20}
+            disabled={readOnly}
+            aria-invalid={nameTouched && errors.name ? true : undefined}
+            onChange={(e) => { setNameTouched(true); update({ name: e.target.value }) }}
+            onBlur={() => setNameTouched(true)}
+          />
+          {nameTouched && errors.name && <FieldError>{errors.name}</FieldError>}
+        </Field>
+        <Field orientation="horizontal" className="items-center">
+          <Switch
+            id="watch-enabled"
+            aria-label="Enabled"
+            checked={draft.enabled}
+            disabled={readOnly}
+            onCheckedChange={(on) => update({ enabled: on })}
+          />
+          <FieldLabel htmlFor="watch-enabled">Enabled</FieldLabel>
+        </Field>
+      </FormSection>
+
+      <FormSection title="What to look out for">
+        <Field>
+          <FieldLabel htmlFor="watch-look-out-for" className="sr-only">What to look out for</FieldLabel>
+          <Textarea
+            id="watch-look-out-for"
+            rows={3}
+            value={draft.look_out_for}
+            disabled={readOnly}
+            aria-invalid={errors.look_out_for ? true : undefined}
+            onChange={(e) => update({ look_out_for: e.target.value })}
+          />
+          {errors.look_out_for ? (
+            <FieldError>{errors.look_out_for}</FieldError>
+          ) : (
+            <FieldDescription>
+              For Mate&apos;s review, in your own words. For example: the watermaker runs overnight; tell me if the fridge draw climbs.
+            </FieldDescription>
+          )}
+          <p className="text-xs tabular-nums text-muted-foreground">{[...draft.look_out_for.trim()].length} / {MAX_LOOK_OUT_FOR}</p>
+        </Field>
+      </FormSection>
+    </>
+  )
+
+  // A scheduled watch that exists has reports, so they come first and its
+  // name and look-outs move to the top of the aside. A new watch has no
+  // reports and keeps them in the main column; a one-off watch has no aside.
+  const reportsFirst = mode.kind === 'existing' && !oneOff
+  const aside = oneOff ? undefined : reportsFirst ? <>{watchFields}{settingsAside}</> : settingsAside
+
+  const reports = mode.kind === 'existing' ? (
+    <section aria-label="Run history" className="flex min-w-0 flex-col gap-3">
+      {running && <p role="status" className="text-xs text-muted-foreground">Building the report. Mate&apos;s review can take a minute.</p>}
+      {runError && <p role="alert" className="text-sm text-destructive">{runError}</p>}
+      {linkedRunId && (
+        <div ref={linkedRef} data-testid="watch-linked-run" className="flex flex-col gap-1">
+          {linked.run ? (
+            <>
+              <p className="text-[10px] font-normal uppercase tracking-[0.16em] text-muted-foreground">Linked run</p>
+              <WatchRunCard
+                run={linked.run}
+                highlighted={highlighted}
+                onAskMate={askMate}
+              />
+            </>
+          ) : linked.gone ? (
+            <p className="text-sm text-muted-foreground">The linked run is no longer there. It may have been deleted.</p>
+          ) : linked.error ? (
+            <p role="alert" className="text-sm text-destructive">Could not read the linked run: {linked.error}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Loading the linked run...</p>
+          )}
+        </div>
+      )}
+      <WatchRunList
+        runs={linkedRunId ? detail.runs.filter((r) => r.id !== linkedRunId) : detail.runs}
+        expandNewest={!linkedRunId || linked.gone || linked.error !== null}
+        hasOlder={detail.hasOlder}
+        canWrite={canWrite}
+        loadingOlder={detail.loadingOlder}
+        olderError={detail.olderError}
+        onShowOlder={() => { void detail.showOlder() }}
+        onAskMate={askMate}
+        onDeleteRun={async (run) => {
+          await watchesApi.removeRun(mode.id, run.id)
+          detail.dropRun(run.id)
+        }}
+      />
+    </section>
+  ) : null
+
   return (
     <div className="h-full overflow-y-auto p-4">
       <Page
         title={title}
         breadcrumb={breadcrumb}
         pager={pager}
+        primaryAction={
+          canWrite && mode.kind === 'existing' && !oneOff
+            ? {
+                label: running ? 'Running...' : 'Run now',
+                icon: <Play className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />,
+                variant: 'outline',
+                disabled: running || dirty,
+                title: dirty ? 'Save your changes first' : undefined,
+                onClick: () => { void runNow() },
+              }
+            : undefined
+        }
         secondaryActions={
           canWrite && mode.kind === 'existing'
             ? [{
@@ -405,7 +519,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
           </p>
         )}
         {detail.error && record && <RefreshFailedNote reason={detail.error} onRetry={() => { void detail.refresh() }} />}
-        <DetailsLayout aside={settingsAside}>
+        <DetailsLayout aside={aside}>
           {oneOff && record ? (
             <FormSection
               title="One-off watch"
@@ -426,117 +540,11 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
                 <dd className="text-foreground">{oneOffStatus(record)}</dd>
               </dl>
             </FormSection>
-          ) : (
-            <>
-              <FormSection title="Watch">
-                <Field>
-                  <FieldLabel htmlFor="watch-name">Name</FieldLabel>
-                  <Input
-                    id="watch-name"
-                    className="max-w-sm"
-                    value={draft.name}
-                    maxLength={MAX_WATCH_NAME + 20}
-                    disabled={readOnly}
-                    aria-invalid={nameTouched && errors.name ? true : undefined}
-                    onChange={(e) => { setNameTouched(true); update({ name: e.target.value }) }}
-                    onBlur={() => setNameTouched(true)}
-                  />
-                  {nameTouched && errors.name && <FieldError>{errors.name}</FieldError>}
-                </Field>
-                <Field orientation="horizontal" className="items-center">
-                  <Switch
-                    id="watch-enabled"
-                    aria-label="Enabled"
-                    checked={draft.enabled}
-                    disabled={readOnly}
-                    onCheckedChange={(on) => update({ enabled: on })}
-                  />
-                  <FieldLabel htmlFor="watch-enabled">Enabled</FieldLabel>
-                </Field>
-              </FormSection>
-
-              <FormSection title="What to look out for">
-                <Field>
-                  <FieldLabel htmlFor="watch-look-out-for" className="sr-only">What to look out for</FieldLabel>
-                  <Textarea
-                    id="watch-look-out-for"
-                    rows={3}
-                    value={draft.look_out_for}
-                    disabled={readOnly}
-                    aria-invalid={errors.look_out_for ? true : undefined}
-                    onChange={(e) => update({ look_out_for: e.target.value })}
-                  />
-                  {errors.look_out_for ? (
-                    <FieldError>{errors.look_out_for}</FieldError>
-                  ) : (
-                    <FieldDescription>
-                      For Mate&apos;s review, in your own words. For example: the watermaker runs overnight; tell me if the fridge draw climbs.
-                    </FieldDescription>
-                  )}
-                  <p className="text-xs tabular-nums text-muted-foreground">{[...draft.look_out_for.trim()].length} / {MAX_LOOK_OUT_FOR}</p>
-                </Field>
-              </FormSection>
-            </>
+          ) : reportsFirst ? null : (
+            watchFields
           )}
 
-          {mode.kind === 'existing' && (
-            <FormSection
-              title="Run history"
-              description="Newest first. Runs with a finding are kept for good."
-              action={
-                canWrite && !oneOff ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={running || dirty}
-                    title={dirty ? 'Save your changes first' : undefined}
-                    onClick={() => { void runNow() }}
-                  >
-                    <Play className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-                    {running ? 'Running...' : 'Run now'}
-                  </Button>
-                ) : undefined
-              }
-            >
-              {running && <p role="status" className="text-xs text-muted-foreground">Building the report. Mate&apos;s review can take a minute.</p>}
-              {runError && <p role="alert" className="text-sm text-destructive">{runError}</p>}
-              {linkedRunId && (
-                <div ref={linkedRef} data-testid="watch-linked-run" className="flex flex-col gap-1">
-                  {linked.run ? (
-                    <>
-                      <p className="text-[10px] font-normal uppercase tracking-[0.16em] text-muted-foreground">Linked run</p>
-                      <WatchRunCard
-                        run={linked.run}
-                        highlighted={highlighted}
-                        onAskMate={askMate}
-                      />
-                    </>
-                  ) : linked.gone ? (
-                    <p className="text-sm text-muted-foreground">The linked run is no longer there. It may have been deleted.</p>
-                  ) : linked.error ? (
-                    <p role="alert" className="text-sm text-destructive">Could not read the linked run: {linked.error}</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Loading the linked run...</p>
-                  )}
-                </div>
-              )}
-              <WatchRunList
-                runs={linkedRunId ? detail.runs.filter((r) => r.id !== linkedRunId) : detail.runs}
-                expandNewest={!linkedRunId || linked.gone || linked.error !== null}
-                hasOlder={detail.hasOlder}
-                canWrite={canWrite}
-                loadingOlder={detail.loadingOlder}
-                olderError={detail.olderError}
-                onShowOlder={() => { void detail.showOlder() }}
-                onAskMate={askMate}
-                onDeleteRun={async (run) => {
-                  await watchesApi.removeRun(mode.id, run.id)
-                  detail.dropRun(run.id)
-                }}
-              />
-            </FormSection>
-          )}
+          {reports}
         </DetailsLayout>
 
         <ConfirmDelete

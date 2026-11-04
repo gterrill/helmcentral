@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"mime"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -186,22 +187,200 @@ func watchNotifyDue(w savedWatch, run watchRun, prevTold []string) bool {
 }
 
 // watchFirstSentence is the opening sentence of Mate's review, bare of markdown.
+//
+// A review that starts with a list has no opening, so a push takes the first
+// line with its list marker removed instead.
 func watchFirstSentence(s string) string {
-	s = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(s), "#*>-_ \t"))
-	if i := strings.IndexAny(s, "\n"); i >= 0 {
-		s = s[:i]
+	whole := s
+	s, _ = splitWatchReview(whole)
+	if s == "" {
+		line, _, _ := strings.Cut(strings.TrimSpace(whole), "\n")
+		s, _ = splitWatchReview(watchListMarker.ReplaceAllString(line, ""))
 	}
-	for i := 0; i+1 < len(s); i++ {
-		if (s[i] == '.' || s[i] == '!' || s[i] == '?') && s[i+1] == ' ' {
-			s = s[:i+1]
-			break
-		}
-	}
-	s = strings.TrimSpace(strings.ReplaceAll(s, "**", ""))
 	if utf8.RuneCountInString(s) > watchNotifySentenceChars {
 		s = string([]rune(s)[:watchNotifySentenceChars-1]) + "…"
 	}
 	return s
+}
+
+var (
+	// watchListMarker is a list item's marker at the start of a line.
+	watchListMarker = regexp.MustCompile(`^[ \t]*(?:[-*+]|\d+[.)])[ \t\n]+`)
+	watchMDLink     = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	// watchAbbreviations are words whose full stop does not end a sentence.
+	watchAbbreviations = map[string]bool{
+		"no": true, "approx": true, "st": true, "vs": true, "e.g": true,
+		"i.e": true, "etc": true, "mr": true, "mrs": true, "dr": true,
+	}
+)
+
+// splitWatchReview reads a review as its opening sentence and the rest.
+//
+// A leading "# " heading or "> " quote marker is dropped from the opening; a
+// leading "-2%" or "#1" is not a marker and stays. A review that starts with a
+// list item ("- ", "* ", "1. ") has no opening: the opening is "" and the rest
+// is the whole review, untouched.
+//
+// The sentence is looked for in the first paragraph, which ends at a blank line
+// or at a line that starts a list item (after a heading, at the end of its
+// line). A single newline in the paragraph counts as a space, so a wrapped
+// sentence is not cut. A sentence ends at ".", "!" or "?", optionally followed
+// by closing characters (* _ ) " ' `), and then whitespace or the end of the
+// paragraph, so "6.00 AM" does not split. A full stop after no, approx, St, vs,
+// e.g, i.e, etc, Mr, Mrs or Dr does not end one either, and neither does any
+// position inside an open "**" or backtick span or inside "[text](url)", so the
+// rest never begins inside a span. A paragraph with no sentence end is all
+// opening.
+//
+// The opening is plain text: "**", emphasis "*" and "_", backticks and link
+// syntax are removed ("*" between digits or with spaces round it, and "_"
+// inside a word, stay). It is uncapped. The rest keeps its markdown.
+func splitWatchReview(review string) (opening, rest string) {
+	s := strings.TrimSpace(review)
+	if s == "" {
+		return "", ""
+	}
+	s, heading := stripWatchReviewMarkers(s)
+	if s == "" {
+		return "", ""
+	}
+	if watchListMarker.MatchString(s) {
+		return "", review
+	}
+	end := len(s)
+	if heading {
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			end = i
+		}
+	} else {
+		off := 0
+		for n, line := range strings.SplitAfter(s, "\n") {
+			if n > 0 && (strings.TrimSpace(line) == "" || watchListMarker.MatchString(line)) {
+				end = off
+				break
+			}
+			off += len(line)
+		}
+	}
+	para := s[:end]
+	flat := strings.NewReplacer("\n", " ", "\r", " ").Replace(para)
+	cut := watchSentenceEnd(flat)
+	if cut < 0 {
+		cut = end
+	}
+	opening = watchPlainText(strings.Join(strings.Fields(flat[:cut]), " "))
+	return opening, strings.TrimSpace(s[cut:])
+}
+
+// stripWatchReviewMarkers drops leading "# " headings and "> " quotes (marker
+// and a space), and says whether a heading was dropped.
+func stripWatchReviewMarkers(s string) (string, bool) {
+	heading := false
+	for s != "" {
+		switch {
+		case s[0] == '>' && len(s) > 1 && (s[1] == ' ' || s[1] == '\t'):
+			s = strings.TrimLeft(s[1:], " \t")
+		case s[0] == '#':
+			n := 0
+			for n < len(s) && s[n] == '#' {
+				n++
+			}
+			if n > 6 || n >= len(s) || (s[n] != ' ' && s[n] != '\t') {
+				return s, heading
+			}
+			s = strings.TrimLeft(s[n:], " \t")
+			heading = true
+		default:
+			return s, heading
+		}
+	}
+	return s, heading
+}
+
+func isWatchASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isWatchDigit(c byte) bool       { return c >= '0' && c <= '9' }
+func isWatchWordByte(c byte) bool {
+	return isWatchASCIILetter(c) || isWatchDigit(c) || c >= 0x80
+}
+
+// watchSentenceEnd is the index just after the first sentence of p, a single
+// line, or -1 when it has none.
+func watchSentenceEnd(p string) int {
+	bold, tick := 0, 0
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch {
+		case c == '*' && i+1 < len(p) && p[i+1] == '*':
+			bold ^= 1
+			i++
+		case c == '`':
+			tick ^= 1
+		case c == '[' && tick == 0:
+			if cl := strings.IndexByte(p[i+1:], ']'); cl >= 0 && i+1+cl+1 < len(p) && p[i+1+cl+1] == '(' {
+				if cp := strings.IndexByte(p[i+1+cl+2:], ')'); cp >= 0 {
+					i = i + 1 + cl + 2 + cp
+				}
+			}
+		case c == '.' || c == '!' || c == '?':
+			j, b, t := i+1, bold, tick
+			for j < len(p) && strings.IndexByte("*_)\"'`", p[j]) >= 0 {
+				switch {
+				case p[j] == '*' && j+1 < len(p) && p[j+1] == '*':
+					b ^= 1
+					j += 2
+					continue
+				case p[j] == '`':
+					t ^= 1
+				}
+				j++
+			}
+			if b != 0 || t != 0 || (j < len(p) && p[j] != ' ' && p[j] != '\t') {
+				continue
+			}
+			if c == '.' {
+				k := i
+				for k > 0 && (isWatchASCIILetter(p[k-1]) || p[k-1] == '.') {
+					k--
+				}
+				if watchAbbreviations[strings.ToLower(strings.TrimLeft(p[k:i], "."))] {
+					continue
+				}
+			}
+			return j
+		}
+	}
+	return -1
+}
+
+// watchPlainText removes markdown from an opening.
+func watchPlainText(s string) string {
+	s = watchMDLink.ReplaceAllString(s, "$1")
+	s = strings.ReplaceAll(s, "**", "")
+	s = strings.ReplaceAll(s, "`", "")
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '*' || c == '_' {
+			prev, next := byte(' '), byte(' ')
+			if i > 0 {
+				prev = s[i-1]
+			}
+			if i+1 < len(s) {
+				next = s[i+1]
+			}
+			keep := prev == ' ' && next == ' '
+			if c == '*' {
+				keep = keep || isWatchDigit(prev) && isWatchDigit(next)
+			} else {
+				keep = keep || isWatchWordByte(prev) && isWatchWordByte(next)
+			}
+			if !keep {
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // watchHeaderText makes a title safe to put in a header line: control

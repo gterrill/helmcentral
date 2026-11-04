@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A watch's page now opens on its latest report.** It leads with the opening
+  sentence of Mate's review in large type, then what needs a look, then the
+  rest of the review and the readings in larger type. The watch's name and
+  **What to look out for** moved to the column at the side, and **Run now** is
+  at the top of the page. Folded runs now show Mate's opening sentence instead
+  of the cost, which is at the foot of the open run. Older runs also show their
+  time as 6.00 AM rather than 06:00.
+
 - **The Documents folders and Cruises panes now match the Rode Planner.** They
   sit in the same style of panel on the left, with a small arrow at the top to
   hide them. Hidden, a thin strip stays down the edge instead of a button above

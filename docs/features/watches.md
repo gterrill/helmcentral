@@ -37,9 +37,11 @@ for its findings, and a box called **What to look out for**. Write what matters
 to you there in your own words, for example "the fridge and the port bilge".
 Mate reads it with every report.
 
-On a watch's page the name and **What to look out for** sit in the main column,
-with the run history. The schedule, the report sections and the notifications
-sit in the column at the side, or below everything on a phone.
+A watch's page opens on its reports, because reading the latest one is usually
+why you came. The name, **What to look out for**, the schedule, the report
+sections and the notifications sit in the column at the side, or below
+everything on a phone. **Run now** is at the top of the page. A new watch has no
+reports yet, so its name and **What to look out for** stay in the main column.
 
 You can also ask Mate. Say "check the boat every hour overnight" and Mate looks
 at the watches you already have, then shows a card for the new one. Nothing is
@@ -324,13 +326,19 @@ Two things to know:
 Every run is kept, newest first, with its report, its findings, Mate's review,
 whether it ran or was skipped and why, and its cost.
 
+- **An open run:** It shows the time and the period it covers. Under that, the
+  first sentence of Mate's review stands out in large type, so you can tell how
+  the morning looks before you read on. If Mate didn't review the run, that line says why,
+  and if the run was skipped, it gives the reason. Below that come **Needs a look**, the rest of **Mate's review**, and
+  **Readings**, with each section in the same place every time. Who was told
+  and what the review cost are at the foot of the run.
 - **Folded runs:** The newest run is open when you arrive, unless you came by a
-  link to a run, which then sits open at the top. Every other run is folded to
-  its time, how many findings it had and what it cost. A folded run also says
-  **Not delivered**, **Not sent** or **No review** when that happened. Tap a run
-  to open it, and open as many as you like to compare them. When a new run
-  arrives it opens in place of the last one that opened by itself. Any you
-  opened yourself stay open.
+  link to a run, which then sits open at the top. Every other run sits under
+  **Earlier reports**, folded to its time, how many findings it had and the first
+  sentence of Mate's review. A folded run also says **Not delivered**, **Not
+  sent** or **No review** when that happened. Tap a run to open it, and open as
+  many as you like to compare them. When a new run arrives it opens in place of
+  the last one that opened by itself. Any you opened yourself stay open.
 - **A year:** A run is kept for a year. After that, runs that found nothing are
   dropped.
 - **Findings stay:** A run with a finding is kept for good.
