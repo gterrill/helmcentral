@@ -106,9 +106,14 @@ any one of them moves all of them. Drop onto **Documents** to take them out of
 their folder. **Move…** and **Move to…** do the same job without dragging,
 which is the way to do it on a touch screen.
 
-**Hide folders** gives the list the whole width, and **Show folders** brings
-the pane back. On a phone the pane isn't on the page. Tap **Folders** to open
-it, and it closes as soon as you pick a folder. In the pane the up and down
+The pane has the same look as the Rode Planner on the Anchor Watch page, with
+its name and a small arrow at the top. Tap the arrow (**Hide folders**) and the
+pane shrinks to a thin strip down the left edge, which gives the list the
+whole width. Tap the arrow at the top of the strip (**Show folders**) to bring
+the pane back.
+Helmcentral remembers on that device whether you left it hidden. On a phone the
+pane isn't on the page. Tap **Folders** to open it, and it closes as soon as
+you pick a folder. In the pane the up and down
 arrows move between folders, right opens a folder, left closes it, and Enter
 opens the folder you are on.
 

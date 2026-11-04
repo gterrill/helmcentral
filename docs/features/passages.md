@@ -43,7 +43,11 @@ end shows `--` and you can type a name yourself.
 ## The list
 
 The left side lists **All passages**, each cruise, and **Unfiled**, which is
-every passage not yet in a cruise. The list shows the newest first, with the
+every passage not yet in a cruise. Tap the arrow at the top of that pane
+(**Hide cruises**) to shrink it to a thin strip. Tap the arrow at the top of
+the strip (**Show cruises**) to bring it back. Helmcentral remembers which you chose on that
+device. On a phone the pane isn't on the page. Tap **Cruises** to open it. The
+list shows the newest first, with the
 date, where the passage went from and to, the distance, the time underway and
 its cruise. Dates and times on this page are the boat's own local time, taken
 from where the passage began, with daylight saving where the place has it. A time

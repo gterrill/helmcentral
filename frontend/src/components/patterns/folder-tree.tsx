@@ -292,7 +292,7 @@ export function FolderTree({
                 <span aria-hidden="true" className="inline-block h-6 w-6 shrink-0" />
               )}
               {node.icon}
-              <span className="min-w-0 flex-1 line-clamp-2 break-words py-1.5 leading-5" title={node.label}>{node.label}</span>
+              <span className="min-w-0 flex-1 line-clamp-2 break-words my-1.5 leading-5" title={node.label}>{node.label}</span>
               {node.count !== undefined && (
                 <span className="shrink-0 self-start py-2 text-xs leading-5 tabular-nums text-muted-foreground">{node.count}</span>
               )}

@@ -164,27 +164,16 @@ const SidebarProvider = React.forwardRef<
 )
 SidebarProvider.displayName = "SidebarProvider"
 
-const Sidebar = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentProps<"div"> & {
-    side?: "left" | "right"
-    variant?: "sidebar" | "floating" | "inset"
-    collapsible?: "offcanvas" | "icon" | "none"
-  }
->(
-  (
-    {
-      side = "left",
-      variant = "sidebar",
-      collapsible = "offcanvas",
-      className,
-      children,
-      ...props
-    },
-    ref
-  ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+type SidebarProps = React.ComponentProps<"div"> & {
+  side?: "left" | "right"
+  variant?: "sidebar" | "floating" | "inset"
+  collapsible?: "offcanvas" | "icon" | "none"
+}
 
+// The "none" form is a plain panel that uses nothing from the provider, so it
+// is split out and never calls useSidebar: it renders without a SidebarProvider.
+const Sidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
+  ({ collapsible = "offcanvas", className, children, ...props }, ref) => {
     if (collapsible === "none") {
       return (
         <div
@@ -199,6 +188,28 @@ const Sidebar = React.forwardRef<
         </div>
       )
     }
+    return (
+      <ProviderSidebar ref={ref} collapsible={collapsible} className={className} {...props}>
+        {children}
+      </ProviderSidebar>
+    )
+  }
+)
+Sidebar.displayName = "Sidebar"
+
+const ProviderSidebar = React.forwardRef<HTMLDivElement, SidebarProps>(
+  (
+    {
+      side = "left",
+      variant = "sidebar",
+      collapsible = "offcanvas",
+      className,
+      children,
+      ...props
+    },
+    ref
+  ) => {
+    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
     if (isMobile) {
       return (
@@ -269,7 +280,7 @@ const Sidebar = React.forwardRef<
     )
   }
 )
-Sidebar.displayName = "Sidebar"
+ProviderSidebar.displayName = "ProviderSidebar"
 
 const SidebarTrigger = React.forwardRef<
   React.ComponentRef<typeof Button>,

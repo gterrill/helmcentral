@@ -108,9 +108,9 @@ beforeEach(() => localStorage.clear())
 describe('Anchor Watch layout: save depth lives in the rode planner', () => {
   it('keeps the planner rail last in the row, with no save-depth child beside it', () => {
     renderDrawer()
-    const rail = screen.getByRole('button', { name: /expand rode planner/i })
-    const row = rail.parentElement as HTMLElement
-    expect(row.lastElementChild).toBe(rail)
+    const strip = screen.getByRole('button', { name: /expand rode planner/i }).parentElement as HTMLElement
+    const row = strip.parentElement as HTMLElement
+    expect(row.lastElementChild).toBe(strip)
     expect(row.children).toHaveLength(2)
     expect(screen.queryByTestId('anchor-save-depth')).toBeNull()
   })

@@ -256,6 +256,7 @@ export function PassagesPanel({
       />
       <TreeLayout
         paneLabel="Cruises"
+        paneIcon={Route}
         collapsedStorageKey={TREE_COLLAPSED_KEY}
         pane={({ dismiss }) => (
           <div className="flex flex-col gap-2">
