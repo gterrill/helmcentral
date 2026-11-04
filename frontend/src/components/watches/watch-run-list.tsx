@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from 'react'
+import { Fragment, memo, useCallback, useState, type CSSProperties } from 'react'
 import { Sparkles, Trash2 } from 'lucide-react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
@@ -50,46 +50,75 @@ function seriesLine(s: WatchSeriesReport): string {
 function SamplesReport({ report }: { report: WatchSamplesReport }) {
   return (
     <div className="flex flex-col gap-1.5" data-testid="watch-samples-report">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {report.reason ? `${report.reason} · ` : ''}{report.minutes} min, {report.started} to {report.ended}
         {report.timezone ? ` ${report.timezone}` : ''}
       </p>
       <ul className="flex flex-col gap-1">
         {report.series.map((s) => (
-          <li key={s.label} className="min-w-0 text-xs">
+          <li key={s.label} className="min-w-0 text-sm">
             <span className="font-medium text-foreground">{s.label}</span>
             <span className="text-muted-foreground"> {seriesLine(s)}</span>
           </li>
         ))}
         {report.difference && (
-          <li className="min-w-0 text-xs">
+          <li className="min-w-0 text-sm">
             <span className="font-medium text-foreground">{report.difference.label}</span>
             <span className="text-muted-foreground"> {seriesLine(report.difference)}</span>
           </li>
         )}
       </ul>
-      {report.difference_note && <p className="text-xs text-muted-foreground">{report.difference_note}</p>}
-      {report.truncated && <p className="text-xs text-muted-foreground">The report was cut short to fit.</p>}
+      {report.difference_note && <p className="text-sm text-muted-foreground">{report.difference_note}</p>}
+      {report.truncated && <p className="text-sm text-muted-foreground">The report was cut short to fit.</p>}
     </div>
   )
 }
 
+/**
+ * The report's sections in fixed places. One column on a phone, in the
+ * report's own order. From sm up, and only when the report has a Tanks section,
+ * two columns: Tanks on the right beside the other sections, Alarms across the
+ * full width below both. Without Tanks it stays one column, so the right half is
+ * not left empty. The grid rows are
+ * set from the number of left-hand sections (CSS variables), with a flexible
+ * row for Tanks to span, so a tall Tanks section never opens gaps between the
+ * sections beside it.
+ */
 function SectionsReport({ report }: { report: WatchSectionsReport }) {
+  const hasTanks = report.sections.some((s) => s.name === 'tanks')
+  const left = report.sections.filter((s) => s.name !== 'tanks' && s.name !== 'alarms').length
+  const leftRows = left > 0 ? `repeat(${left}, auto) ` : ''
+  const rows = hasTanks ? `${leftRows}1fr auto` : `${leftRows}auto`
+  const style = {
+    '--readings-rows': rows,
+    '--readings-tanks-end': left + 2,
+    '--readings-alarms-row': hasTanks ? left + 2 : left + 1,
+  } as CSSProperties
   return (
-    <div className="flex flex-col gap-2" data-testid="watch-sections-report">
-      <p className="text-xs text-muted-foreground">
-        Since {report.since}{report.since_note ? `. ${report.since_note}` : ''}
-      </p>
-      {report.sections.map((section) => (
-        <div key={section.name} className="flex flex-col gap-0.5">
-          <p className={MICRO_LABEL}>{section.title || sectionLabel(section.name)}</p>
-          {section.unavailable ? (
-            <p className="text-xs text-muted-foreground">Unavailable: {section.unavailable}</p>
-          ) : (
-            (section.lines ?? []).map((line, i) => <p key={i} className="min-w-0 text-xs text-foreground">{line}</p>)
-          )}
-        </div>
-      ))}
+    <div
+      className={`grid min-w-0 grid-cols-1 gap-x-6 ${hasTanks ? 'sm:grid-cols-2 sm:[grid-template-rows:var(--readings-rows)]' : ''}`}
+      style={style}
+      data-testid="watch-sections-report"
+    >
+      {report.sections.map((section) => {
+        const place = !hasTanks
+          ? ''
+          : section.name === 'tanks'
+            ? 'sm:col-start-2 sm:[grid-row:1/var(--readings-tanks-end)]'
+            : section.name === 'alarms'
+              ? 'sm:col-span-2 sm:[grid-row:var(--readings-alarms-row)]'
+              : 'sm:col-start-1'
+        return (
+          <div key={section.name} data-section={section.name} className={`flex min-w-0 flex-col gap-0.5 pb-3 ${place}`}>
+            <p className="text-sm font-semibold text-foreground">{section.title || sectionLabel(section.name)}</p>
+            {section.unavailable ? (
+              <p className="min-w-0 text-sm text-muted-foreground">Unavailable: {section.unavailable}</p>
+            ) : (
+              (section.lines ?? []).map((line, i) => <p key={i} className="min-w-0 text-sm text-foreground">{line}</p>)
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -101,24 +130,28 @@ export interface WatchRunCardProps {
   onAskMate?: (run: WatchRun) => void
 }
 
-/** What a run shows when it is closed: when, whether it ran, how many findings, anything that went wrong, what it cost. */
-function RunSummary({ run }: { run: WatchRun }) {
-  const cost = run.outcome === 'ran' ? runCostLabel(run) : null
+/**
+ * What a run shows when it is closed: when, how many findings, anything that
+ * went wrong, and (only while it is closed) the opening line of Mate's review.
+ */
+function RunSummary({ run, opening }: { run: WatchRun; opening?: string }) {
   const count = run.findings.length
   const undelivered = (run.notify_pending ?? []).length > 0
   return (
-    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</span>
-      <Badge variant={run.outcome === 'ran' ? 'secondary' : 'outline'}>{run.outcome === 'ran' ? 'Ran' : 'Skipped'}</Badge>
-      {count > 0 && (
-        <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
-          {count === 1 ? '1 finding' : `${count} findings`}
-        </Badge>
-      )}
-      {undelivered && <Badge variant="outline" className="border-destructive/50 text-destructive">Not delivered</Badge>}
-      {run.not_sent && <Badge variant="outline">Not sent</Badge>}
-      {run.outcome === 'ran' && !run.review && <Badge variant="outline">No review</Badge>}
-      {cost &&<span className="ml-auto text-xs text-muted-foreground">{cost}</span>}
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</span>
+        {count > 0 && (
+          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+            {count === 1 ? '1 finding' : `${count} findings`}
+          </Badge>
+        )}
+        {undelivered && <Badge variant="outline" className="border-destructive/50 text-destructive">Not delivered</Badge>}
+        {run.not_sent && <Badge variant="outline">Not sent</Badge>}
+        {run.outcome === 'ran' && !run.review && run.report_kind !== 'samples' && <Badge variant="outline">No review</Badge>}
+        {run.outcome === 'skipped' && <Badge variant="outline">Skipped</Badge>}
+      </span>
+      {opening && <span className="block min-w-0 truncate text-sm font-normal text-muted-foreground">{opening}</span>}
     </span>
   )
 }
@@ -136,79 +169,121 @@ interface RunBodyProps {
  * of the others.
  */
 const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps) {
+  const sections = run.report && run.report_kind === 'sections' ? (run.report as WatchSectionsReport) : null
+  const samples = run.report && run.report_kind === 'samples' ? (run.report as WatchSamplesReport) : null
+  // The server owns the sentences: the opening is its split of the review, and
+  // a run with no review says so rather than being given a summary here.
+  // A one-off watch's report goes to the chat that asked for it, so it has no
+  // review to miss.
+  const opening =
+    run.outcome === 'skipped'
+      ? run.skip_reason || 'Skipped.'
+      : run.review_opening
+        ? run.review_opening
+        : !run.review && !samples
+          ? `No review. ${run.review_problem || 'Mate did not review this run.'}`
+          : null
+  const reviewText = run.review_rest ?? ''
+  const cost = run.outcome === 'ran' ? runCostLabel(run) : null
+  const told = run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent || (run.notify_notes ?? []).length > 0
+  const hasFooter = onAskMate || onDelete || told || cost
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      {run.outcome === 'skipped' && (
-        <p className="text-sm text-muted-foreground">{run.skip_reason || 'Skipped.'}</p>
+    <div className="flex min-w-0 flex-col gap-4">
+      {sections && (
+        <p className="min-w-0 text-sm text-muted-foreground">
+          Since {sections.since}{sections.since_note ? `. ${sections.since_note}` : ''}
+        </p>
+      )}
+
+      {opening && (
+        <p className="min-w-0 text-xl font-semibold text-foreground" data-testid="watch-run-opening">
+          {opening}
+        </p>
       )}
 
       {run.findings.length > 0 && (
-        <ul className="flex flex-col gap-1" aria-label="Findings">
-          {run.findings.map((f, i) => (
-            <li key={i} className="flex min-w-0 flex-col gap-1.5 text-sm text-foreground">
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                <span className={MICRO_LABEL}>{sectionLabel(f.section)}</span>
-                <span className="min-w-0">{f.text}</span>
-                {f.by === 'mate' && <Badge variant="secondary">Mate</Badge>}
-              </div>
-              {(run.charts ?? [])
-                .filter((c) => c.finding_index === i)
-                .map((c, ci) => (
-                  <WatchChart key={ci} chart={c} />
-                ))}
-              {f.chart_problem && <p className="min-w-0 text-xs text-muted-foreground">{f.chart_problem}</p>}
-            </li>
-          ))}
-        </ul>
+        <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-4">
+          <p className={MICRO_LABEL}>Needs a look</p>
+          <ul className="flex flex-col gap-3" aria-label="Findings">
+            {run.findings.map((f, i) => (
+              <li key={i} className="flex min-w-0 flex-col gap-1.5 text-foreground">
+                {f.by === 'mate' ? (
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
+                    <Badge variant="secondary">Mate</Badge>
+                    <span className="min-w-0">{f.text}</span>
+                  </div>
+                ) : (
+                  <span className="min-w-0 text-base font-medium">{f.text}</span>
+                )}
+                {(run.charts ?? [])
+                  .filter((c) => c.finding_index === i)
+                  .map((c, ci) => (
+                    <WatchChart key={ci} chart={c} />
+                  ))}
+                {f.chart_problem && <p className="min-w-0 text-xs text-muted-foreground">{f.chart_problem}</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      {run.report && run.report_kind === 'sections' && <SectionsReport report={run.report as WatchSectionsReport} />}
-      {run.report && run.report_kind === 'samples' && <SamplesReport report={run.report as WatchSamplesReport} />}
-
-      {run.outcome === 'ran' && (
-        <div className="flex flex-col gap-1 border-t border-border pt-2" data-testid="watch-run-review">
+      {reviewText && (
+        <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-4" data-testid="watch-run-review">
           <p className={MICRO_LABEL}>Mate&apos;s review</p>
-          {run.review ? (
-            <AssistantMarkdown content={run.review} />
-          ) : (
-            <p className="text-xs text-muted-foreground">{run.review_problem || 'Mate did not review this run.'}</p>
-          )}
+          <AssistantMarkdown content={reviewText} />
         </div>
       )}
 
-      {(run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent || (run.notify_notes ?? []).length > 0) && (
-        <div className="flex flex-col gap-0.5" data-testid="watch-run-notified">
-          {run.not_sent && <p className="min-w-0 text-xs text-muted-foreground">Not sent: {run.not_sent}</p>}
-          {run.notified.length > 0 && (
-            <p className="text-xs text-muted-foreground">Notified: {run.notified.map(channelLabel).join(', ')}</p>
-          )}
-          {(run.notify_notes ?? []).map((n) => (
-            <p key={n} className="min-w-0 text-xs text-muted-foreground">
-              {n}
-            </p>
-          ))}
-          {(run.notify_pending ?? []).map((p) => (
-            <p key={p.channel} className="min-w-0 text-xs text-destructive">
-              Not delivered yet to {channelLabel(p.channel)}: {p.reason}
-            </p>
-          ))}
+      {(sections || samples) && (
+        <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-4">
+          <p className={MICRO_LABEL}>Readings</p>
+          {sections && <SectionsReport report={sections} />}
+          {samples && <SamplesReport report={samples} />}
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {onAskMate && (
-          <Button type="button" variant="outline" size="sm" onClick={() => onAskMate(run)}>
-            <Sparkles className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            Ask Mate about this run
-          </Button>
-        )}
-        {onDelete && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onDelete(run)}>
-            <Trash2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-            Delete run
-          </Button>
-        )}
-      </div>
+      {hasFooter && (
+        <div
+          className="flex min-w-0 flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-start sm:justify-between"
+          data-testid="watch-run-footer"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {onAskMate && (
+              <Button type="button" variant="outline" size="sm" onClick={() => onAskMate(run)}>
+                <Sparkles className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                Ask Mate about this run
+              </Button>
+            )}
+            {onDelete && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => onDelete(run)}>
+                <Trash2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                Delete run
+              </Button>
+            )}
+          </div>
+          {(told || cost) && (
+            <div className="flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground sm:items-end sm:text-right">
+              {told && (
+                <div className="flex min-w-0 flex-col gap-0.5 sm:items-end" data-testid="watch-run-notified">
+                  {run.not_sent && <p className="min-w-0">Not sent: {run.not_sent}</p>}
+                  {run.notified.length > 0 && <p>Notified: {run.notified.map(channelLabel).join(', ')}</p>}
+                  {(run.notify_notes ?? []).map((n) => (
+                    <p key={n} className="min-w-0">
+                      {n}
+                    </p>
+                  ))}
+                  {(run.notify_pending ?? []).map((p) => (
+                    <p key={p.channel} className="min-w-0 text-destructive">
+                      Not delivered yet to {channelLabel(p.channel)}: {p.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {cost && <p>{cost}</p>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 })
@@ -217,7 +292,7 @@ const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps
 export function WatchRunCard({ run, highlighted = false, onAskMate }: WatchRunCardProps) {
   return (
     <article
-      className={`flex min-w-0 flex-col gap-3 rounded-md border bg-background p-3 transition-colors ${
+      className={`flex min-w-0 flex-col gap-4 rounded-md border bg-card p-4 transition-colors ${
         highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border'
       }`}
       data-testid="watch-run"
@@ -309,21 +384,26 @@ export function WatchRunList({
   return (
     <div className="flex flex-col gap-3">
       <Accordion multiple value={openIds} onValueChange={changeOpen} className="gap-3">
-        {runs.map((run) => (
-          <AccordionItem
-            key={run.id}
-            value={run.id}
-            id={`run-${run.id}`}
-            data-testid="watch-run"
-            className="rounded-md border border-border bg-background px-3"
-          >
-            <AccordionTrigger>
-              <RunSummary run={run} />
-            </AccordionTrigger>
-            <AccordionContent className="pb-3">
-              <RunBody run={run} onAskMate={onAskMate} onDelete={canWrite ? askToDelete : undefined} />
-            </AccordionContent>
-          </AccordionItem>
+        {runs.map((run, index) => (
+          <Fragment key={run.id}>
+            {/* With a linked run pinned above, none of these is "earlier" than it. */}
+            {index === (expandNewest ? 1 : 0) && (
+              <h2 className={`${MICRO_LABEL} pt-2`}>{expandNewest ? 'Earlier reports' : 'Other reports'}</h2>
+            )}
+            <AccordionItem
+              value={run.id}
+              id={`run-${run.id}`}
+              data-testid="watch-run"
+              className="rounded-md border border-border bg-card px-4"
+            >
+              <AccordionTrigger>
+                <RunSummary run={run} opening={openIds.includes(run.id) ? undefined : run.review_opening} />
+              </AccordionTrigger>
+              <AccordionContent className="pb-4 pt-2">
+                <RunBody run={run} onAskMate={onAskMate} onDelete={canWrite ? askToDelete : undefined} />
+              </AccordionContent>
+            </AccordionItem>
+          </Fragment>
         ))}
       </Accordion>
       {hasOlder && (
@@ -334,6 +414,7 @@ export function WatchRunList({
           <p className="text-xs text-muted-foreground">Showing the newest {runs.length} runs.</p>
         </div>
       )}
+      <p className="text-xs text-muted-foreground">Runs with a finding are kept for good.</p>
       {olderError && <p role="alert" className="text-sm text-destructive">{olderError}</p>}
       <ConfirmDelete
         open={pending !== null}

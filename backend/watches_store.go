@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,8 +149,12 @@ type watchRun struct {
 	NotifyNotes []string `json:"notify_notes"`
 	// Review is Mate's reading of the report. ReviewProblem says why there
 	// is none. Exactly one of them is set on a run that produced a report.
-	Review        *string  `json:"review"`
-	ReviewProblem *string  `json:"review_problem"`
+	Review        *string `json:"review"`
+	ReviewProblem *string `json:"review_problem"`
+	// ReviewOpening and ReviewRest are Review in two parts, worked out when a
+	// run is read for the page (forPage) and never stored.
+	ReviewOpening string   `json:"review_opening,omitempty"`
+	ReviewRest    string   `json:"review_rest,omitempty"`
 	CostUSD       *float64 `json:"cost_usd"`
 	CostKnown     bool     `json:"cost_known"`
 	Model         string   `json:"model,omitempty"`
@@ -171,6 +177,41 @@ type watchRun struct {
 	// have been told about: those the previous run had already told them, and
 	// all of them once a channel accepts this run's report.
 	ToldKeys []string `json:"-"`
+}
+
+// oldBoatTimeRE is a boat time written before the clock went 12-hour:
+// "Tue 3 Nov 06:00 AEST".
+var oldBoatTimeRE = regexp.MustCompile(`^(\w{3} \d{1,2} \w{3} )(\d{2}):(\d{2})( .*)?$`)
+
+// normaliseWatchBoatTime puts a stored 24-hour boat time in the form new runs
+// are written in ("6.00 AM"). Any other text is returned as it is.
+func normaliseWatchBoatTime(s string) string {
+	m := oldBoatTimeRE.FindStringSubmatch(s)
+	if m == nil {
+		return s
+	}
+	h, errH := strconv.Atoi(m[2])
+	mins, errM := strconv.Atoi(m[3])
+	if errH != nil || errM != nil || h > 23 || mins > 59 {
+		return s
+	}
+	return m[1] + boatClock(time.Date(2000, 1, 1, h, mins, 0, 0, time.UTC), time.UTC) + m[4]
+}
+
+// forPage is the run as the Watches page reads it: the review in two parts.
+// The stored run is not changed, and Mate's tools and the notifications keep
+// reading the whole review.
+func (r watchRun) forPage() watchRun {
+	if r.Review != nil {
+		r.ReviewOpening, r.ReviewRest = splitWatchReview(*r.Review)
+	}
+	return r
+}
+
+func watchRunsForPage(runs []watchRun) {
+	for i := range runs {
+		runs[i] = runs[i].forPage()
+	}
 }
 
 func dropLegacyRoutineTables(db *sql.DB) error {
@@ -559,6 +600,7 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		// A run saved with no zone: say it is UTC rather than leave it blank.
 		r.BoatTime = watchBoatClock(r.StartedAt, nil)
 	}
+	r.BoatTime = normaliseWatchBoatTime(r.BoatTime)
 	return r, nil
 }
 

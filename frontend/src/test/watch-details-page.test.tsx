@@ -2,7 +2,7 @@
 process.env.TZ = 'Pacific/Honolulu'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { WatchDetailsPage, type WatchDetailsPageProps } from '@/components/watches/watch-details-page'
@@ -342,20 +342,36 @@ describe('WatchDetailsPage settings aside', () => {
     expect(text.indexOf('Notifications')).toBeGreaterThan(text.indexOf('What each report covers'))
   })
 
-  it('keeps the name, what to look out for and the run history in the main column', async () => {
+  it('keeps the run history in the main column and puts the name and what to look out for at the top of the aside', async () => {
     renderPage()
     const aside = await screen.findByRole('complementary')
     await screen.findByTestId('watch-run')
-    for (const inMain of [screen.getByLabelText('Name'), screen.getByLabelText('What to look out for'), screen.getByText('Run history'), screen.getByTestId('watch-run')]) {
-      expect(aside.contains(inMain)).toBe(false)
-    }
+    expect(aside.contains(screen.getByTestId('watch-run'))).toBe(false)
+    expect(aside.contains(screen.getByRole('region', { name: 'Run history' }))).toBe(false)
+    const name = screen.getByLabelText('Name')
+    const lookOut = screen.getByLabelText('What to look out for')
+    expect(aside.contains(name)).toBe(true)
+    expect(aside.contains(lookOut)).toBe(true)
+    expect(aside.contains(screen.getByRole('switch', { name: 'Enabled' }))).toBe(true)
+    const schedule = within(aside).getByRole('combobox', { name: 'Schedule' })
+    expect(name.compareDocumentPosition(schedule) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(lookOut.compareDocumentPosition(schedule) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('also uses the aside for a new watch', async () => {
+  it('shows the reports before the settings in the page order', async () => {
+    renderPage()
+    const firstRun = await screen.findByTestId('watch-run')
+    const name = screen.getByLabelText('Name')
+    expect(firstRun.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('also uses the aside for a new watch, and keeps the name and what to look out for in the main column', async () => {
     renderPage({ mode: { kind: 'new', template: null } })
     const aside = await screen.findByRole('complementary')
     expect(within(aside).getByRole('group', { name: 'Report sections' })).toBeInTheDocument()
     expect(aside.contains(screen.getByLabelText('Name'))).toBe(false)
+    expect(aside.contains(screen.getByLabelText('What to look out for'))).toBe(false)
+    expect(screen.queryByRole('region', { name: 'Run history' })).not.toBeInTheDocument()
   })
 
   it('gives a one-off watch no aside', async () => {
@@ -371,17 +387,18 @@ describe('WatchDetailsPage settings aside', () => {
 })
 
 describe('WatchDetailsPage run history accordion', () => {
-  const newest = () => run('r1', { review: 'Newest review text' })
+  const newest = () => run('r1', { review: 'Newest review text', review_rest: 'Newest review text' })
   const older = () =>
     run('r2', {
       started_at: '2026-10-27T17:00:00Z',
       boat_time: 'Wed 28 Oct 06:00 UTC+13',
       findings: [{ section: 'alarms', rule: 'alarms_raised', text: 'One older alarm', by: 'rules' }],
       review: 'Older review text',
+      review_rest: 'Older review text',
       cost_usd: 0.05,
     })
 
-  it('opens only the newest run, and a closed run still shows its time, findings and cost', async () => {
+  it('opens only the newest run, and a closed run still shows its time and findings but not its cost', async () => {
     detail = { ...detail, runs: [newest(), older()] }
     renderPage()
     expect(await screen.findAllByTestId('watch-run')).toHaveLength(2)
@@ -392,7 +409,7 @@ describe('WatchDetailsPage run history accordion', () => {
     const closed = within(runItem('r2'))
     expect(closed.getByText('Wed 28 Oct 06:00 UTC+13')).toBeInTheDocument()
     expect(closed.getByText('1 finding')).toBeInTheDocument()
-    expect(closed.getByText('$0.05')).toBeInTheDocument()
+    expect(closed.queryByText('$0.05')).not.toBeInTheDocument()
     expect(closed.queryByText('One older alarm')).not.toBeInTheDocument()
   })
 
@@ -413,7 +430,7 @@ describe('WatchDetailsPage run history accordion', () => {
     await screen.findByText('Newest review text')
     fireEvent.click(triggerOf(runItem('r2')))
     await screen.findByText('Older review text')
-    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review' }), newest(), older()] }
+    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review', review_rest: 'Brand new review' }), newest(), older()] }
     await act(async () => { await invalidateWatches() })
     expect(await screen.findByText('Brand new review')).toBeInTheDocument()
     expect(triggerOf(runItem('r3'))).toHaveAttribute('aria-expanded', 'true')
@@ -430,7 +447,7 @@ describe('WatchDetailsPage run history accordion', () => {
     detail = { ...detail, runs: [older()] }
     await deleteRun('r1')
     await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(1))
-    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review' }), older()] }
+    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review', review_rest: 'Brand new review' }), older()] }
     await act(async () => { await invalidateWatches() })
     expect(await screen.findByText('Brand new review')).toBeInTheDocument()
     expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'true')
@@ -452,7 +469,7 @@ describe('WatchDetailsPage run history accordion', () => {
     await screen.findByText('Newest review text')
     fireEvent.click(triggerOf(runItem('r1')))
     await waitFor(() => expect(screen.queryByText('Newest review text')).not.toBeInTheDocument())
-    detail = { ...detail, runs: [{ ...newest(), review: 'Newest review text, changed' }, older()] }
+    detail = { ...detail, runs: [{ ...newest(), review: 'Newest review text, changed', review_rest: 'Newest review text, changed' }, older()] }
     await act(async () => { await invalidateWatches() })
     expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'false')
   })
@@ -521,6 +538,7 @@ describe('WatchDetailsPage run history accordion', () => {
 
 describe('WatchDetailsPage run history', () => {
   it('renders a run with findings, the Mate badge, section figures, unavailable reasons, review and cost', async () => {
+    detail = { ...detail, runs: detail.runs.map((r) => ({ ...r, review_rest: r.review ?? undefined })) }
     renderPage()
     const card = await screen.findByTestId('watch-run')
     expect(within(card).getByText('Thu 29 Oct 06:00 UTC+13')).toBeInTheDocument()
@@ -533,15 +551,24 @@ describe('WatchDetailsPage run history', () => {
     expect(within(card).getByText('$0.01')).toBeInTheDocument()
   })
 
-  it('shows the review problem as a muted line and "cost not known" when it is', async () => {
+  it('says "No review." with the problem as the opening line, and "cost not known" in the footer', async () => {
     detail = {
       ...detail,
       runs: [run('r1', { review: null, review_problem: 'No model is chosen for Mate.', cost_usd: null, cost_known: false, findings: [] })],
     }
     renderPage()
     const card = await screen.findByTestId('watch-run')
-    expect(within(card).getByText('No model is chosen for Mate.')).toBeInTheDocument()
-    expect(within(card).getByText('cost not known')).toBeInTheDocument()
+    const opening = within(card).getByTestId('watch-run-opening')
+    expect(opening).toHaveTextContent('No review. No model is chosen for Mate.')
+    expect(opening.className).toContain('text-xl')
+    expect(within(card).queryByTestId('watch-run-review')).not.toBeInTheDocument()
+    expect(within(within(card).getByTestId('watch-run-footer')).getByText('cost not known')).toBeInTheDocument()
+  })
+
+  it('says Mate did not review the run when no reason was given', async () => {
+    detail = { ...detail, runs: [run('r1', { review: null, review_problem: null, findings: [] })] }
+    renderPage()
+    expect(await screen.findByTestId('watch-run-opening')).toHaveTextContent('No review. Mate did not review this run.')
   })
 
   it('shows a skipped run with its reason and no review', async () => {
@@ -552,8 +579,16 @@ describe('WatchDetailsPage run history', () => {
     renderPage()
     const card = await screen.findByTestId('watch-run')
     expect(within(card).getByText('Skipped')).toBeInTheDocument()
-    expect(within(card).getByText("No boat position, so the boat's time is not known")).toBeInTheDocument()
+    const opening = within(card).getByTestId('watch-run-opening')
+    expect(opening).toHaveTextContent("No boat position, so the boat's time is not known")
+    expect(opening.className).toContain('text-xl')
     expect(within(card).queryByTestId('watch-run-review')).not.toBeInTheDocument()
+  })
+
+  it('says Skipped. when a skipped run has no reason', async () => {
+    detail = { ...detail, runs: [run('r1', { outcome: 'skipped', skip_reason: '', report: undefined, findings: [], review: null })] }
+    renderPage()
+    expect(await screen.findByTestId('watch-run-opening')).toHaveTextContent('Skipped.')
   })
 
   it('renders a one-off run’s samples summary', async () => {
@@ -582,6 +617,9 @@ describe('WatchDetailsPage run history', () => {
     const report = await screen.findByTestId('watch-samples-report')
     expect(within(report).getByText('Port engine load')).toBeInTheDocument()
     expect(within(report).getByText(/0\.2 to 0\.8 ratio · mean 0\.5 · last 0\.6 · 1 excursion/)).toBeInTheDocument()
+    // Its report goes to the chat that asked for it, so no review is missing.
+    expect(screen.queryByTestId('watch-run-opening')).not.toBeInTheDocument()
+    expect(screen.queryByText('No review')).not.toBeInTheDocument()
     // A one-off watch is read-only: nothing to save, nothing to run again.
     expect(screen.getByText('One-off watch')).toBeInTheDocument()
     expect(screen.getByText('Thu 29 Oct 05:50 UTC+13')).toBeInTheDocument()
@@ -592,7 +630,7 @@ describe('WatchDetailsPage run history', () => {
 
   it('pages older runs in with Show older', async () => {
     detail = { ...detail, has_older: true }
-    olderRuns = [run('r0', { started_at: '2026-10-28T06:00:00Z', report: undefined, report_kind: 'sections', findings: [], review: 'Older review', cost_known: true, cost_usd: 0 })]
+    olderRuns = [run('r0', { started_at: '2026-10-28T06:00:00Z', report: undefined, report_kind: 'sections', findings: [], review: 'Older review', review_rest: 'Older review', cost_known: true, cost_usd: 0 })]
     renderPage()
     await screen.findByTestId('watch-run')
     fireEvent.click(screen.getByRole('button', { name: 'Show older' }))
@@ -652,6 +690,252 @@ describe('WatchDetailsPage run history', () => {
     expect(screen.queryByRole('button', { name: 'Delete run' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Power' })).toHaveAttribute('aria-disabled', 'true')
+  })
+})
+
+describe('WatchDetailsPage report hierarchy', () => {
+  const reviewed = (id: string, over: Partial<WatchRun> = {}) =>
+    run(id, {
+      review: 'Fridge draw is up. Watch **it** tonight.',
+      review_opening: 'Fridge draw is up.',
+      review_rest: 'Watch **it** tonight.',
+      ...over,
+    })
+
+  it('opens a run on the opening line, then what needs a look, Mate’s review, the readings and the footer, in that order', async () => {
+    detail = { ...detail, runs: [reviewed('r1', { notified: ['ntfy'] })] }
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    const opening = within(card).getByTestId('watch-run-opening')
+    expect(opening).toHaveTextContent('Fridge draw is up.')
+    expect(opening.className).toContain('text-xl')
+    expect(opening.className).toContain('font-semibold')
+    expect(await within(card).findByText('it', { selector: 'strong' })).toBeInTheDocument()
+    const text = card.textContent ?? ''
+    const order = ['Since', 'Fridge draw is up.', 'Needs a look', "Mate's review", 'Watch it tonight.', 'Readings', 'House bank 84%', 'Notified: ntfy']
+    const at = order.map((s) => text.indexOf(s))
+    expect(at.every((i) => i >= 0)).toBe(true)
+    expect([...at].sort((a, b) => a - b)).toEqual(at)
+    // The opening is said once, not again inside Mate's review.
+    expect(text.split('Fridge draw is up.').length - 1).toBe(1)
+  })
+
+  it('draws the since line only on a sections report, and the findings without their section label', async () => {
+    detail = { ...detail, runs: [reviewed('r1')] }
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    expect(within(card).getByText('Since Wed 28 Oct 22:00 UTC+13')).toBeInTheDocument()
+    const rule = within(card).getByText('2 alarms raised').closest('li')!
+    expect(rule.textContent).toBe('2 alarms raised')
+    expect(within(card).getByText('2 alarms raised').className).toContain('text-base')
+    const mate = within(card).getByText('Fridge draw is climbing').closest('li')!
+    expect(mate.firstElementChild?.textContent).toContain('Mate')
+    expect(within(card).getByLabelText('Findings')).toBeInTheDocument()
+  })
+
+  it('shows no findings block, and no Mate’s review heading, for a one-sentence review with no findings', async () => {
+    detail = { ...detail, runs: [reviewed('r1', { findings: [], review: 'All quiet.', review_opening: 'All quiet.', review_rest: undefined })] }
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    expect(within(card).getByTestId('watch-run-opening')).toHaveTextContent('All quiet.')
+    expect(within(card).queryByText('Needs a look')).not.toBeInTheDocument()
+    expect(within(card).queryByTestId('watch-run-review')).not.toBeInTheDocument()
+  })
+
+  it('shows the whole review under Mate’s review, and invents no opening, when the server sent no opening', async () => {
+    detail = { ...detail, runs: [run('r1', { review: 'Whole review text only.', review_opening: undefined, review_rest: 'Whole review text only.' })] }
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    expect(within(card).queryByTestId('watch-run-opening')).not.toBeInTheDocument()
+    expect(within(within(card).getByTestId('watch-run-review')).getByText('Whole review text only.')).toBeInTheDocument()
+  })
+
+  it('folds the opening line into a closed run’s summary, with no cost and no Ran badge', async () => {
+    detail = { ...detail, runs: [reviewed('r1'), reviewed('r2', { started_at: '2026-10-27T17:00:00Z', review_opening: 'Older opening line.', review: 'Older opening line.', review_rest: undefined })] }
+    renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
+    const closed = triggerOf(runItem('r2'))
+    expect(closed).toHaveTextContent('Older opening line.')
+    expect(closed).not.toHaveTextContent('$0.01')
+    expect(closed).not.toHaveTextContent('Ran')
+    const line = within(closed).getByText('Older opening line.')
+    expect(line.className).toContain('truncate')
+    expect(line.className).toContain('min-w-0')
+    expect(line.className).toContain('text-sm')
+    // Open, the opening is in the body and not repeated on the summary.
+    expect(triggerOf(runItem('r1'))).not.toHaveTextContent('Fridge draw is up.')
+  })
+
+  it('puts the time first and the findings badge next, and a Skipped badge only on a skipped run', async () => {
+    detail = { ...detail, runs: [run('r1'), run('r2', { started_at: '2026-10-27T17:00:00Z', outcome: 'skipped', skip_reason: 'No boat position', findings: [], review: null, report: undefined })] }
+    renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
+    const ran = triggerOf(runItem('r1')).textContent ?? ''
+    expect(ran.indexOf('Thu 29 Oct 06:00 UTC+13')).toBe(0)
+    expect(ran.indexOf('2 findings')).toBeGreaterThan(0)
+    expect(ran).not.toContain('Skipped')
+    expect(triggerOf(runItem('r2'))).toHaveTextContent('Skipped')
+  })
+
+  it('shows no second line on a closed run with no opening', async () => {
+    detail = { ...detail, runs: [run('r1'), run('r2', { started_at: '2026-10-27T17:00:00Z', review: null, review_problem: 'Mate is not ready' })] }
+    renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'false')
+    expect(triggerOf(runItem('r2'))).not.toHaveTextContent('Mate is not ready')
+  })
+
+  it('puts the cost and who was told in the footer beside Ask Mate and Delete run', async () => {
+    detail = { ...detail, runs: [reviewed('r1', { notified: ['ntfy'], not_sent: undefined })] }
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    const footer = within(card).getByTestId('watch-run-footer')
+    expect(footer).toHaveTextContent('$0.01')
+    expect(footer).toHaveTextContent('Notified: ntfy')
+    expect(within(footer).getByRole('button', { name: 'Ask Mate about this run' })).toBeInTheDocument()
+    expect(within(footer).getByRole('button', { name: 'Delete run' })).toBeInTheDocument()
+  })
+
+  it('keeps every notify line in the footer', async () => {
+    detail = {
+      ...detail,
+      runs: [reviewed('r1', {
+        not_sent: 'no channel is switched on',
+        notify_notes: ['ntfy: sent without the chart'],
+        notify_pending: [{ channel: 'smtp', reason: 'connection refused' }],
+        notified: ['ntfy'],
+      })],
+    }
+    renderPage()
+    const footer = within(await screen.findByTestId('watch-run')).getByTestId('watch-run-footer')
+    for (const s of ['Not sent: no channel is switched on', 'Notified: ntfy', 'ntfy: sent without the chart', 'Not delivered yet to Email: connection refused']) {
+      expect(footer).toHaveTextContent(s)
+    }
+  })
+
+  it('lays the readings out under a Readings heading with a heading on each section', async () => {
+    renderPage()
+    const card = await screen.findByTestId('watch-run')
+    const readings = within(card).getByTestId('watch-sections-report')
+    expect(within(card).getByText('Readings')).toBeInTheDocument()
+    const power = within(readings).getByText('Power')
+    expect(power.className).toContain('font-semibold')
+    expect(within(readings).getByText('House bank 84% at 13.1 V').className).toContain('text-sm')
+    expect(within(readings).getByText('Unavailable: pressure history still filling')).toBeInTheDocument()
+  })
+
+  it('names Tanks and Alarms apart from the other sections so they can sit in their own places', async () => {
+    detail = {
+      ...detail,
+      runs: [run('r1', {
+        report: {
+          kind: 'sections', generated_at: '', boat_time: '', since: 'Wed 28 Oct 22:00 UTC+13',
+          sections: ['power', 'anchor', 'alarms', 'tanks', 'weather', 'instruments', 'extra'].map((name) => ({ name, title: name, lines: [`${name} line`] })),
+        },
+      })],
+    }
+    renderPage()
+    const readings = within(await screen.findByTestId('watch-run')).getByTestId('watch-sections-report')
+    const section = (name: string) => readings.querySelector(`[data-section="${name}"]`) as HTMLElement
+    expect(section('tanks').className).toContain('sm:col-start-2')
+    expect(section('alarms').className).toContain('sm:col-span-2')
+    for (const name of ['power', 'anchor', 'weather', 'instruments', 'extra']) expect(section(name).className).toContain('sm:col-start-1')
+    // One column on a phone, in the report's own order.
+    const names = [...readings.querySelectorAll('[data-section]')].map((el) => el.getAttribute('data-section'))
+    expect(names).toEqual(['power', 'anchor', 'alarms', 'tanks', 'weather', 'instruments', 'extra'])
+  })
+
+  it('puts Earlier reports between the newest run and the rest only when there is more than one', async () => {
+    detail = { ...detail, runs: [run('r1'), run('r2', { started_at: '2026-10-27T17:00:00Z' })] }
+    renderPage()
+    const heading = await screen.findByRole('heading', { name: 'Earlier reports' })
+    expect(runItem('r1').compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(heading.compareDocumentPosition(runItem('r2')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('calls the list Other reports, before its first run, when a linked run is pinned above it', () => {
+    const listProps = { hasOlder: false, canWrite: false, loadingOlder: false, olderError: null, onShowOlder: () => {}, onDeleteRun: async () => {} }
+    render(<WatchRunList runs={[run('r1'), run('r2', { started_at: '2026-10-27T17:00:00Z' })]} expandNewest={false} {...listProps} />)
+    const heading = screen.getByRole('heading', { name: 'Other reports' })
+    expect(screen.queryByRole('heading', { name: 'Earlier reports' })).not.toBeInTheDocument()
+    expect(heading.compareDocumentPosition(runItem('r1')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps Earlier reports before the second run when the newest opens', () => {
+    const listProps = { hasOlder: false, canWrite: false, loadingOlder: false, olderError: null, onShowOlder: () => {}, onDeleteRun: async () => {} }
+    render(<WatchRunList runs={[run('r1'), run('r2', { started_at: '2026-10-27T17:00:00Z' })]} expandNewest {...listProps} />)
+    expect(screen.queryByRole('heading', { name: 'Other reports' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Earlier reports' })).toBeInTheDocument()
+  })
+
+  it('uses two columns from sm up only when the report has a tanks section', async () => {
+    const sections = (names: string[]) => ({
+      kind: 'sections' as const, generated_at: '', boat_time: '', since: 'Wed 28 Oct 22:00 UTC+13',
+      sections: names.map((name) => ({ name, title: name, lines: [`${name} line`] })),
+    })
+    detail = { ...detail, runs: [run('r1', { report: sections(['power', 'alarms']) })] }
+    renderPage()
+    let grid = await screen.findByTestId('watch-sections-report')
+    expect(grid.className).toContain('grid-cols-1')
+    expect(grid.className).not.toContain('sm:grid-cols-2')
+    cleanup()
+    detail = { ...detail, runs: [run('r1', { report: sections(['power', 'tanks']) })] }
+    renderPage()
+    grid = await screen.findByTestId('watch-sections-report')
+    expect(grid.className).toContain('sm:grid-cols-2')
+  })
+
+  it('has no Earlier reports heading with a single run', async () => {
+    renderPage()
+    await screen.findByTestId('watch-run')
+    expect(screen.queryByRole('heading', { name: 'Earlier reports' })).not.toBeInTheDocument()
+  })
+
+  it('is not a card inside a card, and says runs with a finding are kept after the list', async () => {
+    renderPage()
+    const region = await screen.findByRole('region', { name: 'Run history' })
+    expect(region.closest('[data-slot="card"]')).toBeNull()
+    expect(screen.queryByText('Newest first. Runs with a finding are kept for good.')).not.toBeInTheDocument()
+    const kept = within(region).getByText('Runs with a finding are kept for good.')
+    expect(kept.className).toContain('text-muted-foreground')
+    expect(screen.getByTestId('watch-run').compareDocumentPosition(kept) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('puts Run now in the page header, outside the report list, and keeps its status above the list', async () => {
+    renderPage()
+    await screen.findByTestId('watch-run')
+    const button = screen.getByRole('button', { name: 'Run now' })
+    expect(screen.getByRole('region', { name: 'Run history' }).contains(button)).toBe(false)
+    expect(button.closest('[data-slot="card"]')).toBeNull()
+    fireEvent.click(button)
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent('Building the report.')
+    expect(screen.getByRole('region', { name: 'Run history' }).contains(status)).toBe(true)
+    expect(status.compareDocumentPosition(screen.getByTestId('watch-run')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run now' })).toBeEnabled())
+  })
+
+  it('turns Run now off while there are unsaved changes', async () => {
+    renderPage()
+    fireEvent.change(await screen.findByDisplayValue('Overnight check'), { target: { value: 'Renamed' } })
+    expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled()
+  })
+
+  it('puts a one-off watch’s details first and its samples under Readings at text-sm', async () => {
+    detail = {
+      watch: record({ kind: 'one_off', name: 'Engine load', schedule: undefined, duration_minutes: 10, schedule_sentence: 'One-off · 10 minutes' }),
+      runs: [run('r1', {
+        report_kind: 'samples', review: null, review_problem: null, findings: [],
+        report: { reason: 'Engine load', timezone: 'NZDT', started: 'a', ended: 'b', minutes: 10, note: 'Values are SignalK units', series: [{ label: 'Port engine load', units: 'ratio', samples: 600, min: 0.2, mean: 0.5, max: 0.8, last: 0.6, excursion_count: 1 }] },
+      })],
+      has_older: false,
+    }
+    renderPage()
+    const details = await screen.findByText('One-off watch')
+    const card = await screen.findByTestId('watch-run')
+    expect(details.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(card).getByText('Readings')).toBeInTheDocument()
+    expect(within(within(card).getByTestId('watch-samples-report')).getByText('Port engine load').closest('li')!.className).toContain('text-sm')
   })
 })
 

@@ -164,6 +164,9 @@ export interface WatchRun {
   /** Where a delivery was not as meant, such as a message sent without its chart. */
   notify_notes?: string[]
   review: string | null
+  /** The review's opening sentence and the remainder (markdown), split by the server. Absent without a review. */
+  review_opening?: string
+  review_rest?: string
   review_problem: string | null
   cost_usd: number | null
   cost_known: boolean
