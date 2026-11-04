@@ -281,3 +281,20 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: build --snapshot --clean --single-target
+
+  # The one release check branch protection requires. A PR builds only the
+  # targets release-targets picks, so requiring each target by name would leave
+  # most PRs waiting on checks that never report. always() keeps this reporting
+  # when a job it needs fails, because a skipped check counts as passed.
+  release-builds:
+    name: Release builds
+    needs: [release-targets, release-build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TARGETS: ${{ needs.release-targets.result }}
+          BUILDS: ${{ needs.release-build.result }}
+        run: |
+          echo "Release build targets: $TARGETS, release builds: $BUILDS"
+          [ "$TARGETS" = success ] && [ "$BUILDS" = success ]
