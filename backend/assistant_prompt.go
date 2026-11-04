@@ -596,7 +596,7 @@ func assistantHullTypePhrase(hullType string) string {
 // still tells the model something, just not a pretty label.
 var assistantPanelLabels = map[string]string{
 	"forecast":     "Forecast",
-	"radar":        "Radar",
+	"radar":        "Windy",
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",
 	"watches":      "Watches",

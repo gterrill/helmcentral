@@ -156,7 +156,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
   if (!lastKnownPosition) {
     return (
       <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
-        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Radar</p>
+        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Windy</p>
         <p className="mt-2 font-medium text-foreground">Waiting for vessel position...</p>
         <p className="mt-1 text-xs text-muted-foreground">The map will center automatically once GPS latitude/longitude are available.</p>
       </div>

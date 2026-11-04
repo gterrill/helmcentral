@@ -10,12 +10,12 @@ import {
   Mic,
   MicOff,
   Minimize,
-  Radar as RadarIcon,
   Settings,
   Ship,
   Eye,
   Sparkles,
   MonitorPlay,
+  Wind,
   Wrench,
 } from 'lucide-react'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -176,7 +176,7 @@ import { cn } from '@/lib/utils'
 /**
  * Ordered the way the boat is actually run, not the order the panels were
  * built in: what you want at a glance underway first (Alarms, Anchor Watch,
- * Forecast, Radar), then the reference material you go and look
+ * Forecast, Windy), then the reference material you go and look
  * something up in (Documents, Inventory, Mate), then the rows you touch once
  * and leave alone (Wall displays, Settings). ADR 0123 put Inventory right
  * after Documents rather than after Passages - the equipment registry links
@@ -198,7 +198,8 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'alarms', label: 'Alarms', icon: BellRing },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
-  { id: 'radar', label: 'Radar', icon: RadarIcon },
+  // The id stays 'radar', and so does the /radar address, so saved links work.
+  { id: 'radar', label: 'Windy', icon: Wind },
   { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'watches', label: 'Watches', icon: Eye },
   { id: 'documents', label: 'Documents', icon: FileText },
@@ -226,7 +227,7 @@ function activePanelSectionLabel(location: AppLocation): string | null {
 }
 
 // The header's "settings for this page" gear: which panels have a matching
-// Settings section, and which one. Only these four have anywhere for the
+// Settings section, and which one. Only these three have anywhere for the
 // gear to point - Dashboard, Settings itself and every other panel have no
 // entry here, so the header hides the button rather than showing one that
 // goes nowhere useful.
@@ -234,7 +235,6 @@ const PANEL_SETTINGS_SECTIONS: Partial<Record<PanelId, SettingsSectionId>> = {
   alarms: 'alarms',
   'anchor-watch': 'anchor-watch',
   assistant: 'assistant',
-  radar: 'mayara',
 }
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
@@ -1722,7 +1722,7 @@ function AppShell() {
     switch (panel) {
       case 'forecast': return 'forecast'
       case 'alarms': return 'alarms'
-      case 'radar': return 'radar'
+      case 'radar': return 'Windy'
       case 'assistant': return 'Mate'
       case 'settings': return 'settings'
       case 'anchor-watch': return 'anchor watch'

@@ -1,6 +1,6 @@
 /**
  * The header's "settings for this page" gear: a small number of panels
- * (Alarms, Anchor Watch, Mate, Radar/Mayara) have a matching Settings
+ * (Alarms, Anchor Watch, Mate) have a matching Settings
  * section, and a shortcut in the header jumps straight there instead of
  * making the operator go back to the sidebar and find it in Settings
  * itself. Every other panel, Dashboard, and Settings itself have no such
@@ -237,11 +237,11 @@ describe('App header settings-for-this-page button', () => {
     expect(screen.getByRole('button', { name: 'Mate settings' })).toBeInTheDocument()
   })
 
-  it('shows "Mayara settings" on the Radar panel', () => {
+  it('hides the button on the Windy panel, which uses no Mayara settings', () => {
     window.history.replaceState({}, '', '/radar')
     render(<App />)
 
-    expect(screen.getByRole('button', { name: 'Mayara settings' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mayara settings' })).not.toBeInTheDocument()
   })
 
   it('hides the button on the Dashboard', () => {

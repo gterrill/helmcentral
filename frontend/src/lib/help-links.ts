@@ -39,7 +39,7 @@ export const HELP_INDEX: HelpTarget = { page: 'index' }
  */
 export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   forecast: { page: 'features/forecast' },
-  radar: { page: 'features/dashboard', heading: 'Radar targets' },
+  radar: { page: 'features/dashboard', heading: 'Windy' },
   'anchor-watch': { page: 'features/anchor-watch' },
   alarms: { page: 'features/alarms' },
   assistant: { page: 'features/assistant' },

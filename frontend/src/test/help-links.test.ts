@@ -41,6 +41,10 @@ describe('helpTargetFor', () => {
     }
   })
 
+  it('sends the Windy panel to its own help section, not the marine radar one', () => {
+    expect(helpTargetFor({ panel: 'radar' })).toEqual({ page: 'features/dashboard', heading: 'Windy' })
+  })
+
   it('sends settings to the section table, and the Import wizard to the Import section', () => {
     for (const section of SETTINGS_SECTIONS) {
       expect(helpTargetFor({ panel: 'settings', route: { view: 'section', section: section.id } })).toEqual(

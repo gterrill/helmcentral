@@ -286,7 +286,7 @@ equipment it belongs to. Records already in YachtWave
 
 Other features include a Route tile that follows the route SignalK is navigating,
 autopilot control on SignalK's v2 API, ARPA radar targets, and an
-embedded weather radar.
+embedded Windy weather map.
 
 Out of scope: hazard avoidance, weather routing, live
 navigation, or anything requiring a chart licence.
