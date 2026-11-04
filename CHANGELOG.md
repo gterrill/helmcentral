@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Watch report titles now count what there is to look at.** A title reads
+  "Overnight check: 2 to look at" instead of "Overnight check: 2 findings", and
+  the Watches page shows the same count, on older runs too. If you have a webhook
+  or a filter that reads this title, change it to expect the new wording.
+  Webhooks also get Mate's questions, and a finding Mate adds to another says
+  which one.
+
 ### Changed
 
 - **A watch's page now opens on its latest report.** It leads with the opening
@@ -20,7 +29,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   at the top of the page. Folded runs now show Mate's opening sentence instead
   of the cost, which is at the foot of the open run. Older runs also show their
   time as 6.00 AM rather than 06:00.
-
+- **Watch reports say each thing once, and show what wasn't checked.** A check
+  that couldn't run now has its own **Not checked** box, so it can't pass for a
+  reading. The alarm finding is a short summary, with every title in a list under
+  **Readings**. Tanks show how far they've moved since the last report. When Mate
+  adds to a finding, its words sit under that finding, and it won't chart the same
+  reading twice. Mate keeps its review to four sentences and asks its questions
+  separately, each with an **Answer** button.
 - **The Documents folders and Cruises panes now match the Rode Planner.** They
   sit in the same style of panel on the left, with a small arrow at the top to
   hide them. Hidden, a thin strip stays down the edge instead of a button above

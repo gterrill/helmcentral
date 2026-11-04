@@ -62,8 +62,11 @@ export interface WatchDetailsPageProps {
   onCreated: (id: string) => void
   /** A delete that already succeeded: the page no longer has a record. */
   onDeleted: () => void
-  /** Opens Mate on a new conversation about one run. */
-  onAskMate?: (question: string, options: { newConversation: true; watchRun: { id: string; name: string } }) => void
+  /**
+   * Opens Mate on a new conversation about one run. With `draft` the text goes
+   * into the composer unsent, for the skipper to finish and send.
+   */
+  onAskMate?: (question: string, options: { newConversation: true; watchRun: { id: string; name: string }; draft?: boolean }) => void
 }
 
 function leavesEditor(mode: WatchEditorMode, target: AppLocation): boolean {
@@ -283,6 +286,17 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
         })
       }
     : undefined), [onAskMate, recordName])
+  // A question Mate asked in a review: a draft in a new chat about this run, never sent from here.
+  // Not offered to a read-only session: the sheet would open with nothing to send.
+  const answer = useMemo(() => (onAskMate && recordName !== undefined && canWrite
+    ? (run: WatchRun, question: string) => {
+        onAskMate(`About "${question}": `, {
+          newConversation: true,
+          watchRun: { id: run.id, name: recordName },
+          draft: true,
+        })
+      }
+    : undefined), [onAskMate, recordName, canWrite])
 
   const title = mode.kind === 'new' ? 'New watch' : record?.name ?? 'Watch'
   const breadcrumb = (
@@ -456,6 +470,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
                 run={linked.run}
                 highlighted={highlighted}
                 onAskMate={askMate}
+                onAnswer={answer}
               />
             </>
           ) : linked.gone ? (
@@ -476,6 +491,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
         olderError={detail.olderError}
         onShowOlder={() => { void detail.showOlder() }}
         onAskMate={askMate}
+        onAnswer={answer}
         onDeleteRun={async (run) => {
           await watchesApi.removeRun(mode.id, run.id)
           detail.dropRun(run.id)

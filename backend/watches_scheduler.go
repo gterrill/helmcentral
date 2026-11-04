@@ -249,7 +249,7 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 	}); err != nil {
 		log.Printf("watches: %q: could not read the previous run, so Mate is not told which issues it already raised and may word one differently: %v", w.Name, err)
 	} else if hadPrevious {
-		prev := watchPreviousRun{Mate: mateFindings(previous.Findings)}
+		prev := watchPreviousRun{Mate: mateFindings(previous.Findings), Questions: previous.Questions}
 		if previous.Review != nil {
 			prev.Review = *previous.Review
 		}
@@ -264,6 +264,9 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 		reviewCtx = withWatchPreviousRun(ctx, prev)
 	}
 	review := h.review(reviewCtx, cfg, w, report, findings, now, loc)
+	// The rules' findings come first and keep their order: a finding of Mate's
+	// names the one it extends by its index in this list, and a chart names its
+	// finding the same way.
 	all := append(append([]watchFinding{}, findings...), review.Added...)
 	var sources watchChartSources
 	if h.chartSources != nil {
@@ -286,6 +289,7 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 	if review.Review != "" {
 		r := review.Review
 		run.Review = &r
+		run.Questions = review.Questions
 	} else {
 		problem := review.Problem
 		if problem == "" {

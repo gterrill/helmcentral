@@ -282,6 +282,9 @@ interface AssistantThreadProps {
   /** A question to put in the composer, unsent: one the sheet was handed
    * while Mate was still answering. A new `key` puts it in again. */
   queuedQuestion?: { text: string; key: number } | null
+  /** Called once the composer has taken the queued question, so the owner
+   * drops it and a later mount does not put it in again. */
+  onQueuedQuestionTaken?: () => void
   /** The watch Mate is running in the active conversation (ADR 0160), from
    * `useMateTelemetryWatch`. Optional: without it the thread shows no chip
    * and never collects a watch's report on its own. */
@@ -337,14 +340,17 @@ function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: st
  * jump-to-latest button, Message/Bubble render one turn each, and Marker
  * carries the status line and tool activity while a reply is in flight.
  */
-export function AssistantThread({ canWrite, session, autoFocus, composerRef, onHasDraftChange, watch, queuedQuestion }: AssistantThreadProps) {
+export function AssistantThread({ canWrite, session, autoFocus, composerRef, onHasDraftChange, watch, queuedQuestion, onQueuedQuestionTaken }: AssistantThreadProps) {
   const [content, setContent] = useState('')
   // A queued question goes in after anything already typed, never over it.
   const queuedKey = queuedQuestion?.key
   const queuedText = queuedQuestion?.text
+  const onTakenRef = useRef(onQueuedQuestionTaken)
+  onTakenRef.current = onQueuedQuestionTaken
   useEffect(() => {
     if (queuedKey === undefined || !queuedText) return
     setContent((current) => (current.trim() === '' ? queuedText : `${current}\n${queuedText}`))
+    onTakenRef.current?.()
   }, [queuedKey, queuedText])
   const [summaryOpen, setSummaryOpen] = useState(false)
   const { status } = session

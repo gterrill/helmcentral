@@ -77,6 +77,9 @@ type watchReportMessage struct {
 	Charts []watchChart `json:"charts"`
 	Report *watchReport `json:"report"`
 	Review *string      `json:"review"`
+	// Questions are what Mate asked the skipper, apart from the review. A run
+	// with none sends an empty list.
+	Questions []string `json:"questions"`
 	// Path is where the run is in the app. There is no public address to
 	// build a full link from, so the receiver adds its own Helmcentral address.
 	Path string `json:"path"`
@@ -402,7 +405,8 @@ func watchEncodedHeaderText(s string) string {
 }
 
 func buildWatchReportMessage(w savedWatch, run watchRun, vessel, linkBase string) watchReportMessage {
-	m := watchReportMessage{Kind: notificationKindWatchReport, Vessel: vessel, Findings: nonNilFindings(run.Findings), Review: run.Review, Charts: nonNilCharts(run.Charts)}
+	m := watchReportMessage{Kind: notificationKindWatchReport, Vessel: vessel, Findings: nonNilFindings(run.Findings), Review: run.Review,
+		Questions: nonNilStrings(run.Questions), Charts: nonNilCharts(run.Charts)}
 	m.Watch.ID, m.Watch.Name, m.Watch.ScheduleSentence = w.ID, w.Name, watchSentenceOrCron(w)
 	m.Run.ID, m.Run.BoatTime, m.Run.Outcome = run.ID, run.BoatTime, run.Outcome
 	m.Path = "/watches/" + w.ID + "?run=" + run.ID
@@ -418,24 +422,22 @@ func buildWatchReportMessage(w savedWatch, run watchRun, vessel, linkBase string
 		}
 	}
 
-	n := len(run.Findings)
-	switch n {
+	switch issues := watchIssueCount(run.Findings); issues {
 	case 0:
 		m.Title = w.Name + ": nothing to report"
-	case 1:
-		m.Title = w.Name + ": 1 finding"
 	default:
-		m.Title = fmt.Sprintf("%s: %d findings", w.Name, n)
+		m.Title = fmt.Sprintf("%s: %d to look at", w.Name, issues)
 	}
 
 	var lines []string
-	for i, f := range run.Findings {
-		if i == watchNotifyFindingLines {
-			more := n - watchNotifyFindingLines
+	ordered := watchFindingOrder(run.Findings)
+	for shown, i := range ordered {
+		if shown == watchNotifyFindingLines {
+			more := len(ordered) - watchNotifyFindingLines
 			lines = append(lines, fmt.Sprintf("%d more %s.", more, watchPlural(more, "finding", "findings")))
 			break
 		}
-		lines = append(lines, f.Text)
+		lines = append(lines, run.Findings[i].Text)
 	}
 	if run.Review != nil {
 		if s := watchFirstSentence(*run.Review); s != "" {
@@ -447,6 +449,42 @@ func buildWatchReportMessage(w savedWatch, run watchRun, vessel, linkBase string
 	}
 	m.Summary = strings.Join(lines, "\n")
 	return m
+}
+
+// watchIssueCount is how many things a run has to look at: its findings that
+// do not extend another. A finding of Mate's that adds to a rule's finding is
+// more about the same issue.
+func watchIssueCount(findings []watchFinding) int {
+	n := 0
+	for _, f := range findings {
+		if f.Extends == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// watchFindingOrder is the order to read a run's findings in: each finding that
+// extends another right after it. It returns indexes into findings, which are
+// not reordered, because a chart names its finding by index. The review is
+// checked when it is stored, so every extends names one of the rules' findings,
+// which come first and extend nothing.
+func watchFindingOrder(findings []watchFinding) []int {
+	under := map[int][]int{}
+	var top []int
+	for i, f := range findings {
+		if f.Extends != nil {
+			under[*f.Extends] = append(under[*f.Extends], i)
+			continue
+		}
+		top = append(top, i)
+	}
+	order := make([]int, 0, len(findings))
+	for _, i := range top {
+		order = append(order, i)
+		order = append(order, under[i]...)
+	}
+	return order
 }
 
 // watchEmailText is the whole report as plain text, for the email body.
@@ -465,7 +503,8 @@ func watchEmailText(m watchReportMessage) string {
 	}
 	if len(m.Findings) > 0 {
 		b.WriteString("Findings\n")
-		for i, f := range m.Findings {
+		for _, i := range watchFindingOrder(m.Findings) {
+			f := m.Findings[i]
 			b.WriteString("- " + f.Text + "\n")
 			if f.ChartProblem != "" {
 				b.WriteString("  (" + f.ChartProblem + ")\n")
@@ -480,6 +519,13 @@ func watchEmailText(m watchReportMessage) string {
 	}
 	if m.Review != nil && strings.TrimSpace(*m.Review) != "" {
 		b.WriteString("Mate's review\n" + strings.TrimSpace(*m.Review) + "\n\n")
+	}
+	if len(m.Questions) > 0 {
+		b.WriteString("Questions\n")
+		for _, q := range m.Questions {
+			b.WriteString("- " + q + "\n")
+		}
+		b.WriteString("\n")
 	}
 	if m.Report != nil {
 		for _, s := range m.Report.Sections {
@@ -623,9 +669,10 @@ func recordWatchNotSent(watchID, runID, reason string) {
 // review's own text, and what the skipper said in the chats opened on that
 // run. Replies to any older run are not carried.
 type watchPreviousRun struct {
-	Mate    []watchFinding
-	Review  string
-	Replies []string
+	Mate      []watchFinding
+	Review    string
+	Questions []string
+	Replies   []string
 }
 
 // mateFindings keeps the findings Mate added to a run.

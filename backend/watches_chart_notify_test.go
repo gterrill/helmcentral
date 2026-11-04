@@ -164,7 +164,7 @@ func TestWatchNtfy_FirstChartGoesAsAnAttachment(t *testing.T) {
 		t.Fatalf("hits %+v", got)
 	}
 	h := got[0].headers
-	if h.Get("Filename") != "pressure-last-12-hours.png" || h.Get("Title") != "Overnight: 1 finding" || h.Get("Priority") != "3" || h.Get("Tags") != "clipboard" ||
+	if h.Get("Filename") != "pressure-last-12-hours.png" || h.Get("Title") != "Overnight: 1 to look at" || h.Get("Priority") != "3" || h.Get("Tags") != "clipboard" ||
 		h.Get("Click") != "http://boat.local:9091/watches/w1?run=r1" {
 		t.Errorf("headers %v", h)
 	}

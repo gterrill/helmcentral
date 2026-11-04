@@ -58,9 +58,64 @@ judgement when Mate had none.
 - **Keeping the form above the reports:** Settings change rarely, and reports
   arrive daily.
 
+## What the report carries
+
+A report's sections gain `rows`, `summary` and `not_checked` beside `lines`.
+`lines` stays for email, Mate's input and past runs, which keep their wording, so
+the page draws `rows` when a section has them and `lines` when it doesn't. Mate's
+copy of the report leaves out `rows` and `summary`, because they repeat `lines`
+and each token is paid for.
+
+- **Not checked:** A sentence joins `not_checked` when a check or rule could not
+  run: the overnight draw, the pressure fall, a tank with no level, the anchor's
+  distance, the active alarms, the forecast. A missing reading that no check uses
+  stays in its row, so a boat with no solar isn't told so every morning.
+- **Tanks:** Each row carries its change since the last report. The same `now` and
+  `was` feed the finding, so the row and the finding can't disagree.
+- **Alarms:** The finding shrinks to the count, the top title and the active
+  state. The rows and the long line keep the detail.
+
+## What Mate is held to
+
+The prompt already asked for four short sentences and no restating, and the
+4 Nov review ran to six. `submit_watch_review` now refuses what the prompt only
+asked for:
+
+- **Length:** More than four sentences in `review`, counted by the scanner that
+  finds the opening line.
+- **Questions:** A `?` in `review`. Questions go in `questions`, at most three,
+  stored on the run and given to the next review with the do-not-repeat rule.
+- **A second chart:** A chart of a path a rule finding's chart already draws. The
+  pressure chart reads the live barometer and has no path, so this doesn't catch
+  a Mate chart of pressure.
+- **A bad link:** An `extends` index outside `findings_by_the_rules`.
+
+A review that never passes ends the way any failed review does, with its problem
+on the run. It is never accepted as it stands.
+
+## How issues are counted
+
+A Mate finding sets `extends` to name the rule finding it adds to. The issue count
+leaves those out, so the 4 Nov run reads "2 to look at" and not "3 findings". The
+page and the notification titles both use it. Rule findings come first in
+`findings`, so the index holds and charts keep their `finding_index`. Email and
+short messages place an extending finding under its parent without reordering
+what is stored.
+
+The agreed mock-up showed Mate's 48-hour tank chart in place of the rule's
+24-hour one. The rule's chart stays, because replacing it would let Mate remove
+something the rules reached, including its warning line.
+
+## Answering a question
+
+**Answer** opens a chat linked to the run with the question in the composer,
+unsent. The operator's words then reach the next review the way any reply in that
+chat does.
+
 ## Limits
 
-This decision changes order and weight only. The page still shows long alarm
-findings, and it can't yet separate a check that didn't run from a reading,
-because the report holds both as lines of text. The next change gives the
-report that structure.
+- **The any-alarm rule:** One alarm still makes a finding by default, so most
+  mornings still have something to look at. That is a separate decision.
+- **Grouping is Mate's call:** A Mate finding that fails to set `extends` counts
+  as its own issue, and nothing checks that a parent is really about the same
+  thing.

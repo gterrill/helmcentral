@@ -166,6 +166,15 @@ func (d assistantToolDeps) executeGetWatchRuns(ctx context.Context, raw json.Raw
 	if err != nil {
 		return "", fmt.Errorf("get_watch_runs: %w", err)
 	}
+	// The page's rows and summary repeat the lines; Mate reads the report
+	// without them, as the review does.
+	for i := range result.Runs {
+		trimmed, err := watchReportForModel(result.Runs[i].Report)
+		if err != nil {
+			return "", fmt.Errorf("get_watch_runs: run %s: %w", result.Runs[i].ID, err)
+		}
+		result.Runs[i].Report = trimmed
+	}
 	return capToolResultJSON(&result, func() bool {
 		if len(result.Runs) <= 1 {
 			return false
@@ -228,6 +237,9 @@ func (d assistantToolDeps) executeRunWatchNow(ctx context.Context, raw json.RawM
 	run, err := host.RunNow(ctx, w)
 	if err != nil {
 		return "", fmt.Errorf("run_watch_now: %w", err)
+	}
+	if run.Report, err = watchReportForModel(run.Report); err != nil {
+		return "", fmt.Errorf("run_watch_now: run %s: %w", run.ID, err)
 	}
 	return capToolResultJSON(&assistantWatchRunsResult{Watch: w.Name, Runs: []watchRun{*run}}, func() bool { return false })
 }

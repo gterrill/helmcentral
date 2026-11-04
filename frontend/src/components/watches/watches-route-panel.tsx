@@ -14,7 +14,7 @@ export interface WatchesRoutePanelProps {
   canWrite: boolean
   /** Settings is admin-only: without it the links to Alarm settings are plain words. */
   canAdmin: boolean
-  onAskMate?: (question: string, options: { newConversation: true; watchRun: MateWatchRunContext }) => void
+  onAskMate?: (question: string, options: { newConversation: true; watchRun: MateWatchRunContext; draft?: boolean }) => void
 }
 
 // ADR 0227: Watches wired to the app location. The index and one watch's page

@@ -142,8 +142,13 @@ func TestWatchReport_AlarmsRaisedSinceTheLastRun(t *testing.T) {
 	if len(got) != 1 || got[0].Rule != "alarms_raised" || got[0].By != watchByRules {
 		t.Fatalf("findings %+v", got)
 	}
-	if !strings.Contains(got[0].Text, "2 alarms raised since 3.00 AM") || !strings.Contains(got[0].Text, "Anchor Dragging, once (3.40 AM)") {
+	if got[0].Text != "2 alarms raised since 3.00 AM. House Bank Low, once. No alarms active now." {
 		t.Errorf("text %q", got[0].Text)
+	}
+	// The long sentence for every title stays in the lines, for the email and Mate.
+	report, _ := buildWatchReport(baseWatch(), in)
+	if lines := strings.Join(sectionOf(t, report, "alarms").Lines, "|"); !strings.Contains(lines, "Anchor Dragging, once (3.40 AM)") {
+		t.Errorf("lines %q", lines)
 	}
 	// A higher threshold is respected.
 	w := baseWatch()
@@ -398,7 +403,8 @@ func TestWatchReport_AlarmsAreGroupedByTitleAndMarkedActiveNow(t *testing.T) {
 	if strings.Contains(string(raw), "2026-10-") {
 		t.Errorf("figures carry no RFC3339 instant: %s", raw)
 	}
-	if got := findingsFor(findings, "alarms"); len(got) != 1 || !strings.Contains(got[0].Text, "Collision Profile Not Changed, 46 times") {
+	want := "49 alarms raised in the last 24 hours. Collision Profile Not Changed 46 times. 1 active now: Collision Profile Not Changed."
+	if got := findingsFor(findings, "alarms"); len(got) != 1 || got[0].Text != want {
 		t.Errorf("finding %+v", got)
 	}
 }

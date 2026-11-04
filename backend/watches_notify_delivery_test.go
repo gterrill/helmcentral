@@ -35,7 +35,7 @@ func TestWatchReport_NtfyIsNormalPriorityWithAReportTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := requests()[0]
-	if got.headers.Get("Title") != "Overnight: 1 finding" || got.headers.Get("Priority") != "3" {
+	if got.headers.Get("Title") != "Overnight: 1 to look at" || got.headers.Get("Priority") != "3" {
 		t.Errorf("title %q priority %q", got.headers.Get("Title"), got.headers.Get("Priority"))
 	}
 	if tags := got.headers.Get("Tags"); tags != "clipboard" {
@@ -155,7 +155,7 @@ func TestWatchReport_EmailSubjectIsTheTitleAndBodyTheWholeReport(t *testing.T) {
 	if err := transport.Send(context.Background(), testWatchMessage(t)); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Subject: Overnight: 1 finding\r\n", "Drew a lot.", "House bank 13.1 V", "Nothing else to add.", "http://boat.local:9091/watches/w1?run=r1"} {
+	for _, want := range []string{"Subject: Overnight: 1 to look at\r\n", "Drew a lot.", "House bank 13.1 V", "Nothing else to add.", "http://boat.local:9091/watches/w1?run=r1"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("email lacks %q:\n%s", want, body)
 		}
@@ -167,7 +167,7 @@ func TestWatchReport_EmailSubjectIsTheTitleAndBodyTheWholeReport(t *testing.T) {
 
 func TestWatchReport_WebPushCarriesTheShortMessageAndOpensTheRun(t *testing.T) {
 	p := webPushPayloadFor(testWatchMessage(t))
-	if p.Title != "Overnight: 1 finding" || p.Body != "Drew a lot.\nAll quiet." || p.URL != "/watches/w1?run=r1" || p.Kind != notificationKindWatchReport || p.Tag != "watch:w1" {
+	if p.Title != "Overnight: 1 to look at" || p.Body != "Drew a lot.\nAll quiet." || p.URL != "/watches/w1?run=r1" || p.Kind != notificationKindWatchReport || p.Tag != "watch:w1" {
 		t.Errorf("%+v", p)
 	}
 	urgency, _ := webPushUrgencyFor(testWatchMessage(t))

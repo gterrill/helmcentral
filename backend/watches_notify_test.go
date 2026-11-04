@@ -191,7 +191,7 @@ func TestWatchRun_FindingsMode_AStandingFindingIsToldOnceAndAClearedOneIsToldAga
 	if len(c.reports) != 1 || strings.Join(c.channels[0], ",") != "ntfy,webpush" || c.reports[0].Run.ID == "" {
 		t.Fatalf("a first finding notifies: %+v %v", c.reports, c.channels)
 	}
-	if c.reports[0].Vessel != "Pikorua" || !strings.HasPrefix(c.reports[0].Title, "Hourly: 1 finding") {
+	if c.reports[0].Vessel != "Pikorua" || !strings.HasPrefix(c.reports[0].Title, "Hourly: 1 to look at") {
 		t.Errorf("%+v", c.reports[0])
 	}
 	if runs := f.runsOf("id-Hourly"); runs[0].ID != c.reports[0].Run.ID {

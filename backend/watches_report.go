@@ -67,6 +67,31 @@ type watchReportSection struct {
 	Lines       []string `json:"lines,omitempty"`
 	// Figures are values the next report compares with (tank levels).
 	Figures map[string]any `json:"figures,omitempty"`
+	// Rows, Summary and NotChecked are the section as the page lays it out
+	// (ADR 0255). Lines stay as they were, for the email, Mate and any reader of
+	// an older report; reports made before these fields have none of them.
+	Rows    []watchReportRow `json:"rows,omitempty"`
+	Summary string           `json:"summary,omitempty"`
+	// NotChecked are the checks or rules that could not run, one sentence each
+	// in the form "Label: why". A missing reading that no rule depends on is a
+	// row, not a sentence here.
+	NotChecked []string `json:"not_checked,omitempty"`
+}
+
+// watchReportRow is one figure of a section, split into the parts the page
+// sets in columns.
+type watchReportRow struct {
+	Label  string `json:"label,omitempty"`
+	Value  string `json:"value,omitempty"`
+	When   string `json:"when,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Change is the move since the last report, "−11", "+4" or "no change".
+	Change string `json:"change,omitempty"`
+	// Flagged says a rule reached a finding about this row.
+	Flagged bool `json:"flagged,omitempty"`
+	// NotChecked says the check behind this row could not run, so Value is not
+	// a reading.
+	NotChecked bool `json:"not_checked,omitempty"`
 }
 
 type watchReport struct {
@@ -196,23 +221,56 @@ func watchValueText(v statusValue) (string, bool) {
 	return text, true
 }
 
+// watchReading is a reading three ways: the line "Label: 13.1 V" or "Label:
+// not available (reason)", the row value "13.1 V" or "Not available (reason)",
+// and whether it has a value.
+func watchReading(label string, v statusValue) (line, value string, ok bool) {
+	if text, ok := watchValueText(v); ok {
+		return label + ": " + text, text, true
+	}
+	reason := watchMissingReason(v)
+	return label + ": not available (" + reason + ")", "Not available (" + reason + ")", false
+}
+
 // watchLabelled is "Label: 13.1 V", or "Label: not available (reason)".
 func watchLabelled(label string, v statusValue) string {
-	if text, ok := watchValueText(v); ok {
-		return label + ": " + text
+	line, _, _ := watchReading(label, v)
+	return line
+}
+
+// watchMissingReason is why a reading has no value, "no reading" when the
+// status does not say.
+func watchMissingReason(v statusValue) string {
+	if v.Missing != "" {
+		return v.Missing
 	}
-	reason := v.Missing
-	if reason == "" {
-		reason = "no reading"
+	return "no reading"
+}
+
+// watchRowValue is a reading for a row, "13.1 V", or "Not available (reason)".
+func watchRowValue(v statusValue) string {
+	_, value, _ := watchReading("", v)
+	return value
+}
+
+// notChecked records a check that was not run: it adds "label: why" to the
+// section's not-checked list and returns the row that says so.
+func (s *watchReportSection) notChecked(label, why string) watchReportRow {
+	s.NotChecked = append(s.NotChecked, label+": "+why)
+	return watchReportRow{Label: label, Value: "Not checked", NotChecked: true}
+}
+
+// watchStatusProblem is why the boat's status is missing, with a default when
+// the gatherer gave none.
+func watchStatusProblem(problem string) string {
+	if problem == "" {
+		return "the boat's readings could not be read"
 	}
-	return label + ": not available (" + reason + ")"
+	return problem
 }
 
 func watchNoStatus(problem string) watchReportSection {
-	if problem == "" {
-		problem = "the boat's readings could not be read"
-	}
-	return watchReportSection{Unavailable: problem}
+	return watchReportSection{Unavailable: watchStatusProblem(problem)}
 }
 
 // ── power ───────────────────────────────────────────────────────────────
@@ -232,15 +290,25 @@ func watchPowerSection(_ savedWatch, in watchReportInput) (watchReportSection, [
 			parts = append(parts, text)
 		}
 	}
+	// With no figure at all, the bank is as unavailable as its charge reading.
+	bankLine, bank, _ := watchReading("House bank", p.HouseBank.SocPercent)
 	if len(parts) > 0 {
-		s.Lines = append(s.Lines, "House bank: "+strings.Join(parts, ", "))
-	} else {
-		reason := p.HouseBank.SocPercent.Missing
-		s.Lines = append(s.Lines, "House bank: not available ("+reason+")")
+		bank = strings.Join(parts, ", ")
+		bankLine = "House bank: " + bank
 	}
-	s.Lines = append(s.Lines, watchLabelled("Solar", p.SolarW), watchLabelled("DC load", p.DCLoadW))
+	s.Lines = append(s.Lines, bankLine, watchLabelled("Solar", p.SolarW), watchLabelled("DC load", p.DCLoadW))
+	s.Rows = append(s.Rows,
+		watchReportRow{Label: "House bank", Value: bank},
+		watchReportRow{Label: "Solar", Value: watchRowValue(p.SolarW)},
+		watchReportRow{Label: "DC load", Value: watchRowValue(p.DCLoadW)})
 	for _, why := range in.Status.ObservationsUnchecked {
 		s.Lines = append(s.Lines, "Not checked, "+why)
+		if label, reason, found := strings.Cut(why, ": "); found {
+			s.Rows = append(s.Rows, s.notChecked(upperFirstLetter(label), reason))
+		} else {
+			s.Rows = append(s.Rows, watchReportRow{Label: "Other check", Value: "Not checked", NotChecked: true})
+			s.NotChecked = append(s.NotChecked, upperFirstLetter(why))
+		}
 	}
 	var findings []watchFinding
 	for _, o := range in.Status.Observations {
@@ -292,7 +360,7 @@ func watchAnchorSection(_ savedWatch, in watchReportInput) (watchReportSection, 
 		return watchReportSection{Lines: []string{
 			"Anchor watch set, radius " + watchLength(a.RadiusM, units),
 			"Distance from the anchor is not known (" + why + ")",
-		}}, nil
+		}, NotChecked: []string{"Distance from the anchor: " + why}}, nil
 	}
 	d := *a.DistanceFromAnchorM
 	if d > a.RadiusM {
@@ -309,16 +377,25 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		return watchReportSection{Unavailable: in.RaisedProblem}, nil
 	}
 	var s watchReportSection
+	// activeNow is the state of the active list as the summary and the short
+	// finding say it: "" when it could not be read.
+	activeNow, activeSummary := "", ""
 	if in.Status == nil {
 		s.Lines = append(s.Lines, "Active alarms: not available ("+in.StatusProblem+")")
+		s.NotChecked = append(s.NotChecked, "Active alarms: "+watchStatusProblem(in.StatusProblem))
 	} else if n := len(in.Status.Alarms.Active); n == 0 {
 		s.Lines = append(s.Lines, "No alarms active now")
+		activeNow, activeSummary = "No alarms active now.", ", none active now"
 	} else {
 		titles := make([]string, n)
 		for i, a := range in.Status.Alarms.Active {
 			titles[i] = a.Title
 		}
 		s.Lines = append(s.Lines, fmt.Sprintf("%d active now: %s", in.Status.Alarms.ActiveCount, strings.Join(titles, ", ")))
+		activeNow = fmt.Sprintf("%d active now: %s.", in.Status.Alarms.ActiveCount, strings.Join(capList(titles, watchAlarmTitleCap), ", "))
+		// The page shows the rows and this summary, not the lines, so an active
+		// alarm that was not raised in the window is named here.
+		activeSummary = ", active now: " + strings.Join(capList(titles, watchAlarmTitleCap), ", ")
 	}
 	window := "since " + watchDayTime(in.Since, in.Now, loc)
 	if in.FirstRun {
@@ -331,8 +408,10 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 	}
 	if total == 0 {
 		s.Lines = append(s.Lines, "None raised "+window)
+		s.Summary = "None raised" + activeSummary
 		return s, nil
 	}
+	s.Summary = fmt.Sprintf("%d raised%s", total, activeSummary)
 	sort.SliceStable(groups, func(i, j int) bool {
 		if groups[i].Count != groups[j].Count {
 			return groups[i].Count > groups[j].Count
@@ -367,19 +446,86 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		}
 		titles = append(titles, entry)
 		parts = append(parts, watchAlarmGroupText(g, active[g.Title], in.Now, loc))
+		s.Rows = append(s.Rows, watchAlarmRow(g, active[g.Title], in.Now, loc))
 		shown += g.Count
 	}
 	others := total - shown
 	if others > 0 {
 		parts = append(parts, fmt.Sprintf("and %d more %s", others, watchPlural(others, "alarm", "alarms")))
+		s.Rows = append(s.Rows, watchReportRow{Label: "Other alarms", Value: strconv.Itoa(others)})
 	}
 	s.Figures = map[string]any{"raised": total, "others_count": others, "titles": titles}
-	text := fmt.Sprintf("%d %s raised %s: %s", total, watchPlural(total, "alarm", "alarms"), window, strings.Join(parts, "; "))
-	s.Lines = append(s.Lines, text)
+	// The line keeps every title's sentence, for the email and Mate. The finding
+	// is short: the page shows the detail as rows.
+	s.Lines = append(s.Lines, fmt.Sprintf("%d %s raised %s: %s", total, watchPlural(total, "alarm", "alarms"), window, strings.Join(parts, "; ")))
 	if total >= w.Thresholds.AlarmsRaised {
-		return s, []watchFinding{ruleFinding(watchSectionAlarms, "alarms_raised", text)}
+		return s, []watchFinding{ruleFinding(watchSectionAlarms, "alarms_raised", watchAlarmFindingText(total, window, groups[0], activeNow))}
 	}
 	return s, nil
+}
+
+// watchAlarmFindingText is the alarms_raised finding: the window, the top
+// title with its count and sources, and the active state. The per-title detail
+// is in the section's rows and lines.
+func watchAlarmFindingText(total int, window string, top alarmRaisedGroup, activeNow string) string {
+	text := fmt.Sprintf("%d %s raised %s.", total, watchPlural(total, "alarm", "alarms"), window)
+	from := watchAlarmSourcesPhrase(top)
+	if top.Count == 1 {
+		if from != "" {
+			from = " " + from
+		}
+		text += fmt.Sprintf(" %s, once%s.", top.Title, from)
+	} else {
+		if from != "" {
+			from = ", " + from
+		}
+		text += fmt.Sprintf(" %s %d times%s.", top.Title, top.Count, from)
+	}
+	if activeNow != "" {
+		text += " " + activeNow
+	}
+	return text
+}
+
+// watchAlarmRow is one alarm title as the page lays it out.
+func watchAlarmRow(g alarmRaisedGroup, activeNow bool, now time.Time, loc *time.Location) watchReportRow {
+	row := watchReportRow{Label: g.Title, Value: strconv.Itoa(g.Count), When: watchDayTime(g.First, now, loc)}
+	if last := watchDayTime(g.Last, now, loc); g.Count > 1 && last != row.When {
+		sameDay := g.First.In(loc).Format("2006-01-02") == g.Last.In(loc).Format("2006-01-02")
+		if sameDay {
+			last = boatClock(g.Last, loc)
+		}
+		row.When += " to " + last
+	}
+	var detail []string
+	if d := watchAlarmSourcesDetail(g); d != "" {
+		detail = append(detail, d)
+	}
+	if activeNow {
+		detail = append(detail, "active now")
+	}
+	row.Detail = strings.Join(detail, "; ")
+	return row
+}
+
+// watchAlarmSourcesDetail is what raised an alarm for a row: "27 vessels; most
+// Delphi 13, Chantelleiv 12", or "Encore" when one named vessel did.
+func watchAlarmSourcesDetail(g alarmRaisedGroup) string {
+	text := strings.TrimPrefix(watchAlarmSourcesPhrase(g), "from ")
+	if text != "" && len(g.TopSources) > 0 && g.Sources > 1 {
+		text += "; most " + watchTopSourcesText(g)
+	}
+	return text
+}
+
+// watchTopSourcesText is the busiest sources with their counts, "Delphi 13,
+// Chantelleiv 12".
+func watchTopSourcesText(g alarmRaisedGroup) string {
+	top := make([]string, len(g.TopSources))
+	for i, s := range g.TopSources {
+		top[i] = fmt.Sprintf("%s %d", s.Name, s.Count)
+	}
+	return strings.Join(top, ", ")
 }
 
 // watchAlarmTitleCap is how many alarm titles a report names before it
@@ -418,11 +564,7 @@ func watchAlarmGroupText(g alarmRaisedGroup, activeNow bool, now time.Time, loc 
 	} else {
 		times := fmt.Sprintf("first %s, last %s", watchDayTime(g.First, now, loc), watchDayTime(g.Last, now, loc))
 		if len(g.TopSources) > 0 && g.Sources > 1 {
-			top := make([]string, len(g.TopSources))
-			for i, s := range g.TopSources {
-				top[i] = fmt.Sprintf("%s %d", s.Name, s.Count)
-			}
-			times += "; most: " + strings.Join(top, ", ")
+			times += "; most: " + watchTopSourcesText(g)
 		}
 		text = fmt.Sprintf("%s, %d times%s (%s)", g.Title, g.Count, from, times)
 	}
@@ -438,23 +580,31 @@ func watchAlarmGroupText(g alarmRaisedGroup, activeNow bool, now time.Time, loc 
 // vessel's, so it is left out. It reads the same fields the report's figures
 // carry, so the line and Mate's figures agree.
 func watchAlarmSourcesText(g alarmRaisedGroup) string {
-	vessels := g.SourceKind == alarmSourceAISClosestApproach
-	if g.Sources < 1 || (g.Sources < 2 && !vessels) {
+	text := watchAlarmSourcesPhrase(g)
+	if text == "" {
 		return ""
-	}
-	var text string
-	switch {
-	case g.Sources == 1 && len(g.TopSources) == 1:
-		text = "from " + g.TopSources[0].Name
-	case vessels:
-		text = fmt.Sprintf("from %d %s", g.Sources, watchPlural(g.Sources, "vessel", "vessels"))
-	default:
-		text = fmt.Sprintf("from %d sources", g.Sources)
 	}
 	if label := g.SourceKind.Label(); label != "" {
 		text += ", " + label
 	}
 	return text
+}
+
+// watchAlarmSourcesPhrase is "from 27 vessels" or "from Encore", with no
+// description of the kind of source.
+func watchAlarmSourcesPhrase(g alarmRaisedGroup) string {
+	vessels := g.SourceKind == alarmSourceAISClosestApproach
+	if g.Sources < 1 || (g.Sources < 2 && !vessels) {
+		return ""
+	}
+	switch {
+	case g.Sources == 1 && len(g.TopSources) == 1:
+		return "from " + g.TopSources[0].Name
+	case vessels:
+		return fmt.Sprintf("from %d %s", g.Sources, watchPlural(g.Sources, "vessel", "vessels"))
+	default:
+		return fmt.Sprintf("from %d sources", g.Sources)
+	}
 }
 
 func watchPlural(n int, one, many string) string {
@@ -514,14 +664,29 @@ func watchTanksSection(w savedWatch, in watchReportInput) (watchReportSection, [
 	levels := map[string]float64{}
 	var s watchReportSection
 	var findings []watchFinding
+	type tankRow struct {
+		rank int
+		row  watchReportRow
+	}
+	var rows []tankRow
 	for _, tank := range in.Status.Tanks.Tanks {
 		s.Lines = append(s.Lines, watchLabelled(tank.Name, tank.Level))
+		row := tankRow{rank: watchTankKindRank(tank.Kind), row: watchReportRow{Label: tank.Name}}
 		if tank.Level.Value == nil {
+			row.row = s.notChecked(tank.Name+" level", watchMissingReason(tank.Level))
+			row.row.Label, row.row.Value = tank.Name, "Not available"
+			rows = append(rows, row)
 			continue
 		}
 		now := *tank.Level.Value
 		levels[tank.Name] = now
+		row.row.Value = fmt.Sprintf("%.0f %%", now)
 		was, ok := prev[tank.Name]
+		if havePrev && ok {
+			row.row.Change = watchTankChange(now - was)
+			row.row.Flagged = math.Abs(now-was) >= w.Thresholds.TankChangePoints
+		}
+		rows = append(rows, row)
 		if !havePrev || !ok {
 			continue
 		}
@@ -539,10 +704,46 @@ func watchTanksSection(w savedWatch, in watchReportInput) (watchReportSection, [
 		findings = append(findings, f)
 	}
 	if !havePrev {
-		s.Lines = append(s.Lines, "No earlier report to compare with, so changes are measured from the next one.")
+		const noEarlier = "No earlier report to compare with, so changes are measured from the next one."
+		s.Lines = append(s.Lines, noEarlier)
+		// The page shows the rows and the summary, not the lines.
+		s.Summary = noEarlier
+	}
+	// The page reads water, fuel, then waste, then anything else; the lines keep
+	// the order the boat's equipment gives.
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].rank < rows[j].rank })
+	for _, r := range rows {
+		s.Rows = append(s.Rows, r.row)
 	}
 	s.Figures = map[string]any{"levels": levels}
 	return s, findings
+}
+
+// watchTankKindRank orders tank kinds for the rows: fresh water, fuel, waste,
+// then any other.
+func watchTankKindRank(kind string) int {
+	switch kind {
+	case tankKindWater:
+		return 0
+	case tankKindFuel:
+		return 1
+	case tankKindWaste:
+		return 2
+	}
+	return 3
+}
+
+// watchTankChange is a tank's move since the last report in whole points, with
+// a real minus sign, or "no change" when it rounds to nothing.
+func watchTankChange(delta float64) string {
+	r := math.Round(delta)
+	switch {
+	case r == 0:
+		return "no change"
+	case r < 0:
+		return fmt.Sprintf("−%.0f", -r)
+	}
+	return fmt.Sprintf("+%.0f", r)
 }
 
 // ── weather ─────────────────────────────────────────────────────────────
@@ -554,17 +755,25 @@ func watchWeatherSection(w savedWatch, in watchReportInput) (watchReportSection,
 	sur := in.Status.Surroundings
 	var s watchReportSection
 	var findings []watchFinding
-	s.Lines = append(s.Lines, watchLabelled("Pressure", sur.Pressure), watchLabelled("Pressure change in 3 hours", sur.PressureChange3h))
-	if text, ok := watchValueText(sur.TrueWindSpeed); ok {
-		wind := "True wind: " + text
-		if gust, ok := watchValueText(sur.TrueWindGust); ok {
-			wind += ", gust " + gust
-		}
-		s.Lines = append(s.Lines, wind)
-	} else {
-		s.Lines = append(s.Lines, watchLabelled("True wind", sur.TrueWindSpeed))
+	pressureLine, pressureValue, _ := watchReading("Pressure", sur.Pressure)
+	changeLine, changeValue, changeOK := watchReading("Pressure change in 3 hours", sur.PressureChange3h)
+	windLine, windValue, windOK := watchReading("True wind", sur.TrueWindSpeed)
+	if gust, ok := watchValueText(sur.TrueWindGust); windOK && ok {
+		windLine += ", gust " + gust
+		windValue += ", gust " + gust
 	}
-	if sur.PressureChange3h.Value != nil && *sur.PressureChange3h.Value <= -w.Thresholds.PressureFallHPa*100 {
+	s.Lines = append(s.Lines, pressureLine, changeLine, windLine)
+	// The fall rule reads only the 3-hour change, so a missing pressure is not a
+	// check left unrun: its row says "Not available (reason)" and that is all.
+	pressure := watchReportRow{Label: "Pressure", Value: pressureValue}
+	change := watchReportRow{Label: "Pressure change in 3 hours", Value: changeValue}
+	if !changeOK {
+		change = s.notChecked("Pressure change in 3 hours", watchMissingReason(sur.PressureChange3h))
+	}
+	fell := sur.PressureChange3h.Value != nil && *sur.PressureChange3h.Value <= -w.Thresholds.PressureFallHPa*100
+	change.Flagged = fell
+	s.Rows = append(s.Rows, pressure, change, watchReportRow{Label: "True wind", Value: windValue})
+	if fell {
 		change := sur.PressureChange3h
 		unit := change.DisplayUnit
 		fall := 0.0
@@ -584,14 +793,23 @@ func watchWeatherSection(w savedWatch, in watchReportInput) (watchReportSection,
 	case stay.Name == "":
 	case stay.Problem != "":
 		s.Lines = append(s.Lines, "Forecast for "+stay.Name+" was not read: "+stay.Problem)
+		s.Rows = append(s.Rows, s.notChecked("Forecast for "+stay.Name, stay.Problem))
 	case stay.NoGoKn <= 0:
 		s.Lines = append(s.Lines, fmt.Sprintf("Forecast for %s: wind up to %.0f kn on %s. There are no passage limits set, so it is not judged.", stay.Name, stay.MaxWindKn, stay.MaxWindDay))
+		// Not a check that failed: the operator has set no limit to judge against.
+		s.Rows = append(s.Rows, watchReportRow{Label: "Forecast for " + stay.Name,
+			Value:  fmt.Sprintf("up to %.0f kn on %s", stay.MaxWindKn, stay.MaxWindDay),
+			Detail: "There are no passage limits set, so it is not judged."})
 	case stay.MaxWindKn >= stay.NoGoKn:
 		text := fmt.Sprintf("Forecast wind at %s reaches %.0f kn on %s, over your lowest no-go wind of %.0f kn.", stay.Name, stay.MaxWindKn, stay.MaxWindDay, stay.NoGoKn)
 		s.Lines = append(s.Lines, text)
+		s.Rows = append(s.Rows, watchReportRow{Label: "Forecast for " + stay.Name, Flagged: true,
+			Value: fmt.Sprintf("up to %.0f kn on %s, over your lowest no-go wind of %.0f kn", stay.MaxWindKn, stay.MaxWindDay, stay.NoGoKn)})
 		findings = append(findings, ruleFinding(watchSectionWeather, "forecast_no_go", text))
 	default:
 		s.Lines = append(s.Lines, fmt.Sprintf("Forecast for %s: wind up to %.0f kn on %s, under your lowest no-go wind of %.0f kn.", stay.Name, stay.MaxWindKn, stay.MaxWindDay, stay.NoGoKn))
+		s.Rows = append(s.Rows, watchReportRow{Label: "Forecast for " + stay.Name,
+			Value: fmt.Sprintf("up to %.0f kn on %s, under your lowest no-go wind of %.0f kn", stay.MaxWindKn, stay.MaxWindDay, stay.NoGoKn)})
 	}
 	return s, findings
 }

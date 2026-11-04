@@ -31,7 +31,8 @@ func watchEmailHTML(m watchReportMessage) string {
 	}
 	if len(m.Findings) > 0 {
 		b.WriteString("<h3>Findings</h3><ul>")
-		for i, f := range m.Findings {
+		for _, i := range watchFindingOrder(m.Findings) {
+			f := m.Findings[i]
 			b.WriteString("<li><p>" + e(f.Text) + "</p>")
 			for ci, c := range m.Charts {
 				if c.FindingIndex == i && c.Problem != "" {
@@ -49,6 +50,13 @@ func watchEmailHTML(m watchReportMessage) string {
 	}
 	if m.Review != nil && strings.TrimSpace(*m.Review) != "" {
 		b.WriteString("<h3>Mate's review</h3><p>" + strings.ReplaceAll(e(strings.TrimSpace(*m.Review)), "\n", "<br>") + "</p>")
+	}
+	if len(m.Questions) > 0 {
+		b.WriteString("<h3>Questions</h3><ul>")
+		for _, q := range m.Questions {
+			b.WriteString("<li>" + e(q) + "</li>")
+		}
+		b.WriteString("</ul>")
 	}
 	if m.Report != nil {
 		for _, s := range m.Report.Sections {

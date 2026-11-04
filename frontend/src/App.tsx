@@ -648,6 +648,8 @@ function AppShell() {
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
   const [mateSheetNewConversation, setMateSheetNewConversation] = useState(false)
+  // Whether `mateSheetQuestion` is text for the composer rather than a question to send.
+  const [mateSheetDraft, setMateSheetDraft] = useState(false)
   // Whether `mateSheetQuestion` came in by voice: only then does Mate write
   // an answer meant for speaking, and only then is it read aloud.
   const [mateSheetSpoken, setMateSheetSpoken] = useState(false)
@@ -737,11 +739,12 @@ function AppShell() {
     setMateSheetAlarm(null)
     setMateSheetWatchRun(null)
   }, [])
-  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; alarm?: MateAlarmContext; watchRun?: MateWatchRunContext }) => {
+  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; draft?: boolean; alarm?: MateAlarmContext; watchRun?: MateWatchRunContext }) => {
     setMateSheetAlarm(options?.alarm ?? null)
     setMateSheetWatchRun(options?.watchRun ?? null)
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
+    setMateSheetDraft(Boolean(options?.draft))
     setMateSheetSpoken(Boolean(options?.spoken))
     setMateSheetOpen(true)
   }, [])
@@ -2527,12 +2530,16 @@ function AppShell() {
               if (!open) {
                 setMateSheetQuestion(undefined)
                 setMateSheetNewConversation(false)
+                setMateSheetDraft(false)
                 setMateSheetSpoken(false)
                 setMateSheetAlarm(null)
+                // A draft left unsent must not tie the next, unrelated chat to its run.
+                setMateSheetWatchRun(null)
               }
             }}
             initialQuestion={mateSheetQuestion}
             newConversation={mateSheetNewConversation}
+            draft={mateSheetDraft}
             spoken={mateSheetSpoken}
             screen={mateScreen}
             onContextDone={clearMateSheetContext}

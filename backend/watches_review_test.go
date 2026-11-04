@@ -78,7 +78,7 @@ func TestWatchReview_MateNotReadyIsAProblemAndNeverReachesTheModel(t *testing.T)
 
 func TestWatchReview_ParsesTheSubmittedReviewAndAddedFindings(t *testing.T) {
 	fake := withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
-		if _, _, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel fell faster than the engine hours explain. Were the generator and heater on overnight?", "Diesel fell 14 points in three hours.")); err != nil {
+		if _, _, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel fell faster than the engine hours explain. The generator and heater may have been on overnight.", "Diesel fell 14 points in three hours.")); err != nil {
 			return assistantReply{}, err
 		}
 		assistantCostMeterFrom(ctx).add(0.031)
@@ -227,10 +227,11 @@ func TestWatchReviewPrompt(t *testing.T) {
 	for _, want := range []string{
 		"Sea Biscuit", "Leopard 40", "power catamaran", "12.2 m", "Coral Cove", "Never anchor north of the reef.",
 		"Boat time: Thu 29 Oct 6.00 AM AEST", "units are imperial",
-		"never remove", "can never remove", "Where you are unsure, say so and ask", "Never guess a cause", "do not raise it again",
+		"never remove", "can never remove", "Where you are unsure, say so and put the question in questions", "Never guess a cause", "do not raise it again",
 		"not an all clear", "2.00 AM",
-		"Lead with your judgement", "At most four short sentences", "up to three questions",
-		"Do not restate the report",
+		"Lead with your judgement in the first sentence", "the page shows it as the headline", "at most four short sentences",
+		"Do not restate a finding or the report", "Put every question in questions", "up to three", "never in the review",
+		"sets extends to its index", "says only what that finding does not already say", "is not charted again",
 		"When the report names an alarm's source, use it; don't offer another cause.",
 		"Mention it only when it bears on something you flag", "Say an alarm is still going only when the report marks it active now; never say one cleared", "Never suggest a remedy or a setting change", "one sentence", "submit_watch_review", "The tools only read",
 	} {
