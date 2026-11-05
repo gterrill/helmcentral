@@ -628,14 +628,14 @@ func TestAssessItinerary_WaveLimitingTextCarriesThePeriod(t *testing.T) {
 // passageHoursFromBundles keeps absent wave figures absent.
 func TestPassageHoursFromBundles_AbsentWaveFiguresStayAbsent(t *testing.T) {
 	tm := pwDay(20, 6).UTC()
-	wb := weatherForecastBundle{Hourly: []weatherHourPoint{{Time: tm}}}
+	wb := weatherForecastBundle{Hourly: []weatherHourPoint{{Time: tm, WindSpeedMS: 5}}}
 	h2 := 0.0
 	per, dir := 7.0, 0.0
 	vb := &waveForecastBundle{Hourly: []waveHourPoint{
 		{Time: tm},
 		{Time: tm.Add(time.Hour), WaveHeightM: &h2, WavePeriodS: &per, WaveDirectionDeg: &dir},
 	}}
-	wb.Hourly = append(wb.Hourly, weatherHourPoint{Time: tm.Add(time.Hour)})
+	wb.Hourly = append(wb.Hourly, weatherHourPoint{Time: tm.Add(time.Hour), WindSpeedMS: 5})
 	out := passageHoursFromBundles(wb, vb)
 	a := out[tm.Unix()]
 	if a.HasWave || a.HasWaveDir || a.HasWavePeriod {

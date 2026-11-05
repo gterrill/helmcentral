@@ -585,10 +585,9 @@ func (d assistantToolDeps) fetchWaveSeries(lat, lon float64, days int) waveSerie
 // angles relative to course_deg when given, and the shelter grade for the wind
 // direction when the position has a shelter estimate. A speed or gust the
 // provider gave as zero is unknown, never a calm. A direction of zero is
-// unknown only when the speed is also zero: Open-Meteo sends a null direction
-// only with a null speed, so wind with a direction of zero is due north. Shared
-// by get_wind_forecast and anchorage_details so the two cannot read the same
-// hour differently.
+// unknown only when the hour has no wind data (noWindData). Shared by
+// get_wind_forecast and anchorage_details so the two cannot read the same hour
+// differently.
 func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64]waveHourPoint, courseDeg *float64, shelter *shelterResult) assistantWindHour {
 	row := assistantWindHour{T: boatDayClock(hp.Time, loc)}
 
@@ -604,7 +603,7 @@ func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64
 	}
 	var dir *string
 	var dirDeg *int
-	if hp.WindDirectionDeg != 0 || hp.WindSpeedMS != 0 {
+	if !hp.noWindData() {
 		dv := degreesToDirection(hp.WindDirectionDeg)
 		dgv := int(math.Round(hp.WindDirectionDeg))
 		dir, dirDeg = &dv, &dgv

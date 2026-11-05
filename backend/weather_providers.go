@@ -201,6 +201,14 @@ type weatherHourPoint struct {
 	VisibilityNm           float64
 }
 
+// noWindData reports an hour the provider has no wind for. The flat plugin
+// contract turns a null into 0, and Open-Meteo sends a null direction only with
+// a null speed, so speed 0 with direction 0 is no data. Wind with a direction
+// of 0 is due north.
+func (hp weatherHourPoint) noWindData() bool {
+	return hp.WindSpeedMS == 0 && hp.WindDirectionDeg == 0
+}
+
 // weatherNextHourPoint is a single time-stamped nowcast sample, SI units, as
 // returned by one entry of a plugin's fetch_forecast "next_hour" field. A
 // nil/empty NextHour on weatherForecastBundle means the provider has no

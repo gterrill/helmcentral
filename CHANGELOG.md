@@ -52,6 +52,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The weather window no longer calls a passage go on hours with no wind
+  forecast.** The last few hours of a long forecast can come back empty. The
+  check read those hours as flat calm, so a leg running into them could show go.
+  That leg now shows no data.
 - **Save on an engine cluster now shows it's working.** The button reads
   "Saving…" and stays greyed out until the tile is saved, so a slow connection
   no longer leaves it looking ready to tap again. If the save fails, the button
