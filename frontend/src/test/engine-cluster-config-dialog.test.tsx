@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
   extraPaths: [] as string[],
   loading: false,
   error: null as Error | null,
+  saveProfile: (async () => {}) as (...args: unknown[]) => Promise<void>,
 }))
 
 vi.mock('@/hooks/use-equipment-tile-context', () => ({ useEquipmentTileContext: () => state.ctx }))
@@ -34,6 +35,10 @@ vi.mock('@/hooks/use-signalk-paths', () => ({
   useSignalKPaths: () => ({ paths: [...captured.paths, ...state.extraPaths].map((path) => ({ path })), loading: state.loading, error: state.error }),
 }))
 vi.mock('@/hooks/use-vessel-roles', () => ({ useVesselRoles: () => state.roles }))
+vi.mock('@/hooks/use-equipment-profiles', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-equipment-profiles')>()),
+  saveEquipmentProfile: (...args: unknown[]) => state.saveProfile(...args),
+}))
 vi.mock('@/hooks/use-vessel-discovery', () => ({
   useVesselDiscovery: () => ({ discovery: { connected: true, groups: [], detectors: {} }, loading: false, error: null }),
 }))
@@ -42,6 +47,7 @@ afterEach(() => {
   state.extraPaths = []
   state.loading = false
   state.error = null
+  state.saveProfile = async () => {}
 })
 
 async function loadProfile(): Promise<EngineProfile> {
@@ -981,5 +987,100 @@ describe('a footer slot reads what the picked item publishes', () => {
     await openFresh([])
     pick('battery', 'batt-quiet')
     expect(screen.getByText('Needs a reading')).toBeTruthy()
+  })
+})
+
+describe('Save stays busy for the whole save', () => {
+  /** A promise the test settles by hand. */
+  const deferred = () => {
+    let resolve!: () => void
+    let reject!: (err: Error) => void
+    const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+  const saveButton = () => screen.getByRole('button', { name: /^sav(e|ing)/i }) as HTMLButtonElement
+
+  // The centre slot carries zones the profile's Hours reading lacks, so saving
+  // has a profile write to make before the tile.
+  const withHeldZones: EngineClusterConfig = {
+    ...blank,
+    centre: { ...blank.centre, zones: [{ from: 100, to: 200, state: 'warn' }] },
+  }
+
+  function openWith(onSave: (config: EngineClusterConfig) => void | Promise<void>, cluster = blank) {
+    render(<EngineClusterConfigDialog widget={widget(cluster)} onCancel={vi.fn()} onSave={onSave} />)
+  }
+
+  test('disables Save while the tile write is pending, and frees it once it settles', async () => {
+    await setup('port')
+    const write = deferred()
+    const onSave = vi.fn(() => write.promise)
+    openWith(onSave)
+    fireEvent.click(saveButton())
+    expect(onSave).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    expect(saveButton().textContent).toBe('Saving…')
+    write.resolve()
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(false))
+    expect(saveButton().textContent).toBe('Save')
+  })
+
+  test('frees Save again when the write is rejected and the dialog stays open', async () => {
+    await setup('port')
+    const write = deferred()
+    openWith(() => write.promise)
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    write.reject(new Error('refused'))
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(false))
+  })
+
+  test('clears the last failure when Save is tried again', async () => {
+    await setup('port')
+    const retry = deferred()
+    const onSave = vi.fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('refused'))
+      .mockReturnValueOnce(retry.promise)
+    openWith(onSave)
+    fireEvent.click(saveButton())
+    await screen.findByText('refused')
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    expect(screen.queryByText('refused')).toBeNull()
+    retry.resolve()
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(false))
+  })
+
+  test('frees Save and shows the failure when onSave throws at once', async () => {
+    await setup('port')
+    openWith(() => { throw new Error('wired wrong') })
+    fireEvent.click(saveButton())
+    await screen.findByText('wired wrong')
+    expect(saveButton().disabled).toBe(false)
+  })
+
+  test('calls onSave in the same tick when there are no zones to write', async () => {
+    await setup('port')
+    const onSave = vi.fn(async () => {})
+    openWith(onSave)
+    fireEvent.click(saveButton())
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  test('stays disabled across the profile write and the tile write', async () => {
+    await setup('port')
+    const profileWrite = deferred()
+    const tileWrite = deferred()
+    state.saveProfile = () => profileWrite.promise
+    const onSave = vi.fn(() => tileWrite.promise)
+    openWith(onSave, withHeldZones)
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    expect(onSave).not.toHaveBeenCalled()
+    profileWrite.resolve()
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(saveButton().disabled).toBe(true)
+    tileWrite.resolve()
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(false))
   })
 })

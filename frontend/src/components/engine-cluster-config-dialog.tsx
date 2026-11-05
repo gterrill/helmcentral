@@ -427,7 +427,7 @@ function pruneUnbound(config: EngineClusterConfig): EngineClusterConfig {
 interface EngineClusterConfigDialogProps {
   widget: DashboardLayoutItem | null
   onCancel: () => void
-  onSave: (config: EngineClusterConfig) => void
+  onSave: (config: EngineClusterConfig) => void | Promise<void>
 }
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
@@ -525,16 +525,33 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const save = async () => {
     if (!config) return
     // Nothing to write to a profile: save the tile at once, in the same tick.
+    // Save stays busy until the tile write settles (onSave may return a promise).
     if (!zoneEditing.dirty) {
-      onSave(pruneUnbound(config))
+      await writeTile(pruneUnbound(config))
       return
     }
     setSaving(true)
     setSaveError(null)
+    let next: EngineClusterConfig
     try {
-      onSave(pruneUnbound(withoutSettledZones(config, await zoneEditing.commit())))
+      next = pruneUnbound(withoutSettledZones(config, await zoneEditing.commit()))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
+      setSaving(false)
+      return
+    }
+    await writeTile(next)
+  }
+
+  // The tile write. A failed write is toasted by the caller and the draft stays
+  // open for a retry, so Save comes back; a rejection is shown, not swallowed.
+  const writeTile = async (next: EngineClusterConfig) => {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await onSave(next)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save the tile')
     } finally {
       setSaving(false)
     }
@@ -900,7 +917,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
             ? <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>
             : (!canSave && !saving && saveReason && <p role="status" className="mr-auto text-xs text-muted-foreground">{saveReason}</p>)}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button disabled={!canSave || saving} onClick={() => { void save() }}>Save</Button>
+          <Button disabled={!canSave || saving} onClick={() => { void save() }}>{saving ? 'Saving…' : 'Save'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

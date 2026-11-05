@@ -52,6 +52,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Save on an engine cluster now shows it's working.** The button reads
+  "Saving…" and stays greyed out until the tile is saved, so a slow connection
+  no longer leaves it looking ready to tap again. If the save fails, the button
+  comes back and the dialog stays open.
 - **A tile you cancel no longer appears on the page.** If you tapped **Save**
   on an engine cluster whose zones were still saving, then cancelled, the tile
   could turn up anyway. Cancel now leaves the page as it was. The same delay
