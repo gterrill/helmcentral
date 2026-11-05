@@ -52,6 +52,13 @@ clears it, so a reopened sheet never re-sends a stale question or keeps a stale
 context. Owned by `useMateSheetRequest`, which also layers the context over the
 screen the operator is on; the app shell keeps only the handle to ask.
 _Avoid_: sheet state, Mate seed, open options.
+**Run record**: what a Mate run's tool calls did, one entry per call in the
+order made: the call, its result, and its error if it failed or never ran. The
+draft checks ask it whether a tool ran and what it returned (`mateRunRecord`,
+`backend/assistant_run_record.go`). A call that failed has told Mate nothing, so
+no check counts it, except a passage check whose error names the passage limits.
+_Avoid_: tool log (the tool log is the forced-final summary of the same calls),
+call history.
 
 ## Passages
 

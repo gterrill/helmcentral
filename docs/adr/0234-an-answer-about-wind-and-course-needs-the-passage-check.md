@@ -113,7 +113,8 @@ yet. The guard's tests use its text.
   untouched.
 - The phrase list will miss some wordings and catch some innocent ones. An
   innocent hit makes the model answer again, and no more.
-- The guard sees only this run's tool calls. An answer that cites an earlier
+- The guard sees only this run's tool calls, and only those that ran: a passage
+  check that errored does not count (ADR 0256). An answer that cites an earlier
   turn's check passes only if the tool ran again this turn, which the
   correction asks for.
 - The third claim, citing tools that weren't called, is still only a prompt

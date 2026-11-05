@@ -230,10 +230,10 @@ func TestShelterGuard_LabelledForecastSatisfiesIt(t *testing.T) {
 	c.Function.Name = mateToolGetWindForecast.name
 	c.Function.Arguments = `{"lat":-20.5446,"lon":149.118933,"course_deg":140}`
 	calls := []openRouterToolCall{c}
-	if got, _ := d.checkDraft(thomasIslandAnswer, calls, []string{raw}); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(calls, []string{raw})); got != "" {
 		t.Errorf("a forecast that delivered shelter labels satisfies the guard, trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, calls, nil); got != "anchorage shelter" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(calls, nil)); got != "anchorage shelter" {
 		t.Errorf("no results known: trigger = %q", got)
 	}
 }
@@ -248,12 +248,12 @@ func TestShelterGuard_UnavailableOpenWaterOrFailedForecastDoNotSatisfyIt(t *test
 		"open water":  shelterForecastDeps(t, nil, true),
 	} {
 		raw, _ := runShelterForecast(t, d)
-		if got, _ := d.checkDraft(thomasIslandAnswer, calls, []string{raw}); got != "anchorage shelter" {
+		if got, _ := d.checkDraft(thomasIslandAnswer, runOf(calls, []string{raw})); got != "anchorage shelter" {
 			t.Errorf("%s: trigger = %q, want the guard to fire", name, got)
 		}
 	}
 	d := shelterForecastDeps(t, thomasShoreline(), true)
-	if got, _ := d.checkDraft(thomasIslandAnswer, calls, []string{"error: get_wind_forecast: weather provider down"}); got != "anchorage shelter" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(calls, []string{"error: get_wind_forecast: weather provider down"})); got != "anchorage shelter" {
 		t.Errorf("failed forecast: trigger = %q", got)
 	}
 }
