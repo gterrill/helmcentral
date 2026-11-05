@@ -1,0 +1,69 @@
+{
+  "id": 1,
+  "kind": "passage_window",
+  "payload": {
+    "timezone": "Australia/Brisbane",
+    "forecast_fetched_at": "2026-10-19T09:00:00+10:00",
+    "provider": "wx",
+    "wave_provider": "wv",
+    "legs": [
+      {
+        "name": "Alpha → Bravo",
+        "stay_nights_after": null
+      }
+    ],
+    "rows": [
+      {
+        "depart_date": "2026-10-20",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-20",
+            "depart": "2026-10-20T06:00:00+10:00",
+            "arrive": "2026-10-20T16:00:24+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "ahead",
+              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-21",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-21",
+            "depart": "2026-10-21T06:00:00+10:00",
+            "arrive": "2026-10-21T16:00:24+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "ahead",
+              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "decision": {
+    "id": 1,
+    "state": "went",
+    "row_date": "2026-10-21",
+    "inferred": false,
+    "passage_id": null
+  }
+}

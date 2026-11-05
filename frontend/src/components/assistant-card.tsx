@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 
 import { AssistantTileCardFallback } from '@/components/assistant-tile-card-fallback'
 import type { MateCard, PassageDecision } from '@/lib/mate-cards'
@@ -25,6 +25,12 @@ const AssistantAnchorageCard = lazy(() => import('./assistant-anchorage-card').t
 // reply carries one.
 const AssistantTileCard = lazy(() => import('./assistant-tile-card').then((m) => ({ default: m.AssistantTileCard })))
 
+const PLAIN_FALLBACK = <div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />
+
+function CardSuspense({ fallback = PLAIN_FALLBACK, children }: { fallback?: ReactNode; children: ReactNode }) {
+  return <Suspense fallback={fallback}>{children}</Suspense>
+}
+
 /** One card under a Mate reply (ADR 0191), chosen by `kind`. An `error` entry
  * is shown, not hidden: the operator should know a card was meant to be here. */
 export function AssistantCard({
@@ -43,62 +49,40 @@ export function AssistantCard({
 }) {
   switch (card.kind) {
     case 'passage_window':
-      return (
-        <Suspense
-          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
-        >
-          <AssistantPassageWindowCard card={card} canWrite={canWrite} onDecisionChange={onDecisionChange} onDecisionUnreadable={onDecisionUnreadable} />
-        </Suspense>
-      )
+      return <CardSuspense><AssistantPassageWindowCard card={card} canWrite={canWrite} onDecisionChange={onDecisionChange} onDecisionUnreadable={onDecisionUnreadable} /></CardSuspense>
     case 'telemetry_chart':
-      return (
-        <Suspense
-          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
-        >
-          <AssistantTelemetryChartCard card={card} />
-        </Suspense>
-      )
+      return <CardSuspense><AssistantTelemetryChartCard card={card} /></CardSuspense>
     case 'wind_rose':
-      return (
-        <Suspense
-          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
-        >
-          <AssistantWindRoseCard card={card} />
-        </Suspense>
-      )
+      return <CardSuspense><AssistantWindRoseCard card={card} /></CardSuspense>
     case 'marina':
-      return (
-        <Suspense
-          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
-        >
-          <AssistantMarinaCard card={card} />
-        </Suspense>
-      )
+      return <CardSuspense><AssistantMarinaCard card={card} /></CardSuspense>
     case 'anchorage':
-      return (
-        <Suspense
-          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
-        >
-          <AssistantAnchorageCard card={card} />
-        </Suspense>
-      )
+      return <CardSuspense><AssistantAnchorageCard card={card} /></CardSuspense>
     case 'tile':
       return (
-        <Suspense
-          fallback={<AssistantTileCardFallback tile={card.tile} />}
-        >
+        <CardSuspense fallback={<AssistantTileCardFallback tile={card.tile} />}>
           <AssistantTileCard card={card} live={liveTile} />
-        </Suspense>
+        </CardSuspense>
       )
     case 'error':
-      return (
-        <section
-          aria-label="Card error"
-          data-testid="assistant-card-error"
-          className="min-w-0 rounded-md border border-red-500/40 bg-red-50 p-3 text-xs text-red-800 dark:bg-red-950 dark:text-red-300"
-        >
-          This card couldn't be shown: {card.reason}
-        </section>
-      )
+      return <CardError reason={card.reason} />
+    default: {
+      // A kind added to MateCard without a case above stops the build. A stale
+      // bundle or hand-built entry can still reach here, and must not blank the thread.
+      const unhandled: never = card
+      return <CardError reason={`unknown card kind "${String((unhandled as { kind?: unknown }).kind)}"`} />
+    }
   }
+}
+
+function CardError({ reason }: { reason: string }) {
+  return (
+    <section
+      aria-label="Card error"
+      data-testid="assistant-card-error"
+      className="min-w-0 rounded-md border border-red-500/40 bg-red-50 p-3 text-xs text-red-800 dark:bg-red-950 dark:text-red-300"
+    >
+      This card couldn't be shown: {reason}
+    </section>
+  )
 }

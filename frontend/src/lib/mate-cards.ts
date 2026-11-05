@@ -1061,7 +1061,10 @@ function decodeTile(raw: unknown): TileCard {
 
 // `entry` is the whole stored card: a passage window also reads the `id` and
 // `decision` that sit beside its payload (ADR 0211). Both are optional.
-const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>) => MateCard> = {
+// Keyed by every kind of MateCard but `error`, so a kind added to the union
+// without a decoder does not compile.
+type CardDecoder = (payload: unknown, entry: Record<string, unknown>) => MateCard
+const DECODERS = {
   passage_window: (payload, entry) => {
     const card = decodePassageWindow(payload)
     if (entry.id !== undefined) {
@@ -1083,7 +1086,13 @@ const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>
   tile: (payload) => decodeTile(payload),
   marina: (payload) => decodeMarina(payload),
   anchorage: (payload) => decodeAnchorage(payload),
-}
+} satisfies Record<Exclude<MateCard['kind'], 'error'>, CardDecoder>
+
+type DecodedKind = keyof typeof DECODERS
+const isDecodedKind = (kind: string): kind is DecodedKind => Object.prototype.hasOwnProperty.call(DECODERS, kind)
+
+/** Every kind the browser decodes. A golden fixture must exist for each (ADR 0261). */
+export const MATE_CARD_KINDS = Object.keys(DECODERS) as readonly DecodedKind[]
 
 /**
  * Decode the `cards` field of a stored message. An absent field is no cards.
@@ -1097,10 +1106,9 @@ export function decodeMateCards(raw: unknown): MateCard[] {
   return raw.map((entry, i): MateCard => {
     const kind = typeof entry === 'object' && entry !== null ? (entry as { kind?: unknown }).kind : undefined
     if (typeof kind !== 'string') return { kind: 'error', reason: `message card ${i}: missing kind` }
-    const decode = Object.prototype.hasOwnProperty.call(DECODERS, kind) ? DECODERS[kind] : undefined
-    if (decode) {
+    if (isDecodedKind(kind)) {
       try {
-        return decode((entry as { payload?: unknown }).payload, entry as Record<string, unknown>)
+        return DECODERS[kind]((entry as { payload?: unknown }).payload, entry as Record<string, unknown>)
       } catch (err) {
         if (!(err instanceof CardFieldError)) throw err
         return { kind: 'error', reason: `message card ${i}: ${err.message}`, rawKind: kind }

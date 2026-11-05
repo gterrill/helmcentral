@@ -1,0 +1,277 @@
+{
+  "kind": "passage_window",
+  "payload": {
+    "timezone": "Australia/Brisbane",
+    "forecast_fetched_at": "2026-10-19T09:00:00+10:00",
+    "provider": "wx",
+    "wave_provider": "wv",
+    "legs": [
+      {
+        "name": "Alpha → Bravo",
+        "stay_nights_after": 1
+      },
+      {
+        "name": "Bravo → Charlie",
+        "stay_nights_after": null
+      }
+    ],
+    "rows": [
+      {
+        "depart_date": "2026-10-20",
+        "verdict": "marginal",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-20",
+            "depart": "2026-10-20T06:00:00+10:00",
+            "arrive": "2026-10-20T16:00:00+10:00",
+            "state": "go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "astern",
+              "text": "Wind S 5 kn astern · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-21",
+            "depart": "2026-10-21T06:00:00+10:00",
+            "arrive": "2026-10-21T16:00:00+10:00",
+            "state": "marginal",
+            "limiting": {
+              "factor": "wind",
+              "sector": "astern",
+              "text": "Wind S 25 kn astern (marginal from 24.5) · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-21",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-21",
+            "depart": "2026-10-21T06:00:00+10:00",
+            "arrive": "2026-10-21T16:00:00+10:00",
+            "state": "marginal",
+            "limiting": {
+              "factor": "wind",
+              "sector": "astern",
+              "text": "Wind S 25 kn astern (marginal from 24.5) · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-22",
+            "depart": "2026-10-22T06:00:00+10:00",
+            "arrive": "2026-10-22T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "ahead",
+              "text": "Wind N 25 kn ahead · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-22",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-22",
+            "depart": "2026-10-22T06:00:00+10:00",
+            "arrive": "2026-10-22T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "ahead",
+              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-23",
+            "depart": "2026-10-23T06:00:00+10:00",
+            "arrive": "2026-10-23T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "abeam",
+              "text": "Wind E 30 kn abeam · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-23",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-23",
+            "depart": "2026-10-23T06:00:00+10:00",
+            "arrive": "2026-10-23T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "abeam",
+              "text": "Wind E 30 kn abeam · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-24",
+            "depart": "2026-10-24T06:00:00+10:00",
+            "arrive": "2026-10-24T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wave",
+              "sector": "ahead",
+              "text": "Waves 2.5 m · 6 s ahead · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-24",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-24",
+            "depart": "2026-10-24T06:00:00+10:00",
+            "arrive": "2026-10-24T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "wave",
+              "sector": "ahead",
+              "text": "Waves 2.5 m · 6 s ahead · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-25",
+            "depart": "2026-10-25T06:00:00+10:00",
+            "arrive": "2026-10-25T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "gust",
+              "sector": "astern",
+              "text": "Gusts 45 kn astern · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-25",
+        "verdict": "no_go",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-25",
+            "depart": "2026-10-25T06:00:00+10:00",
+            "arrive": "2026-10-25T16:00:00+10:00",
+            "state": "no_go",
+            "limiting": {
+              "factor": "gust",
+              "sector": "astern",
+              "text": "Gusts 45 kn astern · Alpha → Bravo"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-26",
+            "depart": "2026-10-26T06:00:00+10:00",
+            "arrive": "2026-10-26T16:00:00+10:00",
+            "state": "go",
+            "limiting": {
+              "factor": "wind",
+              "sector": "astern",
+              "text": "Wind S 5 kn astern · Bravo → Charlie"
+            },
+            "not_checked": [
+              "wave",
+              "wind_against_tide"
+            ]
+          }
+        ]
+      },
+      {
+        "depart_date": "2026-10-29",
+        "verdict": "no_data",
+        "cells": [
+          {
+            "leg": 0,
+            "date": "2026-10-29",
+            "depart": "2026-10-29T06:00:00+10:00",
+            "arrive": "2026-10-29T16:00:00+10:00",
+            "state": "no_data",
+            "limiting": null,
+            "note": "No forecast this far ahead",
+            "not_checked": [
+              "wind_against_tide"
+            ]
+          },
+          {
+            "leg": 1,
+            "date": "2026-10-30",
+            "depart": "2026-10-30T06:00:00+10:00",
+            "arrive": "2026-10-30T16:00:00+10:00",
+            "state": "no_data",
+            "limiting": null,
+            "note": "No forecast this far ahead",
+            "not_checked": [
+              "wind_against_tide"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

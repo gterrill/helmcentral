@@ -1,0 +1,17 @@
+{
+  "kind": "tile",
+  "payload": {
+    "tile": "depth-tide",
+    "captured_at": "2026-10-29T04:03:00Z",
+    "snapshot": {
+      "depth_age_s": null,
+      "depth_m": null,
+      "depth_trend": {
+        "points": [],
+        "since": "window"
+      },
+      "navigation_state": null,
+      "tide": null
+    }
+  }
+}

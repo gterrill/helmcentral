@@ -243,33 +243,30 @@ func TestMarinaCard_FacilityPointsAreCentresOfTheirShapes(t *testing.T) {
 	}
 }
 
-func TestMarinaCardGolden(t *testing.T) {
+// marinaGoldenCard is the card behind marina_coral_sea.json.
+func marinaGoldenCard(t *testing.T) mateCard {
 	d := marinaCardDeps(&fakeMarinaProvider{details: coralSeaWire(t)}, vesselStateData{LengthOverallM: 15, DraftM: 1.4})
 	_, cards := runMarinaForCard(t, d, `{"lat":-20.2663,"lon":148.7102}`)
-	if len(cards) != 1 {
-		t.Fatalf("cards = %d", len(cards))
+	return onlyCard(t, cards, marinaCardKind)
+}
+
+// marinaSmallCard is a marina that records no berth count, has a charted
+// draught the boat exceeds and a length it fits, a private pontoon, and an
+// answer that was cut short.
+func marinaSmallCard(t *testing.T) mateCard {
+	draught, length := 1.2, 20.0
+	wire := marinaDetails{
+		Marina: marinaRecordWire{
+			marinaChartedLimits: marinaChartedLimits{MaxDraughtM: &draught, MaxLengthM: &length},
+			OSM:                 "way/2", Name: "Example Marina", Lat: -20.5, Lon: 148.5,
+			Outline:  []marinaShape{{Kind: "polygon", Points: [][2]float64{{-20.5, 148.5}, {-20.5, 148.501}, {-20.501, 148.501}, {-20.5, 148.5}}}},
+			Pontoons: []marinaPontoon{{Name: "Private pontoon", Private: true, Shape: marinaShape{Kind: "line", Points: [][2]float64{{-20.5, 148.5}, {-20.501, 148.5}}}}},
+		},
+		Truncated: true, GeometryTruncated: true,
 	}
-	envelope, err := json.MarshalIndent(map[string]any{"kind": cards[0].Kind, "payload": cards[0].Payload}, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	envelope = append(envelope, '\n')
-	path := filepath.Join("testdata", "mate_cards", "marina_coral_sea.json")
-	if *updateMateFixtures {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, envelope, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(envelope, want) {
-		t.Errorf("marina card drifted from %s; run go test -run MarinaCardGolden -update if intended", path)
-	}
+	d := marinaCardDeps(&fakeMarinaProvider{details: wire}, vesselStateData{LengthOverallM: 12, DraftM: 1.4})
+	_, cards := runMarinaForCard(t, d, `{"lat":-20.5,"lon":148.5}`)
+	return onlyCard(t, cards, marinaCardKind)
 }
 
 func TestDecodeMarinaDetails_BoundsTheGeometry(t *testing.T) {
