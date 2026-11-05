@@ -46,11 +46,11 @@ apart, so anything younger is normal. At a count of zero the row says nothing
 about sightings. The row is plain and non-interactive: the kiosk has no input.
 
 **Layout.** Places keep ranks 1 to 5. Vessels have no rank. On a short list
-pane the two groups sit side by side, vessels on the right. From 420 px of pane
+pane the two groups sit side by side, vessels on the right. From 460 px of pane
 height they stack. That figure is the worst case of the stacked content
-(footer, five place rows, the highlighted row's three-line summary, the group
-heading and four vessel rows) with a small margin, so the tile stacks only when
-everything fits. A pane under 600 px wide stacks whatever its height, because two columns would be too narrow. If such a pane is also under 420 px tall, the kiosk cannot scroll to what is cut off, so when a listed vessel is in collision alarm or warning the Vessels group goes first. The tile's grid row is fixed, so the list's content cannot
+(footer and its error line, five place rows, the highlighted row's three-line
+summary, the two group headings and four vessel rows) with a small margin, so the
+tile stacks only when everything fits. A pane under 600 px wide stacks whatever its height, because two columns would be too narrow. If such a pane is also under 460 px tall, the kiosk cannot scroll to what is cut off, so when a listed vessel is in collision alarm or warning the Vessels group goes first. The tile's grid row is fixed, so the list's content cannot
 stretch the map beside it and re-frame the camera. The pane's height comes from a
 ResizeObserver, as the map pane's size already does, rather than a container
 query, because the test suite can drive it and can read the chosen layout from

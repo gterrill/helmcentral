@@ -216,6 +216,21 @@ describe('Nearby list Vessels group', () => {
     rerender(tile({ nearbyVessels: [ves('a', 100, { age_seconds: 300 })] }))
     expect(screen.getByTestId('poi-vessel-row').textContent).toContain('position 5m old')
   })
+
+  it('heads the places group when vessels are shown, and not when the list is places only', async () => {
+    const { rerender } = await renderTile({ nearbyVessels: [ves('a', 100)] })
+    expect(within(screen.getByTestId('poi-places-group')).getByText('Places')).toBeInTheDocument()
+    rerender(tile({ config: config({ showAis: false }), nearbyVessels: [ves('a', 100)] }))
+    expect(screen.queryByText('Places')).toBeNull()
+  })
+
+  it('spaces the place rows the same with or without the Vessels group', async () => {
+    const gap = () => screen.getAllByTestId('poi-list-row')[0].parentElement?.className
+    const { rerender } = await renderTile({ nearbyVessels: [ves('a', 100)] })
+    expect(gap()).toContain('gap-0.5')
+    rerender(tile({ config: config({ showAis: false }), nearbyVessels: [ves('a', 100)] }))
+    expect(gap()).toContain('gap-0.5')
+  })
 })
 
 describe('Vessels group states', () => {
@@ -272,16 +287,26 @@ describe('Vessels group layout', () => {
     expect(screen.getByTestId('poi-list-groups').dataset.stacked).toBe('false')
   })
 
-  it('stacks from 420 px', async () => {
-    listPaneHeight = 420
+  it('stacks from 460 px', async () => {
+    listPaneHeight = 460
     await renderTile()
     expect(screen.getByTestId('poi-list-groups').dataset.stacked).toBe('true')
   })
 
-  it('stays beside at 419 px', async () => {
-    listPaneHeight = 419
+  it('stays beside at 459 px', async () => {
+    listPaneHeight = 459
     await renderTile()
     expect(screen.getByTestId('poi-list-groups').dataset.stacked).toBe('false')
+  })
+
+  it('holds the tile content to the card, so a tall list cannot stretch the map', async () => {
+    await renderTile()
+    expect(screen.getByTestId('poi-map-container').closest('[data-slot="card-content"]')?.className).toContain('min-h-0')
+  })
+
+  it('lets a tall list push the footer down rather than run under it', async () => {
+    await renderTile()
+    expect(screen.getByTestId('poi-list-groups').className).not.toContain('min-h-0')
   })
 
   it('stacks a short but narrow pane', async () => {
@@ -345,7 +370,7 @@ describe('Vessels group order on a pane that cannot hold both groups', () => {
 
   it('keeps the places first on a tall narrow pane, where everything fits', async () => {
     listPaneWidth = 500
-    listPaneHeight = 450
+    listPaneHeight = 460
     await renderTile({ nearbyVessels: [ves('a', 100)], aisCollisionAlarms: alarms })
     expect(screen.getByTestId('poi-list-groups').dataset.vesselsFirst).toBe('false')
   })

@@ -319,7 +319,8 @@ one to a page, or to different pages, each with its own range and categories.
   Vessels group to the list. It shows up to four AIS contacts within 5 km (or
   the tile's range, if that is smaller), alarmed first and then nearest, with
   distance, bearing and "Seen 7x before, last 2d ago" for vessels you have met.
-  On a short tile it sits beside the places, and on a tall tile below them. It
+  The list then has a Places heading and a Vessels heading. On a short tile the
+  two groups sit side by side, and on a tall tile Vessels goes below Places. It
   says why when it can't list vessels, for example "AIS unavailable". If the AIS
   receiver goes silent while SignalK is still up, it reads as no vessels. See
   [Add a Nearby map](../how-to/add-a-nearby-map.md#vessels-in-the-list).
