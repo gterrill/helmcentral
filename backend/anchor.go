@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -929,25 +928,6 @@ func deleteAnchorWatch(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"active": false})
 }
 
-// GET /api/anchor-watch/trails/ais/:id?since=<RFC3339-timestamp>
-func getAISTrailHandler(c echo.Context) error {
-	id := c.Param("id")
-	trails := fetchSignalKAISTrails(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	points := trails[strings.ToUpper(strings.TrimSpace(id))]
-	return c.JSON(http.StatusOK, map[string]any{
-		"points": points,
-	})
-}
-
-// GET /api/anchor-watch/trails/ais?since=<RFC3339-timestamp>
-// Returns all AIS trails with new points since the given timestamp.
-func getAllAISTrailsHandler(c echo.Context) error {
-	trails := fetchSignalKAISTrails(getEnv("SETTINGS_FILE", "../settings.yaml"))
-	return c.JSON(http.StatusOK, map[string]any{
-		"trails": trails,
-	})
-}
-
 // anchorRoutes returns the /api routes for the anchor watch, its placemarks and trails.
 // Each row carries its own auth tier (docs/adr/0177).
 func anchorRoutes() []apiRoute {
@@ -955,8 +935,7 @@ func anchorRoutes() []apiRoute {
 		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
 		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
-		{http.MethodGet, "/api/anchor-watch/trails/ais/:id", tierRead, getAISTrailHandler},
-		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAllAISTrailsHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAISTrailsHandler},
 		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
 		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
 		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},

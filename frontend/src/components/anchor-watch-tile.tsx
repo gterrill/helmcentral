@@ -13,7 +13,8 @@ import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useAnchorWatch, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
-import { useAisTrails, type TrailPoint } from '@/hooks/use-server-trails'
+import { useAisTrails, type AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
+import type { TrailPoint } from '@/hooks/use-server-trails'
 import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
 import { useMapContacts, usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
 import { useVesselFields } from '@/hooks/use-vessel-state'
@@ -66,7 +67,7 @@ interface AnchorWatchTileProps {
   vesselHeadingDeg: number | null
   vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
-  aisTrails: Map<string, TrailPoint[]>
+  aisTrails: Map<string, AisTrailPoint[]>
   // Optional, mirroring AnchorWatchMapProps — passed straight through to the
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).

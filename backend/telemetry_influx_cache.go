@@ -130,7 +130,7 @@ func newTelemetryInfluxFetcher(slot *telemetryInfluxSlot) *telemetryInfluxFetche
 
 // telemetryInfluxSolarPositionMissing gates the "no vessel position yet" log
 // line to once per state change (in both directions), the same idiom
-// tracksEndpointMissing (tracks.go) uses for its own 404 log line: refresh
+// solarZoneMissing (tracks.go) uses for its own log line: refresh
 // runs every telemetryInfluxRefreshInterval (30s), and a line every tick
 // while waiting for the first GNSS fix would bury everything else in the log.
 var telemetryInfluxSolarPositionMissing atomic.Bool

@@ -2,12 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,91 +19,8 @@ var (
 	selfTrack = newVesselTrail()
 )
 
-const tracksAISTrailsCacheMaxAge = 15 * time.Second
-
-type tracksAISTrailsCacheSnapshot struct {
-	fetchedAt time.Time
-	trails    map[string][]trackPoint
-}
-
-type tracksAISTrailsCache struct {
-	mu         sync.Mutex
-	cond       *sync.Cond
-	refreshing bool
-	snapshot   tracksAISTrailsCacheSnapshot
-}
-
-var tracksAISTrails = newTracksAISTrailsCache()
-
-// tracksEndpointMissing remembers whether the last AIS trails fetch got a 404,
-// so the missing-plugin log line is written when that changes rather than on
-// every refresh.
-var tracksEndpointMissing atomic.Bool
-
 // solarZoneMissing is set while a good fix has no time zone, so that is logged once.
 var solarZoneMissing atomic.Bool
-
-func newTracksAISTrailsCache() *tracksAISTrailsCache {
-	c := &tracksAISTrailsCache{}
-	c.cond = sync.NewCond(&c.mu)
-	return c
-}
-
-func cloneTrackPointMap(src map[string][]trackPoint) map[string][]trackPoint {
-	if len(src) == 0 {
-		return map[string][]trackPoint{}
-	}
-	cloned := make(map[string][]trackPoint, len(src))
-	for vesselID, pts := range src {
-		copied := make([]trackPoint, len(pts))
-		copy(copied, pts)
-		cloned[vesselID] = copied
-	}
-	return cloned
-}
-
-func (s tracksAISTrailsCacheSnapshot) fresh() bool {
-	return !s.fetchedAt.IsZero() && time.Since(s.fetchedAt) < tracksAISTrailsCacheMaxAge
-}
-
-func (c *tracksAISTrailsCache) get(settingsPath string) map[string][]trackPoint {
-	c.mu.Lock()
-	for c.refreshing {
-		if len(c.snapshot.trails) > 0 {
-			trails := cloneTrackPointMap(c.snapshot.trails)
-			c.mu.Unlock()
-			return trails
-		}
-		c.cond.Wait()
-	}
-	if c.snapshot.fresh() {
-		trails := cloneTrackPointMap(c.snapshot.trails)
-		c.mu.Unlock()
-		return trails
-	}
-	c.refreshing = true
-	c.mu.Unlock()
-
-	trails, err := fetchSignalKAISTrailsResult(settingsPath)
-	return c.finishRefresh(trails, err)
-}
-
-func (c *tracksAISTrailsCache) finishRefresh(trails map[string][]trackPoint, err error) map[string][]trackPoint {
-	c.mu.Lock()
-	defer func() {
-		c.refreshing = false
-		c.cond.Broadcast()
-		c.mu.Unlock()
-	}()
-
-	if err == nil {
-		c.snapshot = tracksAISTrailsCacheSnapshot{fetchedAt: time.Now().UTC(), trails: cloneTrackPointMap(trails)}
-	} else if len(c.snapshot.trails) == 0 {
-		c.snapshot = tracksAISTrailsCacheSnapshot{fetchedAt: time.Now().UTC(), trails: map[string][]trackPoint{}}
-	}
-
-	return cloneTrackPointMap(c.snapshot.trails)
-}
 
 // motoringTrail is kept separately: only records motoring state fixes,
 // starting empty and filling purely from live sampling.
@@ -185,20 +98,6 @@ func startTrackPoller(ctx context.Context, pollInterval time.Duration) <-chan st
 }
 
 func sampleTracks(settingsPath string) {
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-
-	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
-
-	if signalkURL == "" {
-		return
-	}
-
 	now := time.Now().UTC() // shared by wind/depth/solar recording this tick
 
 	// Sample self vessel
@@ -294,12 +193,6 @@ func sampleTracks(settingsPath string) {
 		// The anchor swing trail (ADR 0199) is stored only while a watch is on.
 		recordAnchorTrailPoint(state.Latitude, state.Longitude, now)
 
-		// AIS trails are no longer refreshed on this tick: getTracksHandler's
-		// own tracksAISTrails.get() already refreshes on demand within its
-		// 15s freshness window (backend perf audit #10), so refreshing here
-		// too just doubled the upstream GET to /signalk/v1/api/tracks -- every
-		// 5s from the poller regardless of whether any client had the map
-		// open, on top of whatever the handler already did.
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
 		}
@@ -313,49 +206,56 @@ func sampleTracks(settingsPath string) {
 			geoname = updateTickPlaceName(state.Latitude, state.Longitude)
 		}
 
-		recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath, state, geoname)
+		// One fetch of the nearby vessels serves both the sighting log and the
+		// anchor watch's AIS tracks (ADR 0263); each recorder guards itself.
+		//
+		// Fetches with nearbyVesselsUnlimited, not fetchSignalKNearbyVessels' own
+		// default 10 (the map tile's own display cap) - a code-review finding,
+		// 2026-09-25: get_nearby_vessels (ADR 0128) lists up to
+		// assistantNearbyVesselsMaxMaxResults (25), so a vessel ranked 11th-25th
+		// nearest never got a sighting-log row at all, leaving in_range_since
+		// missing or wrong for exactly the vessels a crowded anchorage most needs
+		// it for. Both recorders are authoritative records of "who has been in
+		// range," independent of any one caller's own display cap.
+		nearby, nearbyErr := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, []string{fetchSignalKSelfName()}, nearbyVesselsUnlimited)
+		noteNearbyFetch(nearbyErr)
+		if nearbyErr == nil {
+			recordNearbyVesselContacts(nearby, state, geoname, now)
+			recordAISAnchorTracks(nearby, now)
+		}
 	}
 }
 
-// recordNearbyVesselContacts fetches the current set of nearby AIS vessels
-// and records a contact for each in globalNearbyContactStore. This runs
-// once per server-owned 5-second poll tick (ADR 0001: the server owns
-// sampling, independent of client polling), not from the /api/nearby-
-// vessels HTTP handler, which can be hit far more often by several open
-// browser tabs - recording from the handler would defeat "record once per
-// encounter." geoname is this tick's already-resolved place name (see
-// updateTickPlaceName in place_name.go) rather than looked up again here -
-// since resolution now runs live on every tick (docs/adr/0056), a second
-// independent lookup would be redundant and the caller already knows the
-// answer.
-//
-// Fetches with nearbyVesselsUnlimited, not fetchSignalKNearbyVessels' own
-// default 10 (the map tile's own display cap) - a code-review finding,
-// 2026-09-25: get_nearby_vessels (ADR 0128) lists up to
-// assistantNearbyVesselsMaxMaxResults (25), so a vessel ranked 11th-25th
-// nearest never got a sighting-log row at all, leaving in_range_since
-// missing or wrong for exactly the vessels a crowded anchorage most needs
-// it for. The sighting log is the authoritative record of "who has been in
-// range," independent of any one caller's own display cap, so it must not
-// inherit a limit that belongs to the map tile. Performance/storage: this
-// still runs once per 5s poll tick, not per HTTP request; recordContactIfNew
-// is one indexed SQLite read plus, only on a genuinely new encounter, one
-// insert (WAL mode, ADR-documented in nearby_contacts.go) - going from 10 to
-// however many vessels nearbyMaxRangeMeters actually admits (a crowded
-// anchorage might see a few dozen) adds a few dozen more indexed reads every
-// 5s, negligible next to what this poll tick already does (self track,
-// weather-trend buffers, place-name resolution).
-func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, state vesselStateData, geoname string) {
-	if globalNearbyContactStore == nil {
+// nearbyFetchFailing is set while the tick's nearby-vessel fetch is failing, so
+// the failure and the recovery are each logged once, not every tick.
+var nearbyFetchFailing atomic.Bool
+
+// noteNearbyFetch logs a failed fetch, which skips both recorders for the
+// tick, once per change of state.
+func noteNearbyFetch(err error) {
+	if err != nil {
+		if nearbyFetchFailing.CompareAndSwap(false, true) {
+			log.Printf("nearby vessels: fetch failed, the sighting log and the anchor watch AIS tracks skip ticks until it recovers: %v", err)
+		}
 		return
 	}
+	if nearbyFetchFailing.CompareAndSwap(true, false) {
+		log.Printf("nearby vessels: fetch recovered")
+	}
+}
 
-	signalkSelfName := fetchSignalKSelfName()
-	excludedNames := []string{signalkSelfName}
-
-	now := time.Now().UTC()
-	nearby, err := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, excludedNames, nearbyVesselsUnlimited)
-	if err != nil {
+// recordNearbyVesselContacts records a contact for each vessel in nearby in
+// globalNearbyContactStore. This runs once per server-owned poll tick (ADR
+// 0001: the server owns sampling, independent of client polling), not
+// from the /api/nearby-vessels HTTP handler, which can be hit far more often
+// by several open browser tabs - recording from the handler would defeat
+// "record once per encounter." geoname is this tick's already-resolved place
+// name (see updateTickPlaceName in place_name.go) rather than looked up again
+// here. recordContactIfNew is one indexed SQLite read plus, only on a
+// genuinely new encounter, one insert (WAL mode, ADR-documented in
+// nearby_contacts.go), negligible next to what this poll tick already does.
+func recordNearbyVesselContacts(nearby []nearbyVessel, state vesselStateData, geoname string, now time.Time) {
+	if globalNearbyContactStore == nil {
 		return
 	}
 
@@ -409,156 +309,10 @@ func toWire(pts []*trailPoint) []trackPoint {
 	return out
 }
 
-type signalKTrackSnapshot struct {
-	Type        string        `json:"type"`
-	Coordinates [][][]float64 `json:"coordinates"`
-	Geometry    *struct {
-		Type        string        `json:"type"`
-		Coordinates [][][]float64 `json:"coordinates"`
-	} `json:"geometry,omitempty"`
-}
-
-func fetchSignalKAISTrailsResult(settingsPath string) (map[string][]trackPoint, error) {
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-
-	signalkURL := buildSignalKURL(address, port)
-	if signalkURL == "" {
-		return map[string][]trackPoint{}, nil
-	}
-
-	tracksPath := getEnv("SIGNALK_TRACKS_PATH", "/signalk/v1/api/tracks")
-	tracksURL := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(tracksPath, "/")
-
-	client := &http.Client{Timeout: 4 * time.Second}
-	response, err := client.Get(tracksURL)
-	if err != nil {
-		return map[string][]trackPoint{}, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode == http.StatusNotFound {
-		// Drain so the connection can be reused rather than left half-read,
-		// same as the error branch just below. A 404 here is a fact about the
-		// boat's configuration, not a failure: the tracks plugin simply is not
-		// installed, the same idiom fetchSignalKNotificationsTree already
-		// uses for a 404'd sub-resource (notification_sync.go). It must still
-		// surface rather than vanish silently, so it is logged; the trails
-		// stay empty rather than becoming an error, since "the plugin is not
-		// there" is not something a retry or a stale cache fixes.
-		// Logged once per change of state: /api/tracks refreshes this on
-		// demand every 15 s while a map is open, and a line per refresh
-		// would bury everything else in the log buffer.
-		io.Copy(io.Discard, response.Body)
-		if tracksEndpointMissing.CompareAndSwap(false, true) {
-			log.Printf("tracks: signalk has no %s endpoint (404); AIS trails will stay empty until it appears", tracksPath)
-		}
-		return map[string][]trackPoint{}, nil
-	}
-	if tracksEndpointMissing.CompareAndSwap(true, false) {
-		log.Printf("tracks: signalk %s endpoint answered again", tracksPath)
-	}
-	if response.StatusCode != http.StatusOK {
-		// An unexpected status (5xx, a proxy timeout page, ...) is a real
-		// failure, unlike the 404 above -- returning it as an error rather
-		// than a silent empty success lets tracksAISTrailsCache.finishRefresh
-		// keep serving the last-good trails instead of blanking them on a
-		// blip (AGENTS.md fallback policy).
-		body, _ := io.ReadAll(response.Body)
-		return map[string][]trackPoint{}, fmt.Errorf("signalk returned status %d fetching AIS trails: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return map[string][]trackPoint{}, err
-	}
-
-	var payload map[string]signalKTrackSnapshot
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return map[string][]trackPoint{}, err
-	}
-
-	nameMap, nameErr := fetchSignalKVesselNameMap()
-	if nameErr != nil {
-		nameMap = map[string]string{}
-	}
-	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName()))
-
-	result := make(map[string][]trackPoint, len(payload))
-	// Truncated to millisecond precision for the same reason as
-	// vesselTrail.addPoint (anchor.go): the client feeds the max AIS
-	// timestamp it has seen back into `since` as a millisecond-precision
-	// JS Date string, and a nanosecond-precision synthesized timestamp
-	// here would never match it exactly.
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	for vesselID, snapshot := range payload {
-		var multiCoords [][][]float64
-		if snapshot.Geometry != nil && len(snapshot.Geometry.Coordinates) > 0 {
-			multiCoords = snapshot.Geometry.Coordinates
-		} else if len(snapshot.Coordinates) > 0 {
-			multiCoords = snapshot.Coordinates
-		}
-
-		if len(multiCoords) == 0 {
-			continue
-		}
-
-		// Always take the most recent track segment
-		coords := multiCoords[len(multiCoords)-1]
-		if len(coords) == 0 {
-			continue
-		}
-
-		// Track contexts are "vessels.<id>" but the vessels endpoint keys by "<id>" alone.
-		lookupKey := strings.TrimPrefix(vesselID, "vessels.")
-		if lookupKey == "self" {
-			continue
-		}
-
-		name := strings.ToUpper(strings.TrimSpace(nameMap[lookupKey]))
-		if name == "" {
-			name = strings.ToUpper(strings.TrimSpace(compactVesselID(vesselID)))
-		}
-		if name == "SELF" || name == signalkSelfName {
-			continue
-		}
-
-		start := now.Add(-time.Duration(len(coords)-1) * time.Second)
-		points := make([]trackPoint, 0, len(coords))
-		for i, coord := range coords {
-			if len(coord) < 2 {
-				continue
-			}
-			lon := coord[0]
-			lat := coord[1]
-			if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
-				continue
-			}
-			points = append(points, trackPoint{Lat: lat, Lon: lon, Timestamp: start.Add(time.Duration(i) * time.Second)})
-		}
-		if len(points) > 0 {
-			result[name] = points
-		}
-	}
-
-	return result, nil
-}
-
-func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
-	trails, err := fetchSignalKAISTrailsResult(settingsPath)
-	if err != nil {
-		return map[string][]trackPoint{}
-	}
-	return trails
-}
-
 // GET /api/tracks?since=<RFC3339>
-// Returns self and AIS vessel tracks for anchor-watch display.
-// Clients pass the timestamp of the last point they received so only
-// new fixes are returned on subsequent polls.
+// Returns the self track. Clients pass the timestamp of the last point they
+// received so only new fixes are returned on subsequent polls. The AIS tracks
+// recorded during an anchor watch are at /api/anchor-watch/trails/ais.
 func getTracksHandler(c echo.Context) error {
 	sinceStr := c.QueryParam("since")
 	var since time.Time
@@ -574,10 +328,8 @@ func getTracksHandler(c echo.Context) error {
 	selfPts := selfTrack.pointsSince(since)
 	trackMu.RUnlock()
 
-	aisWire := tracksAISTrails.get(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	payload := map[string]any{
 		"self": toWire(selfPts),
-		"ais":  aisWire,
 	}
 	etag, etagErr := weakETagForJSON(payload)
 	if etagErr != nil {

@@ -54,7 +54,9 @@ group shows:
   worst first, then the nearest. A vessel in a collision alarm or warning is
   listed even when it's outside the tile's range. It lists four, with "+N more"
   beside the heading when others qualify. The map still draws every contact it
-  has.
+  has. During an anchor watch, the AIS list holds every boat within 500 m of
+  your anchor as well as the 10 nearest to you. So the Vessels group can have
+  more boats to pick from.
 - Each row: the vessel's name on the left, and its distance and bearing from you
   on the right. A vessel with no name shows the short ID Helmcentral gives it. The
   bearing is left out when the vessel's position or yours isn't known.

@@ -68,11 +68,18 @@ under the boat arrow.
   starts a new one.
 - **How much is kept:** The newest 10,000 points are kept and drawn, which
   covers days at anchor.
+- **Reading it:** The line is dim yellow where the boat was longest ago and
+  bright yellow where it is now, in a few steps along the whole stay. The oldest
+  part stays solid, so a long swing never fades out of sight.
 
 ## AIS targets on the map
 
 Nearby AIS targets draw on the anchor-watch map as amber circles carrying the
-vessel's name, range and bearing.
+vessel's name, range and bearing. Usually that is the 10 boats nearest to you.
+While a watch is set, every boat within 500 m of your anchor draws as well. A
+crowded anchorage can't hide a boat close to your anchor behind ten that are
+nearer your hull. The Nearby tile reads the same list, so it can show more boats
+during a watch.
 
 - **Collision alarms:** When a collision alarm is in force for one of them, its
   marker turns red. It gains a ring once the alarm reaches alarm severity. It
@@ -82,6 +89,38 @@ vessel's name, range and bearing.
   turn red on their own closing figures, independently of AIS. So a boat that
   your radar and your AIS both see can show two red markers at once, with two
   different numbers.
+
+## AIS tracks on the map
+
+While a watch is set, Helmcentral also records where each target has been, so
+you can see which way the boats around you have swung through the night.
+Helmcentral keeps these tracks itself, and nothing needs to be installed on the
+SignalK server for them.
+
+- **Who is recorded:** Any target with an MMSI that comes within 500 m of the
+  anchor. Helmcentral only sees targets between about 9 m and 5 km from your
+  boat. So a boat almost touching yours isn't recorded. Neither is a target when
+  you're more than 5 km from your anchor. A target that stays further out than
+  500 m shows as a marker only. A target with no MMSI can't be followed from one
+  report to the next, so it also shows as a marker only.
+- **What is recorded:** One point each time the target reports a new position,
+  stamped with the time of that report. A target that has gone quiet adds
+  nothing.
+- **Leaving the circle:** A target that moves out past 500 m stops adding points,
+  but its track stays on the map for as long as the target does.
+- **Gaps:** There's no line where a target left the circle and came back, or
+  where more than 15 minutes passed between two reports. That includes any time
+  Helmcentral itself was stopped.
+- **Brightness follows age:** The newest part of a track is solid amber and the
+  oldest fades towards clear, in a few steps across the 24 hours that are kept.
+  The newest part is drawn on top.
+- **Starting and ending:** The tracks start empty when you drop the anchor and
+  end when you raise it. Moving the anchor position keeps them, as the swing
+  trail does, and so does changing the radius. After a move, a boat is recorded
+  while it is within 500 m of the new position. One that is now outside it adds
+  no points. If it comes back inside, its track starts a new line. A watch that
+  is already set when Helmcentral is updated starts recording from then.
+- **Without a watch:** No tracks are recorded and none are drawn.
 
 ## Adjust: moving the anchor or changing the radius
 

@@ -60,7 +60,8 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/weather-today` - Current weather summary for vessel position
 - `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts. Response shape includes `days`, `cached`, `updated_at`, and `ttl_seconds`. Cached for 60 minutes per rounded vessel position; returns `502` when upstream forecast data cannot be fetched.
 - `GET /api/tide-today` - Current and upcoming tide conditions
-- `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
+- `GET /api/tracks?since=<RFC3339>` - Incremental self track updates sampled by the server
+- `GET /api/anchor-watch/trails/ais?since=<cursor>` - During an anchor watch, the AIS tracks the server recorded within 500 m of the anchor, stored after the cursor; no tracks without a watch
 - `GET /api/routes/active` - The route SignalK is navigating (name and waypoints read from its route resource) and its next point
 
 ## Configuration
@@ -90,7 +91,8 @@ Trail-handling decisions are documented in:
 - [../docs/adr/0002-separate-motoring-and-anchor-trails.md](../docs/adr/0002-separate-motoring-and-anchor-trails.md)
 - [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md) (superseded by ADR-0020)
 - [../docs/adr/0004-gnss-validation-gate.md](../docs/adr/0004-gnss-validation-gate.md)
-- [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
+- [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md) (superseded by ADR-0263)
+- [../docs/adr/0263-helmcentral-records-ais-tracks-during-an-anchor-watch.md](../docs/adr/0263-helmcentral-records-ais-tracks-during-an-anchor-watch.md)
 - [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md) (superseded by ADR-0195)
 - [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md) (superseded by ADR-0195)
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)

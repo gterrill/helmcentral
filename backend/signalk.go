@@ -1233,29 +1233,6 @@ func fetchSignalKPositionHistory(settingsPath, mmsi string, from, to time.Time, 
 	return points, nil
 }
 
-func fetchSignalKVesselNameMap() (map[string]string, error) {
-	payload, err := signalKVesselsPayload()
-	if err != nil {
-		return nil, err
-	}
-
-	names := make(map[string]string, len(payload))
-	for vesselID, raw := range payload {
-		vesselMap, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		name := firstNonEmptyString(lookupString(vesselMap, "name"), lookupString(vesselMap, "design", "name"))
-		if name == "" {
-			name = compactVesselID(vesselID)
-		}
-		names[vesselID] = strings.ToUpper(strings.TrimSpace(name))
-	}
-
-	return names, nil
-}
-
 func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
 	t := globalSignalKSnapshot.selfTelemetry()
 	if !t.HasSelf() {

@@ -8,7 +8,7 @@ import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useKnownAlarmLis
 import { setAnchorHere, useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
-import { useAisTrails } from '@/hooks/use-server-trails'
+import { useAisTrails } from '@/hooks/use-ais-anchor-tracks'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { selectTimeZone } from '@/lib/vessel-time'

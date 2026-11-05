@@ -60,8 +60,9 @@ func createAnchorTrailSchema(db sqlExecer) error {
 	return nil
 }
 
-// resetAnchorTrail empties the trail. A restart stamps a new start time (a
-// drop); otherwise the trail is over (raise).
+// resetAnchorTrail empties the swing trail and the AIS tracks (ADR 0263) in one
+// transaction. A restart stamps a new start time (a drop); otherwise the trail
+// is over (raise).
 func (s *passageStore) resetAnchorTrail(restart bool, now time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -79,7 +80,14 @@ func (s *passageStore) resetAnchorTrail(restart bool, now time.Time) error {
 		ON CONFLICT(id) DO UPDATE SET started_ms = excluded.started_ms`, started); err != nil {
 		return fmt.Errorf("reset anchor trail: %w", err)
 	}
-	return tx.Commit()
+	if _, err := tx.Exec(`DELETE FROM ais_anchor_track_points`); err != nil {
+		return fmt.Errorf("reset ais anchor tracks: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	aisTracks.reset(now)
+	return nil
 }
 
 // startAnchorTrailIfAbsent begins a trail for a watch restored at startup
