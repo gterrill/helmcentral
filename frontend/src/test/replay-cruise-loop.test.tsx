@@ -108,6 +108,7 @@ let now = 0
 const errors: string[] = []
 
 beforeEach(() => {
+  Object.assign(seen, { stay: 0, passage: 0, frames: 0 })
   m.handlers.clear()
   m.jumps = 0
   m.current = { center: { lng: 149, lat: 0 }, zoom: 9, pitch: 0, bearing: 0 }

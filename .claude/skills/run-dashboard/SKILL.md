@@ -85,6 +85,16 @@ against the same backend:
 cd frontend && npx vite --port 5175 --strictPort
 ```
 
+An isolated worktree session cannot `cd`. Give the worktree's absolute path
+twice instead, with the same optional `VITE_API_PROXY_TARGET` prefix:
+
+```bash
+npm --prefix <worktree>/frontend exec -- vite <worktree>/frontend --port 5175 --strictPort
+```
+
+Keep the path after `vite`. Without it, vite serves from the worktree root: the
+page never loads, and it leaves a stray `.vite` folder.
+
 Vite proxies `/api` to the running backend on :8080, so the page shows the same
 live data as :5173 and the two can be compared side by side. To see the boat's
 own data instead, prefix `VITE_API_PROXY_TARGET=http://192.168.50.240:9091`.

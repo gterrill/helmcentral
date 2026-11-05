@@ -188,6 +188,24 @@ jobs:
       - name: Lint
         run: vale --no-global docs
 
+  # actionlint through `go run` at the version pinned in the Makefile, so a
+  # broken workflow fails here instead of when it first runs on main.
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          # No cache: this job's module cache would otherwise claim the
+          # backend jobs' cache key.
+          cache: false
+
+      - name: Lint workflows
+        run: make workflow-lint
+
   # See scripts/check-changelog.sh. The push run catches a PR whose checks ran
   # before a release was tagged.
   changelog:

@@ -325,6 +325,10 @@ export default defineConfig(({ mode }) => ({
     },
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Tests that render whole pages or hundreds of frames take 2 s or more on an
+    // idle Mac, and the default 5 s turned them red under CI load, on a required
+    // check, for PRs that never touched them.
+    testTimeout: 30_000,
     // Worker threads rather than Vitest's default child-process forks. Nearly
     // all of this suite's wall clock is per-file fixed cost (happy-dom setup, then
     // transforming and importing the module graph) rather than the test bodies

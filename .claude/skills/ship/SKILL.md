@@ -47,9 +47,14 @@ Run every suite the change touches:
 
 - Backend: `make check-backend`
 - Frontend: `make check-frontend`
-- Help pages under `docs/`: `make docs-lint`
+- Help pages under `docs/`: `make docs-lint-changed`
+- A change under `.github/workflows/`: `make workflow-lint`
 - `CHANGELOG.md`: `sh scripts/check-changelog.sh`. A rebase merges this file
   without a conflict, so this is what catches an entry left in a released section.
+
+A UI change is previewed now, before review, following "Preview from a
+worktree" in the `run-dashboard` skill, at desktop and phone widths. Fixes the
+preview prompts go through this step again.
 
 Run the two check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
@@ -69,7 +74,8 @@ that test file alone before you call it a flake. Reproduce a failure this way:
   `-test.shuffle <seed>` printed in its log. A rerun draws a new seed, so a
   passing rerun proves nothing, and it is never called a flake.
 
-**Done:** every suite you ran is green. Keep the pass counts for the PR body.
+**Done:** every suite you ran is green, and a UI change has been previewed at
+desktop and phone widths. Keep the pass counts for the PR body.
 
 ## 5. Review
 
@@ -81,9 +87,13 @@ test-first, then go back to step 4.
 A real finding gets fixed in this PR, even when it sits in code the change
 only passes through. Dismiss a finding only when the code proves it wrong.
 
+Any code change made after the review, other than a fix for its findings, goes
+back to step 4 and gets reviewed again. A loop of fixes alone does not.
+
 **Done:** every finding is fixed or shown wrong against the code, every
-touched standards section has been applied to the diff, and step 4 is green
-on the fixed tree.
+touched standards section has been applied to the diff, step 4 is green on the
+fixed tree, and no code has changed since the review except fixes for its
+findings.
 
 ## 6. Commit and open the PR
 
@@ -111,11 +121,22 @@ wrong directory: go back to step 1.
 
 ## 8. Watch until merged
 
-Report the PR URL and a one-paragraph summary to the operator. Then start a
-Monitor on `sh scripts/watch-pr.sh <N>` with the longest timeout, re-armed
-on each expiry. It prints `state | mergeable | failed checks` when that line
-changes, and exits on merge or close. Each re-arm repeats the current line
-once; act only on a line that differs from the last.
+Report the PR URL and a one-paragraph summary to the operator. Then run `sh
+scripts/watch-pr.sh <N> --once` as a background Bash command. The first run
+reports the current line straight away. Each run after that exits only when
+the line differs from the last one reported, so you are woken only on a
+change. Act on the line, then run it again unless the PR is `MERGED` or
+`CLOSED`. The line reads `state | mergeable | merge state | failed checks |
+checks`, and the last field is `no checks yet`, `no checks after 15 min`,
+`checks running` or `checks done`. A failure you have already told the operator
+about does not wake you again.
+
+`mergeable` means only that the PR has no conflicts. Call the PR ready to
+merge only when the merge state is `CLEAN`. `no checks yet` means CI is queued,
+so run the watcher again. `no checks after 15 min` means CI has not started:
+tell the operator. `BLOCKED` with `checks done` and no failed checks means a
+required check will never report: run `gh pr checks <N>` and tell the operator
+which.
 
 - A failed check: read its log with `gh run view --log-failed`, fix it,
   go back to step 4.

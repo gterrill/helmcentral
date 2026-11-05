@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config check-frontend-deps check-backend check-frontend
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree prune-merged check-vite-config check-frontend-deps check-backend check-frontend
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -26,6 +26,21 @@ docs-lint:
 	sh scripts/check-adr-numbers.sh
 	@command -v vale >/dev/null || { echo "docs-lint: vale not installed (brew install vale)"; exit 1; }
 	vale --no-global docs
+
+# docs-lint on only the Markdown files under docs/ that differ from the merge
+# base with origin/main, including uncommitted and untracked ones. Rules in
+# scripts/docs-lint-changed.sh; it runs from the repo root whatever the cwd.
+docs-lint-changed:
+	@sh scripts/docs-lint-changed.sh
+
+# Lints .github/workflows with actionlint, run through Go at a pinned version
+# so nothing needs installing. v1.7.12 was released 2026-03-30. GO111MODULE=on
+# because `go run pkg@version` needs module mode, which a shell that sets
+# GO111MODULE=off would otherwise refuse. -shellcheck= -pyflakes= turn off the
+# external checkers, so the Mac checks the same as CI whichever of those tools
+# each happens to have installed.
+workflow-lint:
+	GO111MODULE=on go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck= -pyflakes=
 
 # A second checkout for a second concurrent session, so two sessions editing
 # at once cannot race in one working tree. `make worktree NAME=ux-tweaks`
