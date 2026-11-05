@@ -23,7 +23,7 @@ import { useMapContacts, usePins, useWatchAtFix } from '@/hooks/use-anchor-map-i
 
 /*
  * The wrappers for the pages AppShell opens as lazy chunks (ADR 0215): Alarms,
- * Anchor Watch, Radar and Forecast. They cannot sit beside the page they feed,
+ * Anchor Watch, Windy and Forecast. They cannot sit beside the page they feed,
  * because the wrapper is eager and the page is not: a wrapper in the page's
  * own file would pull its chunk into the main bundle. So the pages stay behind
  * React.lazy here, as in App.tsx's own panels, and each wrapper reads its
@@ -182,7 +182,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
 
 const RADAR_FIELDS = ['latitude', 'longitude'] as const
 
-/** The radar page, centred on the fix. */
+/** The Windy page, centred on the fix. */
 export const LiveRadarDrawer = memo(function LiveRadarDrawer() {
   const { latitude, longitude } = useVesselFields(RADAR_FIELDS)
   return <RadarDrawer latitude={latitude} longitude={longitude} />

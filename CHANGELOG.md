@@ -22,6 +22,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Radar panel in the sidebar is now called Windy.** It's the Windy weather
+  map, so the new name and a wind icon stop it being mistaken for the boat's own
+  radar. Its **Mayara settings** gear is gone because the map doesn't use Mayara,
+  and **Help** now opens a section about the map. You'll still find Mayara under
+  Settings. The `/radar` address and the **Radar Targets** tile keep their names.
 - **A watch's page now opens on its latest report.** It leads with the opening
   sentence of Mate's review in large type, then what needs a look, then the
   rest of the review and the readings in larger type. The watch's name and

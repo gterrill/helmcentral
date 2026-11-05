@@ -59,7 +59,7 @@ pinned above the grid on every dashboard page, inside whatever skin that page
 uses. The strip belongs to the vessel, not to the page. It has the same lamps in
 the same order wherever you look, so a glance always means the same thing.
 
-It stays off the Forecast, Radar, Anchor Watch and Settings panels, which rely
+It stays off the Forecast, Windy, Anchor Watch and Settings panels, which rely
 on the alarm banner instead. It also stays off wall displays, where it would
 spend a third of a 360px-tall strip on the least page-specific information on
 screen.
@@ -216,7 +216,7 @@ The address bar follows the panel you are on, so you can link straight to it.
 | `/` | The dashboard. On first load, this browser's remembered page if it still exists, otherwise the first page. |
 | `/dashboard/<page id>` | The dashboard, that page. |
 | `/forecast` | The forecast drawer. |
-| `/radar` | Radar targets. |
+| `/radar` | The Windy weather map. |
 | `/anchor-watch` | Anchor watch. |
 | `/alarms` | The alarms panel. |
 | `/settings` | Settings, General section. |
@@ -228,7 +228,7 @@ so a different one comes first, the address follows, without switching the page
 you're looking at.
 
 Back and Forward move between panels the way they move between pages on any
-other site. If you open Forecast, then Radar, Back returns you to Forecast
+other site. If you open Forecast, then Windy, Back returns you to Forecast
 rather than closing the app. Tapping an alarm notification on your phone opens
 the Alarms panel, not the dashboard.
 
@@ -369,13 +369,28 @@ These are ARPA contacts from the ship's own radar, if you run one. They plot on
 the anchor map as course-oriented triangles, distinct from the AIS circles, and
 list with range, bearing and the CPA and TCPA the radar computed.
 
-This is the marine radar. The **weather radar** is a separate embedded Windy map
-centred on the vessel.
+This is the marine radar. For weather radar, use the [Windy](#windy) panel.
 
 Radar is optional and stays off unless the pieces are there: mayara-server
 running against the physical radar, and its plugin installed on the boat's
 instrument server. Helmcentral needs no configuration of its own beyond that,
 and it finds the radar on the feed. Without both pieces the tile reads `—`.
+
+### Windy
+
+The **Windy** panel in the sidebar shows a Windy weather map centred on the
+boat. The map comes from Windy, so it needs an internet connection, and it waits
+for a GPS position before it opens.
+
+Here is what you can change on it:
+
+- Layer and units: Pick the **Layer** (radar, wind, temp or pressure), the
+  **Wind Unit** and the **Temp Unit**, and turn **Menu** and **Marker** on or
+  off. Then tap **Apply**.
+- Following the boat: The map doesn't move as the boat does, because reloading
+  it on every position update would keep interrupting you. Tap **Recenter** to
+  bring it back to the boat.
+- A bigger view: **Open in Windy** opens the same map on its own.
 
 ### Max wind gust
 

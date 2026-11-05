@@ -379,7 +379,7 @@ describe('App sidebar navigation', () => {
       'Alarms',
       'Anchor Watch',
       'Forecast',
-      'Radar',
+      'Windy',
       'Passages',
       'Watches',
       'Documents',

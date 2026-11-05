@@ -1518,6 +1518,15 @@ func TestAssistantScreenSentence_NamesTheAlarmBeingAskedAbout(t *testing.T) {
 	}
 }
 
+// The panel id stays "radar" so saved links keep working, but Mate must call
+// it what the sidebar calls it, or it reads the Windy map as the boat's radar.
+func TestAssistantScreenSentence_NamesTheRadarPanelWindy(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "radar"})
+	if got != "The operator is looking at the Windy panel.\n\n" {
+		t.Fatalf("expected the Windy label, got %q", got)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_AlarmContextRule(t *testing.T) {
 	stable, live := assistantSystemPromptParts(basePromptContext())
 	for _, want := range []string{
