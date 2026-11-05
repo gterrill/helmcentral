@@ -73,14 +73,14 @@ func currentDocumentBackfillStatus() documentBackfillStatus {
 // is a no-op rather than a nil-func panic.
 var documentIndexerSweepIfReady func()
 
-// sweepDocumentsIfReady is documentIndexerSweepIfReady's nil-safe caller -
-// run once at boot (main.go) and again by updateSettingsHandler
-// (signalk.go) every time settings are saved into a working configuration,
-// so turning Mate on sweeps the enrich=0 backlog without the operator
-// taking any further action (ADR 0120).
-func sweepDocumentsIfReady() {
-	if documentIndexerSweepIfReady != nil {
-		documentIndexerSweepIfReady()
+// sweepDocumentsInBackground is documentIndexerSweepIfReady's nil-safe caller,
+// run every time settings are saved into a working configuration, so turning
+// Mate on sweeps the enrich=0 backlog without the operator taking any further
+// action (ADR 0120). It reads the hook before starting the goroutine, so a
+// sweep that starts late still runs the hook in place when it was asked for.
+func sweepDocumentsInBackground() {
+	if sweep := documentIndexerSweepIfReady; sweep != nil {
+		go sweep()
 	}
 }
 
