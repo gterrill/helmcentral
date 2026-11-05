@@ -79,7 +79,8 @@ func (s *passageStore) appendAISAnchorSamples(samples []aisAnchorSample) (bool, 
 	}
 	defer tx.Rollback()
 	// A tick that read the watch as active can arrive after Raise emptied the
-	// tables. Store only while a trail is running, as appendAnchorTrailPoint
+	// tables, or after a raise and a fresh drop. Store only while a trail is
+	// running, and only reports from after it started, as appendAnchorTrailPoint
 	// does.
 	var startedMs int64
 	if err := tx.QueryRow(`SELECT started_ms FROM anchor_trail_state WHERE id = 1`).Scan(&startedMs); err != nil {
@@ -92,7 +93,13 @@ func (s *passageStore) appendAISAnchorSamples(samples []aisAnchorSample) (bool, 
 		return false, nil
 	}
 	for _, sm := range samples {
-		if _, err := tx.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES (?,?,?,?,?)`,
+		if sm.atMs < startedMs {
+			continue
+		}
+		// A point already stored (an ambiguous commit, a recorder out of step
+		// with the table) is the same report, so it is skipped rather than
+		// failing the tick for every other target.
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES (?,?,?,?,?)`,
 			sm.mmsi, sm.atMs, sm.lat, sm.lon, boolInt(sm.newSegment)); err != nil {
 			return false, fmt.Errorf("append ais anchor track point for %s: %w", sm.mmsi, err)
 		}
@@ -207,6 +214,8 @@ func (st *aisTrackState) reset(at time.Time) {
 	st.lastMs = map[string]int64{}
 	st.warmed = true // the table was just emptied: nothing to warm from
 	st.notBefore = at.UnixMilli()
+	// A new anchorage logs a boat with no MMSI again.
+	missingMMSILoggedForAISAnchorTrack.Clear()
 }
 
 // missingMMSILoggedForAISAnchorTrack is recordAISAnchorTracks' own once-per-

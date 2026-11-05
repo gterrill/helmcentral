@@ -67,8 +67,9 @@ async function pollAisTracks(signal: AbortSignal, store: PollStore<AisTracks>): 
         while (drop < merged.length && merged[drop].timestampMs < cutoffMs) drop++
         next.set(track.mmsi, drop > 0 ? merged.slice(drop) : merged)
       }
-      // A target that stopped reporting goes once its newest point is past the
-      // cutoff, so a long watch does not keep every boat that ever came by.
+      // A target whose newest point is past the cutoff is dropped at the next
+      // poll that brings anything new, so a long watch does not keep every boat
+      // that ever came by. A quiet watch brings nothing new and grows nothing.
       if (next) {
         for (const [mmsi, points] of next) {
           if (points.length === 0 || points[points.length - 1].timestampMs < cutoffMs) next.delete(mmsi)

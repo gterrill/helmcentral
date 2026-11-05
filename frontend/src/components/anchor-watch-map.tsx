@@ -899,7 +899,8 @@ export function AnchorWatchMap({
   // timeout to the next mark wakes the map, not a timer polling for it. The
   // timeout reschedules itself every time it fires, so a wake that lands in the
   // same step (a clock stepped back, an early timer) does not stop the clock.
-  const activeAisMmsis = aisVessels.map(v => v.mmsi).filter((m): m is string => !!m).sort().join('\n')
+  // Trimmed, as the server stores the track's MMSI.
+  const activeAisMmsis = aisVessels.map(v => v.mmsi?.trim()).filter((m): m is string => !!m).sort().join('\n')
   const [bandNowMs, setBandNowMs] = useState(() => bandClock(Date.now()))
   useEffect(() => {
     let id: ReturnType<typeof setTimeout>

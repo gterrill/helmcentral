@@ -93,6 +93,14 @@ describe('AnchorWatchMap AIS trails', () => {
     expect(sources['ais-trails'].data?.features.length).toBeGreaterThan(0)
   })
 
+  it('matches an MMSI the feed carries with padding, as the server stores it trimmed', () => {
+    renderMap({
+      aisVessels: [vessel(' 111111111 ', 'PADDED')],
+      aisTrails: tracksOf([aisPoint(40 * MIN, -25.29), aisPoint(30 * MIN, -25.291)]),
+    })
+    expect(sources['ais-trails']?.data?.features.length).toBeGreaterThan(0)
+  })
+
   it('draws nothing for a track whose target is not on the map, even under a name that matches', () => {
     renderMap({
       aisVessels: [vessel('222222222', 'SPLURGE')],

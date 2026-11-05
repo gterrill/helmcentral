@@ -74,6 +74,42 @@ func TestAISAnchorTracksAWriteLandingAfterARaiseStoresNothing(t *testing.T) {
 	}
 }
 
+// A tick that took its samples before a raise and a fresh drop can reach the
+// database after both; a report from before the new drop is not the new track.
+func TestAISAnchorTracksAWriteOlderThanTheTrailStartStoresNothing(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	var startedMs int64
+	if err := store.db.QueryRow(`SELECT started_ms FROM anchor_trail_state WHERE id = 1`).Scan(&startedMs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.appendAISAnchorSamples([]aisAnchorSample{{mmsi: "111111111", lat: aisInsideLat, lon: aisTestAnchorLon, atMs: startedMs - 1, newSegment: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := aisRowCount(t, store); n != 0 {
+		t.Fatalf("a report from before the drop must not be stored, got %d rows", n)
+	}
+}
+
+// A point already in the table (an ambiguous commit, a recorder out of step)
+// must not fail the tick for every other target.
+func TestAISAnchorTracksADuplicateReportDoesNotFailTheTick(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	at := time.Now().Add(time.Minute).UnixMilli()
+	first := aisAnchorSample{mmsi: "111111111", lat: aisInsideLat, lon: aisTestAnchorLon, atMs: at, newSegment: true}
+	if _, err := store.appendAISAnchorSamples([]aisAnchorSample{first}); err != nil {
+		t.Fatal(err)
+	}
+	other := aisAnchorSample{mmsi: "222222222", lat: aisInsideLat, lon: aisTestAnchorLon, atMs: at, newSegment: true}
+	if _, err := store.appendAISAnchorSamples([]aisAnchorSample{first, other}); err != nil {
+		t.Fatalf("a duplicate must not fail the tick: %v", err)
+	}
+	if n := aisRowCount(t, store); n != 2 {
+		t.Fatalf("expected the other target stored beside the duplicate, got %d rows", n)
+	}
+}
+
 func TestNearbyFetchFailureIsLoggedOncePerChangeOfState(t *testing.T) {
 	nearbyFetchFailing.Store(false)
 	t.Cleanup(func() { nearbyFetchFailing.Store(false) })
