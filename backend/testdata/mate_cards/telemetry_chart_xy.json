@@ -1,0 +1,35 @@
+{
+  "kind": "telemetry_chart",
+  "payload": {
+    "title": "Starboard alternator current against House bank state of charge",
+    "view": "xy",
+    "xy": {
+      "x": 0,
+      "y": 1
+    },
+    "timezone": "Australia/Brisbane",
+    "series": [
+      {
+        "path": "electrical.batteries.1.capacity.stateOfCharge",
+        "source": null,
+        "label": "House bank state of charge",
+        "unit": "%",
+        "si_unit": "ratio",
+        "panel": 0
+      },
+      {
+        "path": "electrical.alternator.12.current",
+        "source": "alt-a",
+        "label": "Starboard alternator current",
+        "unit": "A",
+        "si_unit": "A",
+        "panel": 1
+      }
+    ],
+    "range": {
+      "from": "2026-10-12T10:00:00+10:00",
+      "to": "2026-10-12T16:00:00+10:00"
+    },
+    "compare": []
+  }
+}

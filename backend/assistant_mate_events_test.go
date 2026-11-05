@@ -10,10 +10,11 @@ import (
 	"testing"
 )
 
-// updateMateFixtures rewrites testdata/mate_events/*.sse from what Go emits:
-// go test -run TestMateEventFixtures -update. Go owns the bytes; the
-// frontend test decodes the same files (ADR 0189).
-var updateMateFixtures = flag.Bool("update", false, "rewrite the Mate event golden fixtures")
+// updateMateFixtures rewrites the golden fixtures from what Go emits:
+// testdata/mate_events/*.sse (go test -run TestMateEventFixtures -update, ADR
+// 0189) and testdata/mate_cards/*.json (go test -run MateCardGoldens -update,
+// ADR 0261). Go owns the bytes; the frontend tests decode the same files.
+var updateMateFixtures = flag.Bool("update", false, "rewrite the Mate event (testdata/mate_events) and card (testdata/mate_cards) golden fixtures")
 
 type mateFlushBuffer struct{ bytes.Buffer }
 

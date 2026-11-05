@@ -1,0 +1,30 @@
+{
+  "kind": "telemetry_chart",
+  "payload": {
+    "title": "House bank state of charge",
+    "view": "time",
+    "xy": null,
+    "timezone": "Australia/Brisbane",
+    "series": [
+      {
+        "path": "electrical.batteries.1.capacity.stateOfCharge",
+        "source": null,
+        "label": "House bank state of charge",
+        "unit": "%",
+        "si_unit": "ratio",
+        "panel": 0
+      }
+    ],
+    "range": {
+      "from": "2026-10-12T10:00:00+10:00",
+      "to": "2026-10-12T16:00:00+10:00"
+    },
+    "compare": [
+      {
+        "label": "Later",
+        "from": "2026-10-12T16:00:00+10:00",
+        "to": "2026-10-12T22:00:00+10:00"
+      }
+    ]
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "kind": "marina",
+  "payload": {
+    "name": "Example Marina",
+    "osm": "way/2",
+    "lat": -20.5,
+    "lon": 148.5,
+    "berths": null,
+    "fee": "",
+    "power_supply": "",
+    "opening_hours": "",
+    "contact": {
+      "website": "",
+      "phone": "",
+      "vhf": "",
+      "email": ""
+    },
+    "charted_limits": {
+      "max_draught_m": 1.2,
+      "max_length_m": 20,
+      "depth_m": null
+    },
+    "pontoon_arms": [],
+    "facilities": [],
+    "entrance_marks": [],
+    "ashore": [],
+    "vessel_limit_check": [
+      {
+        "particular": "draft",
+        "status": "exceeds",
+        "boat_m": 1.4,
+        "charted_limit_m": 1.2
+      },
+      {
+        "particular": "length",
+        "status": "ok",
+        "boat_m": 12,
+        "charted_limit_m": 20
+      }
+    ],
+    "data_as_of": "",
+    "truncated": true,
+    "geometry_truncated": true,
+    "geometry": {
+      "outline": [
+        {
+          "kind": "polygon",
+          "points": [
+            [
+              -20.5,
+              148.5
+            ],
+            [
+              -20.5,
+              148.501
+            ],
+            [
+              -20.501,
+              148.501
+            ],
+            [
+              -20.5,
+              148.5
+            ]
+          ]
+        }
+      ],
+      "pontoons": [
+        {
+          "name": "Private pontoon",
+          "private": true,
+          "shape": {
+            "kind": "line",
+            "points": [
+              [
+                -20.5,
+                148.5
+              ],
+              [
+                -20.501,
+                148.5
+              ]
+            ]
+          }
+        }
+      ],
+      "facilities": [],
+      "ashore": []
+    },
+    "saved_documents": []
+  }
+}

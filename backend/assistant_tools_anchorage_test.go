@@ -744,7 +744,19 @@ func TestAnchorageDetailsTool_IsRegisteredAndDescribed(t *testing.T) {
 	}
 }
 
-func TestAnchorageCardGolden(t *testing.T) {
+// anchorageGoldenCard is the card behind anchorage_butterfly_bay.json.
+func anchorageGoldenCard(t *testing.T) mateCard {
+	return anchorageCardFor(t, `{"lat":-20.0765,"lon":148.925,"arrive":"2026-11-02T14:00:00+10:00","name":"West Butterfly Bay","depth_m":4}`)
+}
+
+// anchorageNoDepthCard is the same bay with no depth given, so the depth
+// checks are skipped and say why.
+func anchorageNoDepthCard(t *testing.T) mateCard {
+	return anchorageCardFor(t, `{"lat":-20.0765,"lon":148.925,"arrive":"2026-11-02T14:00:00+10:00","name":"West Butterfly Bay"}`)
+}
+
+func anchorageCardFor(t *testing.T, args string) mateCard {
+	t.Helper()
 	// Hook Island: the Stonehaven shoreline fixture, the plugin's Butterfly
 	// Bay answer, and a fixed weather and tide.
 	w := newShelterWorld(t)
@@ -763,33 +775,11 @@ func TestAnchorageCardGolden(t *testing.T) {
 	d.vesselState = func() (vesselStateData, error) { return vesselStateData{DraftM: 1.4, LengthOverallM: 13}, nil }
 	d.anchorSettings = func() (anchorageBoatSettings, error) { return anchorageBoat(), nil }
 
-	text, _, err := d.execute(context.Background(), "anchorage_details", json.RawMessage(
-		`{"lat":-20.0765,"lon":148.925,"arrive":"2026-11-02T14:00:00+10:00","name":"West Butterfly Bay","depth_m":4}`))
+	text, _, err := d.execute(context.Background(), "anchorage_details", json.RawMessage(args))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cards := d.takeCards(text)
-	if len(cards) != 1 {
-		t.Fatalf("cards = %d", len(cards))
-	}
-	envelope, err := json.MarshalIndent(map[string]any{"kind": cards[0].Kind, "payload": cards[0].Payload}, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	envelope = append(envelope, '\n')
-	path := filepath.Join("testdata", "mate_cards", "anchorage_butterfly_bay.json")
-	if *updateMateFixtures {
-		if err := os.WriteFile(path, envelope, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(envelope, want) {
-		t.Errorf("anchorage card drifted from %s; run go test -run AnchorageCardGolden -update if intended", path)
-	}
+	return onlyCard(t, d.takeCards(text), anchorageCardKind)
 }
 
 func TestWasmPOIProvider_AnchorageFeaturesWithoutTheExportIsAnError(t *testing.T) {
