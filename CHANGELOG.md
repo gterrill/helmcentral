@@ -52,6 +52,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A tile you cancel no longer appears on the page.** If you tapped **Save**
+  on an engine cluster whose zones were still saving, then cancelled, the tile
+  could turn up anyway. Cancel now leaves the page as it was. The same delay
+  could also close the next tile's dialog under you, with your edits in it, and
+  that no longer happens.
+- **A tile that fails to save stays open.** When the connection to the boat
+  drops as you tap **Save** on a new tile, the dialog now stays open with what
+  you typed, so you can tap **Save** again. Before, it closed and your changes
+  were gone.
 - **Discovery no longer says a named battery has no name.** "The boat gives it
   no name" now only appears on a battery that you haven't assigned to an
   equipment item yet.

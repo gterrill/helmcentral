@@ -59,7 +59,7 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 // since the render path that names it is dead code once DEV is false.
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
-import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
+import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
@@ -100,30 +100,12 @@ import { useSwipePaging } from '@/hooks/use-swipe-paging'
 import { useVersionReload } from '@/hooks/use-version-reload'
 import {
   DASHBOARD_WIDGET_DEFAULT_SIZE,
-  duplicateWidget,
-  isEmbedWidgetId,
-  isGaugeGroupWidgetId,
-  isGaugeWidgetId,
-  isClusterWidgetId,
-  isLampStripWidgetId,
-  isPoiMapWidgetId,
-  newEmbedWidgetId,
-  newGaugeGroupWidgetId,
-  newGaugeWidgetId,
-  newClusterWidgetId,
-  newLampStripWidgetId,
-  newPoiMapWidgetId,
   type BuiltinWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
-  type EmbedWidgetConfig,
-  type GaugeGroupWidgetConfig,
-  type EngineClusterConfig,
   type LampStripWidgetConfig,
-  type GaugeWidgetConfig,
-  type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
-import { POI_CATEGORY_IDS } from '@/lib/poi'
+import { placeBelow, useTileDraft } from '@/hooks/use-tile-draft'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
@@ -395,20 +377,6 @@ function AppShell() {
   // only page whose field behaves that way. Cleared once that field settles
   // (Enter/blur that saves, or Escape) — see components/page-title-field.tsx.
   const [namingPageId, setNamingPageId] = useState<string | null>(null)
-  // The embed widget currently open in the config dialog. For a freshly added
-  // embed this is the only place it exists until it is given a URL and saved.
-  const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
-  // Same pattern as embedDraft: a freshly added gauge exists only here until it
-  // is given a path, since the backend rejects one without.
-  const [gaugeDraft, setGaugeDraft] = useState<DashboardLayoutItem | null>(null)
-  // Same again for a gauge group (ADR 0049): the backend rejects an empty one,
-  // so a new group has no business reaching it until it holds a bound gauge.
-  const [gaugeGroupDraft, setGaugeGroupDraft] = useState<DashboardLayoutItem | null>(null)
-  const [lampStripDraft, setLampStripDraft] = useState<DashboardLayoutItem | null>(null)
-  const [clusterDraft, setClusterDraft] = useState<DashboardLayoutItem | null>(null)
-  // Same pattern as embedDraft: a freshly added Nearby map (ADR 0091 phase
-  // 3b) exists only here until it holds a valid config.
-  const [poiMapDraft, setPoiMapDraft] = useState<DashboardLayoutItem | null>(null)
   // Gauges, engine clusters, gauge groups and lamp strips read their own
   // readings from the gauge-values store (ADR 0215). The shell reads none of
   // it: a tick does not re-render the shell.
@@ -596,6 +564,12 @@ function AppShell() {
   activePageRef.current = activePage
   const effectiveWidgetsRef = useRef(effectiveWidgets)
   effectiveWidgetsRef.current = effectiveWidgets
+  // A new tile exists only as a draft until it is saved (use-tile-draft.ts):
+  // the backend rejects a blank embed, a gauge with no path and an empty gauge
+  // group, so cancelling just drops it. The same draft holds a saved tile
+  // while its gear dialog is open.
+  const tiles = useTileDraft({ pageRef: activePageRef, widgetsRef: effectiveWidgetsRef, updatePage })
+  const { addTile, openTile } = tiles
   // namingPageId only means anything for the page it was set on, while
   // layout mode can actually show that page's name field — stale otherwise.
   // PageTitleField's own onDone (an Enter/blur that saved, or an Escape)
@@ -833,7 +807,7 @@ function AppShell() {
   // Home Screen app on any panel other than the dashboard.
   const overlayOpen =
     mateSheetOpen || helpOpen || ribbonDialogOpen || layoutEditing || namingPageId !== null ||
-    [embedDraft, gaugeDraft, gaugeGroupDraft, lampStripDraft, clusterDraft, poiMapDraft].some((d) => d !== null)
+    tiles.draft !== null
   const overlayOpenRef = useRef(false)
   overlayOpenRef.current = overlayOpen
   unattendedRef.current = isDisplay || (
@@ -1126,159 +1100,8 @@ function AppShell() {
   // resize handle.
   const handleAddWidget = useCallback((id: BuiltinWidgetId) => {
     if (!activePage) return
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    const { w, h } = DASHBOARD_WIDGET_DEFAULT_SIZE[id]
-    void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w, h }] })
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placeBelow({ id, ...DASHBOARD_WIDGET_DEFAULT_SIZE[id] }, effectiveWidgets)] })
   }, [activePage, effectiveWidgets, updatePage])
-
-  // A new embed is held as an unsaved draft until it has a URL — the backend
-  // rejects a blank one, and rightly so, rather than persisting a broken widget.
-  // Cancelling therefore just discards it. Wider and taller than the builtin
-  // default above, since a chart needs the room.
-  const handleAddEmbed = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setEmbedDraft({
-      id: newEmbedWidgetId(effectiveWidgets),
-      x: 0,
-      y: maxY,
-      w: 6,
-      h: 8,
-      embed: { title: '', url: '' },
-    })
-  }, [effectiveWidgets])
-
-  const handleAddGauge = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setGaugeDraft({
-      id: newGaugeWidgetId(effectiveWidgets),
-      x: 0,
-      y: maxY,
-      w: 3,
-      h: 6,
-      gauge: { path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
-    })
-  }, [effectiveWidgets])
-
-  const handleSaveGauge = useCallback((gauge: GaugeWidgetConfig) => {
-    if (!activePage || !gaugeDraft) return
-    const id = gaugeDraft.id
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gauge, h: raiseGaugeHeight(w.h, gauge.display) } : w)),
-      })
-    } else {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeDraft, gauge, h: raiseGaugeHeight(gaugeDraft.h, gauge.display) }] })
-    }
-    setGaugeDraft(null)
-  }, [activePage, effectiveWidgets, gaugeDraft, updatePage])
-
-  // Starts at the same footprint as the built-in Alternator tile so a pair
-  // can sit side-by-side without a resize pass.
-  const handleAddGaugeGroup = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setGaugeGroupDraft({
-      id: newGaugeGroupWidgetId(effectiveWidgets),
-      x: 0,
-      y: maxY,
-      w: 4,
-      h: 7,
-      gaugeGroup: { title: '', gauges: [{ path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' }] },
-    })
-  }, [effectiveWidgets])
-
-  const handleSaveGaugeGroup = useCallback((gaugeGroup: GaugeGroupWidgetConfig) => {
-    if (!activePage || !gaugeGroupDraft) return
-    const id = gaugeGroupDraft.id
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gaugeGroup } : w)),
-      })
-    } else {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeGroupDraft, gaugeGroup }] })
-    }
-    setGaugeGroupDraft(null)
-  }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
-
-  /**
-   * Duplicate button inside the gauge group dialog. This is Save As, not
-   * Save And Copy: change the values, then click Duplicate instead of Save,
-   * and the edits land on a new tile while the original is left exactly as
-   * it was when the dialog opened. Same for a brand-new draft that has
-   * never been saved: Duplicate produces the one tile carrying the edits,
-   * not a saved draft plus a separate copy.
-   *
-   * gaugeGroupDraft is always set here, since the dialog that calls this
-   * only renders when it is, so there is no stand-in widget to build for
-   * the case where it isn't.
-   */
-  const handleDuplicateGaugeGroup = useCallback((gaugeGroup: GaugeGroupWidgetConfig) => {
-    if (!activePage || !gaugeGroupDraft) return
-    const edited = { ...gaugeGroupDraft, gaugeGroup }
-    const copy = duplicateWidget(edited, effectiveWidgets)
-    if (!copy) return
-
-    // Same placement a fresh widget gets elsewhere in this file: below
-    // everything else, so the copy never lands on top of its source.
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    const placedCopy = { ...copy, x: 0, y: maxY }
-
-    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placedCopy] })
-    setGaugeGroupDraft(null)
-  }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
-
-  // Tall: the canvas is 460x300 plus the tile chrome.
-  const handleAddCluster = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setClusterDraft({
-      id: newClusterWidgetId(effectiveWidgets),
-      x: 0, y: maxY, ...CLUSTER_DEFAULT_SIZE,
-      cluster: {
-        title: '',
-        ring: { path: '', label: 'RPM', display: 'radial', quantity: 'raw', unit: 'raw' },
-        centre: { path: '', label: 'Hours', display: 'numeric', quantity: 'raw', unit: 'raw' },
-        corners: [],
-      },
-    })
-  }, [effectiveWidgets])
-
-  const handleSaveCluster = useCallback((cluster: EngineClusterConfig) => {
-    if (!activePage || !clusterDraft) return
-    const id = clusterDraft.id
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, cluster } : w)),
-      })
-    } else {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...clusterDraft, cluster }] })
-    }
-    setClusterDraft(null)
-  }, [activePage, effectiveWidgets, clusterDraft, updatePage])
-
-  // Wide and short: a ribbon spans the page rather than occupying a cell.
-  const handleAddLampStrip = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setLampStripDraft({
-      id: newLampStripWidgetId(effectiveWidgets),
-      x: 0,
-      y: maxY,
-      w: 12,
-      h: 3,
-      lamps: { title: 'Status', lamps: [{ path: '', label: '' }], showCheck: true },
-    })
-  }, [effectiveWidgets])
-
-  const handleSaveLampStrip = useCallback((lamps: LampStripWidgetConfig) => {
-    if (!activePage || !lampStripDraft) return
-    const id = lampStripDraft.id
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, lamps } : w)),
-      })
-    } else {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...lampStripDraft, lamps }] })
-    }
-    setLampStripDraft(null)
-  }, [activePage, effectiveWidgets, lampStripDraft, updatePage])
 
   // The ribbon (ADR 0082) reuses LampStripConfigDialog under a synthetic
   // { id: 'ribbon' } rather than a real page widget — there is no draft state
@@ -1293,81 +1116,13 @@ function AppShell() {
     setRibbonDialogOpen(false)
   }, [saveRibbon])
 
-  /**
-   * Copies a tile and opens the copy's config straight away — the copy exists
-   * to be retargeted, so making that the immediate next step is the point.
-   * Persisted first: unlike a fresh draft, a duplicate is already valid.
-   */
-  const handleDuplicateWidget = useCallback((id: DashboardWidgetId) => {
-    const page = activePageRef.current
-    const widgets = effectiveWidgetsRef.current
-    if (!page) return
-    const source = widgets.find((w) => w.id === id)
-    if (!source) return
-    const copy = duplicateWidget(source, widgets)
-    if (!copy) return
-
-    const maxY = widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    const placed = { ...copy, x: 0, y: maxY }
-    void updatePage(page.id, { widgets: [...widgets, placed] })
-
-    if (isClusterWidgetId(placed.id)) setClusterDraft(placed)
-    else if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
-    else if (isGaugeGroupWidgetId(placed.id)) setGaugeGroupDraft(placed)
-    else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
-    else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
-    else if (isPoiMapWidgetId(placed.id)) setPoiMapDraft(placed)
-  }, [updatePage])
-
-  const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
-    if (!activePage) return
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, embed } : w)),
-      })
-      return
-    }
-    if (embedDraft?.id === id) {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...embedDraft, embed }] })
-    }
-  }, [activePage, effectiveWidgets, embedDraft, updatePage])
-
-  // Wide by default (w:12, h:7): the split layout needs the room, and a
-  // narrower map-only tile is a resize away rather than the starting point.
-  const handleAddPoiMap = useCallback(() => {
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    setPoiMapDraft({
-      id: newPoiMapWidgetId(effectiveWidgets),
-      x: 0, y: maxY, w: 12, h: 7,
-      poiMap: { title: '', rangeNm: 5, categories: [...POI_CATEGORY_IDS], layout: 'split', showAis: true, showTrail: false },
-    })
-  }, [effectiveWidgets])
-
-  const handleSavePoiMap = useCallback((id: DashboardWidgetId, poiMap: PoiMapWidgetConfig) => {
-    if (!activePage) return
-    if (effectiveWidgets.some((w) => w.id === id)) {
-      void updatePage(activePage.id, {
-        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, poiMap } : w)),
-      })
-      return
-    }
-    if (poiMapDraft?.id === id) {
-      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...poiMapDraft, poiMap }] })
-    }
-  }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
   // One handler for every widget's gear: WidgetHost binds the id. It reads the
   // widget at the click, so it never needs rebuilding as the page changes.
   const openWidgetConfig = useCallback((id: DashboardWidgetId) => {
     const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
-    if (!widget) return
-    if (isClusterWidgetId(id)) setClusterDraft(widget)
-    else if (isLampStripWidgetId(id)) setLampStripDraft(widget)
-    else if (isGaugeGroupWidgetId(id)) setGaugeGroupDraft(widget)
-    else if (isGaugeWidgetId(id)) setGaugeDraft(widget)
-    else if (isEmbedWidgetId(id)) setEmbedDraft(widget)
-    else if (isPoiMapWidgetId(id)) setPoiMapDraft(widget)
-  }, [])
+    if (widget) openTile(widget)
+  }, [openTile])
 
   // Same reasoning as openWidgetConfig above, for the tiles/banner whose
   // onOpen just navigates — these take no widget-specific argument, so a
@@ -1414,16 +1169,16 @@ function AppShell() {
   const renderWidgetInstrument = useMemo(() => renderWidgetFor(true), [renderWidgetFor])
 
   // The Add Tile menu's multi-instance entries (ADR 0107): each opens the
-  // same config dialog/draft flow it always has — App.tsx still owns every
-  // one of those handlers — the picker just offers them grouped alongside
+  // same config dialog/draft flow it always has (use-tile-draft.ts) — the
+  // picker just offers them grouped alongside
   // the built-in widgets instead of listed separately underneath them.
   const addWidgetMultiInstanceEntries: AddTileMultiInstanceEntry[] = [
-    { label: 'Gauge…', category: 'custom', onSelect: handleAddGauge },
-    { label: 'Engine Cluster…', category: 'engine', onSelect: handleAddCluster },
-    { label: 'Indicators…', category: 'custom', onSelect: handleAddLampStrip },
-    { label: 'Gauge Group…', category: 'custom', onSelect: handleAddGaugeGroup },
-    { label: 'Embed…', category: 'custom', onSelect: handleAddEmbed },
-    { label: 'Nearby map…', category: 'navigation', onSelect: handleAddPoiMap },
+    { label: 'Gauge…', category: 'custom', onSelect: () => addTile('gauge') },
+    { label: 'Engine Cluster…', category: 'engine', onSelect: () => addTile('cluster') },
+    { label: 'Indicators…', category: 'custom', onSelect: () => addTile('lamps') },
+    { label: 'Gauge Group…', category: 'custom', onSelect: () => addTile('gaugeGroup') },
+    { label: 'Embed…', category: 'custom', onSelect: () => addTile('embed') },
+    { label: 'Nearby map…', category: 'navigation', onSelect: () => addTile('poiMap') },
   ]
 
   const handleDisplayPatch = (id: string, patch: DisplayPatch) => {
@@ -1626,7 +1381,7 @@ function AppShell() {
             heroId={page?.display_id ? undefined : page?.hero}
             renderWidget={page?.skin === 'instrument' ? renderWidgetInstrument : renderWidgetPlain}
             onRemoveWidget={handleRemoveWidget}
-            onDuplicateWidget={handleDuplicateWidget}
+            onDuplicateWidget={tiles.duplicateTileById}
             onLayoutSettle={handleLayoutSettle}
             // A wall page's height is fixed by the panel, not by a scrolling
             // viewport, so its rows sit closer together on a narrow strip.
@@ -1656,28 +1411,28 @@ function AppShell() {
       {chrome && (
       <>
       <GaugeConfigDialog
-        widget={gaugeDraft}
-        onCancel={() => setGaugeDraft(null)}
-        onSave={handleSaveGauge}
+        widget={tiles.draftOfKind('gauge')}
+        onCancel={tiles.cancelTile}
+        onSave={(config) => tiles.saveTile('gauge', config)}
       />
 
       <GaugeGroupConfigDialog
-        widget={gaugeGroupDraft}
-        onCancel={() => setGaugeGroupDraft(null)}
-        onSave={handleSaveGaugeGroup}
-        onDuplicate={handleDuplicateGaugeGroup}
+        widget={tiles.draftOfKind('gaugeGroup')}
+        onCancel={tiles.cancelTile}
+        onSave={(config) => tiles.saveTile('gaugeGroup', config)}
+        onDuplicate={(config) => tiles.duplicateTile('gaugeGroup', config)}
       />
 
       <EngineClusterConfigDialog
-        widget={clusterDraft}
-        onCancel={() => setClusterDraft(null)}
-        onSave={handleSaveCluster}
+        widget={tiles.draftOfKind('cluster')}
+        onCancel={tiles.cancelTile}
+        onSave={(config) => tiles.saveTile('cluster', config)}
       />
 
       <LampStripConfigDialog
-        widget={lampStripDraft}
-        onCancel={() => setLampStripDraft(null)}
-        onSave={handleSaveLampStrip}
+        widget={tiles.draftOfKind('lamps')}
+        onCancel={tiles.cancelTile}
+        onSave={(config) => tiles.saveTile('lamps', config)}
       />
 
       <LampStripConfigDialog
@@ -1688,17 +1443,17 @@ function AppShell() {
       />
 
       <EmbedConfigDialog
-        widget={embedDraft}
-        open={embedDraft !== null}
-        onOpenChange={(open) => { if (!open) setEmbedDraft(null) }}
-        onSave={handleSaveEmbed}
+        widget={tiles.draftOfKind('embed')}
+        open={tiles.draftOfKind('embed') !== null}
+        onOpenChange={(open) => { if (!open) tiles.cancelTile() }}
+        onSave={(_id, embed) => tiles.saveTile('embed', embed)}
       />
 
       <PoiMapConfigDialog
-        widget={poiMapDraft}
-        open={poiMapDraft !== null}
-        onOpenChange={(open) => { if (!open) setPoiMapDraft(null) }}
-        onSave={handleSavePoiMap}
+        widget={tiles.draftOfKind('poiMap')}
+        open={tiles.draftOfKind('poiMap') !== null}
+        onOpenChange={(open) => { if (!open) tiles.cancelTile() }}
+        onSave={(_id, poiMap) => tiles.saveTile('poiMap', poiMap)}
       />
       </>
       )}
