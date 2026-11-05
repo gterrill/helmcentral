@@ -508,7 +508,7 @@ func TestSettingsPayloadRoundTripsAssistantDocumentModel(t *testing.T) {
 //
 // updateSettingsHandler is where the operator's save might be the very
 // moment Mate became ready (a key pasted in, a document model chosen), so
-// it calls sweepDocumentsIfReady itself rather than waiting for the next
+// it calls sweepDocumentsInBackground itself rather than waiting for the next
 // boot. These tests swap documentIndexerSweepIfReady for a spy - the same
 // nil-until-wired package var main() assigns to the real indexer's
 // SweepIfReady method (documents_embed_test.go covers what that method
@@ -565,6 +565,32 @@ func TestUpdateSettingsHandler_SaveDoesNotWaitForTheReadySweep(t *testing.T) {
 	}
 	close(release)
 	<-done
+}
+
+// A background sweep can start after the save that asked for it has returned.
+// It must still run the hook in place when it was asked for: reading the hook
+// late let one test's sweep land on the next test's spy, which closed that
+// spy's channel twice and panicked the whole package.
+func TestSweepDocumentsInBackground_RunsTheHookInPlaceWhenCalled(t *testing.T) {
+	prev := documentIndexerSweepIfReady
+	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
+
+	const rounds = 2000
+	ran := make(chan struct{}, rounds)
+	var stray int32
+	for i := 0; i < rounds; i++ {
+		documentIndexerSweepIfReady = func() { ran <- struct{}{} }
+		sweepDocumentsInBackground()
+		documentIndexerSweepIfReady = func() { atomic.AddInt32(&stray, 1) }
+	}
+	timeout := time.After(5 * time.Second)
+	for i := 0; i < rounds; i++ {
+		select {
+		case <-ran:
+		case <-timeout:
+			t.Fatalf("%d of %d sweeps ran the hook set after them", atomic.LoadInt32(&stray), rounds)
+		}
+	}
 }
 
 // A save validateSettingsChange refuses must not sweep - nothing was

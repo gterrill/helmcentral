@@ -54,7 +54,7 @@ func updateSecretsSettingsHandler(c echo.Context) error {
 	// POST /api/settings, and the Settings page sends both at once. Sweeping
 	// after either save means whichever lands last finds Mate ready. In the
 	// background for the same reason updateSettingsHandler's call is.
-	go sweepDocumentsIfReady()
+	sweepDocumentsInBackground()
 	return c.JSON(http.StatusOK, state)
 }
 

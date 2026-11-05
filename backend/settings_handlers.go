@@ -454,15 +454,15 @@ func updateSettingsHandler(c echo.Context) error {
 
 	// ADR 0120: this save may be the moment Mate just became ready (a key
 	// pasted in, document/embedding models chosen) - sweep the enrich=0
-	// backlog now rather than waiting for the next boot. sweepDocumentsIfReady
+	// backlog now rather than waiting for the next boot. The sweep
 	// re-reads readiness itself and is a no-op whenever this save didn't
 	// change anything about it, so it is called on every settings save rather
 	// than diffing old vs. new readiness here. It runs in the background: it
 	// waits on the document store's lock, which a long indexing write can
 	// hold, and a settings save has no business waiting on that. A sweep
-	// failure is logged inside sweepDocumentsIfReady and never touches the
+	// failure is logged inside the sweep and never touches the
 	// save, which has already succeeded.
-	go sweepDocumentsIfReady()
+	sweepDocumentsInBackground()
 
 	return c.JSON(http.StatusOK, normalized)
 }
