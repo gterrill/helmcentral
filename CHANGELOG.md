@@ -52,6 +52,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate now reads a wind from due north.** A forecast hour with the wind from
+  exactly north used to reach Mate with no direction at all, so Mate couldn't say
+  which way it blew, how it sat against your course, or how sheltered the
+  anchorage was from it. An hour with no wind and no direction is still treated as
+  unknown.
 - **A tile you cancel no longer appears on the page.** If you tapped **Save**
   on an engine cluster whose zones were still saving, then cancelled, the tile
   could turn up anyway. Cancel now leaves the page as it was. The same delay

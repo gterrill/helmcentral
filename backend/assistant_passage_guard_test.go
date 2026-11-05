@@ -82,17 +82,28 @@ func guardRun(t *testing.T, limits passageLimits, rounds ...string) (assistantRe
 	return guardRunWith(t, pwToolDepsWithCoastline(limits), rounds...)
 }
 
-// windFromEast gives d a forecast whose wind blows from 90 degrees. The
-// fixture's wind from 0 reads as an unknown direction to get_wind_forecast, so
-// it returns no rel_wind labels.
-func windFromEast(d assistantToolDeps) assistantToolDeps {
+// withForecastHours gives d a forecast whose every hour is hour, at its own time.
+func withForecastHours(d assistantToolDeps, hour weatherHourPoint) assistantToolDeps {
 	var hours []weatherHourPoint
 	for t := pwDay(19, 0); !t.After(pwDay(40, 23)); t = t.Add(time.Hour) {
-		hours = append(hours, weatherHourPoint{Time: t, WindSpeedMS: kn(25), WindGustMS: kn(30), WindDirectionDeg: 90})
+		hour.Time = t
+		hours = append(hours, hour)
 	}
 	wx := &pwWeather{bundle: weatherForecastBundle{Hourly: hours}}
 	d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
 	return d
+}
+
+// windFromEast gives d a forecast whose wind blows from 90 degrees.
+func windFromEast(d assistantToolDeps) assistantToolDeps {
+	return withForecastHours(d, weatherHourPoint{WindSpeedMS: kn(25), WindGustMS: kn(30), WindDirectionDeg: 90})
+}
+
+// windUnknown gives d a forecast with no wind figures, which is how an hour the
+// provider has no data for arrives, so get_wind_forecast returns no rel_wind
+// labels.
+func windUnknown(d assistantToolDeps) assistantToolDeps {
+	return withForecastHours(d, weatherHourPoint{})
 }
 
 // guardRunWith is guardRun with the tool deps given.
@@ -232,10 +243,10 @@ func TestPassageGuard_NoExtraRoundWhenForecastGaveTheAngle(t *testing.T) {
 	}
 }
 
-// A forecast that ran with a course but whose wind direction is unknown (0
-// reads as unknown) returns no rel_wind labels, so it gave no angle.
+// A forecast that ran with a course but whose wind direction is unknown returns
+// no rel_wind labels, so it gave no angle.
 func TestPassageGuard_ForecastWithNoLabelsDoesNotGiveTheAngle(t *testing.T) {
-	_, doer, _ := guardRun(t, pwLimitsAll(), "WIND_COURSE", "A head sea on the bow all day.", guardGood)
+	_, doer, _ := guardRunWith(t, windUnknown(pwToolDepsWithCoastline(pwLimitsAll())), "WIND_COURSE", "A head sea on the bow all day.", guardGood)
 	if len(doer.requests) != 3 {
 		t.Fatalf("requests = %d, want 3 (forecast round, draft, corrected answer)", len(doer.requests))
 	}
