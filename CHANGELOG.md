@@ -35,8 +35,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - **AIS trails on the anchor map are now recorded by Helmcentral, newest
   brightest.** While a watch is set, it records every AIS boat that comes within
-  500 m of your anchor, one point each time the boat reports a position, with the
-  real time of that report. The newest part of a trail is solid amber and the
+  500 m of your anchor, at most one point every 30 seconds for each boat, with
+  the real time of its report. The newest part of a trail is solid amber and the
   oldest fades out, over the 24 hours that are kept. There's no line where a boat
   left the circle and came back, or where more than 15 minutes passed between
   reports, including when Helmcentral was stopped. Dropping the anchor starts
@@ -83,6 +83,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The anchor map's trails now age by the boat's clock.** A display whose own
+  clock is wrong, such as a wall screen with no internet, used to fade the trails
+  at the wrong pace and could drop every AIS trail as older than 24 hours. Both
+  trails now follow the clock on the box, so they look the same on every screen.
 - **Your own swing trail now brightens towards the present.** On the anchor map
   it ran light yellow at the oldest end to darker amber at the newest, which read
   backwards. It's now dim yellow where you were longest ago and bright yellow

@@ -72,8 +72,25 @@ function schedule(): void {
  */
 export function feedServerTime(datetime: unknown, receivedAt: number = performance.now()): void {
   if (typeof datetime !== 'string') return
-  const serverMs = new Date(datetime).getTime()
-  if (Number.isNaN(serverMs)) return
+  feedServerTimeMs(new Date(datetime).getTime(), receivedAt)
+}
+
+/**
+ * The boat's time now in unrounded ms since the epoch, aged on the performance
+ * clock like readServerClock, or null before any stamp has arrived. For
+ * comparing against server timestamps, such as the anchor map's trail points.
+ */
+export function serverNowMs(): number | null {
+  return serverNowAt(performance.now())
+}
+
+/**
+ * The same as feedServerTime for a stamp already in ms since the epoch, as the
+ * anchor trail endpoints carry it (`server_time_ms`). A value that is not a
+ * finite number changes nothing, and the same jitter rule applies.
+ */
+export function feedServerTimeMs(serverMs: unknown, receivedAt: number = performance.now()): void {
+  if (typeof serverMs !== 'number' || !Number.isFinite(serverMs)) return
   const shown = serverNowAt(receivedAt)
   if (shown !== null) {
     const behind = shown - serverMs

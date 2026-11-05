@@ -36,6 +36,7 @@ func resetAISAnchorTrackStateForTest() {
 	aisTracks.mu.Lock()
 	aisTracks.inside = map[string]bool{}
 	aisTracks.lastMs = map[string]int64{}
+	aisTracks.pendingSegment = map[string]bool{}
 	aisTracks.warmed = false
 	aisTracks.notBefore = 0
 	aisTracks.lastPrune = time.Time{}
@@ -174,9 +175,9 @@ func TestAISAnchorTracksStoreOnePointPerNewReportNotPerPoll(t *testing.T) {
 	if n := aisRowCount(t, store); n != 1 {
 		t.Fatalf("expected one row for one report, got %d", n)
 	}
-	report2 := t0.Add(8 * time.Second)
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, report2)}, t0.Add(10*time.Second))
-	tracks := aisTracksNow(t, store, t0.Add(10*time.Second))
+	report2 := t0.Add(40 * time.Second)
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, report2)}, t0.Add(40*time.Second))
+	tracks := aisTracksNow(t, store, t0.Add(40*time.Second))
 	if len(tracks) != 1 || len(tracks[0].Points) != 2 {
 		t.Fatalf("expected two points, got %+v", tracks)
 	}
@@ -225,11 +226,11 @@ func TestAISAnchorTracksBreakWhereATargetLeftAndCameBackEvenUnderFifteenMinutes(
 	t0 := aisBase()
 	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
 	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(0))}, at(0))
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(5))}, at(5))
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisOutsideLat, at(10))}, at(10))
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(15))}, at(15))
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(20))}, at(20))
-	pts := aisTracksNow(t, store, at(20))[0].Points
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(35))}, at(35))
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisOutsideLat, at(70))}, at(70))
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(105))}, at(105))
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(140))}, at(140))
+	pts := aisTracksNow(t, store, at(140))[0].Points
 	if len(pts) != 4 {
 		t.Fatalf("expected 4 points, got %+v", pts)
 	}
@@ -294,8 +295,8 @@ func TestAISAnchorTracksAnEmptiedListDoesNotBreakLines(t *testing.T) {
 	// The own fix is lost for a while and the whole list comes back empty.
 	recordAISAnchorTracks(nil, at(5))
 	recordAISAnchorTracks(nil, at(10))
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(15))}, at(15))
-	pts := aisTracksNow(t, store, at(20))[0].Points
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(45))}, at(45))
+	pts := aisTracksNow(t, store, at(50))[0].Points
 	if len(pts) != 2 || pts[1].NewSegment {
 		t.Fatalf("an empty list is not evidence the target left the circle: %+v", pts)
 	}
@@ -312,13 +313,13 @@ func TestAISAnchorTracksSurviveARestartAndBreakAtIt(t *testing.T) {
 	if tracks := aisTracksNow(t, store, t0); len(tracks) != 1 || len(tracks[0].Points) != 1 {
 		t.Fatalf("the stored track must survive a restart, got %+v", tracks)
 	}
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, t0.Add(10*time.Second))}, t0.Add(10*time.Second))
-	pts := aisTracksNow(t, store, t0.Add(10*time.Second))[0].Points
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, t0.Add(40*time.Second))}, t0.Add(40*time.Second))
+	pts := aisTracksNow(t, store, t0.Add(40*time.Second))[0].Points
 	if len(pts) != 2 || !pts[1].NewSegment {
 		t.Fatalf("the first point after a restart starts a new segment, got %+v", pts)
 	}
 	// A report seen again is not written twice, restart or not.
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, t0.Add(10*time.Second))}, t0.Add(15*time.Second))
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, t0.Add(40*time.Second))}, t0.Add(45*time.Second))
 	if n := aisRowCount(t, store); n != 2 {
 		t.Fatalf("the stored report must not be written again, got %d rows", n)
 	}
@@ -495,7 +496,7 @@ func TestAISAnchorTracksAfterAMoveATargetReEnteringTheNewCircleStartsANewSegment
 	}
 	t1 := t0.Add(10 * time.Second)
 	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, t1)}, t1) // outside now
-	t2 := t0.Add(20 * time.Second)
+	t2 := t0.Add(40 * time.Second)
 	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisMovedInsideLat, t2)}, t2) // back inside
 	pts := aisTracksNow(t, store, t2)
 	if len(pts) != 1 || len(pts[0].Points) != 2 {
@@ -537,15 +538,15 @@ func TestAISAnchorTracksAFailedWriteKeepsTheSegmentFlagAndThePoint(t *testing.T)
 		t.Fatal(err)
 	}
 	// The target is back inside, but the write fails.
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(10))}, at(10))
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(40))}, at(40))
 	if !strings.Contains(buf.String(), "ais anchor tracks:") {
 		t.Fatalf("a failed write must be logged, got %q", buf.String())
 	}
 	if _, err := store.db.Exec(`ALTER TABLE ais_hidden RENAME TO ais_anchor_track_points`); err != nil {
 		t.Fatal(err)
 	}
-	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(10))}, at(15))
-	pts := aisTracksNow(t, store, at(15))[0].Points
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat, at(40))}, at(45))
+	pts := aisTracksNow(t, store, at(45))[0].Points
 	if len(pts) != 2 || !pts[1].NewSegment {
 		t.Fatalf("the retried point must still start a new segment, got %+v", pts)
 	}
@@ -599,7 +600,7 @@ func TestAISTrailsHandlerServesRealTimesAndIncrementsByCursor(t *testing.T) {
 	}
 
 	// One target reports again: only it comes back, with t_ms its report time.
-	next := t0.Add(7 * time.Second)
+	next := t0.Add(40 * time.Second)
 	recordAISAnchorTracks([]nearbyVessel{aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, next)}, next)
 	_, inc, _ := getAISTrailsBody(t, strconv.FormatInt(first.Cursor, 10))
 	if len(inc.Tracks) != 1 || inc.Tracks[0].MMSI != "111111111" || len(inc.Tracks[0].Points) != 1 ||

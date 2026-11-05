@@ -48,9 +48,9 @@ func TestAISAnchorTracksASharedMMSIIsInsideIfAnyContextIsInside(t *testing.T) {
 	outside.ID = "urn:mrn:imo:mmsi:111111111-second"
 	// Listed after the inside one, the outside context must not win.
 	recordAISAnchorTracks([]nearbyVessel{inside, outside}, at(0))
-	next := aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(5))
-	recordAISAnchorTracks([]nearbyVessel{next}, at(5))
-	pts := aisTracksNow(t, store, at(5))[0].Points
+	next := aisTarget("111111111", "ALPHA", aisInsideLat+0.0001, at(35))
+	recordAISAnchorTracks([]nearbyVessel{next}, at(35))
+	pts := aisTracksNow(t, store, at(35))[0].Points
 	if len(pts) != 2 || pts[1].NewSegment {
 		t.Fatalf("one context inside keeps the target inside, so the line joins: %+v", pts)
 	}

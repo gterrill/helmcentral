@@ -6,6 +6,17 @@
 // sits on top whatever the order.
 
 import { hexAlpha } from '@/lib/hex-mix'
+import { serverNowMs } from '@/lib/server-clock'
+
+/**
+ * The time trail ages are counted against: the boat's clock (lib/server-clock.ts,
+ * ADR 0218), because trail points carry server times and a display's own clock
+ * can be hours out. Before any server time has arrived it is the browser's
+ * clock, which is what the map used before this and no worse.
+ */
+export function trailNow(): number {
+  return serverNowMs() ?? Date.now()
+}
 
 /** How long AIS tracks are kept and drawn: the server serves 24 hours, and the bands span the same. */
 export const AIS_TRACK_WINDOW_MS = 24 * 60 * 60 * 1000

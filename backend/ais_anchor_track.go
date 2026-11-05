@@ -28,6 +28,11 @@ const (
 	// aisAnchorSegmentGap is the silence between two stored reports of one
 	// target after which the line between them is not drawn.
 	aisAnchorSegmentGap = 15 * time.Minute
+	// aisAnchorMinInterval is the least time between two stored points of one
+	// target. A Class A boat reports every 2 to 10 seconds, which would store
+	// about 17,000 points a day; a report sooner than this after the target's
+	// last stored point is skipped. Not a setting.
+	aisAnchorMinInterval = 30 * time.Second
 	// aisAnchorPruneEvery is how often the table is trimmed to the retention.
 	// Reads and the client apply the 24 hour cut themselves.
 	aisAnchorPruneEvery = time.Minute
@@ -196,14 +201,18 @@ type aisTrackState struct {
 	inside map[string]bool
 	// lastMs is each target's newest stored report time.
 	lastMs map[string]int64
-	warmed bool
+	// pendingSegment holds the targets whose next stored point must start a new
+	// segment because a report that would have was skipped by
+	// aisAnchorMinInterval. It clears when a point is stored.
+	pendingSegment map[string]bool
+	warmed         bool
 	// notBefore is the last reset: a report received before it belongs to the
 	// old anchor and is not stored.
 	notBefore int64
 	lastPrune time.Time
 }
 
-var aisTracks = &aisTrackState{inside: map[string]bool{}, lastMs: map[string]int64{}}
+var aisTracks = &aisTrackState{inside: map[string]bool{}, lastMs: map[string]int64{}, pendingSegment: map[string]bool{}}
 
 // reset forgets every target, after the tracks were erased at reset time (a
 // drop or a raise; moving the anchor mark does not reset).
@@ -212,6 +221,7 @@ func (st *aisTrackState) reset(at time.Time) {
 	defer st.mu.Unlock()
 	st.inside = map[string]bool{}
 	st.lastMs = map[string]int64{}
+	st.pendingSegment = map[string]bool{}
 	st.warmed = true // the table was just emptied: nothing to warm from
 	st.notBefore = at.UnixMilli()
 	// A new anchorage logs a boat with no MMSI again.
@@ -227,7 +237,8 @@ var missingMMSILoggedForAISAnchorTrack sync.Map // key: vessel id (string)
 // within aisAnchorRecordRadiusM of the anchor. It runs once per server poll
 // tick on the vessel list the tick already fetched, and does nothing without a
 // watch. A report is stored only when it is newer than the target's last
-// stored report and than the last reset.
+// stored report and than the last reset, and at least aisAnchorMinInterval
+// after that last stored report.
 func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 	watch, active, _ := currentAnchorWatch()
 	if !active {
@@ -291,6 +302,15 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 			continue
 		}
 		sm.newSegment = !st.inside[sm.mmsi] || !seen || time.Duration(sm.atMs-last)*time.Millisecond > aisAnchorSegmentGap
+		if seen && time.Duration(sm.atMs-last)*time.Millisecond < aisAnchorMinInterval {
+			// Too soon after the last stored point. A report that would have
+			// started a segment passes the flag on to the next stored point.
+			if sm.newSegment {
+				st.pendingSegment[sm.mmsi] = true
+			}
+			continue
+		}
+		sm.newSegment = sm.newSegment || st.pendingSegment[sm.mmsi]
 		fresh = append(fresh, sm)
 	}
 	samples = fresh
@@ -308,6 +328,7 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 		}
 		for _, sm := range samples {
 			st.lastMs[sm.mmsi] = sm.atMs
+			delete(st.pendingSegment, sm.mmsi)
 		}
 	}
 	for key, isInside := range evidence {
@@ -331,7 +352,8 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 // Returns the AIS tracks recorded around the anchor since the cursor, which is
 // the "cursor" of the previous answer (0 for all). trail_started_at has the
 // same meaning as on trails/self: a client that sees it change drops the points
-// it holds and asks again from 0.
+// it holds and asks again from 0. server_time_ms is the server's own clock, so
+// the map can age the points by the boat's time rather than the browser's.
 func getAISTrailsHandler(c echo.Context) error {
 	var cursor int64
 	if s := c.QueryParam("since"); s != "" {
@@ -343,7 +365,7 @@ func getAISTrailsHandler(c echo.Context) error {
 	}
 
 	if !anchorWatchActive() {
-		return c.JSON(http.StatusOK, map[string]any{"trail_started_at": nil, "cursor": 0, "tracks": []aisTrackWire{}})
+		return c.JSON(http.StatusOK, map[string]any{"trail_started_at": nil, "cursor": 0, "tracks": []aisTrackWire{}, "server_time_ms": time.Now().UnixMilli()})
 	}
 	if globalPassageStore == nil {
 		log.Printf("ais anchor tracks: %v", errAnchorTrailNoStore)
@@ -365,5 +387,5 @@ func getAISTrailsHandler(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "AIS tracks unavailable: could not read the tracks"})
 		}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"trail_started_at": startedAt, "cursor": next, "tracks": tracks})
+	return c.JSON(http.StatusOK, map[string]any{"trail_started_at": startedAt, "cursor": next, "tracks": tracks, "server_time_ms": time.Now().UnixMilli()})
 }
