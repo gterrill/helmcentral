@@ -1,12 +1,14 @@
 #!/bin/sh
 # Watches a PR until it merges or closes, for the ship skill.
-# Prints `state | mergeable | merge state | failed checks | checks running`,
-# ending in `checks done` once every check has finished. `mergeable` means
-# only that there are no conflicts; a merge state of CLEAN is what means the
-# PR can merge. While the PR is OPEN and GitHub is still computing either
-# value (UNKNOWN), the line is not a change: polling goes on.
-# A PR stuck BLOCKED on a required check that never reports still produces one
-# change, from `checks running` to `checks done`.
+# Prints `state | mergeable | merge state | failed checks | checks`. The last
+# field is `no checks yet` while CI is queued, `no checks after 15 min` if the
+# PR has gone that long since its last update with none, `checks running`, or
+# `checks done`. `mergeable` means only that there are no conflicts; a merge
+# state of CLEAN is what means the PR can merge. While the PR is OPEN and GitHub
+# is still computing either value (UNKNOWN), the line is not a change: polling
+# goes on.
+# A PR stuck BLOCKED on a required check that never reports, or on a CI run that
+# never starts, still produces a change that wakes a --once run.
 # A single failed `gh` call is not reported (the network drops, the Mac
 # sleeps); the third in a row is, as `gh pr view failed: ...`. gh's stderr is
 # kept apart from the line and used only for that message.
@@ -47,10 +49,12 @@ trap 'exit 130' INT TERM
 prev=
 fails=0
 while :; do
-	if cur=$(gh pr view "$pr" --json state,mergeable,mergeStateStatus,statusCheckRollup --jq '[.state, .mergeable, .mergeStateStatus,
-		([(.statusCheckRollup // [])[] | select((.conclusion // .state) | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED"))
+	if cur=$(gh pr view "$pr" --json state,mergeable,mergeStateStatus,statusCheckRollup,updatedAt --jq '(.statusCheckRollup // []) as $checks | [.state, .mergeable, .mergeStateStatus,
+		([$checks[] | select((.conclusion // .state) | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED","STALE"))
 			| (.name // .context)] | join(", ")),
-		(if any((.statusCheckRollup // [])[]; (.status // .state) | IN("COMPLETED","SUCCESS","FAILURE","ERROR") | not) then "checks running" else "checks done" end)] | join(" | ")' 2>"$err"); then
+		(if ($checks | length) == 0 then (if (now - (.updatedAt | fromdate)) > 900 then "no checks after 15 min" else "no checks yet" end)
+		elif any($checks[]; (.status // .state) | IN("COMPLETED","SUCCESS","FAILURE","ERROR") | not) then "checks running"
+		else "checks done" end)] | join(" | ")' 2>"$err"); then
 		fails=0
 	else
 		fails=$((fails + 1))

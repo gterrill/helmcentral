@@ -127,13 +127,16 @@ reports the current line straight away. Each run after that exits only when
 the line differs from the last one reported, so you are woken only on a
 change. Act on the line, then run it again unless the PR is `MERGED` or
 `CLOSED`. The line reads `state | mergeable | merge state | failed checks |
-checks running` (or `checks done`). A failure you have already told the
-operator about does not wake you again.
+checks`, and the last field is `no checks yet`, `no checks after 15 min`,
+`checks running` or `checks done`. A failure you have already told the operator
+about does not wake you again.
 
 `mergeable` means only that the PR has no conflicts. Call the PR ready to
-merge only when the merge state is `CLEAN`. `BLOCKED` with `checks done` and
-no failed checks means a required check will never report: run `gh pr checks
-<N>` and tell the operator which.
+merge only when the merge state is `CLEAN`. `no checks yet` means CI is queued,
+so run the watcher again. `no checks after 15 min` means CI has not started:
+tell the operator. `BLOCKED` with `checks done` and no failed checks means a
+required check will never report: run `gh pr checks <N>` and tell the operator
+which.
 
 - A failed check: read its log with `gh run view --log-failed`, fix it,
   go back to step 4.
