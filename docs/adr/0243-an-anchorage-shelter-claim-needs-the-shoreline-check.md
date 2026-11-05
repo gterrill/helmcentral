@@ -127,7 +127,8 @@ they are not about an anchorage.
   tells the model to drop the statements when they are about open water.
 - A forecast for a different position than the anchorage under discussion also
   satisfies the guard.
-- A wind direction of exactly 0° is read as unknown, as everywhere else in the
-  forecast, so that row gets no label.
+- A wind direction of exactly 0° with wind is due north and gets its label. A
+  row with no wind and a direction of 0° is unknown and gets no label, because
+  Open-Meteo sends a missing direction only with a missing speed.
 - The phrase list will miss some wordings. It does not check that the final
   answer agrees with the tool, only that the tool ran.
