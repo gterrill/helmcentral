@@ -60,10 +60,12 @@ under the boat arrow.
   minute has passed.
 - **Keeping the trail:** The server keeps it, so closing the browser, reloading
   or restarting Helmcentral doesn't lose it.
-- **Moving the anchor:** Moving the anchor position starts the trail again from
-  that point, because the trail is measured against where the anchor is.
-  Changing only the radius keeps it.
-- **Raising the anchor:** Raising the anchor ends the trail.
+- **Moving the anchor:** Because the trail is where the boat has actually been,
+  moving the anchor position or changing the radius keeps it. **Undo** keeps it
+  too. If you move the anchor a long way, the old swing stays on the map around
+  the old position until you raise.
+- **Raising the anchor:** Raising the anchor ends the trail, and the next drop
+  starts a new one.
 - **How much is kept:** The newest 10,000 points are kept and drawn, which
   covers days at anchor.
 

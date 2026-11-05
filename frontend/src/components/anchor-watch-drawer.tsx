@@ -434,11 +434,11 @@ export function AnchorWatchDrawer({
     // (lib/anchor-adjust.ts's buildAdjustCommitTargets, 0.5 m tolerance) —
     // the common case (the corner toolbar's own +/-, or the whole no-WebGL2
     // path, which can only ever change radius) must PATCH radius_meters alone, or
-    // the backend treats it as a genuine reposition: resets the self trail
-    // and requires a fresh SignalK publish that 502s if SignalK is down for
-    // a change that never touched position (code-review finding). Undo
-    // mirrors the same decision, built from the same pair, so it can't
-    // restore a position Set itself never sent.
+    // the backend treats it as a genuine reposition: it requires a fresh
+    // SignalK publish that 502s if SignalK is down for a change that never
+    // touched position (code-review finding). Undo mirrors the same
+    // decision, built from the same pair, so it can't restore a position
+    // Set itself never sent.
     const { set, undo } = buildAdjustCommitTargets(
       previous,
       { lat: adjustDraft.lat, lon: adjustDraft.lon, radiusMeters: adjustDraft.radiusM },

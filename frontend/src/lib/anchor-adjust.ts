@@ -174,12 +174,11 @@ export function adjustWarningActive(distanceFromDraftM: number | null, draftRadi
 // Set used to send lat/lon unconditionally, even when the operator only
 // touched the radius (the bar's own +/-/chips, or the no-WebGL2 path, which
 // can *only* change radius). The backend treats any lat/lon on the PATCH as
-// a genuine reposition: it resets the post-anchor self trail and requires a
-// fresh SignalK publish to confirm, which 502s outright if SignalK happens
-// to be unreachable — turning an ordinary radius tweak into a failure that
-// has nothing to do with the radius. Below this tolerance, the draft
-// position is read as unchanged and lat/lon travel with neither Set nor its
-// Undo.
+// a genuine reposition: it requires a fresh SignalK publish to confirm,
+// which 502s outright if SignalK happens to be unreachable — turning an
+// ordinary radius tweak into a failure that has nothing to do with the
+// radius. Below this tolerance, the draft position is read as unchanged and
+// lat/lon travel with neither Set nor its Undo.
 
 /**
  * Set (and Undo) omit lat/lon when the draft position is within this of the

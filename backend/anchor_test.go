@@ -35,7 +35,7 @@ func anchorTestEnv(t *testing.T, gpsFromBowM float64) string {
 
 	t.Setenv("ANCHOR_WATCH_FILE", filepath.Join(dir, "anchor_watch.json"))
 
-	// A drop, a move and a raise reset the swing trail (ADR 0199) and fail
+	// A drop and a raise reset the swing trail (ADR 0199) and fail
 	// without a track store, so every anchor test gets one unless it set up its own.
 	if globalPassageStore == nil {
 		globalPassageStore = newTestPassageStore(t)

@@ -63,10 +63,10 @@ a few seconds. It gets the previous position and radius back without reopening
 Adjust.
 
 Changing only the radius (the −/+ control, or the no-map path) never touches the
-anchor's saved position. It doesn't reset your swing trail, and it doesn't need
-to hear back from the boat's instrument network first. Moving the anchor does
-need that confirmation, so a radius-only change still goes through if the
-instrument network is briefly unreachable.
+anchor's saved position, and it doesn't need to hear back from the boat's
+instrument network first. Moving the anchor does need that confirmation, so a
+radius-only change still goes through if the instrument network is briefly
+unreachable. Neither change clears your swing trail.
 
 The rode planner sidebar's **Apply as alarm radius** button also sets the radius
 to match the swing your planned rode and boat length need, without opening

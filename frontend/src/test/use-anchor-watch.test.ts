@@ -282,8 +282,8 @@ describe('useAnchorWatch adjustAnchor', () => {
 
   // Code-review finding: Set (and Undo) used to send lat/lon unconditionally,
   // even for a radius-only change — the backend treats any lat/lon as a
-  // genuine reposition (resets the self trail, requires a fresh SignalK
-  // publish, 502s if SignalK is down). adjustAnchor must accept lat/lon as
+  // genuine reposition (requires a fresh SignalK publish, 502s if SignalK
+  // is down). adjustAnchor must accept lat/lon as
   // optional (both or neither) and PATCH only radius_meters when they're
   // omitted.
   it('PATCHes radius_meters alone when lat/lon are omitted (a radius-only Adjust Set)', async () => {
