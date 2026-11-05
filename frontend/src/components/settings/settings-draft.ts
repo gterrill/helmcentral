@@ -119,126 +119,6 @@ function rolesEqual(a: VesselRoles | null, b: VesselRoles | null): boolean {
   return (Object.keys(emptyVesselRoles) as Array<keyof VesselRoles>).every((key) => a[key] === b[key])
 }
 
-/**
- * Local-form mirror of every field owned by the "regular" settings
- * sections (SignalK Connection, Boat & UI, Labels, Anchor, InfluxDB) plus
- * the Tide station fields that live visually in the Widgets > Tide tab but
- * are still plain form fields saved through the same pinned "Save
- * Settings" button, not provider-card auto-save. Numbers are kept as
- * strings while editing (matching the old panel's UX of allowing partial
- * numeric input), and only coerced to numbers when building the save
- * patch.
- */
-export interface RegularSettingsDraft {
-  signalkAddress: string
-  signalkPort: string
-  vesselPrefix: string
-  boatModel: string
-  distanceUnits: 'metric' | 'imperial'
-  tideStationId: string
-  tideStationName: string
-  tideAutoStation: boolean
-  bowRollerHeightM: string
-  gpsFromBowM: string
-  loaM: string
-  // How far below the waterline the depth transducer sits; '' leaves it unset (no default).
-  transducerDepthM: string
-  chainSizeMm: string
-  chainOnboardM: string
-  hullType: HullType
-  scopeMethod: ScopeMethod
-  windageAreaM2: string
-  // ADR 0099: gates the server-side anchor auto-raise watcher. A plain
-  // boolean, not a string, unlike the numeric anchor fields above - there is
-  // no partial-typing UX to preserve for a switch.
-  autoRaiseOnMotoring: boolean
-  // ADR 0135: water the operator wants under the keel at the next low tide
-  // before Anchor Watch's low-water clearance warning fires. Zero is a
-  // meaningful explicit value (same as gpsFromBowM below), not an absent one.
-  minClearanceAtLowM: string
-  influxdbEnabled: boolean
-  influxdbUrl: string
-  influxdbOrg: string
-  influxdbBucket: string
-  mayaraAddress: string
-  mayaraPort: string
-  authMode: 'none' | 'signalk'
-  assistantEnabled: boolean
-  assistantModel: string
-  assistantDocumentModel: string
-  assistantNotes: string
-  assistantAllowedModels: string[]
-  assistantExcludedModels: string[]
-  assistantCostTier: AssistantCostTier
-  assistantVoiceInput: boolean
-  assistantReadAloud: boolean
-  assistantWakeWord: boolean
-  assistantVerboseRunLog: boolean
-  assistantWebSearch: boolean
-  assistantWebSearchModel: string
-  assistantPassageLimits: PassageLimitsDraft
-  // Off until the operator turns it on: it downloads in the background.
-  offlineCoastlineEnabled: boolean
-  /**
-   * null until the server's roles block has been read. It stays null if the
-   * settings fetch fell back without one, and the patch then omits `roles`
-   * so a save cannot wipe a setup this page never saw.
-   */
-  roles: VesselRoles | null
-}
-
-export const initialRegularSettingsDraft: RegularSettingsDraft = {
-  signalkAddress: 'localhost',
-  signalkPort: '3000',
-  vesselPrefix: '',
-  boatModel: '',
-  distanceUnits: 'metric',
-  tideStationId: '',
-  tideStationName: '',
-  tideAutoStation: false,
-  bowRollerHeightM: '1.5',
-  gpsFromBowM: '0',
-  loaM: '0',
-  transducerDepthM: '',
-  chainSizeMm: '12',
-  chainOnboardM: '150',
-  hullType: 'power_cat',
-  scopeMethod: 'ratio',
-  windageAreaM2: '35',
-  // Matches the server's own default (buildSettingsPayload, ADR 0099): the
-  // feature ships on until the operator explicitly turns it off.
-  autoRaiseOnMotoring: true,
-  // Matches the server's own default (buildSettingsPayload, ADR 0135): a
-  // generic 0.5m seamanship margin, not vessel-specific.
-  minClearanceAtLowM: '0.5',
-  influxdbEnabled: false,
-  authMode: 'none',
-  influxdbUrl: '',
-  influxdbOrg: '',
-  influxdbBucket: '',
-  // Blank by default and left blank when unset — a plausible-looking default
-  // host would produce a confusing failure (the overlay silently pointed at
-  // the wrong box) rather than an obvious one (no address configured).
-  mayaraAddress: '',
-  mayaraPort: '6502',
-  assistantEnabled: false,
-  assistantModel: 'anthropic/claude-sonnet-4.5',
-  assistantDocumentModel: '',
-  assistantNotes: '',
-  assistantAllowedModels: [],
-  assistantExcludedModels: [],
-  assistantCostTier: '',
-  assistantVoiceInput: false,
-  assistantReadAloud: false,
-  assistantWakeWord: false,
-  assistantVerboseRunLog: false,
-  assistantWebSearch: false,
-  assistantWebSearchModel: defaultWebSearchModel,
-  assistantPassageLimits: blankPassageLimits(),
-  offlineCoastlineEnabled: false,
-  roles: null,
-}
-
 function normalizeModelPatterns(values: string[] | undefined): string[] {
   if (!Array.isArray(values)) return []
   return values
@@ -252,97 +132,6 @@ function normalizeAssistantCostTier(value: string | undefined): AssistantCostTie
     return normalized
   }
   return ''
-}
-
-/** Builds the draft's starting values from a freshly-fetched settings payload. */
-export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSettingsDraft {
-  const draft: RegularSettingsDraft = { ...initialRegularSettingsDraft }
-
-  if (settings.signalk?.address) draft.signalkAddress = settings.signalk.address
-  if (typeof settings.signalk?.port === 'number') draft.signalkPort = String(settings.signalk.port)
-
-  if (typeof settings.boat?.vessel_prefix === 'string') draft.vesselPrefix = settings.boat.vessel_prefix
-  if (typeof settings.boat?.model === 'string') draft.boatModel = settings.boat.model
-
-  if (settings.units === 'metric' || settings.units === 'imperial') draft.distanceUnits = settings.units
-  if (typeof settings.ui?.tide_station_id === 'string') draft.tideStationId = settings.ui.tide_station_id
-  if (typeof settings.ui?.tide_station_name === 'string') draft.tideStationName = settings.ui.tide_station_name
-  if (typeof settings.ui?.tide_auto_station === 'boolean') draft.tideAutoStation = settings.ui.tide_auto_station
-
-  if (typeof settings.anchor?.bow_roller_height_m === 'number') draft.bowRollerHeightM = String(settings.anchor.bow_roller_height_m)
-  // gps_from_bow_m: 0 is a meaningful explicit value ("no correction"), not
-  // an absent one, so it must hydrate the same as any other number here.
-  if (typeof settings.anchor?.gps_from_bow_m === 'number') draft.gpsFromBowM = String(settings.anchor.gps_from_bow_m)
-  if (typeof settings.anchor?.loa_m === 'number') draft.loaM = String(settings.anchor.loa_m)
-  // The server sends 0 for unset; the box stays empty then.
-  if (typeof settings.anchor?.transducer_depth_m === 'number' && settings.anchor.transducer_depth_m > 0) draft.transducerDepthM = String(settings.anchor.transducer_depth_m)
-  if (typeof settings.anchor?.chain_size_mm === 'number') draft.chainSizeMm = String(settings.anchor.chain_size_mm)
-  if (typeof settings.anchor?.chain_onboard_m === 'number') draft.chainOnboardM = String(settings.anchor.chain_onboard_m)
-  if (
-    settings.anchor?.hull_type === 'power_cat'
-    || settings.anchor?.hull_type === 'sail_mono'
-    || settings.anchor?.hull_type === 'power_mono'
-    || settings.anchor?.hull_type === 'sail_cat'
-  ) {
-    draft.hullType = settings.anchor.hull_type
-  }
-  if (
-    settings.anchor?.scope_method === 'catenary'
-    || settings.anchor?.scope_method === 'ratio'
-  ) {
-    draft.scopeMethod = settings.anchor.scope_method
-  }
-  if (typeof settings.anchor?.windage_area_m2 === 'number') draft.windageAreaM2 = String(settings.anchor.windage_area_m2)
-  // typeof, not truthy: an explicit false must hydrate as false, not be
-  // mistaken for "absent" and fall through to the true default above -
-  // same reasoning as tideAutoStation's hydration above.
-  if (typeof settings.anchor?.auto_raise_on_motoring === 'boolean') {
-    draft.autoRaiseOnMotoring = settings.anchor.auto_raise_on_motoring
-  }
-  // min_clearance_at_low_m: 0 is a meaningful explicit value ("warn only
-  // once the keel would touch"), not an absent one, same as gps_from_bow_m
-  // above - it must hydrate the same as any other number here.
-  if (typeof settings.anchor?.min_clearance_at_low_m === 'number') {
-    draft.minClearanceAtLowM = String(settings.anchor.min_clearance_at_low_m)
-  }
-
-  if (typeof settings.influxdb?.enabled === 'boolean') draft.influxdbEnabled = settings.influxdb.enabled
-  if (settings.auth?.mode === 'signalk' || settings.auth?.mode === 'none') draft.authMode = settings.auth.mode
-  if (typeof settings.influxdb?.url === 'string') draft.influxdbUrl = settings.influxdb.url
-  if (typeof settings.influxdb?.org === 'string') draft.influxdbOrg = settings.influxdb.org
-  if (typeof settings.influxdb?.bucket === 'string') draft.influxdbBucket = settings.influxdb.bucket
-
-  // typeof, not truthy: an explicit blank address must hydrate as blank, not
-  // fall through to some default host. Unlike signalkAddress (whose default
-  // is the meaningful 'localhost'), mayaraAddress's default is itself blank.
-  if (typeof settings.mayara?.address === 'string') draft.mayaraAddress = settings.mayara.address
-  if (typeof settings.mayara?.port === 'number') draft.mayaraPort = String(settings.mayara.port)
-
-  if (typeof settings.assistant?.enabled === 'boolean') draft.assistantEnabled = settings.assistant.enabled
-  // typeof, not truthy: a blank model on the server (nothing configured, or
-  // explicitly cleared) must hydrate as blank, not silently fall back to the
-  // default model id — same reasoning as mayaraAddress above.
-  if (typeof settings.assistant?.model === 'string') draft.assistantModel = settings.assistant.model
-  if (typeof settings.assistant?.document_model === 'string') draft.assistantDocumentModel = settings.assistant.document_model
-  if (typeof settings.assistant?.notes === 'string') draft.assistantNotes = settings.assistant.notes
-  draft.assistantAllowedModels = normalizeModelPatterns(settings.assistant?.allowed_models)
-  draft.assistantExcludedModels = normalizeModelPatterns(settings.assistant?.excluded_models)
-  draft.assistantCostTier = normalizeAssistantCostTier(settings.assistant?.cost_tier)
-  // Voice phase (ADR 0093): all three default false, same as assistantEnabled.
-  if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
-  if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
-  if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
-  if (typeof settings.assistant?.verbose_run_log === 'boolean') draft.assistantVerboseRunLog = settings.assistant.verbose_run_log
-  if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
-  if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
-
-  draft.assistantPassageLimits = passageLimitsFromPayload(settings.assistant?.passage_limits)
-
-  if (typeof settings.offline_coastline?.enabled === 'boolean') draft.offlineCoastlineEnabled = settings.offline_coastline.enabled
-
-  if (settings.roles) draft.roles = { ...emptyVesselRoles, ...settings.roles }
-
-  return draft
 }
 
 const parseNumber = (value: string, fallback: number) => {
@@ -367,6 +156,288 @@ const parseNonNegativeNumber = (value: string, fallback: number) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
 }
 
+// ---------------------------------------------------------------------------
+// The field table
+// ---------------------------------------------------------------------------
+
+/** The sections of the settings payload a draft field can sit in. `units` is a bare top-level value. */
+type WireSection = Exclude<keyof SettingsPayload, 'units' | 'roles' | 'roles_error'>
+
+/** Every place in the settings payload a draft field can sit. */
+type PayloadPath =
+  | { [S in WireSection]: { [N in keyof NonNullable<SettingsPayload[S]> & string]-?: readonly [S, N] }[keyof NonNullable<SettingsPayload[S]> & string] }[WireSection]
+  | readonly ['units']
+
+type ValueAt<P extends PayloadPath> = P extends readonly ['units']
+  ? SettingsPayload['units']
+  : P extends readonly [infer S extends WireSection, infer N extends string]
+    ? N extends keyof NonNullable<SettingsPayload[S]> ? NonNullable<SettingsPayload[S]>[N] : never
+    : never
+
+/**
+ * The payload paths that accept a value of type W. A field that writes a
+ * string cannot be pointed at a number's path, and a name the payload does not
+ * have is not a path at all. Two fields of the same type can still be swapped:
+ * settings-draft-fields.test.ts pins the paths.
+ */
+type PathFor<W, P extends PayloadPath = PayloadPath> = P extends PayloadPath
+  ? [W] extends [NonNullable<ValueAt<P>>] ? P : never
+  : never
+
+/**
+ * One draft field's whole life: T is the draft's type for it and W what a save
+ * sends.
+ */
+interface DraftField<T, W> {
+  at: PathFor<W>
+  /** The value before the server has answered, and when the server's value is absent or unusable. */
+  initial: T
+  /** The draft value for what the server sent; undefined keeps `initial`. */
+  read: (raw: unknown) => T | undefined
+  /** What a save sends for this draft value; the value itself when left out. */
+  write?: (value: T) => W
+  /** How two values compare for the unsaved-changes check; `===` when left out. */
+  same?: (a: T, b: T) => boolean
+}
+
+/** Text. `trim` trims it on save; `nonEmpty` ignores an empty answer from the server (the starting value stays). */
+const text = (at: PathFor<string>, initial: string, opts: { trim?: boolean, nonEmpty?: boolean } = {}): DraftField<string, string> => ({
+  at,
+  initial,
+  read: (raw) => (typeof raw === 'string' && !(opts.nonEmpty && raw === '') ? raw : undefined),
+  write: opts.trim ? (value) => value.trim() : undefined,
+})
+
+const flag = (at: PathFor<boolean>, initial: boolean): DraftField<boolean, boolean> => ({
+  at,
+  initial,
+  read: (raw) => (typeof raw === 'boolean' ? raw : undefined),
+})
+
+/** One of a closed set of strings; anything else from the server keeps the starting value. */
+const choice = <T extends string>(at: PathFor<string>, initial: NoInfer<T>, allowed: readonly T[]): DraftField<T, string> => ({
+  at,
+  initial,
+  read: (raw) => allowed.find((option) => option === raw),
+})
+
+/**
+ * A number kept as text while editing. Text that is not a number saves as the
+ * starting value, so each default is written once. `nonNegative` lets 0 stand
+ * for itself; otherwise only numbers above 0 do.
+ */
+const numberField = (at: PathFor<number>, initial: string, range: 'positive' | 'nonNegative'): DraftField<string, number> => {
+  const fallback = Number(initial)
+  return {
+    at,
+    initial,
+    read: (raw) => (typeof raw === 'number' ? String(raw) : undefined),
+    write: (value) => (range === 'positive' ? parseNumber(value, fallback) : parseNonNegativeNumber(value, fallback)),
+  }
+}
+
+const port = (at: PathFor<number>, initial: string): DraftField<string, number> => ({
+  at,
+  initial,
+  read: (raw) => (typeof raw === 'number' ? String(raw) : undefined),
+  write: (value) => Number.parseInt(value, 10) || Number(initial),
+})
+
+const modelList = (at: PathFor<string[]>): DraftField<string[], string[]> => ({
+  at,
+  initial: [],
+  read: (raw) => normalizeModelPatterns(raw as string[] | undefined),
+  write: normalizeModelPatterns,
+  same: (a, b) => a.length === b.length && a.every((item, i) => item === b[i]),
+})
+
+/** Gives a field with rules of its own the types its table entry is read by. */
+const ownRules = <T, W>(field: DraftField<T, W>) => field
+
+/**
+ * Adding a plain setting is one entry here and its type in the payload
+ * (use-settings-form.ts). The draft's type is read off this table. Entries
+ * marked "own rules" write their `read` and `write` out.
+ */
+const draftFields = {
+  signalkAddress: text(['signalk', 'address'], 'localhost', { trim: true, nonEmpty: true }),
+  signalkPort: port(['signalk', 'port'], '3000'),
+
+  vesselPrefix: text(['boat', 'vessel_prefix'], '', { trim: true }),
+  boatModel: text(['boat', 'model'], '', { trim: true }),
+
+  distanceUnits: choice(['units'], 'metric', ['metric', 'imperial']),
+
+  tideStationId: text(['ui', 'tide_station_id'], ''),
+  tideStationName: text(['ui', 'tide_station_name'], ''),
+  tideAutoStation: flag(['ui', 'tide_auto_station'], false),
+
+  bowRollerHeightM: numberField(['anchor', 'bow_roller_height_m'], '1.5', 'positive'),
+  // 0 is a meaningful explicit value ("no correction"), not an absent one.
+  gpsFromBowM: numberField(['anchor', 'gps_from_bow_m'], '0', 'nonNegative'),
+  loaM: numberField(['anchor', 'loa_m'], '0', 'positive'),
+  // How far below the waterline the depth transducer sits; '' leaves it unset
+  // (no default). Own rules: the server sends 0 for unset and the box stays
+  // empty then; see parseTransducerDepth.
+  transducerDepthM: ownRules<string, number>({
+    at: ['anchor', 'transducer_depth_m'],
+    initial: '',
+    read: (raw) => (typeof raw === 'number' && raw > 0 ? String(raw) : undefined),
+    write: parseTransducerDepth,
+  }),
+  chainSizeMm: numberField(['anchor', 'chain_size_mm'], '12', 'positive'),
+  chainOnboardM: numberField(['anchor', 'chain_onboard_m'], '150', 'positive'),
+  hullType: choice<HullType>(['anchor', 'hull_type'], 'power_cat', ['power_cat', 'sail_mono', 'power_mono', 'sail_cat']),
+  scopeMethod: choice<ScopeMethod>(['anchor', 'scope_method'], 'ratio', ['catenary', 'ratio']),
+  windageAreaM2: numberField(['anchor', 'windage_area_m2'], '35', 'positive'),
+  // ADR 0099: gates the server-side anchor auto-raise watcher. Matches the
+  // server's own default (buildSettingsPayload): the feature ships on until
+  // the operator explicitly turns it off. An explicit false hydrates as false,
+  // not as "absent". A plain boolean: no partial typing to preserve.
+  autoRaiseOnMotoring: flag(['anchor', 'auto_raise_on_motoring'], true),
+  // ADR 0135: water the operator wants under the keel at the next low tide
+  // before Anchor Watch's low-water clearance warning fires. Matches the
+  // server's own default: a generic 0.5m seamanship margin, not
+  // vessel-specific. 0 is a meaningful explicit value, not an absent one.
+  minClearanceAtLowM: numberField(['anchor', 'min_clearance_at_low_m'], '0.5', 'nonNegative'),
+
+  influxdbEnabled: flag(['influxdb', 'enabled'], false),
+  influxdbUrl: text(['influxdb', 'url'], '', { trim: true }),
+  influxdbOrg: text(['influxdb', 'org'], '', { trim: true }),
+  influxdbBucket: text(['influxdb', 'bucket'], '', { trim: true }),
+
+  // Blank by default and left blank when unset, trimmed and never defaulted: a
+  // plausible-looking default host would produce a confusing failure (the
+  // overlay silently pointed at the wrong box) rather than an obvious one (no
+  // address configured). An explicit blank from the server hydrates as blank.
+  mayaraAddress: text(['mayara', 'address'], '', { trim: true }),
+  mayaraPort: port(['mayara', 'port'], '6502'),
+
+  authMode: choice<'none' | 'signalk'>(['auth', 'mode'], 'none', ['none', 'signalk']),
+
+  assistantEnabled: flag(['assistant', 'enabled'], false),
+  // A blank model on the server (nothing configured, or explicitly cleared)
+  // hydrates as blank, not as the default model id.
+  assistantModel: text(['assistant', 'model'], 'anthropic/claude-sonnet-4.5', { trim: true }),
+  assistantDocumentModel: text(['assistant', 'document_model'], '', { trim: true }),
+  assistantNotes: text(['assistant', 'notes'], ''),
+  assistantAllowedModels: modelList(['assistant', 'allowed_models']),
+  assistantExcludedModels: modelList(['assistant', 'excluded_models']),
+  // Own rules: anything outside the known tiers reads and saves as ''.
+  assistantCostTier: ownRules<AssistantCostTier, AssistantCostTier>({
+    at: ['assistant', 'cost_tier'],
+    initial: '',
+    read: (raw) => normalizeAssistantCostTier(typeof raw === 'string' ? raw : undefined),
+    write: normalizeAssistantCostTier,
+  }),
+  // Voice phase (ADR 0093): all three default false, same as assistantEnabled.
+  assistantVoiceInput: flag(['assistant', 'voice_input'], false),
+  assistantReadAloud: flag(['assistant', 'read_aloud'], false),
+  assistantWakeWord: flag(['assistant', 'wake_word'], false),
+  assistantVerboseRunLog: flag(['assistant', 'verbose_run_log'], false),
+  assistantWebSearch: flag(['assistant', 'web_search'], false),
+  assistantWebSearchModel: text(['assistant', 'web_search_model'], defaultWebSearchModel, { trim: true }),
+  // Own rules: a nested block of text boxes; see passageLimitsFromPayload and passageLimitErrors.
+  assistantPassageLimits: ownRules<PassageLimitsDraft, ReturnType<typeof passageLimitsToPayload>>({
+    at: ['assistant', 'passage_limits'],
+    initial: blankPassageLimits(),
+    read: (raw) => passageLimitsFromPayload(raw as PassageLimitsPayload | undefined),
+    write: passageLimitsToPayload,
+    same: passageLimitsEqual,
+  }),
+
+  // Off until the operator turns it on: it downloads in the background.
+  offlineCoastlineEnabled: flag(['offline_coastline', 'enabled'], false),
+}
+
+type DraftFields = typeof draftFields
+type DraftKey = keyof DraftFields
+
+/**
+ * Local-form mirror of every field owned by the "regular" settings
+ * sections (SignalK Connection, Boat & UI, Labels, Anchor, InfluxDB) plus
+ * the Tide station fields that live visually in the Widgets > Tide tab but
+ * are still plain form fields saved through the same pinned "Save
+ * Settings" button, not provider-card auto-save. Numbers are kept as
+ * strings while editing (matching the old panel's UX of allowing partial
+ * numeric input), and only coerced to numbers when building the save
+ * patch.
+ *
+ * Read off `draftFields`, plus `roles`.
+ */
+export type RegularSettingsDraft = {
+  [K in DraftKey]: DraftFields[K]['initial']
+} & {
+  /**
+   * null until the server's roles block has been read. It stays null if the
+   * settings fetch fell back without one, and the patch then omits `roles`
+   * so a save cannot wipe a setup this page never saw.
+   */
+  roles: VesselRoles | null
+}
+
+/**
+ * The table in the one shape the loops below need: each field's functions are
+ * only ever called with its own key's value, which `never` stands for.
+ */
+interface LoadedField {
+  key: DraftKey
+  at: PayloadPath
+  initial: unknown
+  read: (raw: unknown) => unknown
+  write: (value: never) => unknown
+  same: (a: never, b: never) => boolean
+}
+
+const identity = <V>(value: V) => value
+const strictEqual = (a: unknown, b: unknown) => a === b
+
+const draftFieldList: LoadedField[] = (Object.keys(draftFields) as DraftKey[]).map((key) => {
+  const field = draftFields[key]
+  return {
+    key,
+    at: field.at,
+    initial: field.initial,
+    read: field.read,
+    write: field.write ?? identity,
+    same: field.same ?? strictEqual,
+  }
+})
+
+const readWire = (settings: SettingsPayload, at: PayloadPath): unknown => {
+  if (at.length === 1) return settings[at[0]]
+  return (settings[at[0]] as Record<string, unknown> | undefined)?.[at[1]]
+}
+
+const writeWire = (patch: Record<string, unknown>, at: PayloadPath, value: unknown): void => {
+  if (at.length === 1) {
+    patch[at[0]] = value
+    return
+  }
+  const [section, name] = at
+  const block = (patch[section] ??= {}) as Record<string, unknown>
+  block[name] = value
+}
+
+export const initialRegularSettingsDraft: RegularSettingsDraft = {
+  ...(Object.fromEntries(draftFieldList.map((field) => [field.key, field.initial])) as Omit<RegularSettingsDraft, 'roles'>),
+  roles: null,
+}
+
+/** Builds the draft's starting values from a freshly-fetched settings payload. */
+export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSettingsDraft {
+  const draft: Record<string, unknown> = { ...initialRegularSettingsDraft }
+
+  for (const field of draftFieldList) {
+    const value = field.read(readWire(settings, field.at))
+    if (value !== undefined) draft[field.key] = value
+  }
+
+  if (settings.roles) draft.roles = { ...emptyVesselRoles, ...settings.roles }
+
+  return draft as RegularSettingsDraft
+}
+
 /**
  * Deep-equality check for two RegularSettingsDraft values, used to derive
  * whether the draft actually differs from what's saved (rather than
@@ -374,58 +445,10 @@ const parseNonNegativeNumber = (value: string, fallback: number) => {
  * field is edited and then changed back to its original value).
  */
 export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): boolean {
-  if (a.signalkAddress !== b.signalkAddress) return false
-  if (a.signalkPort !== b.signalkPort) return false
-  if (a.vesselPrefix !== b.vesselPrefix) return false
-  if (a.boatModel !== b.boatModel) return false
-  if (a.distanceUnits !== b.distanceUnits) return false
-  if (a.tideStationId !== b.tideStationId) return false
-  if (a.tideStationName !== b.tideStationName) return false
-  if (a.tideAutoStation !== b.tideAutoStation) return false
-  if (a.bowRollerHeightM !== b.bowRollerHeightM) return false
-  if (a.gpsFromBowM !== b.gpsFromBowM) return false
-  if (a.loaM !== b.loaM) return false
-  if (a.transducerDepthM !== b.transducerDepthM) return false
-  if (a.chainSizeMm !== b.chainSizeMm) return false
-  if (a.chainOnboardM !== b.chainOnboardM) return false
-  if (a.hullType !== b.hullType) return false
-  if (a.scopeMethod !== b.scopeMethod) return false
-  if (a.windageAreaM2 !== b.windageAreaM2) return false
-  if (a.autoRaiseOnMotoring !== b.autoRaiseOnMotoring) return false
-  if (a.minClearanceAtLowM !== b.minClearanceAtLowM) return false
-  if (a.influxdbEnabled !== b.influxdbEnabled) return false
-  if (a.authMode !== b.authMode) return false
-  if (a.influxdbUrl !== b.influxdbUrl) return false
-  if (a.influxdbOrg !== b.influxdbOrg) return false
-  if (a.influxdbBucket !== b.influxdbBucket) return false
-  if (a.mayaraAddress !== b.mayaraAddress) return false
-  if (a.mayaraPort !== b.mayaraPort) return false
-  if (a.assistantEnabled !== b.assistantEnabled) return false
-  if (a.assistantModel !== b.assistantModel) return false
-  if (a.assistantDocumentModel !== b.assistantDocumentModel) return false
-  if (a.assistantNotes !== b.assistantNotes) return false
-  if (a.assistantCostTier !== b.assistantCostTier) return false
-  if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
-  if (a.assistantReadAloud !== b.assistantReadAloud) return false
-  if (a.assistantWakeWord !== b.assistantWakeWord) return false
-  if (a.assistantVerboseRunLog !== b.assistantVerboseRunLog) return false
-  if (a.assistantWebSearch !== b.assistantWebSearch) return false
-  if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
-  if (!passageLimitsEqual(a.assistantPassageLimits, b.assistantPassageLimits)) return false
-  if (a.offlineCoastlineEnabled !== b.offlineCoastlineEnabled) return false
-
-  if (!rolesEqual(a.roles, b.roles)) return false
-
-  if (a.assistantAllowedModels.length !== b.assistantAllowedModels.length) return false
-  for (let i = 0; i < a.assistantAllowedModels.length; i++) {
-    if (a.assistantAllowedModels[i] !== b.assistantAllowedModels[i]) return false
+  for (const field of draftFieldList) {
+    if (!field.same(a[field.key] as never, b[field.key] as never)) return false
   }
-  if (a.assistantExcludedModels.length !== b.assistantExcludedModels.length) return false
-  for (let i = 0; i < a.assistantExcludedModels.length; i++) {
-    if (a.assistantExcludedModels[i] !== b.assistantExcludedModels[i]) return false
-  }
-
-  return true
+  return rolesEqual(a.roles, b.roles)
 }
 
 /**
@@ -439,70 +462,11 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
  * whatever is already persisted for them untouched.
  */
 export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPartial<SettingsPayload> {
-  return {
-    signalk: {
-      address: draft.signalkAddress.trim(),
-      port: Number.parseInt(draft.signalkPort, 10) || 3000,
-    },
-    boat: {
-      vessel_prefix: draft.vesselPrefix.trim(),
-      model: draft.boatModel.trim(),
-    },
-    units: draft.distanceUnits,
-    ui: {
-      tide_station_id: draft.tideStationId,
-      tide_station_name: draft.tideStationName,
-      tide_auto_station: draft.tideAutoStation,
-    },
-    anchor: {
-      bow_roller_height_m: parseNumber(draft.bowRollerHeightM, 1.5),
-      gps_from_bow_m: parseNonNegativeNumber(draft.gpsFromBowM, 0),
-      loa_m: parseNumber(draft.loaM, 0),
-      transducer_depth_m: parseTransducerDepth(draft.transducerDepthM),
-      chain_size_mm: parseNumber(draft.chainSizeMm, 12),
-      chain_onboard_m: parseNumber(draft.chainOnboardM, 150),
-      hull_type: draft.hullType,
-      scope_method: draft.scopeMethod,
-      windage_area_m2: parseNumber(draft.windageAreaM2, 35),
-      auto_raise_on_motoring: draft.autoRaiseOnMotoring,
-      min_clearance_at_low_m: parseNonNegativeNumber(draft.minClearanceAtLowM, 0.5),
-    },
-    influxdb: {
-      enabled: draft.influxdbEnabled,
-      url: draft.influxdbUrl.trim(),
-      org: draft.influxdbOrg.trim(),
-      bucket: draft.influxdbBucket.trim(),
-    },
-    mayara: {
-      // Trimmed, never defaulted: a blank address must save as blank so an
-      // unconfigured radar server is an obvious "not set" rather than a
-      // plausible-looking wrong host.
-      address: draft.mayaraAddress.trim(),
-      port: Number.parseInt(draft.mayaraPort, 10) || 6502,
-    },
-    auth: {
-      mode: draft.authMode,
-    },
-    assistant: {
-      enabled: draft.assistantEnabled,
-      model: draft.assistantModel.trim(),
-      document_model: draft.assistantDocumentModel.trim(),
-      notes: draft.assistantNotes,
-      allowed_models: normalizeModelPatterns(draft.assistantAllowedModels),
-      excluded_models: normalizeModelPatterns(draft.assistantExcludedModels),
-      cost_tier: normalizeAssistantCostTier(draft.assistantCostTier),
-      voice_input: draft.assistantVoiceInput,
-      read_aloud: draft.assistantReadAloud,
-      wake_word: draft.assistantWakeWord,
-      verbose_run_log: draft.assistantVerboseRunLog,
-      web_search: draft.assistantWebSearch,
-      web_search_model: draft.assistantWebSearchModel.trim(),
-      passage_limits: passageLimitsToPayload(draft.assistantPassageLimits),
-    },
-    offline_coastline: {
-      enabled: draft.offlineCoastlineEnabled,
-    },
-    // Omitted while the roles block was never read (see the draft field).
-    ...(draft.roles === null ? {} : { roles: draft.roles }),
+  const patch: Record<string, unknown> = {}
+  for (const field of draftFieldList) {
+    writeWire(patch, field.at, field.write(draft[field.key] as never))
   }
+  // Omitted while the roles block was never read (see the draft field).
+  if (draft.roles !== null) patch.roles = draft.roles
+  return patch as DeepPartial<SettingsPayload>
 }
