@@ -207,7 +207,9 @@ describe('trail polling (ADR 0215 phase 4)', () => {
 
     const paths = requestedPaths()
     expect(paths.some((path) => path.includes('/api/anchor-watch/trails/self'))).toBe(true)
-    expect(paths.some((path) => path.includes('/api/tracks'))).toBe(true)
+    expect(paths.some((path) => path.includes('/api/anchor-watch/trails/ais'))).toBe(true)
+    // The own trail on the Nearby map's endpoint is not this tile's to poll.
+    expect(paths.some((path) => path.includes('/api/tracks'))).toBe(false)
   })
 })
 

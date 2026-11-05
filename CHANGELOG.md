@@ -19,9 +19,32 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   or a filter that reads this title, change it to expect the new wording.
   Webhooks also get Mate's questions, and a finding Mate adds to another says
   which one.
+- **AIS trails now only show during an anchor watch, and the tracks plugin is
+  no longer needed.** Helmcentral records AIS trails itself, so the SignalK
+  `tracks` plugin can come out. If you set `SIGNALK_TRACKS_PATH`, delete it,
+  because Helmcentral no longer reads it. The same goes for
+  `SIGNALK_VESSELS_PATH`: delete it if you set it, because nothing reads it.
+  With no watch set, the anchor map shows AIS boats as markers with no trail.
+  The trails you saw before are gone, and a watch that is already set starts
+  recording from the upgrade. If a script or tool of yours reads AIS trails from
+  Helmcentral, change it. `/api/tracks` now carries only your own boat's track.
+  `/api/anchor-watch/trails/ais/:id` is gone, and `/api/anchor-watch/trails/ais`
+  now answers in a new shape, so read it again from the start.
 
 ### Changed
 
+- **AIS trails on the anchor map are now recorded by Helmcentral, newest
+  brightest.** While a watch is set, it records every AIS boat that comes within
+  500 m of your anchor, one point each time the boat reports a position, with the
+  real time of that report. The newest part of a trail is solid amber and the
+  oldest fades out, over the 24 hours that are kept. There's no line where a boat
+  left the circle and came back, or where more than 15 minutes passed between
+  reports, including when Helmcentral was stopped. Dropping the anchor starts
+  the trails fresh and raising it clears them. Moving the anchor position keeps
+  them, and boats are then recorded within 500 m of the new position. During a
+  watch, every boat within 500 m of your anchor
+  now shows on the anchor map and in the Nearby list, as well as the 10 nearest
+  to you, so a crowded anchorage can't hide a boat you're recording.
 - **The Radar panel in the sidebar is now called Windy.** It's the Windy weather
   map, so the new name and a wind icon stop it being mistaken for the boat's own
   radar. Its **Mayara settings** gear is gone because the map doesn't use Mayara,
@@ -60,6 +83,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Your own swing trail now brightens towards the present.** On the anchor map
+  it ran light yellow at the oldest end to darker amber at the newest, which read
+  backwards. It's now dim yellow where you were longest ago and bright yellow
+  where you are now, in a few steps across the whole stay.
 - **The weather window no longer calls a passage go on hours with no wind
   forecast.** The last few hours of a long forecast can come back empty. The
   check read those hours as flat calm, so a leg running into them could show go.

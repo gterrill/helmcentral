@@ -1,7 +1,7 @@
 # ADR 0005: SignalK/Tracks-Backed AIS Trail History
 
 ## Status
-Accepted
+Superseded by [ADR 0263](0263-helmcentral-records-ais-tracks-during-an-anchor-watch.md): Helmcentral now records AIS tracks itself during an anchor watch, and no longer reads the tracks plugin.
 
 ## Context
 AIS vessel trails for the anchor-watch map were previously accumulated in server-side in-memory ring buffers inside Helmcentral. The backend polled SignalK for nearby vessel positions every 5 seconds and appended them to per-vessel `vesselTrail` ring buffers keyed by vessel name. The frontend `useAisTrails` hook would also accumulate trail points client-side from the live `useNearbyVessels` feed as a secondary source.

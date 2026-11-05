@@ -252,9 +252,14 @@ vi.mock('@/hooks/use-server-trails', async () => {
       useServerTrailsSpy(...args)
       return trailHooksMock.useSelfTrail()
     },
+  }
+})
+vi.mock('@/hooks/use-ais-anchor-tracks', async () => {
+  const { aisTrailHooksMock } = await import('./trail-mocks')
+  return {
     useAisTrails: (...args: unknown[]) => {
       useServerTrailsSpy(...args)
-      return trailHooksMock.useAisTrails()
+      return aisTrailHooksMock.useAisTrails()
     },
   }
 })

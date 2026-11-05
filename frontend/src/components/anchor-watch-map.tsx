@@ -1,5 +1,5 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
-import maplibregl from 'maplibre-gl'
+import maplibregl, { type ExpressionSpecification, type LineLayerSpecification } from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
@@ -10,7 +10,17 @@ import { haversineMeters, bearingDeg, circlePolygon } from '@/lib/geo'
 import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
+import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
 import type { TrailPoint } from '@/hooks/use-server-trails'
+import {
+  AIS_BAND_COLORS,
+  AIS_TRACK_WINDOW_MS,
+  SELF_BAND_COLORS,
+  bandClock,
+  groupLinesByAge,
+  msToNextBandClock,
+  type AgeBandedLine,
+} from '@/lib/trail-age-bands'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 import { MapIconButton } from '@/components/map-icon-button'
@@ -43,7 +53,6 @@ import {
 
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
 const ANCHOR_WATCH_CENTER_STORAGE_KEY = 'anchor-watch-map-center'
-const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 // Threshold above which the current is judged strong enough to visually call out.
 const HIGH_DRIFT_IMPACT_KTS = 1.5
 // Provisional zoom for the one frame before the fit-to-container effect can
@@ -221,16 +230,47 @@ function generateCircleGeoJSON(anchorLon: number, anchorLat: number, radiusM: nu
   }
 }
 
-// ── Trail to GeoJSON LineString ─────────────────────────────────────────────
-function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineString> {
+// ── Age-banded trail GeoJSON ────────────────────────────────────────────────
+// One LineString per run of one age band; `band` (0 oldest) picks the colour
+// and, as the line-sort-key, the draw order, so the newest stretch sits on top.
+function bandedLinesToGeoJSON(lines: AgeBandedLine[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
   return {
-    type: 'Feature',
-    geometry: {
-      type: 'LineString',
-      coordinates: points.map((p) => [p.lon, p.lat]),
-    },
-    properties: {},
+    type: 'FeatureCollection',
+    features: lines.map((line) => ({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: line.coordinates },
+      properties: { band: line.band },
+    })),
   }
+}
+
+// One target's banded lines, remembered by the identity of its points array and
+// the band clock's step. A poll gives a new array only to the targets that got
+// a point, so the rest are not banded again; a new step of the clock makes
+// every remembered entry stale. Held weakly, so a dropped array frees its entry.
+const aisLinesCache = new WeakMap<AisTrailPoint[], { clockMs: number; lines: AgeBandedLine[] }>()
+
+function aisLinesFor(points: AisTrailPoint[], bandNowMs: number): AgeBandedLine[] {
+  const held = aisLinesCache.get(points)
+  if (held && held.clockMs === bandNowMs) return held.lines
+  const lines = groupLinesByAge(points, { nowMs: bandNowMs, windowMs: AIS_TRACK_WINDOW_MS })
+  aisLinesCache.set(points, { clockMs: bandNowMs, lines })
+  return lines
+}
+
+function bandColorExpression(colors: readonly string[]): ExpressionSpecification {
+  const expr: unknown[] = ['match', ['get', 'band']]
+  colors.forEach((color, band) => expr.push(band, color))
+  expr.push(colors[colors.length - 1])
+  return expr as ExpressionSpecification
+}
+
+const AIS_TRAIL_LINE_COLOR = bandColorExpression(AIS_BAND_COLORS)
+const SELF_TRAIL_LINE_COLOR = bandColorExpression(SELF_BAND_COLORS)
+const TRAIL_LINE_LAYOUT: LineLayerSpecification['layout'] = {
+  'line-join': 'round',
+  'line-cap': 'round',
+  'line-sort-key': ['get', 'band'],
 }
 
 // A map click that hasn't been committed to a placemark yet — the tooltip
@@ -290,7 +330,7 @@ export interface AnchorWatchMapProps {
   isImperial: boolean
   vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
-  aisTrails: Map<string, TrailPoint[]>
+  aisTrails: Map<string, AisTrailPoint[]>
   // Vessel id -> worst live collision-alarm state (ADR 0088), keyed the same
   // way collisionAlarmStatesByVessel keys it. Optional and left undefined by
   // every existing caller/test with no alarm feed wired up — the AIS marker
@@ -845,21 +885,41 @@ export function AnchorWatchMap({
   )
 
   // Trail data: the trails are snapshots that change identity only when a point arrives.
-  const postAnchorTrailGeoJSON = useMemo(() => trailToGeoJSON(vesselTrail), [vesselTrail])
+  // The own trail is banded across the whole stay, newest brightest.
+  const postAnchorTrailGeoJSON = useMemo(() => {
+    const nowMs = Date.now()
+    const windowMs = Math.max(nowMs - (vesselTrail[0]?.timestampMs ?? nowMs), 1)
+    return bandedLinesToGeoJSON(groupLinesByAge(vesselTrail, { nowMs, windowMs }))
+  }, [vesselTrail])
 
-  // Keyed on the names, not the array: the array is new on every AIS delta.
-  const activeAisNames = aisVessels.map(v => v.name).sort().join('\n')
-  const aisTrailsData = useMemo(() => {
-    const activeNames = new Set(activeAisNames === '' ? [] : activeAisNames.split('\n'))
-    const cutoffMs = Date.now() - AIS_TRAIL_MAX_AGE_MS
-    const features: GeoJSON.Feature<GeoJSON.LineString>[] = []
-    for (const [name, points] of aisTrails) {
-      if (!activeNames.has(name)) continue
-      const recentPoints = points.filter((p) => p.timestampMs >= cutoffMs)
-      if (recentPoints.length >= 2) features.push(trailToGeoJSON(recentPoints))
+  // AIS tracks are banded by age across their 24 hours, against a clock that
+  // moves in five minute steps: they are recomputed when a track changes, when
+  // the set of targets on the map changes (keyed on MMSI, not the array: the
+  // array is new on every AIS delta), and at each mark of that clock. One
+  // timeout to the next mark wakes the map, not a timer polling for it. The
+  // timeout reschedules itself every time it fires, so a wake that lands in the
+  // same step (a clock stepped back, an early timer) does not stop the clock.
+  const activeAisMmsis = aisVessels.map(v => v.mmsi).filter((m): m is string => !!m).sort().join('\n')
+  const [bandNowMs, setBandNowMs] = useState(() => bandClock(Date.now()))
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout>
+    const schedule = () => {
+      id = setTimeout(() => {
+        setBandNowMs(bandClock(Date.now()))
+        schedule()
+      }, msToNextBandClock(Date.now()))
     }
-    return { type: 'FeatureCollection' as const, features }
-  }, [aisTrails, activeAisNames])
+    schedule()
+    return () => clearTimeout(id)
+  }, [])
+  const aisTrailsData = useMemo(() => {
+    const active = new Set(activeAisMmsis === '' ? [] : activeAisMmsis.split('\n'))
+    const lines: AgeBandedLine[] = []
+    for (const [mmsi, points] of aisTrails) {
+      if (active.has(mmsi)) lines.push(...aisLinesFor(points, bandNowMs))
+    }
+    return bandedLinesToGeoJSON(lines)
+  }, [aisTrails, activeAisMmsis, bandNowMs])
 
   // ── Map click handler ────────────────────────────────────────────────────
   // Editing (reposition, radius drag) is gone entirely — every branch that
@@ -1530,48 +1590,26 @@ export function AnchorWatchMap({
         */}
         <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={showImageryLayer} />
 
-        {/* AIS vessel trails */}
-      {aisTrailsData.features.length > 0 && (
-        <Source id="ais-trails" type="geojson" lineMetrics data={aisTrailsData}>
-          <Layer
-            id="ais-trails-layer"
-            type="line"
-            paint={{
-              'line-width': 2.5,
-              'line-gradient': [
-                'interpolate',
-                ['linear'],
-                ['line-progress'],
-                0, 'rgba(245, 158, 11, 0)',
-                0.5, 'rgba(245, 158, 11, 0.4)',
-                1, 'rgba(245, 158, 11, 1)',
-              ],
-              'line-opacity': 0.9,
-            }}
-            layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-          />
-        </Source>
-      )}
+        {/* AIS vessel trails: recorded during the watch, brighter the newer */}
+        {aisTrailsData.features.length > 0 && (
+          <Source id="ais-trails" type="geojson" data={aisTrailsData}>
+            <Layer
+              id="ais-trails-layer"
+              type="line"
+              paint={{ 'line-width': 2.5, 'line-color': AIS_TRAIL_LINE_COLOR }}
+              layout={TRAIL_LINE_LAYOUT}
+            />
+          </Source>
+        )}
 
-        {/* Post-anchor tracking trail (ring buffer) */}
-        {postAnchorTrailGeoJSON.geometry.coordinates.length >= 2 && (
-          <Source id="vessel-trail-anchor" type="geojson" lineMetrics data={postAnchorTrailGeoJSON}>
+        {/* Own swing trail: dim yellow for the oldest stretch, bright for the newest */}
+        {postAnchorTrailGeoJSON.features.length > 0 && (
+          <Source id="vessel-trail-anchor" type="geojson" data={postAnchorTrailGeoJSON}>
             <Layer
               id="vessel-trail-anchor-layer"
               type="line"
-              paint={{
-                'line-width': 3,
-                'line-gradient': [
-                  'interpolate',
-                  ['linear'],
-                  ['line-progress'],
-                  0, '#fde047',
-                  0.7, '#facc15',
-                  1, '#f59e0b',
-                ],
-                'line-opacity': 0.9,
-              }}
-              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+              paint={{ 'line-width': 3, 'line-color': SELF_TRAIL_LINE_COLOR }}
+              layout={TRAIL_LINE_LAYOUT}
             />
           </Source>
         )}

@@ -66,7 +66,9 @@ Changing only the radius (the −/+ control, or the no-map path) never touches t
 anchor's saved position, and it doesn't need to hear back from the boat's
 instrument network first. Moving the anchor does need that confirmation, so a
 radius-only change still goes through if the instrument network is briefly
-unreachable. Neither change clears your swing trail.
+unreachable. Neither change clears your swing trail or the AIS tracks, and
+neither does **Undo**. After a move, boats are recorded within 500 m of the new
+anchor position, and the tracks already drawn stay where they are.
 
 The rode planner sidebar's **Apply as alarm radius** button also sets the radius
 to match the swing your planned rode and boat length need, without opening
@@ -78,8 +80,8 @@ you're lying properly. That's usually simpler than adjusting a long way.
 ## Raise the watch
 
 Open the Anchor Watch page, choose **Raise** (bottom left of the map) and
-confirm. This clears the watch, the trail and any pins placed in the rode
-planner for this anchoring. The Anchor Watch tile on a dashboard page has no
+confirm. This clears the watch, the trail, the AIS tracks and any pins placed in
+the rode planner for this anchoring. The Anchor Watch tile on a dashboard page has no
 Raise, so a stray touch on the tile can't end the watch.
 
 To have the watch raise itself when you motor away, turn on **Auto-raise anchor

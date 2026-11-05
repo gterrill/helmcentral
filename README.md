@@ -143,7 +143,6 @@ Stuck, or not sure it suits your boat? Ask in
   | Plugin | Provides |
   | --- | --- |
   | [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) | True wind and other derived navigation data |
-  | [`tracks`](https://github.com/SignalK/tracks) | Vessel trails and historical path data |
   | [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) | Generator and advanced electrical state (Victron GX devices) |
   | [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Optional, only for InfluxDB-backed history |
   | [`mayara-server-signalk-plugin`](https://github.com/MarineYachtRadar/mayara-server-signalk-plugin) | Optional, ARPA radar targets. Needs a [mayara-server](https://github.com/MarineYachtRadar/mayara-server) reaching your radar |

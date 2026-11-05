@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,41 +16,6 @@ import (
 )
 
 // ── helpers ────────────────────────────────────────────────────────────────────
-
-// makeTracksServer serves the tracks plugin endpoint over HTTP — that one is a
-// REST API the delta stream does not carry — while seeding vessel data into the
-// snapshot, which is where every vessel lookup now reads from (ADR 0037). Self
-// is seeded too so name-based self-filtering keeps working.
-func makeTracksServer(t *testing.T, tracksBody map[string]any, vesselsBody map[string]any) *httptest.Server {
-	t.Helper()
-	tracksJSON, _ := json.Marshal(tracksBody)
-	vesselsJSON, _ := json.Marshal(vesselsBody)
-
-	snapshot := newSignalKSnapshot()
-	for id, tree := range vesselsBody {
-		if asMap, ok := tree.(map[string]any); ok {
-			snapshot.contexts[vesselContextPrefix+id] = asMap
-		}
-	}
-	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
-	snapshot.setSelfContext("vessels.self")
-	withGlobalSnapshot(t, snapshot)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/api/tracks") || strings.Contains(r.URL.Path, "v1/api/tracks"):
-			w.Write(tracksJSON)
-		case strings.Contains(r.URL.Path, "/vessels/self"):
-			w.Write([]byte(`{"name":"TESTSELF"}`))
-		case strings.HasSuffix(r.URL.Path, "/vessels"):
-			w.Write(vesselsJSON)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	return srv
-}
 
 func settingsFileForServer(t *testing.T, serverURL string) string {
 	t.Helper()
@@ -71,293 +34,9 @@ func resetTracksStateForTest(t *testing.T) {
 	trackMu.Lock()
 	selfTrack = newVesselTrail()
 	trackMu.Unlock()
-
-	tracksAISTrails = newTracksAISTrailsCache()
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
-
-func TestFetchSignalKAISTrails_ReturnsNamedTrails(t *testing.T) {
-	tracksBody := map[string]any{
-		"vessels.urn:mrn:imo:mmsi:123456789": map[string]any{
-			"type": "MultiLineString",
-			"coordinates": [][][]float64{
-				{{152.91, -25.29}, {152.92, -25.30}},
-			},
-		},
-	}
-	vesselsBody := map[string]any{
-		"urn:mrn:imo:mmsi:123456789": map[string]any{
-			"name": "PEGASUS",
-		},
-	}
-
-	srv := makeTracksServer(t, tracksBody, vesselsBody)
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	trails := fetchSignalKAISTrails(settingsPath)
-
-	if len(trails) != 1 {
-		t.Fatalf("expected 1 trail, got %d", len(trails))
-	}
-	pts, ok := trails["PEGASUS"]
-	if !ok {
-		t.Fatal("expected trail keyed by vessel name PEGASUS")
-	}
-	if len(pts) != 2 {
-		t.Fatalf("expected 2 points, got %d", len(pts))
-	}
-	// SignalK/tracks uses [lon, lat] order; adapter must flip to lat/lon.
-	if pts[0].Lat != -25.29 || pts[0].Lon != 152.91 {
-		t.Errorf("first point lat/lon mismatch: got %+v", pts[0])
-	}
-}
-
-func TestFetchSignalKAISTrails_ExcludesSelf(t *testing.T) {
-	tracksBody := map[string]any{
-		"vessels.self": map[string]any{
-			"type": "MultiLineString",
-			"coordinates": [][][]float64{
-				{{152.91, -25.29}},
-			},
-		},
-	}
-	srv := makeTracksServer(t, tracksBody, map[string]any{})
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	trails := fetchSignalKAISTrails(settingsPath)
-	if len(trails) != 0 {
-		t.Fatalf("expected self vessel excluded, got %d trails", len(trails))
-	}
-}
-
-func TestFetchSignalKAISTrails_EmptyOnBadJSON(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("not-json"))
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	trails := fetchSignalKAISTrails(settingsPath)
-	if len(trails) != 0 {
-		t.Fatalf("expected empty result on bad JSON, got %d trails", len(trails))
-	}
-}
-
-func TestFetchSignalKAISTrails_EmptyOnNonOKStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	trails := fetchSignalKAISTrails(settingsPath)
-	if len(trails) != 0 {
-		t.Fatalf("expected empty result on non-OK status, got %d trails", len(trails))
-	}
-}
-
-// TestFetchSignalKAISTrailsResult_404IsALegitimateAbsentEndpointNotAnError
-// pins the boat's actual current state (backend perf audit #10): the
-// SignalK tracks plugin is not installed there, so every fetch gets a 404.
-// That is a configuration fact, not a failure -- the same idiom
-// fetchSignalKNotificationsTree already uses for a 404'd sub-resource
-// (notification_sync.go) -- so it must not be reported as an error, only
-// return empty trails.
-func TestFetchSignalKAISTrailsResult_404IsALegitimateAbsentEndpointNotAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-
-	trails, err := fetchSignalKAISTrailsResult(settingsPath)
-	if err != nil {
-		t.Fatalf("a 404 tracks endpoint must not surface as an error, got %v", err)
-	}
-	if len(trails) != 0 {
-		t.Fatalf("expected empty trails for a 404, got %d", len(trails))
-	}
-}
-
-// TestFetchSignalKAISTrailsResult_404LogsOncePerStateChange: /api/tracks
-// refreshes on demand every 15 s while a map is open, so a line per 404 would
-// flood the log buffer on a boat without the tracks plugin.
-func TestFetchSignalKAISTrailsResult_404LogsOncePerStateChange(t *testing.T) {
-	var found atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !found.Load() {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	tracksEndpointMissing.Store(false)
-	t.Cleanup(func() { tracksEndpointMissing.Store(false) })
-
-	var buf strings.Builder
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-
-	for i := 0; i < 3; i++ {
-		if _, err := fetchSignalKAISTrailsResult(settingsPath); err != nil {
-			t.Fatalf("fetch %d: %v", i, err)
-		}
-	}
-	if got := strings.Count(buf.String(), "(404)"); got != 1 {
-		t.Fatalf("expected one 404 log line across three fetches, got %d:\n%s", got, buf.String())
-	}
-
-	found.Store(true)
-	for i := 0; i < 2; i++ {
-		if _, err := fetchSignalKAISTrailsResult(settingsPath); err != nil {
-			t.Fatalf("fetch after recovery %d: %v", i, err)
-		}
-	}
-	if got := strings.Count(buf.String(), "answered again"); got != 1 {
-		t.Fatalf("expected one recovery log line, got %d:\n%s", got, buf.String())
-	}
-}
-
-// TestFetchSignalKAISTrailsResult_OtherNonOKStatusReturnsAnError guards the
-// fallback policy (AGENTS.md): unlike 404 (an absent, optional endpoint), a
-// 5xx or other unexpected status is a real failure and must surface as an
-// error rather than silently becoming an empty success -- the distinction
-// TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError
-// below depends on below the cache layer.
-func TestFetchSignalKAISTrailsResult_OtherNonOKStatusReturnsAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-
-	if _, err := fetchSignalKAISTrailsResult(settingsPath); err == nil {
-		t.Fatalf("expected a real error for a non-404 non-OK status")
-	}
-}
-
-// TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError is
-// the end-to-end reason fetchSignalKAISTrailsResult must distinguish a real
-// error from the 404-as-absent-feature case above: finishRefresh keeps the
-// last-good snapshot on an error rather than overwriting it with empty, so a
-// plugin restart or a blip does not blank the map until the next successful
-// poll. Before this fix every non-OK status (the 503 here included) returned
-// a nil error, so this clobbered good data with empty on the very first
-// blip.
-func TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError(t *testing.T) {
-	resetTracksStateForTest(t)
-
-	tracksBody := map[string]any{
-		"vessels.urn:mrn:imo:mmsi:123456789": map[string]any{
-			"type":        "MultiLineString",
-			"coordinates": [][][]float64{{{152.91, -25.29}}},
-		},
-	}
-	vesselsBody := map[string]any{
-		"urn:mrn:imo:mmsi:123456789": map[string]any{"name": "PEGASUS"},
-	}
-	tracksJSON, _ := json.Marshal(tracksBody)
-	vesselsJSON, _ := json.Marshal(vesselsBody)
-
-	var failNext atomic.Bool
-
-	snapshot := newSignalKSnapshot()
-	for id, tree := range vesselsBody {
-		if asMap, ok := tree.(map[string]any); ok {
-			snapshot.contexts[vesselContextPrefix+id] = asMap
-		}
-	}
-	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
-	snapshot.setSelfContext("vessels.self")
-	withGlobalSnapshot(t, snapshot)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(r.URL.Path, "v1/api/tracks"):
-			if failNext.Load() {
-				http.Error(w, "unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			w.Write(tracksJSON)
-		case strings.Contains(r.URL.Path, "/vessels/self"):
-			w.Write([]byte(`{"name":"TESTSELF"}`))
-		case strings.HasSuffix(r.URL.Path, "/vessels"):
-			w.Write(vesselsJSON)
-		}
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	good := tracksAISTrails.get(settingsPath)
-	if len(good) != 1 {
-		t.Fatalf("expected the initial fetch to warm the cache with 1 trail, got %d", len(good))
-	}
-
-	// Force the next fetch to fail and expire the cache so get() re-fetches.
-	failNext.Store(true)
-	tracksAISTrails.snapshot.fetchedAt = time.Now().Add(-1 * time.Minute)
-
-	stillGood := tracksAISTrails.get(settingsPath)
-	if len(stillGood) != 1 {
-		t.Fatalf("a transient upstream error must not clobber the last-good trails, got %d", len(stillGood))
-	}
-}
-
-func TestFetchSignalKAISTrails_SkipsInvalidCoordinates(t *testing.T) {
-	tracksBody := map[string]any{
-		"vessels.urn:mrn:imo:mmsi:111": map[string]any{
-			"type": "MultiLineString",
-			"coordinates": [][][]float64{
-				{{999.0, 999.0}}, // out of range
-			},
-		},
-	}
-	srv := makeTracksServer(t, tracksBody, map[string]any{})
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	trails := fetchSignalKAISTrails(settingsPath)
-	if len(trails) != 0 {
-		t.Fatalf("expected invalid coordinates skipped, got %d trails", len(trails))
-	}
-}
 
 // TestMotoringTrail_StartsEmptyAndFillsOnlyViaRecordMotoringPoint guards the
 // removal of Influx startup seeding: the motoring trail must start empty and
@@ -626,62 +305,9 @@ func TestSampleTracks_SkipsTrueWindGustRecordingWhenTrueWindIsStale(t *testing.T
 	}
 }
 
-// TestSampleTracks_DoesNotRefreshAISTrailsCache guards the removal of the
-// poller's direct tracksAISTrails.refresh call (backend perf audit #10):
-// getTracksHandler's own get() already refreshes on demand within the
-// cache's 15s freshness window, so the poller hitting the same upstream
-// endpoint on every 5s tick regardless of whether a client had the map open
-// just doubled the load for nothing. The position here defaults to the
-// -1,-1 sentinel (no navigation.position in the body), which is exactly what
-// the two tests above use to reach this same block without tripping
-// hasUsableVesselPosition's Overpass lookup -- the loose range check a few
-// lines up in sampleTracks treats it as "in range" regardless.
-func TestSampleTracks_DoesNotRefreshAISTrailsCache(t *testing.T) {
-	resetTracksStateForTest(t)
-	resetGNSSPositionValidationState()
-	t.Cleanup(resetGNSSPositionValidationState)
-
-	body := []byte(`{
-		"navigation": {
-			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
-			"state": {"value": "anchored"}
-		}
-	}`)
-	seedSelfTree(t, string(body))
-
-	var tracksCalls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "tracks") {
-			tracksCalls.Add(1)
-			w.Write([]byte(`{}`))
-			return
-		}
-		w.Write(body)
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-
-	sampleTracks(settingsPath)
-
-	if got := tracksCalls.Load(); got != 0 {
-		t.Fatalf("sampleTracks must not hit the tracks endpoint directly, got %d call(s)", got)
-	}
-
-	// The cache is still cold; a handler's own get() must still warm it on
-	// demand -- this is the "handler refreshes on demand" half of the fix,
-	// confirming the removal above didn't leave the cache permanently cold.
-	tracksAISTrails.get(settingsPath)
-	if got := tracksCalls.Load(); got != 1 {
-		t.Fatalf("expected get() to warm the cold cache exactly once, got %d", got)
-	}
-}
-
 // TestStartTrackPoller_StopsOnContextCancellation pins the shutdown wiring
 // (backend perf audit #10): the poller used to run forever regardless of
-// streamCtx, so main.go's shutdown never stopped it. Now that
-// tracksAISTrails.refresh is gone (the test above), sampleTracks makes no
+// streamCtx, so main.go's shutdown never stopped it. sampleTracks makes no
 // HTTP call at all for a self vessel with no usable position -- every field
 // it reads comes off the in-memory snapshot -- so ticking is observed
 // through windGustHistory (a plain, position-independent per-tick side
@@ -729,127 +355,35 @@ func TestStartTrackPoller_StopsOnContextCancellation(t *testing.T) {
 	}
 }
 
-func TestGetTracksHandler_CachesAISFetchAndRevalidatesETag(t *testing.T) {
+func TestGetTracksHandler_RevalidatesETag(t *testing.T) {
 	resetTracksStateForTest(t)
-
 	recordTrackSelf(-25.29, 152.91)
 
-	tracksBody := map[string]any{
-		"vessels.urn:mrn:imo:mmsi:123456789": map[string]any{
-			"type":        "MultiLineString",
-			"coordinates": [][][]float64{{{152.91, -25.29}, {152.92, -25.30}}},
-		},
-	}
-	vesselsBody := map[string]any{
-		"urn:mrn:imo:mmsi:123456789": map[string]any{
-			"name": "PEGASUS",
-		},
-	}
-
-	tracksJSON, _ := json.Marshal(tracksBody)
-	vesselsJSON, _ := json.Marshal(vesselsBody)
-
-	var trackCalls atomic.Int32
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-
-	snapshot := newSignalKSnapshot()
-	for id, tree := range vesselsBody {
-		if asMap, ok := tree.(map[string]any); ok {
-			snapshot.contexts[vesselContextPrefix+id] = asMap
-		}
-	}
-	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
-	snapshot.setSelfContext("vessels.self")
-	withGlobalSnapshot(t, snapshot)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/api/tracks") || strings.Contains(r.URL.Path, "v1/api/tracks"):
-			if trackCalls.Add(1) == 1 {
-				select {
-				case started <- struct{}{}:
-				default:
-				}
-			}
-			<-release
-			w.Write(tracksJSON)
-		case strings.Contains(r.URL.Path, "/vessels/self"):
-			w.Write([]byte(`{"name":"TESTSELF"}`))
-		case strings.HasSuffix(r.URL.Path, "/vessels"):
-			w.Write(vesselsJSON)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SETTINGS_FILE", settingsPath)
-	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
-	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
-	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
-
-	type responseResult struct {
-		rec *httptest.ResponseRecorder
-		err error
-	}
-	doRequest := func(etag string) responseResult {
+	doRequest := func(etag string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/api/tracks", nil)
 		if etag != "" {
 			req.Header.Set("If-None-Match", etag)
 		}
 		rec := httptest.NewRecorder()
 		if err := getTracksHandler(echo.New().NewContext(req, rec)); err != nil {
-			return responseResult{err: err}
+			t.Fatalf("tracks handler returned error: %v", err)
 		}
-		return responseResult{rec: rec}
+		return rec
 	}
 
-	results := make(chan responseResult, 3)
-	go func() { results <- doRequest("") }()
-
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first tracks request never reached the upstream server")
+	first := doRequest("")
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", first.Code)
 	}
-
-	go func() { results <- doRequest("") }()
-	go func() { results <- doRequest("") }()
-
-	close(release)
-
-	var firstETag string
-	for i := 0; i < 3; i++ {
-		res := <-results
-		if res.err != nil {
-			t.Fatalf("tracks handler returned error: %v", res.err)
-		}
-		if res.rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK, got %d", res.rec.Code)
-		}
-		if firstETag == "" {
-			firstETag = res.rec.Header().Get("ETag")
-		}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("expected an ETag on the tracks response")
 	}
-
-	if got := trackCalls.Load(); got != 1 {
-		t.Fatalf("expected one upstream AIS fetch to satisfy three concurrent requests, got %d", got)
+	revalidated := doRequest(etag)
+	if revalidated.Code != http.StatusNotModified {
+		t.Fatalf("expected 304 Not Modified for matching ETag, got %d", revalidated.Code)
 	}
-	if firstETag == "" {
-		t.Fatal("expected an ETag on the cached tracks response")
-	}
-
-	revalidated := doRequest(firstETag)
-	if revalidated.err != nil {
-		t.Fatalf("ETag revalidation request failed: %v", revalidated.err)
-	}
-	if revalidated.rec.Code != http.StatusNotModified {
-		t.Fatalf("expected 304 Not Modified for matching ETag, got %d", revalidated.rec.Code)
-	}
-	if body := strings.TrimSpace(revalidated.rec.Body.String()); body != "" {
+	if body := strings.TrimSpace(revalidated.Body.String()); body != "" {
 		t.Fatalf("expected empty body for 304 response, got %q", body)
 	}
 }
@@ -1084,7 +618,12 @@ func TestRecordNearbyVesselContacts_LogsOncePerVesselIDWithNoMMSI(t *testing.T) 
 
 	state := vesselStateData{Latitude: -21.595297, Longitude: 149.796444, Status: "anchored"}
 	for i := 0; i < 3; i++ {
-		recordNearbyVesselContacts("", "", "", state, "")
+		now := time.Now().UTC()
+		nearby, err := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, nil, nearbyVesselsUnlimited)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recordNearbyVesselContacts(nearby, state, "", now)
 	}
 
 	if got := strings.Count(buf.String(), "NO MMSI BOAT"); got != 1 {
@@ -1121,7 +660,12 @@ func TestRecordNearbyVesselContacts_RecordsEveryVesselInRangeNotJustTheNearestTe
 	seedVesselTrees(t, body)
 
 	state := vesselStateData{Latitude: selfLat, Longitude: selfLon, Status: "anchored"}
-	recordNearbyVesselContacts("", "", "", state, "")
+	now := time.Now().UTC()
+	nearby, err := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, nil, nearbyVesselsUnlimited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordNearbyVesselContacts(nearby, state, "", now)
 
 	latest, err := store.latestContactsByName("", 100)
 	if err != nil {

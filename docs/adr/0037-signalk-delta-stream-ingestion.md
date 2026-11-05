@@ -37,7 +37,7 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 
 7. **REST survives in exactly one place: probing.** Connection *setup* has to reach a server that is not the configured one and has no stream open — discovery names every host it finds on the LAN, and the settings screen verifies a new address before saving it (ADR 0028). Answering either from the snapshot would report the currently configured vessel, so discovery would label every result with the same boat name and a broken address would validate clean and take the dashboard offline on save. `backend/signalk_probe.go` holds `probeSignalKTree`/`probeSignalKReachable`/`probeSignalKVesselName` for that, and nothing else may use them.
 
-   The tracks plugin endpoint (`/signalk/v1/api/tracks`, read by `fetchSignalKAISTrails`) also stays REST: it serves historical track geometry, which deltas do not carry at all.
+   The tracks plugin endpoint (`/signalk/v1/api/tracks`, read by `fetchSignalKAISTrails`) also stayed REST: it served historical track geometry, which deltas do not carry at all. ADR 0263 later removed that read.
 
 8. **Per-path staleness is mandatory.** Under REST, an absent key meant no data. Under deltas a value persists indefinitely until superseded, so a dead sensor would otherwise stay frozen at its last good reading forever. `pathSeen` records receive time per `context|path`; `stale(context, path, maxAge, now)` takes `now` as a parameter so callers drive it deterministically.
 

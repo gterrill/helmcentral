@@ -100,7 +100,6 @@ role gets no access.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SIGNALK_VESSEL_PATH` | `/signalk/v1/api/vessels/self` | Self-vessel path |
-| `SIGNALK_VESSELS_PATH` | `/signalk/v1/api/vessels` | All-vessels path, for AIS targets |
 | `SIGNALK_READ_TIMEOUT_MS` | `3000` | Per-request read timeout |
 | `HELMCENTRAL_DISCOVERY_SUBNET` | *(derived)* | `/24` to sweep when the browser hostname and configured address give no usable hint |
 | `HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS` | `600` | Per-host dial timeout during discovery |

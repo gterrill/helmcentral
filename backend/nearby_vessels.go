@@ -51,6 +51,27 @@ type nearbyVessel struct {
 	PositionSeen time.Time `json:"-"`
 }
 
+// nearbyFeedVessels picks what the feed carries from the full list, sorted by
+// range from the boat: the 10 nearest, and during an anchor watch (watch is
+// not nil) also every vessel within aisAnchorRecordRadiusM of the anchor, so
+// every boat whose track is recorded has a marker however crowded the
+// anchorage is (ADR 0263). It stays in range order.
+func nearbyFeedVessels(all []nearbyVessel, watch *anchorWatchData) []nearbyVessel {
+	if len(all) <= nearbyVesselsDefaultLimit {
+		return all
+	}
+	feed := append([]nearbyVessel(nil), all[:nearbyVesselsDefaultLimit]...)
+	if watch == nil {
+		return feed
+	}
+	for _, v := range all[nearbyVesselsDefaultLimit:] {
+		if withinAISAnchorRecordRadius(*watch, v.Lat, v.Lon) {
+			feed = append(feed, v)
+		}
+	}
+	return feed
+}
+
 // buildNearbyVesselsPayload produces the /api response body. Split from the handler so
 // the SSE stream emits the identical shape without the two drifting apart.
 func buildNearbyVesselsPayload() map[string]any {
@@ -73,8 +94,15 @@ func buildNearbyVesselsPayload() map[string]any {
 
 		state, selfErr := fetchSignalKVesselState()
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
-			nearby, nearbyErr := fetchSignalKNearbyVessels(state.Latitude, state.Longitude, now, excludedNames)
+			// One fetch of the whole list, then the selection: the 10 nearest, plus
+			// during an anchor watch every boat within 500 m of the anchor.
+			all, nearbyErr := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, excludedNames, nearbyVesselsUnlimited)
 			if nearbyErr == nil {
+				var watchPtr *anchorWatchData
+				if watch, active, _ := currentAnchorWatch(); active {
+					watchPtr = &watch
+				}
+				nearby := nearbyFeedVessels(all, watchPtr)
 				if globalNearbyContactStore != nil {
 					enrichNearbyVesselsWithContactHistory(globalNearbyContactStore, nearby)
 				}
