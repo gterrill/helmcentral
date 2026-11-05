@@ -4,6 +4,7 @@ import { DocumentDetailsPage, type DocumentDetailsPageHandle } from '@/component
 import { DocumentsPanel } from '@/components/documents-panel'
 import { useDocumentPager } from '@/hooks/use-document-pager'
 import { useDocumentsRoute } from '@/hooks/use-documents-route'
+import type { MateAskOptions } from '@/hooks/use-mate-sheet-request'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import type { HelpTarget } from '@/lib/help-links'
 
@@ -13,7 +14,7 @@ interface DocumentsRoutePanelProps {
   initialDocumentId: string | null
   onOpenHelp: (target: HelpTarget) => void
   onOpenAssistantSettings: () => void
-  onAskMate: (question: string, options?: { newConversation?: boolean }) => void
+  onAskMate: (question: string, options?: Pick<MateAskOptions, 'newConversation'>) => void
   /** The open document's name, for the Mate sheet's screen context. */
   onDetailsTitleChange: (title: string | null) => void
 }

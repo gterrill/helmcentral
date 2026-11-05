@@ -359,6 +359,30 @@ describe('MateSheet', () => {
       await waitFor(() => expect(onContextDone).toHaveBeenCalledTimes(1))
     })
 
+    // ADR 0257: the release names the request the send began under, so a
+    // request opened since cannot lose its context to this send.
+    it('names the request the send began under', async () => {
+      vi.stubGlobal('fetch', buildFetch((id) => answer(id)))
+      const onContextDone = vi.fn()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} requestId={7} initialQuestion="Why did House Bank Low go off?" newConversation
+          screen={{ panel: 'alarms', alarm_id: 'r1', alarm_title: 'House Bank Low' }} canWrite readAloud={false}
+          onOpenPanel={vi.fn()} onContextDone={onContextDone} />,
+      )
+      await waitFor(() => expect(onContextDone).toHaveBeenCalledWith(7))
+    })
+
+    it('sends the same words again under a new request while open', async () => {
+      let sent = 0
+      vi.stubGlobal('fetch', buildFetch((id) => { sent += 1; return answer(id) }))
+      const props = { open: true, onOpenChange: vi.fn(), newConversation: true, screen: { panel: 'alarms' }, canWrite: true, readAloud: false, onOpenPanel: vi.fn() }
+      const { rerender } = render(<MateSheet {...props} requestId={1} initialQuestion="Same words" />)
+      await screen.findByText(/It tripped at 49/)
+      expect(sent).toBe(1)
+      rerender(<MateSheet {...props} requestId={2} initialQuestion="Same words" />)
+      await waitFor(() => expect(sent).toBe(2))
+    })
+
     it('is released by New conversation', async () => {
       vi.stubGlobal('fetch', buildFetch())
       const onContextDone = vi.fn()
@@ -863,8 +887,8 @@ describe('MateSheet', () => {
   })
 
   // Code-review finding: "opening the Mate sheet ALWAYS shows a fresh empty
-  // chat". The sheet never truly unmounts once opened (App.tsx's
-  // mateSheetHasOpenedRef keeps it mounted, only `open` toggles) - without
+  // chat". The sheet never truly unmounts once opened (useMateSheetRequest
+  // keeps it mounted, only `open` toggles) - without
   // resetting on each open, whatever conversation the operator last picked
   // (or sent a message into) stayed active across every later close/reopen,
   // for the rest of the browser session.

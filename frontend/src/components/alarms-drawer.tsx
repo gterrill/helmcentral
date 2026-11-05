@@ -26,7 +26,7 @@ import { formatAppLocation } from '@/lib/app-location'
 import { runCostLabel } from '@/lib/watches'
 import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
-import type { MateAlarmContext } from '@/lib/mate-screen'
+import type { MateAskOptions } from '@/hooks/use-mate-sheet-request'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 import { errorMessage } from '@/lib/errors'
@@ -45,8 +45,8 @@ function formatDwell(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`
 }
 
-/** How a page opens Mate with a question (App's openMate); the alarm is the one the question is about. */
-export type AskMateAboutAlarm = (question: string, options: { newConversation: true; alarm: MateAlarmContext }) => void
+/** How a page opens Mate with a question (`ask` from useMateSheetRequest); the alarm is the one the question is about. */
+export type AskMateAboutAlarm = (question: string, options: Required<Pick<MateAskOptions, 'newConversation' | 'alarm'>>) => void
 
 interface AlarmsDrawerProps {
   /**

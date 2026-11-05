@@ -59,6 +59,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   input, not a battery" now has its own line, so a long name can't cut it off,
   and it stays when the source stops reporting, so that you don't assign a
   charger input as a battery by mistake.
+- **Asking Mate the same words twice now asks twice.** If you tapped **Ask Mate**
+  with the same question while the Mate sheet was still open, nothing happened
+  the second time. It now sends the question again.
+- **A watch report's answer draft stays linked to its report.** If you opened
+  Mate about one report and then opened it about another while the first answer
+  was still coming in, the second chat could lose its link to its report. It
+  keeps it now.
 
 ## [0.60.0] - 2026-11-04
 
