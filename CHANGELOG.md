@@ -52,6 +52,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate no longer counts a passage check that failed as one that ran.** If the
+  go/no-go check errored and Mate then talked about wind against your course or
+  your passage limits, the answer went out as it was. Mate now answers again and
+  says the check couldn't run. If the check failed because a limit is missing,
+  Mate can still tell you which one to set. A wind forecast that failed, or that
+  came back without wind angles, no longer counts as the angle either. Mate also
+  no longer takes a blank depth as one you gave it when it describes an
+  anchorage.
 - **Discovery no longer says a named battery has no name.** "The boat gives it
   no name" now only appears on a battery that you haven't assigned to an
   equipment item yet.

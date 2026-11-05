@@ -68,7 +68,7 @@ func TestPassageGuardTrigger(t *testing.T) {
 		if tc.limitsSet {
 			limits = pwLimitsAll()
 		}
-		if got, _ := pwToolDeps(limits).checkDraft(tc.text, nil, nil); got != tc.want {
+		if got, _ := pwToolDeps(limits).checkDraft(tc.text, nil); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -79,12 +79,32 @@ func TestPassageGuardTrigger(t *testing.T) {
 // assess_passage_window.
 func guardRun(t *testing.T, limits passageLimits, rounds ...string) (assistantReply, *queuedChatDoer, *[]recordedEvent) {
 	t.Helper()
-	d := pwToolDepsWithCoastline(limits)
+	return guardRunWith(t, pwToolDepsWithCoastline(limits), rounds...)
+}
+
+// windFromEast gives d a forecast whose wind blows from 90 degrees. The
+// fixture's wind from 0 reads as an unknown direction to get_wind_forecast, so
+// it returns no rel_wind labels.
+func windFromEast(d assistantToolDeps) assistantToolDeps {
+	var hours []weatherHourPoint
+	for t := pwDay(19, 0); !t.After(pwDay(40, 23)); t = t.Add(time.Hour) {
+		hours = append(hours, weatherHourPoint{Time: t, WindSpeedMS: kn(25), WindGustMS: kn(30), WindDirectionDeg: 90})
+	}
+	wx := &pwWeather{bundle: weatherForecastBundle{Hourly: hours}}
+	d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
+	return d
+}
+
+// guardRunWith is guardRun with the tool deps given.
+func guardRunWith(t *testing.T, d assistantToolDeps, rounds ...string) (assistantReply, *queuedChatDoer, *[]recordedEvent) {
+	t.Helper()
 	doer := &queuedChatDoer{}
 	for _, r := range rounds {
 		switch r {
 		case "TOOL":
 			doer.responses = append(doer.responses, toolCallResponse(t, "call_1", mateToolAssessPassageWindow.name, pwToolArgs, usage(1, 1, 0)))
+		case "TOOL_BADARGS":
+			doer.responses = append(doer.responses, toolCallResponse(t, "call_1", mateToolAssessPassageWindow.name, `{"legs":[]}`, usage(1, 1, 0)))
 		case "WIND_COURSE":
 			doer.responses = append(doer.responses, toolCallResponse(t, "call_1", mateToolGetWindForecast.name, `{"lat":-19,"lon":147,"course_deg":152}`, usage(1, 1, 0)))
 		case "WIND_NOCOURSE":
@@ -144,10 +164,80 @@ func TestPassageGuard_NoExtraRoundWhenTheToolRan(t *testing.T) {
 	}
 }
 
+// pwLimitsNoAhead leaves the ahead sector without a no-go, so the boat's own
+// northbound leg in a northerly makes assess_passage_window fail with the
+// operator's fix in the error.
+func pwLimitsNoAhead() passageLimits {
+	l := pwLimitsAll()
+	l.Ahead = passageSectorLimits{}
+	return l
+}
+
+// lastUserTurn is the text of the final message in a request: the correction.
+func lastUserTurn(doer *queuedChatDoer, request int) string {
+	m := doer.requests[request].Messages
+	return string(m[len(m)-1].Content)
+}
+
+// A failed check can carry the operator's fix: the limits are missing a
+// no-go. Relaying it must not be sent back as a claim about the limits.
+func TestPassageGuard_AFailedCheckThatNamesTheLimitsMayBeRelayed(t *testing.T) {
+	answer := "Set the ahead no-go wind in Settings → Mate → Passage limits and I'll score it."
+	_, doer, _ := guardRun(t, pwLimitsNoAhead(), "TOOL", answer)
+	if len(doer.requests) != 2 {
+		t.Fatalf("requests = %d, want 2 (failed check, answer accepted)", len(doer.requests))
+	}
+}
+
+// Any other failure says nothing about the limits, so a claim about them is
+// still wrong, and the send-back must not tell Mate to repeat the call.
+func TestPassageGuard_AnotherFailureDoesNotExcuseALimitsClaim(t *testing.T) {
+	_, doer, _ := guardRun(t, pwLimitsAll(), "TOOL_BADARGS", "Your passage limits are not set.", guardGood)
+	if len(doer.requests) != 3 {
+		t.Fatalf("requests = %d, want 3 (failed check, draft, corrected answer)", len(doer.requests))
+	}
+	if ins := lastUserTurn(doer, 2); strings.Contains(ins, "call assess_passage_window for") || !strings.Contains(ins, "could not run") {
+		t.Errorf("send-back after a failed check = %q", ins)
+	}
+}
+
+// The check failed, so the send-back for a wind judgement must not point Mate
+// at it again: a repeat fails, stalls the round budget and forces a final
+// answer with no check at all.
+func TestPassageGuard_AFailedCheckIsNotRetriedByTheWindSendBack(t *testing.T) {
+	_, doer, _ := guardRun(t, pwLimitsNoAhead(), "TOOL", "A northerly gives you a head sea.", guardGood)
+	if len(doer.requests) != 3 {
+		t.Fatalf("requests = %d, want 3 (failed check, draft, corrected answer)", len(doer.requests))
+	}
+	ins := lastUserTurn(doer, 2)
+	for _, want := range []string{"failed", "Do not call assess_passage_window again", "could not run", "rel_wind"} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("send-back lacks %q: %q", want, ins)
+		}
+	}
+	if strings.Contains(ins, "call assess_passage_window for the legs") {
+		t.Errorf("send-back still instructs a call: %q", ins)
+	}
+	for i, req := range doer.requests {
+		if i > 0 && len(req.Tools) == 0 {
+			t.Errorf("request %d had its tools withdrawn: the stall budget was spent", i)
+		}
+	}
+}
+
 func TestPassageGuard_NoExtraRoundWhenForecastGaveTheAngle(t *testing.T) {
-	_, doer, _ := guardRun(t, pwLimitsAll(), "WIND_COURSE", "A head sea on the bow all day.")
+	_, doer, _ := guardRunWith(t, windFromEast(pwToolDepsWithCoastline(pwLimitsAll())), "WIND_COURSE", "A head sea on the bow all day.")
 	if len(doer.requests) != 2 {
 		t.Fatalf("requests = %d, want 2 (forecast round, answer)", len(doer.requests))
+	}
+}
+
+// A forecast that ran with a course but whose wind direction is unknown (0
+// reads as unknown) returns no rel_wind labels, so it gave no angle.
+func TestPassageGuard_ForecastWithNoLabelsDoesNotGiveTheAngle(t *testing.T) {
+	_, doer, _ := guardRun(t, pwLimitsAll(), "WIND_COURSE", "A head sea on the bow all day.", guardGood)
+	if len(doer.requests) != 3 {
+		t.Fatalf("requests = %d, want 3 (forecast round, draft, corrected answer)", len(doer.requests))
 	}
 }
 
@@ -248,12 +338,56 @@ func TestPassageLimitsStatusIsInTheLivePartNotTheStable(t *testing.T) {
 	}
 }
 
+// A passage check that errored or never ran (its result is "") has told Mate
+// nothing, so it must not excuse a wind or limits claim.
+func TestPassageGuard_AFailedPassageCheckDoesNotSatisfyIt(t *testing.T) {
+	d := pwToolDeps(pwLimitsAll())
+	claim, wind := "Set passage limits in Settings.", "A northerly gives you a head sea."
+	if got, _ := d.checkDraft(claim, runOf(assessCall(), []string{""})); got != "passage limits claim" {
+		t.Errorf("failed check, limits claim: trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(wind, runOf(assessCall(), []string{""})); got != "relative wind" {
+		t.Errorf("failed check, relative wind: trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(claim, runOf(assessCall(), okResults(assessCall()))); got != "" {
+		t.Errorf("a check that ran satisfies the claim, trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(wind, runOf(assessCall(), okResults(assessCall()))); got != "" {
+		t.Errorf("a check that ran satisfies the wind judgement, trigger = %q", got)
+	}
+}
+
+// A forecast that errored gave Mate no rel_wind labels, even when it was asked
+// for a course.
+func TestPassageGuard_AFailedAngledForecastDoesNotSatisfyIt(t *testing.T) {
+	d := pwToolDeps(pwLimitsAll())
+	var c openRouterToolCall
+	c.Function.Name = mateToolGetWindForecast.name
+	c.Function.Arguments = `{"lat":-19,"lon":147,"course_deg":152}`
+	calls := []openRouterToolCall{c}
+	wind := "A northerly gives you a head sea."
+	if got, _ := d.checkDraft(wind, runOf(calls, []string{""})); got != "relative wind" {
+		t.Errorf("failed forecast: trigger = %q", got)
+	}
+	// It ran, but no rel_wind or rel_wave label came back (the direction was
+	// unknown), so nothing gave Mate the angle.
+	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","dir":null}]}`})); got != "relative wind" {
+		t.Errorf("forecast with no labels: trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wind":"head"}]}`})); got != "" {
+		t.Errorf("forecast with a rel_wind label: trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wave":"beam"}]}`})); got != "" {
+		t.Errorf("forecast with a rel_wave label: trigger = %q", got)
+	}
+}
+
 func TestPassageGuardInstructionPerTrigger(t *testing.T) {
-	_, claim := pwToolDeps(pwLimitsAll()).checkDraft("Set passage limits in Settings.", nil, nil)
+	_, claim := pwToolDeps(pwLimitsAll()).checkDraft("Set passage limits in Settings.", nil)
 	if !strings.Contains(claim, "limits are set") {
 		t.Errorf("claim instruction should say the limits are set: %q", claim)
 	}
-	trig, wind := pwToolDeps(passageLimits{}).checkDraft("A northerly gives you a head sea.", nil, nil)
+	trig, wind := pwToolDeps(passageLimits{}).checkDraft("A northerly gives you a head sea.", nil)
 	if trig != "relative wind" {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -306,6 +440,23 @@ func pwToolDepsWithCoastline(l passageLimits) assistantToolDeps {
 	d := pwToolDeps(l)
 	d.offlineCoastline = enabledReaderStub
 	return d
+}
+
+// runOf builds the run record a test needs from calls and the result each
+// returned. A call with no result entry, or "", errored.
+func runOf(calls []openRouterToolCall, results []string) mateRunRecord {
+	var run mateRunRecord
+	for i, c := range calls {
+		rc := mateRunCall{call: c}
+		if i < len(results) {
+			rc.result = results[i]
+		}
+		if rc.result == "" {
+			rc.err = "failed"
+		}
+		run = append(run, rc)
+	}
+	return run
 }
 
 // okResults is a non-empty result for every call: each one ran.
@@ -366,7 +517,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
 	}
 	for _, tc := range cases {
-		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls, okResults(tc.calls)); got != tc.want {
+		if got, _ := shelterDeps().checkDraft(tc.text, runOf(tc.calls, okResults(tc.calls))); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -374,7 +525,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 
 func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
 	text := "A northerly gives you a head sea, and the bay is sheltered from the north."
-	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil, nil)
+	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil)
 	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -393,13 +544,13 @@ func TestShelterGuard_SentBackOnceAndSecondAnswerWins(t *testing.T) {
 func TestShelterGuard_OffWithoutOfflineCoastline(t *testing.T) {
 	d := shelterDeps()
 	d.offlineCoastline = nil
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
 		t.Errorf("no Offline coastline on this install: trigger = %q, want none", got)
 	}
 }
 
 func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
-	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil, nil)
+	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
 	for _, want := range []string{"find_places", "boat's position", "Otherwise remove"} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
@@ -409,10 +560,10 @@ func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
 
 func TestShelterGuard_AnErroredShelterCallDoesNotSatisfyIt(t *testing.T) {
 	d := shelterDeps()
-	if got, _ := d.checkDraft(thomasIslandAnswer, shelterCall(t), []string{""}); got != "anchorage shelter" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(shelterCall(t), []string{""})); got != "anchorage shelter" {
 		t.Errorf("a call with no result (it errored) must not satisfy the guard, trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, shelterCall(t), []string{`{"summary":"ok"}`}); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(shelterCall(t), []string{`{"summary":"ok"}`})); got != "" {
 		t.Errorf("a call that returned satisfies it, trigger = %q", got)
 	}
 }
@@ -426,13 +577,13 @@ func TestShelterGuard_DisarmedWhileTheCoastlineIsOffOrUnreadable(t *testing.T) {
 	d.offlineCoastline = func() *offlineCoastlineReader {
 		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, nil }}
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
 		t.Errorf("coastline switched off: trigger = %q, want none", got)
 	}
 	d.offlineCoastline = func() *offlineCoastlineReader {
 		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, errors.New("settings unreadable") }}
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
 		t.Errorf("coastline setting unreadable: trigger = %q, want none", got)
 	}
 	if !strings.Contains(buf.String(), "settings unreadable") {

@@ -420,7 +420,7 @@ type assistantCardSource interface {
 // non-empty trigger sends the draft back once with instruction as a user turn
 // labelled as Helmcentral's own check.
 type assistantDraftChecker interface {
-	checkDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string)
+	checkDraft(draft string, run mateRunRecord) (trigger, instruction string)
 }
 
 // assistantRunner drives one assistant reply's agentic tool loop.
@@ -915,13 +915,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	// rounds' findings instead of none at all.
 	var toolLog []assistantForcedFinalToolLogEntry
 
-	// runCalls is every tool call made this run, for the draft check
-	// (ADR 0234); sentBackTrigger makes the correction a one-time thing.
-	var runCalls []openRouterToolCall
-	// runResults is what each of those calls returned, by index: the tool
-	// message's content, or "" for a call that did not run. A check can tell a
-	// forecast that carried shelter labels from one that did not.
-	var runResults []string
+	// record is every tool call made this run and what each returned, for the
+	// draft check (ADR 0234, 0256). A check can tell a forecast that carried
+	// shelter labels from one that did not, and a call that ran from one that
+	// errored.
+	var record mateRunRecord
 	// sentBackTrigger and callsAtSendBack record what was sent back and how
 	// many calls the run had made then, so an answer that follows with no new
 	// result can be logged as a correction that changed nothing.
@@ -1202,13 +1200,13 @@ forcedLoop:
 			// review is a watch or alarm summary, not a passage answer, and
 			// nobody is there to read a corrected draft.
 			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal && !r.options.Unattended {
-				trigger, instruction = checker.checkDraft(content, runCalls, runResults)
+				trigger, instruction = checker.checkDraft(content, record)
 			}
 			// An answer after a correction that led to no lookups may be a fair
 			// question back, so it is accepted; the log says the correction
 			// changed nothing. A second draft that still trips a trigger gets
 			// this line and the one below.
-			if sentBackTrigger != "" && strings.Join(runResults[callsAtSendBack:], "") == "" {
+			if sentBackTrigger != "" && !record.producedSince(callsAtSendBack) {
 				log.Printf("assistant: draft check: answer after the %s correction made no lookups; accepted as is", sentBackTrigger)
 			}
 			switch {
@@ -1218,7 +1216,7 @@ forcedLoop:
 				// check. Accept the answer, but say so in the log.
 				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
 			case budgetReason(toolRounds) == "":
-				sentBackTrigger, callsAtSendBack = trigger, len(runCalls)
+				sentBackTrigger, callsAtSendBack = trigger, len(record)
 				tr.CheckTrigger, tr.CheckDraft = trigger, content
 				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
 				// The draft already streamed in part is withdrawn the same
@@ -1307,7 +1305,6 @@ forcedLoop:
 		}
 
 		messages = append(messages, choice)
-		runCalls = append(runCalls, choice.ToolCalls...)
 
 		// This round's text (if any reached the operator at all) was never
 		// going to be the final answer - it ended in tool calls, so
@@ -1318,13 +1315,7 @@ forcedLoop:
 		}
 
 		toolMessages, calls, terr := r.runToolRound(toolCtx, choice.ToolCalls, failures)
-		for i := range choice.ToolCalls {
-			result := ""
-			if i < len(toolMessages) && i < len(calls) && calls[i].Error == "" {
-				result = string(toolMessages[i].Content)
-			}
-			runResults = append(runResults, result)
-		}
+		record.addRound(choice.ToolCalls, toolMessages, calls)
 		// collectResults lifts each call's result into the reply and the
 		// forced-final log. finishedOnly skips the calls a round cut short
 		// never ran or abandoned.
