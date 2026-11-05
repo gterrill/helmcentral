@@ -53,6 +53,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the places sit under their own heading, the same as the Vessels group
   next to them. A list too long for its tile now scrolls instead of stretching
   the map, so the map no longer jumps when a long description comes up.
+- **Moving the anchor no longer wipes the swing trail.** The yellow line stays
+  when you move the anchor position in **Adjust**, and when you tap **Undo**,
+  because it shows where the boat has actually been. Only raising the anchor
+  clears it, and the next drop starts a new one.
 
 ### Fixed
 

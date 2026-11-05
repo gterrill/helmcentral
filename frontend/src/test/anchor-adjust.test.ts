@@ -137,11 +137,10 @@ describe('formatRadiusDisplay', () => {
 
 // buildAdjustCommitTargets (code-review finding, ADR 0136): Set always sent
 // lat/lon even when only the radius changed, and the backend treats any
-// lat/lon as a genuine reposition (resets the self trail, requires a fresh
-// SignalK publish) — a radius-only change has no business paying that cost,
-// and 502s outright when SignalK happens to be down. Undo must mirror
-// whatever Set actually sent, not silently restore a position Set itself
-// never touched.
+// lat/lon as a genuine reposition (requires a fresh SignalK publish) — a
+// radius-only change has no business paying that cost, and 502s outright when
+// SignalK happens to be down. Undo must mirror whatever Set actually sent, not
+// silently restore a position Set itself never touched.
 describe('buildAdjustCommitTargets', () => {
   const committed = { lat: -25.2938, lon: 152.9102, radiusMeters: 20 }
   // Stands in for "nothing to restore" in tests that don't care about it -

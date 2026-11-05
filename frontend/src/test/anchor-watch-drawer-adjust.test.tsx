@@ -219,8 +219,8 @@ describe('AnchorWatchDrawer Adjust mode — the warning and its double-tap', () 
     })
     // Position never moved in this no-map path (there's no camera to pan) —
     // lat/lon must be omitted, or the backend treats this radius-only Save
-    // as a reposition (resets the self trail, requires a fresh SignalK
-    // publish — code-review finding).
+    // as a reposition (requires a fresh SignalK publish — code-review
+    // finding).
     expect(baseProps.adjustAnchor).toHaveBeenCalledWith({ radiusMeters: 5 })
   })
 })

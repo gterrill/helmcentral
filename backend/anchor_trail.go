@@ -13,10 +13,10 @@ import (
 )
 
 // The anchor swing trail (ADR 0199): the boat's fixes since the anchor was
-// set (or last moved), one per poll tick, kept in helmcentral.sqlite so the
-// whole swing survives a restart. The track point log (ADR 0176) keeps a
-// point only every 25 m or ten minutes, which is far too sparse to draw a
-// swing of a few metres, so the trail has its own table.
+// dropped, one per poll tick, kept in helmcentral.sqlite so the whole swing
+// survives a restart. The track point log (ADR 0176) keeps a point only every
+// 25 m or ten minutes, which is far too sparse to draw a swing of a few
+// metres, so the trail has its own table.
 
 const (
 	// anchorTrailMaxPoints is the one bound on the trail: the table keeps the
@@ -61,7 +61,7 @@ func createAnchorTrailSchema(db sqlExecer) error {
 }
 
 // resetAnchorTrail empties the trail. A restart stamps a new start time (a
-// drop or a moved anchor); otherwise the trail is over (raise).
+// drop); otherwise the trail is over (raise).
 func (s *passageStore) resetAnchorTrail(restart bool, now time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -195,12 +195,6 @@ func (s *passageStore) anchorTrailSince(since time.Time) ([]*trailPoint, time.Ti
 // recordAnchorTrailPoint is called on every poll tick; it stores the fix only
 // while an anchor watch is active and the position is a real fix.
 func recordAnchorTrailPoint(lat, lon float64, at time.Time) {
-	// A drop or move is restarting the trail: this fix belongs to the old
-	// anchor, so skip it rather than wait.
-	if !anchorTrailMoveMu.TryRLock() {
-		return
-	}
-	defer anchorTrailMoveMu.RUnlock()
 	anchorWatchMu.RLock()
 	active := anchorWatchState != nil
 	anchorWatchMu.RUnlock()
@@ -216,9 +210,9 @@ func recordAnchorTrailPoint(lat, lon float64, at time.Time) {
 	}
 }
 
-// resetAnchorTrail starts a fresh trail (drop, moved anchor) or ends it
-// (raise). The caller fails the operation when it returns an error, so the
-// watch and its trail never disagree silently.
+// resetAnchorTrail starts a fresh trail (drop) or ends it (raise). The caller
+// fails the operation when it returns an error, so the watch and its trail
+// never disagree silently.
 func resetAnchorTrail(restart bool) error {
 	return (*anchorTrailResetter.Load())(restart)
 }
@@ -254,9 +248,9 @@ func startRestoredAnchorTrail() error {
 }
 
 // GET /api/anchor-watch/trails/self?since=<RFC3339>
-// Returns the swing trail since the anchor was set or last moved.
-// trail_started_at changes whenever the trail restarts, so a client that
-// sees it change drops the points it holds.
+// Returns the swing trail since the anchor was dropped. Moving the anchor mark
+// keeps it. trail_started_at changes whenever the trail restarts, so a client
+// that sees it change drops the points it holds.
 func getSelfTrailHandler(c echo.Context) error {
 	var since time.Time
 	if sinceStr := c.QueryParam("since"); sinceStr != "" {
@@ -267,9 +261,6 @@ func getSelfTrailHandler(c echo.Context) error {
 		}
 	}
 
-	// Wait out a move in progress so the trail and the anchor agree.
-	anchorTrailMoveMu.RLock()
-	defer anchorTrailMoveMu.RUnlock()
 	anchorWatchMu.RLock()
 	active := anchorWatchState != nil
 	anchorWatchMu.RUnlock()

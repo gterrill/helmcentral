@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. [ADR 0262](0262-a-moved-anchor-keeps-its-swing-trail.md) reverses
+decision 3 for a moved anchor: only a drop restarts the trail now.
 
 ## Context
 

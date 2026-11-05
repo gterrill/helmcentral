@@ -7,7 +7,7 @@ export const ANCHOR_TRAIL_MAX_POINTS = 10000
 
 interface AnchorTrailResponse {
   points?: Array<{ lat: number; lon: number; timestamp: string }>
-  /** Changes whenever the server restarts the trail (drop, moved anchor); null with no watch. */
+  /** Changes whenever the server restarts the trail (a fresh drop); null with no watch. */
   trail_started_at?: string | null
 }
 

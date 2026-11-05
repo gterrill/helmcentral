@@ -115,11 +115,11 @@ export interface AnchorWatchRecord {
    * (the drawer's handleAdjustSet, via lib/anchor-adjust.ts's
    * buildAdjustCommitTargets) omits them entirely when the draft position
    * wasn't actually moved, so a radius-only Set doesn't ask the backend to
-   * treat it as a reposition (self-trail reset, a fresh SignalK publish that
-   * 502s if SignalK happens to be down — code-review finding). Mirrors
-   * updateRadius exactly otherwise — awaits apiRequest, replaces state
-   * with the server echo, rethrows on failure rather than swallowing it, so
-   * the caller (the Adjust mode's Set button) is what shows a Retry toast.
+   * treat it as a reposition (a fresh SignalK publish that 502s if SignalK
+   * happens to be down — code-review finding). Mirrors updateRadius exactly
+   * otherwise — awaits apiRequest, replaces state with the server echo,
+   * rethrows on failure rather than swallowing it, so the caller (the Adjust
+   * mode's Set button) is what shows a Retry toast.
    *
    * `restore` (code-review finding, round 2): forwarded verbatim as the
    * PATCH body's own `restore` object when the caller provides one - only

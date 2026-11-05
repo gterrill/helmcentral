@@ -81,11 +81,9 @@ func TestAnchorTrailRecordsAndServesSinceDrop(t *testing.T) {
 	}
 }
 
-func TestAnchorTrailResetsOnPositionChangeNotRadius(t *testing.T) {
+func TestAnchorTrailKeptWhenTheAnchorPositionIsPatched(t *testing.T) {
 	anchorTrailEnv(t)
-	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
-		t.Fatalf("drop: %d %v", code, resp)
-	}
+	dropAnchor(t, -20.0, 149.0)
 	now := time.Now().UTC()
 	recordAnchorTrailPoint(-20.0001, 149.0001, now.Add(time.Second))
 	_, before := getAnchorTrailBody(t, "")
@@ -103,20 +101,75 @@ func TestAnchorTrailResetsOnPositionChangeNotRadius(t *testing.T) {
 		t.Fatalf("move patch: %d %v", code, resp)
 	}
 	_, after := getAnchorTrailBody(t, "")
-	if len(after.Points) != 0 || after.TrailStartedAt == nil || *after.TrailStartedAt == *before.TrailStartedAt {
-		t.Fatalf("expected a restarted trail with a new start, got %+v (before %v)", after, *before.TrailStartedAt)
+	if len(after.Points) != 1 || after.TrailStartedAt == nil || *after.TrailStartedAt != *before.TrailStartedAt {
+		t.Fatalf("expected the trail and its start kept across a move, got %+v (before %v)", after, *before.TrailStartedAt)
 	}
+
+	// The boat's fixes after the move join the same trail.
+	recordAnchorTrailPoint(-20.0002, 149.0002, now.Add(10*time.Second))
+	_, joined := getAnchorTrailBody(t, "")
+	if len(joined.Points) != 2 || *joined.TrailStartedAt != *before.TrailStartedAt {
+		t.Fatalf("expected a fix after the move to join the same trail, got %+v", joined)
+	}
+	waitForPlaceNameResolveIdle(t)
 }
 
-func TestAnchorTrailRepositionByPostRestarts(t *testing.T) {
+func TestAnchorTrailKeptWhenTheAnchorPositionIsUndone(t *testing.T) {
 	anchorTrailEnv(t)
-	postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0})
+	dropAnchor(t, -20.0, 149.0)
 	recordAnchorTrailPoint(-20.0001, 149.0001, time.Now().UTC().Add(time.Second))
+	_, before := getAnchorTrailBody(t, "")
+
+	time.Sleep(5 * time.Millisecond)
+	code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"lat": -20.5, "lon": 149.5,
+		"restore": map[string]any{
+			"bow_offset_m":       0.0,
+			"bow_offset_applied": false,
+			"bow_offset_reason":  "",
+			"heading_at_set_deg": -1.0,
+			"place_name":         "Goldsmith Island",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("undo patch: %d %v", code, resp)
+	}
+	_, after := getAnchorTrailBody(t, "")
+	if len(after.Points) != 1 || after.TrailStartedAt == nil || *after.TrailStartedAt != *before.TrailStartedAt {
+		t.Fatalf("expected Undo to keep the trail, got %+v (before %v)", after, *before.TrailStartedAt)
+	}
+	waitForPlaceNameResolveIdle(t)
+}
+
+func TestAnchorTrailKeptWhenTheAnchorIsRepositionedByPost(t *testing.T) {
+	anchorTrailEnv(t)
+	dropAnchor(t, -20.0, 149.0)
+	recordAnchorTrailPoint(-20.0001, 149.0001, time.Now().UTC().Add(time.Second))
+	_, before := getAnchorTrailBody(t, "")
+	time.Sleep(5 * time.Millisecond)
 	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.2, "lon": 149.2}); code != http.StatusOK {
 		t.Fatalf("reposition: %d %v", code, resp)
 	}
-	if _, body := getAnchorTrailBody(t, ""); len(body.Points) != 0 {
-		t.Fatalf("expected trail cleared by re-POST, got %+v", body.Points)
+	_, after := getAnchorTrailBody(t, "")
+	if len(after.Points) != 1 || after.TrailStartedAt == nil || *after.TrailStartedAt != *before.TrailStartedAt {
+		t.Fatalf("expected the trail and its start kept by re-POST, got %+v (before %v)", after, *before.TrailStartedAt)
+	}
+	waitForPlaceNameResolveIdle(t)
+}
+
+func TestAnchorTrailRestartsOnADropAfterARaise(t *testing.T) {
+	anchorTrailEnv(t)
+	dropAnchor(t, -20.0, 149.0)
+	recordAnchorTrailPoint(-20.0001, 149.0001, time.Now().UTC().Add(time.Second))
+	_, before := getAnchorTrailBody(t, "")
+	if rec := raiseAnchor(t); rec.Code != http.StatusOK {
+		t.Fatalf("raise: %d", rec.Code)
+	}
+	time.Sleep(5 * time.Millisecond)
+	dropAnchor(t, -20.2, 149.2)
+	_, after := getAnchorTrailBody(t, "")
+	if len(after.Points) != 0 || after.TrailStartedAt == nil || *after.TrailStartedAt == *before.TrailStartedAt {
+		t.Fatalf("expected an empty trail with a new start after a fresh drop, got %+v (before %v)", after, *before.TrailStartedAt)
 	}
 }
 
@@ -243,21 +296,24 @@ func TestAnchorDropFailsWhenTheTrailCannotBeReset(t *testing.T) {
 	}
 }
 
-func TestAnchorPositionPatchFailsWhenTheTrailCannotBeReset(t *testing.T) {
+func TestAnchorPositionPatchSucceedsWithoutATrailStore(t *testing.T) {
 	anchorPublishEnv(t)
-	postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0})
+	dropAnchor(t, -20.0, 149.0)
 	prev := globalPassageStore
 	globalPassageStore = nil
 	t.Cleanup(func() { globalPassageStore = prev })
-	if code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -20.5, "lon": 149.5}); code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d %v", code, resp)
+	if code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -20.5, "lon": 149.5}); code != http.StatusOK {
+		t.Fatalf("expected 200, got %d %v", code, resp)
 	}
 	anchorWatchMu.RLock()
 	lat := anchorWatchState.Lat
 	anchorWatchMu.RUnlock()
-	if lat != -20.0 {
-		t.Fatalf("watch must keep its old position, got %v", lat)
+	if lat != -20.5 {
+		t.Fatalf("watch must move to the new position, got %v", lat)
 	}
+	// The place-name resolve the move starts does not read the passage store,
+	// but it must finish before the test ends.
+	waitForPlaceNameResolveIdle(t)
 }
 
 func TestAnchorRaiseReportsAFailedTrailClear(t *testing.T) {
@@ -401,9 +457,8 @@ func TestAnchorRaiseReportsAPlacemarksFileThatCannotBeRemoved(t *testing.T) {
 	}
 }
 
-func TestAnchorPositionPatchDoesNotHoldTheWriteLockDuringTheTrailReset(t *testing.T) {
+func TestAnchorDropDoesNotHoldTheWriteLockDuringTheTrailReset(t *testing.T) {
 	anchorPublishEnv(t)
-	dropAnchor(t, -20.0, 149.0)
 	entered, release := make(chan struct{}), make(chan struct{})
 	setTrailReset(t, func(bool) error {
 		close(entered)
@@ -416,12 +471,12 @@ func TestAnchorPositionPatchDoesNotHoldTheWriteLockDuringTheTrailReset(t *testin
 		err  error
 	}, 1)
 	go func() {
-		// Not patchAnchorWatchForTest: it calls t.Fatalf, which must not run here.
+		// Not postAnchorWatch: it calls t.Fatalf, which must not run here.
 		raw, _ := json.Marshal(map[string]any{"lat": -20.5, "lon": 149.5})
-		req := httptest.NewRequest(http.MethodPatch, "/api/anchor-watch", strings.NewReader(string(raw)))
+		req := httptest.NewRequest(http.MethodPost, "/api/anchor-watch", strings.NewReader(string(raw)))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		rec := httptest.NewRecorder()
-		err := patchAnchorWatch(echo.New().NewContext(req, rec))
+		err := setAnchorWatch(echo.New().NewContext(req, rec))
 		done <- struct {
 			code int
 			err  error
@@ -455,72 +510,9 @@ func TestAnchorPositionPatchDoesNotHoldTheWriteLockDuringTheTrailReset(t *testin
 	releaseOnce()
 	res := <-done
 	if res.err != nil || res.code != http.StatusOK {
-		t.Fatalf("expected the PATCH to succeed, got %d %v", res.code, res.err)
+		t.Fatalf("expected the drop to succeed, got %d %v", res.code, res.err)
 	}
 	waitForPlaceNameResolveIdle(t)
-}
-
-func TestAnchorMoveHidesTheHalfMovedStateFromTrailReadersAndTicks(t *testing.T) {
-	store := anchorTrailEnv(t)
-	dropAnchor(t, -20.0, 149.0)
-	entered, release := make(chan struct{}), make(chan struct{})
-	setTrailReset(t, func(bool) error {
-		close(entered)
-		<-release
-		return nil
-	})
-	done := make(chan int, 1)
-	go func() {
-		raw, _ := json.Marshal(map[string]any{"lat": -20.5, "lon": 149.5})
-		req := httptest.NewRequest(http.MethodPatch, "/api/anchor-watch", strings.NewReader(string(raw)))
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		rec := httptest.NewRecorder()
-		_ = patchAnchorWatch(echo.New().NewContext(req, rec))
-		done <- rec.Code
-	}()
-	var once sync.Once
-	releaseOnce := func() { once.Do(func() { close(release) }) }
-	t.Cleanup(func() {
-		releaseOnce()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-		}
-	})
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("trail reset never started")
-	}
-
-	// A tick during the move is skipped, not recorded against the old anchor.
-	recordAnchorTrailPoint(-20.0001, 149.0001, time.Now().UTC().Add(time.Second))
-
-	// A trail read waits for the move to finish.
-	read := make(chan struct{})
-	go func() {
-		rec := httptest.NewRecorder()
-		_ = getSelfTrailHandler(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/anchor-watch/trails/self", nil), rec))
-		close(read)
-	}()
-	select {
-	case <-read:
-		t.Fatal("trail read returned in the middle of a move")
-	case <-time.After(150 * time.Millisecond):
-	}
-	releaseOnce()
-	select {
-	case <-read:
-	case <-time.After(5 * time.Second):
-		t.Fatal("trail read never finished")
-	}
-	if code := <-done; code != http.StatusOK {
-		t.Fatalf("move: %d", code)
-	}
-	waitForPlaceNameResolveIdle(t)
-	if pts, _, _ := store.anchorTrailSince(time.Time{}); len(pts) != 0 {
-		t.Fatalf("the tick taken during the move must not be in the new trail: %v", pts)
-	}
 }
 
 func lastFrameIsAt(t *testing.T, frames [][]byte, lat, lon float64) {
@@ -541,32 +533,7 @@ func lastFrameIsAt(t *testing.T, frames [][]byte, lat, lon float64) {
 	t.Fatalf("last SignalK frame is not at %v,%v: %s", lat, lon, frames[len(frames)-1])
 }
 
-func TestAnchorPositionPatchTrailFailureRollsSignalKBackAndKeepsTheWatch(t *testing.T) {
-	stub := anchorPublishEnv(t)
-	dropAnchor(t, -20.0, 149.0)
-	failTrailReset(t)
-
-	code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -20.5, "lon": 149.5})
-	if code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d %v", code, resp)
-	}
-	if msg, _ := resp["error"].(string); !strings.Contains(msg, "swing trail") {
-		t.Fatalf("the error must say the trail failed, got %q", msg)
-	}
-	anchorWatchMu.RLock()
-	lat, lon := anchorWatchState.Lat, anchorWatchState.Lon
-	anchorWatchMu.RUnlock()
-	if lat != -20.0 || lon != 149.0 {
-		t.Fatalf("watch must keep its old position, got %v,%v", lat, lon)
-	}
-	frames := stub.captured()
-	if len(frames) != 3 { // drop, the PATCH's publish, the rollback
-		t.Fatalf("expected drop + patch + rollback publishes, got %d", len(frames))
-	}
-	lastFrameIsAt(t, frames, -20.0, 149.0)
-}
-
-func TestAnchorPositionPatchSaveFailureAfterTrailResetRollsSignalKBack(t *testing.T) {
+func TestAnchorPositionPatchSaveFailureRollsSignalKBack(t *testing.T) {
 	stub := anchorPublishEnv(t)
 	dropAnchor(t, -20.0, 149.0)
 	notADir := filepath.Join(t.TempDir(), "not-a-directory")
@@ -580,8 +547,8 @@ func TestAnchorPositionPatchSaveFailureAfterTrailResetRollsSignalKBack(t *testin
 		t.Fatalf("expected 500, got %d %v", code, resp)
 	}
 	msg, _ := resp["error"].(string)
-	if !strings.Contains(msg, "swing trail was restarted") || !strings.Contains(msg, "put back") {
-		t.Fatalf("the error must say the trail was restarted and SignalK put back, got %q", msg)
+	if !strings.Contains(msg, "put back") || strings.Contains(msg, "trail") {
+		t.Fatalf("the error must say SignalK was put back and not mention the trail, got %q", msg)
 	}
 	anchorWatchMu.RLock()
 	lat := anchorWatchState.Lat
