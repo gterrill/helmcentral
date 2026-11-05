@@ -31,7 +31,7 @@ func TestCheckDraft_EverySendBackCarriesTheNoticeOnce(t *testing.T) {
 		{"two triggers", pwToolDepsWithCoastline(passageLimits{}), "A northerly gives you a head sea, and the bay is sheltered from the north.", "relative wind and anchorage shelter"},
 	}
 	for _, tc := range cases {
-		trigger, ins := tc.deps.checkDraft(tc.text, nil, nil)
+		trigger, ins := tc.deps.checkDraft(tc.text, nil)
 		if trigger != tc.trigger {
 			t.Fatalf("%s: trigger = %q, want %q", tc.name, trigger, tc.trigger)
 		}
@@ -70,7 +70,7 @@ func TestCheckNotice_DoesNotCancelTheCorrection(t *testing.T) {
 }
 
 func TestCheckDraft_TheCorrectionNamesTheDraft(t *testing.T) {
-	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil, nil)
+	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
 	if !strings.HasPrefix(ins, assistantCheckLabel+"Your draft ") {
 		t.Errorf("the correction should talk about the draft, not an answer the operator got: %q", ins)
 	}

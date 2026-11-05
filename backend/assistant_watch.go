@@ -1379,7 +1379,9 @@ func deleteAssistantWatchHandler(c echo.Context) error {
 }
 
 var mateToolStartWatch = mateTool{
-	name: "start_watch",
+	name:      "start_watch",
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Start a background watch on 1 to 6 live SignalK paths for 1 to 30 minutes, sampled once a " +
 			"second from the live feed. Use it when the skipper asks you to watch or monitor something over " +

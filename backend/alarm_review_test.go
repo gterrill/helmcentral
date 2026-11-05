@@ -261,7 +261,7 @@ func TestAlarmReview_TheTurnIsGivenTheAlarmContextAndOnlyReadTools(t *testing.T)
 	h.r.wait()
 
 	for _, name := range offered {
-		if !alarmReviewReadTools[name] && name != alarmReviewToolName {
+		if !alarmReviewReadTool(name) && name != alarmReviewToolName {
 			t.Errorf("%s must not be offered", name)
 		}
 	}

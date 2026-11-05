@@ -6,6 +6,11 @@ Accepted. Adds a credential type to ADR 0111's threat model (see the addendum
 there). Builds on ADR 0172 (the Mate tool registry) and ADR 0184 (store
 transactions).
 
+Note (2026-11-05): [ADR 0259](0259-a-mate-tool-says-who-may-call-it.md) moves
+whether a tool may reach an outside assistant into its registry record.
+`backend/mcp_tools.go` keeps the reason, the Settings name, the default and the
+wording, and the two must agree.
+
 ## Context
 
 An operator wants to ask the boat questions from tools they already use, such

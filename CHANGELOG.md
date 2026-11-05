@@ -61,6 +61,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   drops as you tap **Save** on a new tile, the dialog now stays open with what
   you typed, so you can tap **Save** again. Before, it closed and your changes
   were gone.
+- **Mate no longer counts a passage check that failed as one that ran.** If the
+  go/no-go check errored and Mate then talked about wind against your course or
+  your passage limits, the answer went out as it was. Mate now answers again and
+  says the check couldn't run. If the check failed because a limit is missing,
+  Mate can still tell you which one to set. A wind forecast that failed, or that
+  came back without wind angles, no longer counts as the angle either. Mate also
+  no longer takes a blank depth as one you gave it when it describes an
+  anchorage.
 - **Discovery no longer says a named battery has no name.** "The boat gives it
   no name" now only appears on a battery that you haven't assigned to an
   equipment item yet.
@@ -68,6 +76,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   input, not a battery" now has its own line, so a long name can't cut it off,
   and it stays when the source stops reporting, so that you don't assign a
   charger input as a battery by mistake.
+- **Asking Mate the same words twice now asks twice.** If you tapped **Ask Mate**
+  with the same question while the Mate sheet was still open, nothing happened
+  the second time. It now sends the question again.
+- **A watch report's answer draft stays linked to its report.** If you opened
+  Mate about one report and then opened it about another while the first answer
+  was still coming in, the second chat could lose its link to its report. It
+  keeps it now.
 
 ## [0.60.0] - 2026-11-04
 

@@ -67,7 +67,7 @@ func TestDepthGuardTrigger(t *testing.T) {
 		if results == nil {
 			results = okResults(tc.calls)
 		}
-		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls, results); got != tc.want {
+		if got, _ := shelterDeps().checkDraft(tc.text, runOf(tc.calls, results)); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -84,7 +84,7 @@ func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 	for name, reader := range map[string]func() *offlineCoastlineReader{"no coastline on this install": nil, "coastline switched off": off} {
 		d := shelterDeps()
 		d.offlineCoastline = reader
-		got, ins := d.checkDraft(text, nil, nil)
+		got, ins := d.checkDraft(text, nil)
 		if got != "anchorage depth" {
 			t.Errorf("%s: trigger = %q, want anchorage depth", name, got)
 		}
@@ -95,18 +95,49 @@ func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 			t.Errorf("%s: instruction = %q", name, ins)
 		}
 		// The shelter check stays disarmed: it can only be answered by the tool.
-		if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+		if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
 			t.Errorf("%s: shelter trigger = %q, want none", name, got)
 		}
 		// A figure passed on in a call that ran still sources it.
-		if got, _ := d.checkDraft(text, depthCall("save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`), []string{`{"proposal":{}}`}); got != "" {
+		if got, _ := d.checkDraft(text, runOf(depthCall("save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`), []string{`{"proposal":{}}`})); got != "" {
 			t.Errorf("%s: sourced depth trigger = %q, want none", name, got)
 		}
 	}
 }
 
+// A depth_m of null is the model leaving the figure out, not the operator's depth.
+func TestDepthGuard_ANullDepthArgumentIsNotADepth(t *testing.T) {
+	calls := depthCall("anchorage_details", `{"lat":-20,"lon":149,"depth_m":null}`)
+	got, _ := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", runOf(calls, []string{unknownDepthResult}))
+	if got != "anchorage depth" {
+		t.Errorf("trigger = %q, want anchorage depth", got)
+	}
+}
+
+// The operator's figure can ride in a nested argument: propose_changes puts it
+// in operations[].fields. Only a number sources a depth, at any depth.
+func TestDepthGuard_FindsANumericDepthAnywhereInTheArguments(t *testing.T) {
+	text := "Butterfly Bay is about 6 m deep on sand."
+	cases := []struct {
+		name, tool, args string
+		want             string
+	}{
+		{"propose_changes fields", "propose_changes", `{"operations":[{"type":"location","action":"update","id":"l1","fields":{"depth_m":6}}]}`, ""},
+		{"save_place top level", "save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`, ""},
+		{"nested null", "propose_changes", `{"operations":[{"type":"location","action":"update","id":"l1","fields":{"depth_m":null}}]}`, "anchorage depth"},
+		{"nested string", "propose_changes", `{"operations":[{"type":"location","action":"update","id":"l1","fields":{"depth_m":"six"}}]}`, "anchorage depth"},
+		{"nested other field", "propose_changes", `{"operations":[{"type":"location","action":"update","id":"l1","fields":{"name":"x"}}]}`, "anchorage depth"},
+	}
+	for _, tc := range cases {
+		calls := depthCall(tc.tool, tc.args)
+		if got, _ := shelterDeps().checkDraft(text, runOf(calls, []string{`{"proposal":{}}`})); got != tc.want {
+			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestDepthGuard_InstructionSaysWhereADepthMayComeFrom(t *testing.T) {
-	_, ins := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", nil, nil)
+	_, ins := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", nil)
 	for _, want := range []string{"depth_m", "anchorage_details", "check the chart", assistantCheckLabel} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
@@ -116,7 +147,7 @@ func TestDepthGuard_InstructionSaysWhereADepthMayComeFrom(t *testing.T) {
 
 func TestDepthGuard_SentTogetherWithTheShelterCorrection(t *testing.T) {
 	text := "The bay is 6 m deep and sheltered from the north."
-	trig, ins := shelterDeps().checkDraft(text, nil, nil)
+	trig, ins := shelterDeps().checkDraft(text, nil)
 	if !strings.Contains(trig, "anchorage shelter") || !strings.Contains(trig, "anchorage depth") {
 		t.Fatalf("trigger = %q", trig)
 	}

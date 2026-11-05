@@ -574,7 +574,9 @@ func (d assistantToolDeps) executeGetMaintenanceLog(ctx context.Context, raw jso
 }
 
 var mateToolFindEquipment = mateTool{
-	name: "find_equipment",
+	name:      "find_equipment",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Find items in the boat's equipment registry by name, manufacturer, model or " +
 			"alias, optionally within one system. Returns each item's id, system, whether its hour " +
@@ -614,7 +616,9 @@ var mateToolFindEquipment = mateTool{
 }
 
 var mateToolListMaintenance = mateTool{
-	name: "list_maintenance",
+	name:      "list_maintenance",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "List the boat's maintenance rules with each one's status (overdue, due_soon, ok, " +
 			"never_recorded, interval_not_set or hours_unknown) worked out right now against the " +
@@ -644,7 +648,9 @@ var mateToolListMaintenance = mateTool{
 }
 
 var mateToolGetMaintenanceLog = mateTool{
-	name: "get_maintenance_log",
+	name:      "get_maintenance_log",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Read the maintenance log, newest first: what was done, when, at what cumulative " +
 			"engine hours (engine_hours, which equals the meter only if no meter replacement is " +

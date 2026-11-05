@@ -81,7 +81,9 @@ func (d assistantToolDeps) recordStore(toolName string) (*documentStore, error) 
 }
 
 var mateToolProposeChanges = mateTool{
-	name: assistantProposalToolTag,
+	name:      assistantProposalToolTag,
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Propose changes to Helmcentral's records. This changes NOTHING: the operator sees your " +
 			"proposal as a card under your reply and taps Apply (or Dismiss). Use it only for a change the " +

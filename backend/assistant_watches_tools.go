@@ -83,7 +83,9 @@ func (d assistantToolDeps) executeListWatches(ctx context.Context, _ json.RawMes
 }
 
 var mateToolListWatches = mateTool{
-	name: "list_watches",
+	name:      "list_watches",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "List the scheduled watches the boat has: id, name, schedule (cron, with its sentence), report sections, " +
 			"thresholds, what to look out for, enabled, where its reports are sent (notify) and when (send), when it last ran and how many findings that run had. Call it before proposing a watch, " +
@@ -186,7 +188,9 @@ func (d assistantToolDeps) executeGetWatchRuns(ctx context.Context, raw json.Raw
 }
 
 var mateToolGetWatchRuns = mateTool{
-	name: "get_watch_runs",
+	name:      "get_watch_runs",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Read a watch's latest runs, newest first: when each ran, the report (figures by section), the findings the rules " +
 			"reached and Mate's own review, whether it was skipped and why, what the review cost, and which channels the run was sent to (notified). Give watch_id for the latest runs " +
@@ -245,7 +249,9 @@ func (d assistantToolDeps) executeRunWatchNow(ctx context.Context, raw json.RawM
 }
 
 var mateToolRunWatchNow = mateTool{
-	name: "run_watch_now",
+	name:      "run_watch_now",
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Run a scheduled watch now and return the run: its report, the findings the rules reached and Mate's review of it. " +
 			"Use it when the operator asks for a watch's report right away. The run is saved on the Watches page like any other. " +

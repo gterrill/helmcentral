@@ -189,7 +189,9 @@ func (d assistantToolDeps) executeDescribeRecordType(ctx context.Context, raw js
 }
 
 var mateToolDescribeRecordType = mateTool{
-	name: "describe_record_type",
+	name:      "describe_record_type",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Describe a kind of Helmcentral record Mate can read or propose changes to: its fields (which " +
 			"are writable, which can be cleared, which refer to other records), the actions a proposal may " +
@@ -209,7 +211,9 @@ var mateToolDescribeRecordType = mateTool{
 }
 
 var mateToolListRecords = mateTool{
-	name: "list_records",
+	name:      "list_records",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "List records of one type with their registered fields and each one's version. Use it for " +
 			"records no other tool reads (locations, bins, decks, and the rest of describe_record_type's list); " +
@@ -231,7 +235,9 @@ var mateToolListRecords = mateTool{
 }
 
 var mateToolGetRecord = mateTool{
-	name: "get_record",
+	name:      "get_record",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Read one record by id: its registered fields and its version (the base_version for a proposal that changes or deletes it).",
 		Parameters: json.RawMessage(`{

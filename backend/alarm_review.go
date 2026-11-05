@@ -64,26 +64,10 @@ const alarmReviewLoadBackoff = 30 * time.Second
 // they were stopped.
 const alarmReviewShutdownWait = 10 * time.Second
 
-// alarmReviewReadTools are the tools an alarm review may call: reads only.
-// Nothing that proposes, fills a form, starts a watch or draws a card, and no
-// web search.
-var alarmReviewReadTools = map[string]bool{
-	"get_vessel_status":      true,
-	"get_active_alarms":      true,
-	"get_alarm_context":      true,
-	"list_alarm_rules":       true,
-	"check_signalk_paths":    true,
-	"get_last_recorded":      true,
-	"get_path_history":       true,
-	"list_passages":          true,
-	"get_cruise_summary":     true,
-	"get_wind_forecast":      true,
-	"get_tides":              true,
-	"get_vessel_particulars": true,
-	"get_planned_stay":       true,
-}
-
-func alarmReviewReadTool(name string) bool { return alarmReviewReadTools[name] }
+// alarmReviewReadTool says whether an alarm review may call the tool: reads
+// only, as each tool's audiences in the registry say. Nothing that proposes,
+// fills a form, starts a watch or draws a card, and no web search.
+func alarmReviewReadTool(name string) bool { return reachesAudience(name, audienceAlarmReview) }
 
 // alarmReview is one review of one raise. Its json tags are what the alarm card
 // shows of it; the rest never leaves the server.
@@ -519,13 +503,7 @@ var alarmReviewToolDef = openRouterFunctionDef{
 }
 
 func (t *alarmReviewTools) definitions() []openRouterTool {
-	var out []openRouterTool
-	for _, def := range t.assistantToolDeps.definitions() {
-		if alarmReviewReadTool(def.Function.Name) {
-			out = append(out, def)
-		}
-	}
-	return append(out, openRouterTool{Type: "function", Function: alarmReviewToolDef})
+	return reviewAudienceDefinitions(t.assistantToolDeps, audienceAlarmReview, alarmReviewToolDef)
 }
 
 func (t *alarmReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
@@ -533,10 +511,7 @@ func (t *alarmReviewTools) execute(ctx context.Context, name string, args json.R
 		result, err := t.submit(args)
 		return result, assistantToolOutcome{}, err
 	}
-	if !alarmReviewReadTool(name) {
-		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available in an alarm review: it reads the boat and cannot change anything", name)
-	}
-	return t.assistantToolDeps.execute(ctx, name, args)
+	return reviewAudienceExecute(ctx, t.assistantToolDeps, audienceAlarmReview, "an alarm review", name, args)
 }
 
 // alarmReviewPathLike matches a dotted SignalK path.

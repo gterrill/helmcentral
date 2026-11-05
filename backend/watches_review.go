@@ -47,26 +47,12 @@ const (
 	watchSkipperRepliesMaxChars = 2000
 )
 
-// watchReviewReadTools are the tools a review may call: reads only. Nothing
-// that hands the operator something to tap, starts a background watch, fills
-// a form or draws a card. search_web joins them only when the operator has
+// watchReviewReadTool says whether a watch review may call the tool: reads
+// only, as each tool's audiences in the registry say. Nothing that hands the
+// operator something to tap, starts a background watch, fills a form or draws
+// a card. search_web is among them, and is offered only when the operator has
 // turned web search on.
-var watchReviewReadTools = map[string]bool{
-	"get_vessel_status":      true,
-	"get_active_alarms":      true,
-	"get_alarm_context":      true,
-	"list_alarm_rules":       true,
-	"check_signalk_paths":    true,
-	"get_last_recorded":      true,
-	"get_path_history":       true,
-	"list_passages":          true,
-	"get_cruise_summary":     true,
-	"get_wind_forecast":      true,
-	"get_tides":              true,
-	"get_vessel_particulars": true,
-	"get_planned_stay":       true,
-	"search_web":             true,
-}
+func watchReviewReadTool(name string) bool { return reachesAudience(name, audienceWatchReview) }
 
 type watchReviewSubmission struct {
 	Review string `json:"review"`
@@ -134,7 +120,7 @@ var watchReviewToolDef = openRouterFunctionDef{
 }
 
 // watchReviewTools is the executor a review runs against: the turn's live tool
-// dependencies, narrowed to watchReviewReadTools plus submit_watch_review.
+// dependencies, narrowed to the tools a watch review may call plus submit_watch_review.
 type watchReviewTools struct {
 	assistantToolDeps
 	// findings are the rules' findings the review was given, in the order it
@@ -146,13 +132,7 @@ type watchReviewTools struct {
 }
 
 func (t *watchReviewTools) definitions() []openRouterTool {
-	var out []openRouterTool
-	for _, def := range t.assistantToolDeps.definitions() {
-		if watchReviewReadTools[def.Function.Name] {
-			out = append(out, def)
-		}
-	}
-	return append(out, openRouterTool{Type: "function", Function: watchReviewToolDef})
+	return reviewAudienceDefinitions(t.assistantToolDeps, audienceWatchReview, watchReviewToolDef)
 }
 
 func (t *watchReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
@@ -160,10 +140,7 @@ func (t *watchReviewTools) execute(ctx context.Context, name string, args json.R
 		result, err := t.submit(args)
 		return result, assistantToolOutcome{}, err
 	}
-	if !watchReviewReadTools[name] {
-		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available in a watch review: it reads the boat and cannot change anything", name)
-	}
-	return t.assistantToolDeps.execute(ctx, name, args)
+	return reviewAudienceExecute(ctx, t.assistantToolDeps, audienceWatchReview, "a watch review", name, args)
 }
 
 func (t *watchReviewTools) submit(args json.RawMessage) (string, error) {

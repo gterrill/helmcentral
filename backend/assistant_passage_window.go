@@ -1172,7 +1172,10 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 }
 
 var mateToolAssessPassageWindow = mateTool{
-	name: "assess_passage_window",
+	name:      "assess_passage_window",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Judge an itinerary against the operator's own passage limits as a grid: one " +
 			"row per candidate departure date, one cell per leg on the date it would be sailed, each go, marginal, " +

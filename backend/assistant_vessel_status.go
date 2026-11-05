@@ -1065,7 +1065,9 @@ func hiddenBetween(hidden [][2]time.Time, from, to time.Time) bool {
 // ── registry record ──────────────────────────────────────────────────────
 
 var mateToolGetVesselStatus = mateTool{
-	name: "get_vessel_status",
+	name:      "get_vessel_status",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Read one snapshot of the boat as it is now, built from the operator's own roles and equipment: " +
 			"power (house bank charge, voltage and current, solar watts, DC load), every tank with its level and " +

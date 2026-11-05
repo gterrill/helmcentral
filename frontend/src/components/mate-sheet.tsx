@@ -54,8 +54,13 @@ interface MateSheetProps {
   screen?: AssistantScreenContext
   /** ADR 0226, 0227: the alarm or watch run in `screen` belonged to the seeded question. Called
    * once that question has been answered, and when the operator starts a new
-   * conversation or picks another one, so the caller drops it from `screen`. */
-  onContextDone?: () => void
+   * conversation or picks another one, so the caller drops it from `screen`.
+   * Names the request the send began under (ADR 0257), so a request opened
+   * since keeps its context. */
+  onContextDone?: (requestId: number) => void
+  /** Names this open (ADR 0257). A new id means a new ask, so the same words
+   * asked again while the sheet is open are sent again. */
+  requestId?: number
   canWrite: boolean
   /** Settings → Mate → "Read replies aloud" (ADR 0093 voice phase): when
    * on, the answer to a spoken question is read aloud as soon as it
@@ -85,12 +90,12 @@ interface MateSheetProps {
  * with its own Mate session (ADR 0183), independent of the panel's.
  *
  * Mate UI cycle ("Mate opens on an empty chat"): the sheet never actually
- * unmounts once opened (App.tsx's mateSheetHasOpenedRef keeps it mounted;
+ * unmounts once opened (useMateSheetRequest keeps it mounted;
  * only `open` toggles), so without deliberate resetting it would otherwise
  * keep whatever conversation was last active across every later close and
  * reopen, for the rest of the session - see the reset-on-open effect below.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, draft = false, spoken = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange, onContextDone }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, draft = false, spoken = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange, onHasDraftChange, onContextDone, requestId = 0 }: MateSheetProps) {
   const session = useMateSession({ screen })
   const watch = useMateTelemetryWatch(session.activeId)
   const speechOutput = useSpeechOutput()
@@ -129,9 +134,9 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   const handleNewConversation = useCallback(() => {
     startNew()
     draftChatPendingRef.current = false
-    onContextDone?.()
+    onContextDone?.(requestId)
     composerRef.current?.focus()
-  }, [startNew, onContextDone])
+  }, [startNew, onContextDone, requestId])
 
   // "Open the Mate page" (ADR 0094): hands the active conversation to the
   // full panel and closes the sheet. Not gated on sending - a reply in
@@ -157,9 +162,9 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
   // page's own list does.
   const handleSelectFromSearch = useCallback((id: string) => {
     draftChatPendingRef.current = false
-    onContextDone?.()
+    onContextDone?.(requestId)
     void select(id)
-  }, [select, onContextDone])
+  }, [select, onContextDone, requestId])
 
   // Refetches every time the sheet opens, rather than once per app session
   // (impeccable critique 2026-09-12, P0): the sheet has no conversation
@@ -214,7 +219,8 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
     }
     if (!initialQuestion || !canWrite || loading) return
 
-    const key = `${draft ? 'draft:' : newConversation ? 'new:' : 'existing:'}${initialQuestion}`
+    // The request id makes asking the same words again a new send.
+    const key = `${requestId}:${draft ? 'draft:' : newConversation ? 'new:' : 'existing:'}${initialQuestion}`
     if (sentQuestionRef.current === key) return
     // Text to finish, not a question: it always goes in a new chat linked to
     // the run, so it waits for a reply still arriving. `sending` is a
@@ -238,7 +244,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
         setQueuedQuestion({ text: initialQuestion, key: Date.now() })
         return
       }
-      onContextDone?.()
+      onContextDone?.(requestId)
       // Read-aloud (ADR 0093 voice phase): only for an answer to a question
       // that came in by voice - the `## Spoken summary` section exists only
       // because `spoken` asked for it - and only while the sheet still shows
@@ -247,7 +253,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
         speechOutput.speak(extractSpokenSummary(result.message.content) ?? result.message.content.slice(0, SPOKEN_FALLBACK_LENGTH))
       }
     })()
-  }, [open, initialQuestion, newConversation, draft, spoken, canWrite, loading, sending, send, isAnswering, startNew, readAloud, speechOutput, onContextDone])
+  }, [open, initialQuestion, newConversation, draft, spoken, canWrite, loading, sending, send, isAnswering, startNew, readAloud, speechOutput, onContextDone, requestId])
 
   // A draft's chat is linked to its run on the first send; after that the run
   // is dropped from the screen, as for a question the sheet sent itself. The
@@ -256,14 +262,15 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
     ...session,
     send: async (text: string, options?: MateSendOptions) => {
       const firstOfDraftChat = draftChatPendingRef.current
+      const startedUnder = requestId
       const result = await session.send(text, options)
       if (firstOfDraftChat && !result.refused) {
         draftChatPendingRef.current = false
-        onContextDone?.()
+        onContextDone?.(startedUnder)
       }
       return result
     },
-  }), [session, onContextDone])
+  }), [session, onContextDone, requestId])
 
   // Closing the sheet stops whatever it was reading - the operator has
   // moved on, and a voice answer trailing off after the panel that gave it

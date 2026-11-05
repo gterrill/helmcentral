@@ -75,7 +75,7 @@ boat's position if it is where the boat is now), or to remove the statements if
 they are not about an anchorage.
 
 - **How the check knows what a forecast returned:** the run loop keeps each call's
-  result alongside the call, by index, and passes both to `checkDraft`. The check
+  result with the call in the run record (ADR 0256) and passes it to `checkDraft`. The check
   reads `shelter_summary` from a `get_wind_forecast` result. A failed call has no
   result, and `shelter_unavailable` and open water leave `shelter_summary` out, so
   none of them satisfies the check.

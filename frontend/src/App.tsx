@@ -148,7 +148,8 @@ import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId }
 import { browserHistory, createAppRouter } from '@/lib/app-router'
 import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
 import { useHasNavigationGuard } from '@/hooks/use-navigation-guard'
-import { screenContextFor, withAlarmContext, withWatchRunContext, type MateAlarmContext, type MateWatchRunContext } from '@/lib/mate-screen'
+import { screenContextFor } from '@/lib/mate-screen'
+import { useMateSheetRequest } from '@/hooks/use-mate-sheet-request'
 import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Its own module, not the patterns barrel: the barrel would drag TanStack
 // Table into the entry chunk for the sake of one empty div.
@@ -616,35 +617,18 @@ function AppShell() {
   // page is on screen, opened by the header's "Ask Mate" button (and later
   // by voice) rather than navigating away to the Assistant panel. Rendered
   // once here, not per-panel, so it keeps its own thread across opens/closes
-  // the same way the panel's own conversation does. `mateSheetQuestion` is
-  // cleared on close so reopening later with no question never re-sends a
-  // stale one.
-  const [mateSheetOpen, setMateSheetOpen] = useState(false)
-  const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
-  const [mateSheetNewConversation, setMateSheetNewConversation] = useState(false)
-  // Whether `mateSheetQuestion` is text for the composer rather than a question to send.
-  const [mateSheetDraft, setMateSheetDraft] = useState(false)
-  // Whether `mateSheetQuestion` came in by voice: only then does Mate write
-  // an answer meant for speaking, and only then is it read aloud.
-  const [mateSheetSpoken, setMateSheetSpoken] = useState(false)
-  // The alarm the sheet's conversation is about (ADR 0226), set by an Ask Mate
-  // button on an alarm card. It rides on the screen context of every question
-  // asked until the sheet closes, so a follow-up still means that alarm.
-  const [mateSheetAlarm, setMateSheetAlarm] = useState<MateAlarmContext | null>(null)
-  // The watch run the sheet's conversation is about (ADR 0227), the same way.
-  const [mateSheetWatchRun, setMateSheetWatchRun] = useState<MateWatchRunContext | null>(null)
-  // MateSheet is lazy-loaded and does not mount at all until the sheet is
-  // opened for the first time - it fetches its conversation list and runs
-  // every other effect only while `open`, so there is nothing for it to do
-  // before then. This ref latches true the first time `mateSheetOpen` goes
-  // true and never resets, so the component then stays mounted across later
-  // closes - its thread, active conversation, and speech-output state
-  // survive being closed and reopened the same way they always have. A ref
-  // (mutated during render, not via a separate effect) rather than state:
-  // this needs to be visible the same render `mateSheetOpen` first turns
-  // true, not one render later.
-  const mateSheetHasOpenedRef = useRef(false)
-  if (mateSheetOpen) mateSheetHasOpenedRef.current = true
+  // the same way the panel's own conversation does. What each open was for,
+  // and when that is forgotten, lives in useMateSheetRequest (ADR 0257).
+  const mateBaseScreen = useMemo(
+    () => screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle),
+    [appLocation, activePage, documentDetailsTitle],
+  )
+  const {
+    ask: openMate,
+    open: mateSheetOpen,
+    hasOpened: mateSheetHasOpened,
+    sheetProps: mateSheetProps,
+  } = useMateSheetRequest(mateBaseScreen)
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
   // thread was active there, and by the panel's own list/search selecting
@@ -666,8 +650,8 @@ function AppShell() {
   // the viewer, e.g. from a Mate attachment chip's link) is handed to the
   // panel once as an initial prop rather than tracked in the location at
   // all: nothing here needs to know which document is open.
-  // Ditto latch pattern (mateSheetHasOpenedRef/helpSheetHasOpenedRef
-  // above), but the opposite direction - tracking that the operator has
+  // Ditto latch pattern (useMateSheetRequest's hasOpened and
+  // helpSheetHasOpenedRef above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
   // Mate attachment chip's link should open its document once, for the
   // navigation it names, not every time the Documents panel remounts (it
@@ -709,27 +693,10 @@ function AppShell() {
   // the answer watcher can tell a conversation the sheet is showing right
   // now apart from one it merely knows about.
   const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
-  const clearMateSheetContext = useCallback(() => {
-    setMateSheetAlarm(null)
-    setMateSheetWatchRun(null)
-  }, [])
-  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; draft?: boolean; alarm?: MateAlarmContext; watchRun?: MateWatchRunContext }) => {
-    setMateSheetAlarm(options?.alarm ?? null)
-    setMateSheetWatchRun(options?.watchRun ?? null)
-    setMateSheetQuestion(question)
-    setMateSheetNewConversation(Boolean(options?.newConversation))
-    setMateSheetDraft(Boolean(options?.draft))
-    setMateSheetSpoken(Boolean(options?.spoken))
-    setMateSheetOpen(true)
-  }, [])
   // Push-to-talk and "Hey Mate": the one way a question arrives by voice.
   const openMateBySpeech = useCallback((question: string) => {
     openMate(question, { spoken: true })
   }, [openMate])
-  const mateScreen = useMemo(
-    () => withWatchRunContext(withAlarmContext(screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle), mateSheetAlarm), mateSheetWatchRun),
-    [appLocation, activePage, documentDetailsTitle, mateSheetAlarm, mateSheetWatchRun],
-  )
 
   // mate-answer-toast plan: which conversation(s), if any, are actually on
   // screen right now - the Mate panel's active thread only counts while the
@@ -792,7 +759,7 @@ function AppShell() {
   // openHelp a HelpTarget (or null for the contents page).
   const [helpOpen, setHelpOpen] = useState(false)
   const [helpTarget, setHelpTarget] = useState<HelpTarget | null>(null)
-  // Same lazy-mount-on-first-open latch as mateSheetHasOpenedRef above:
+  // Same lazy-mount-on-first-open latch as useMateSheetRequest's hasOpened above:
   // HelpSheet fetches nothing before it has ever been opened (see
   // use-help.ts), so there is nothing lost by not mounting it until then,
   // and its back-stack history then survives later closes.
@@ -2271,39 +2238,18 @@ function AppShell() {
       <NavigationGuardDialog />
 
       {/* Lazy-loaded, and not mounted at all until first opened - see
-          mateSheetHasOpenedRef above. `fallback={null}` is fine here: the
+          useMateSheetRequest above. `fallback={null}` is fine here: the
           sheet itself is a Sheet primitive that renders nothing (no overlay,
           no panel) until `open` is true, so there is nothing that should be
           showing while its chunk loads on this very first open. */}
-      {mateSheetHasOpenedRef.current && (
+      {mateSheetHasOpened && (
         <LazyBoundary fallback={null} onChunkError={versionWatch.reportChunkFailure}>
         <Suspense fallback={null}>
           <MateSheet
-            open={mateSheetOpen}
-            onOpenChange={(open) => {
-              setMateSheetOpen(open)
-              if (!open) {
-                setMateSheetQuestion(undefined)
-                setMateSheetNewConversation(false)
-                setMateSheetDraft(false)
-                setMateSheetSpoken(false)
-                setMateSheetAlarm(null)
-                // A draft left unsent must not tie the next, unrelated chat to its run.
-                setMateSheetWatchRun(null)
-              }
-            }}
-            initialQuestion={mateSheetQuestion}
-            newConversation={mateSheetNewConversation}
-            draft={mateSheetDraft}
-            spoken={mateSheetSpoken}
-            screen={mateScreen}
-            onContextDone={clearMateSheetContext}
+            {...mateSheetProps}
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}
-            onOpenPanel={(id) => {
-              setMateSheetOpen(false)
-              openMatePanel(id)
-            }}
+            onOpenPanel={openMatePanel}
             onActiveConversationChange={setMateSheetConversationId}
             onHasDraftChange={setMateSheetHasDraft}
           />

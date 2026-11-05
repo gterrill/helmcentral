@@ -120,7 +120,7 @@ export interface AskMateSelectionProps {
    * hooks/use-assistant-status.ts) - false hides this feature entirely
    * rather than offering a control that would just fail. */
   mateAvailable: boolean
-  /** Matches App.tsx's openMate signature exactly - always called with
+  /** Matches `ask` of useMateSheetRequest - always called with
    * `{ newConversation: true }`, per the plan ("Always start a new
    * conversation"). Optional so a caller that hasn't wired Mate up yet (or
    * a test with nothing to assert on) doesn't have to pass a no-op. */

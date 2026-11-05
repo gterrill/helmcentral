@@ -38,9 +38,12 @@ _Avoid_: widget draft, pending tile.
 
 **Mate tool**: one thing the model can call during a run, defined by a single
 record in `mateTools` (`backend/assistant_tools.go`): its name, its definition,
-its handler, its status line, and optionally how its result becomes a card on
-the reply and whether it is on offer for this run. Calls in a round run
-concurrently, so a tool that writes is safe under that on its own.
+its handler, its status line, whether it only reads, and which audiences besides
+the operator in chat (alarm reviews, watch reviews, outside assistants) may call
+it, and optionally how its result becomes a card on the reply and whether it is
+on offer for this run. A tool that has not decided an audience reaches none of
+them. Calls in a round run concurrently, so a tool that writes is safe under that
+on its own.
 _Avoid_: function, plugin, skill.
 
 **Mate event**: one entry in the stream a run sends the browser, from a closed
@@ -56,6 +59,21 @@ streaming answer (`useMateSession`). The Mate panel and the Mate sheet each
 have their own, so each can show a different conversation. A session asks one
 question at a time and sends the screen the operator is on with every one.
 _Avoid_: chat, thread (the thread is the rendered list of messages).
+
+**Mate sheet request**: what one opening of the Mate sheet is for: the question
+or draft, how to send it (new conversation, spoken), and the alarm or watch run
+it is about. Each open replaces the last request whole, and closing the sheet
+clears it, so a reopened sheet never re-sends a stale question or keeps a stale
+context. Owned by `useMateSheetRequest`, which also layers the context over the
+screen the operator is on; the app shell keeps only the handle to ask.
+_Avoid_: sheet state, Mate seed, open options.
+**Run record**: what a Mate run's tool calls did, one entry per call in the
+order made: the call, its result, and its error if it failed or never ran. The
+draft checks ask it whether a tool ran and what it returned (`mateRunRecord`,
+`backend/assistant_run_record.go`). A call that failed has told Mate nothing, so
+no check counts it, except a passage check whose error names the passage limits.
+_Avoid_: tool log (the tool log is the forced-final summary of the same calls),
+call history.
 
 ## Passages
 

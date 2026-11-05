@@ -50,7 +50,7 @@ export interface UseMateVoiceResult {
 /**
  * Push-to-talk (Phase 1) plus the "Hey Mate" wake word (Phase 2 option B),
  * both funnelled through onQuestion so App.tsx only has to know "a question
- * arrived by voice, open Mate with it" - see openMate() in App.tsx.
+ * arrived by voice, open Mate with it" - see `ask` in use-mate-sheet-request.ts.
  */
 export function useMateVoice({
   voiceInput,

@@ -1025,7 +1025,9 @@ func roundTo2Ptr(v *float64) *float64 {
 }
 
 var mateToolCheckSignalKPaths = mateTool{
-	name: "check_signalk_paths",
+	name:      "check_signalk_paths",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Check the live SignalK connection right now: whether it is connected, when it " +
 			"last received any data, a summary of every source ($source) feeding the tree with how long " +
@@ -1064,7 +1066,9 @@ var mateToolCheckSignalKPaths = mateTool{
 }
 
 var mateToolGetLastRecorded = mateTool{
-	name: "get_last_recorded",
+	name:      "get_last_recorded",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "From InfluxDB, find the last recorded time and value for every SignalK path and/or " +
 			"source matching a filter - this is what actually answers \"when did X stop\", including for " +
@@ -1108,7 +1112,9 @@ var mateToolGetLastRecorded = mateTool{
 }
 
 var mateToolGetPathHistory = mateTool{
-	name: "get_path_history",
+	name:      "get_path_history",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "From InfluxDB, fetch one exact SignalK path's history over a time range - " +
 			"min/mean/max per bucket, overall min/mean/max, first/last seen, and any gaps - to see what " +
