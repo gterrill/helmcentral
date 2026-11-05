@@ -15,6 +15,9 @@ import {
 import { formatBearing } from '@/lib/poi'
 import { cn } from '@/lib/utils'
 
+// The heading both list groups (places and vessels) use.
+export const nearbyGroupHeadingClass = 'text-[10px] uppercase tracking-[0.14em] text-muted-foreground'
+
 // The Vessels group lists at most this many contacts, alarmed first and then
 // nearest; "+N more" beside the heading says when others qualified. Four
 // two-line rows fit beside the places on the 272 px wall tile with no scrolling,
@@ -94,12 +97,12 @@ export function VesselGroup({
     <div
       data-testid="poi-vessel-group"
       className={cn(
-        'flex min-h-0 min-w-0 flex-col gap-1',
+        'flex min-h-0 min-w-0 flex-col gap-0.5',
         !stacked ? 'border-l border-border/60 pl-2' : first ? 'border-b border-border/60 pb-1' : 'border-t border-border/60 pt-1',
       )}
     >
       <div className="flex items-baseline justify-between gap-1">
-        <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Vessels</span>
+        <span className={nearbyGroupHeadingClass}>Vessels</span>
         {more > 0 && (
           <span data-testid="poi-vessel-more" className="text-xs text-muted-foreground">+{more} more</span>
         )}

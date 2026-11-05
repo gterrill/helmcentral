@@ -45,8 +45,9 @@ the tile's title bar. To remove the tile, use the same X every other tile uses.
 
 ## Vessels in the list
 
-With **Show AIS traffic** on and the **Map and list** layout, the list has a
-Vessels group next to the places. Here is what it shows:
+With **Show AIS traffic** on and the **Map and list** layout, the list has two
+groups, each with its own heading: Places and Vessels. Here is what the Vessels
+group shows:
 
 - Which vessels: the ones inside the smaller of the tile's range and the
   distance the AIS feed searches, which is 5 km. Alarmed vessels come first,

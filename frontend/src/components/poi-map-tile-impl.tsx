@@ -6,7 +6,7 @@ import { MapPin, Settings2, Ship } from 'lucide-react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
-import { VesselGroup, vesselGroupMessage } from '@/components/nearby-vessel-group'
+import { nearbyGroupHeadingClass, VesselGroup, vesselGroupMessage } from '@/components/nearby-vessel-group'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, suppressedIdsEqual, type MarkerLabelPoint } from '@/lib/marker-labels'
@@ -98,11 +98,11 @@ const RANKED_LIST_SIZE = 5
 // The list pane height from which the Vessels group stacks under the places
 // instead of sitting beside them. The kiosk list cannot scroll, so a tall pane
 // is the only one where stacking is known to fit everything. Worst case, in pixels: footer
-// 24, five place rows 130, the highlighted row's three-line summary 50, group
-// heading 16, four two-line vessel rows 160 and gaps 16, which is 396. The
-// 272 px wall tile has about 230 px for the list, and a 12 x 22 tile has well
-// over this.
-const VESSELS_STACK_MIN_HEIGHT_PX = 420
+// 25 and its error line 18, five place rows 130, the highlighted row's three-line
+// summary 48, two group headings 30, four two-line vessel rows 168 and gaps and
+// the divider 31, which is 450. The 272 px wall tile has about 230 px for the
+// list, and a 12 x 22 tile has well over this.
+const VESSELS_STACK_MIN_HEIGHT_PX = 460
 // The list pane width below which the two groups stack even when the pane is
 // short, because side by side each column would be too narrow. Such a pane may
 // cut off what is stacked last, so it puts the Vessels group first while a
@@ -439,7 +439,7 @@ export default function PoiMapTileImpl({
   const stale = isStale(positionLastUpdateAgeS)
 
   const placesContent = rankedList.length === 0 ? (
-    <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">
+    <div className="flex flex-1 items-center justify-center text-center text-xs text-muted-foreground">
       {poi.error && poi.fetchedAt === null
         ? 'POI feed unavailable'
         : poi.loading
@@ -458,7 +458,12 @@ export default function PoiMapTileImpl({
     ))
   )
 
-  const placesGroup = <div key="places" className="flex min-h-0 flex-col gap-1">{placesContent}</div>
+  const placesGroup = (
+    <div key="places" data-testid="poi-places-group" className="flex min-h-0 flex-col gap-0.5">
+      <span className={nearbyGroupHeadingClass}>Places</span>
+      {placesContent}
+    </div>
+  )
   const vesselGroup = (
     <VesselGroup
       key="vessels"
@@ -477,6 +482,7 @@ export default function PoiMapTileImpl({
 
   return (
     <Tile
+      fill
       title={title}
       icon={<MapPin className="h-3.5 w-3.5 text-gauge-secondary" />}
       stale={stale}
@@ -490,7 +496,9 @@ export default function PoiMapTileImpl({
       }
     >
       {/* A fixed row: the list's content must not stretch the map beside it,
-          because a change in the map's measured size re-frames the camera. */}
+          because a change in the map's measured size re-frames the camera. The
+          Tile's fill is what holds it: without it a list taller than the row
+          grows the tile's content, and the map with it. */}
       <div
         className={cn(
           'grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-2',
@@ -696,11 +704,11 @@ export default function PoiMapTileImpl({
                 data-testid="poi-list-groups"
                 data-stacked={stackVessels}
                 data-vessels-first={vesselsFirst}
-                className={cn('grid min-h-0 flex-1 gap-2', stackVessels ? 'grid-cols-1 content-start' : 'grid-cols-2')}
+                className={cn('grid flex-1 gap-2', stackVessels ? 'grid-cols-1 content-start' : 'grid-cols-2')}
               >
                 {vesselsFirst ? [vesselGroup, placesGroup] : [placesGroup, vesselGroup]}
               </div>
-            ) : placesContent}
+            ) : <div className="flex flex-1 flex-col gap-0.5">{placesContent}</div>}
             <div className="mt-auto border-t border-border/60 pt-1 text-xs text-muted-foreground">
               {poi.provider ? <span className="capitalize">{poi.provider.replace(/-/g, ' ')}</span> : null}
               {poi.fetchedAt && (

@@ -49,6 +49,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   narrower, so Size and each row's menu fit on a laptop screen when the main
   menu is collapsed. With the main menu open, the table still scrolls sideways.
   Long folder names no longer show a sliver of a third line.
+- **The Nearby list now has a Places heading.** With **Show AIS traffic** on,
+  the places sit under their own heading, the same as the Vessels group
+  next to them. A list too long for its tile now scrolls instead of stretching
+  the map, so the map no longer jumps when a long description comes up.
 
 ### Fixed
 
