@@ -356,7 +356,9 @@ func tidalPhasesCrossed(cycles []tidalHalfCycle, dep, arr time.Time, loc *time.L
 }
 
 var mateToolPlanTidalDeparture = mateTool{
-	name: "plan_tidal_departure",
+	name:      "plan_tidal_departure",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Rank departure times by how much of a passage runs with a fair tidal stream. It uses the " +
 			"nearest tide station's high and low water times for the stream's phase and the direction you give " +

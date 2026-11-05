@@ -507,7 +507,7 @@ func TestCollectedPromptContextCarriesTheMemories(t *testing.T) {
 }
 
 func TestReviewsReadMemoriesButCannotSaveThem(t *testing.T) {
-	if watchReviewReadTools["remember_fact"] || alarmReviewReadTool("remember_fact") {
+	if watchReviewReadTool("remember_fact") || alarmReviewReadTool("remember_fact") {
 		t.Fatal("an unattended review must not be able to save a memory")
 	}
 	tools := &watchReviewTools{assistantToolDeps: assistantToolDeps{}}

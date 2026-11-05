@@ -11,7 +11,9 @@ import (
 )
 
 var mateToolFindPlaces = mateTool{
-	name: "find_places",
+	name:      "find_places",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Resolve a place name (a bay, anchorage, island, reef, marina, harbour or similar) " +
 			"to one or more candidate positions, each with its straight-line distance and bearing from the search centre " +

@@ -15,7 +15,9 @@ import (
 // does the same before it works out time and fuel. Both go through routePassage.
 
 var mateToolRouteDistance = mateTool{
-	name: "route_distance",
+	name:      "route_distance",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "How far it is by water between two positions, routed round islands and headlands over the " +
 			"offline coastline held on board. Use it for the distance and first-leg bearing of any leg you " +

@@ -664,7 +664,9 @@ const logbookRangeParams = `"from": {"type": "string", "description": "Earliest 
 						"to": {"type": "string", "description": "Latest departure: YYYY-MM-DD (that whole day on the boat's clock) or RFC3339. Omit for the end of the logbook."}`
 
 var mateToolListPassages = mateTool{
-	name: "list_passages",
+	name:      "list_passages",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "List passages from the Passages logbook, the record the operator sees on the Passages page: " +
 			"start and end (start_local and end_local, boat time to quote as given; start_iso and end_iso, UTC, for the range of a later get_path_history call), the place it left and arrived at, cruise, rating, notes, distance in NM, time " +
@@ -689,7 +691,9 @@ var mateToolListPassages = mateTool{
 }
 
 var mateToolGetCruiseSummary = mateTool{
-	name: "get_cruise_summary",
+	name:      "get_cruise_summary",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Summarise the Passages logbook over a date range, or all of it: passage count, total " +
 			"distance in NM, time under way, fuel burned in litres over the passages that recorded it, the " +

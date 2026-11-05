@@ -7,6 +7,11 @@ Accepted (2026-10-13). Supersedes the wording "every Mate tool is read-only" in
 and [ADR 0158](0158-mate-changes-records-through-changesets.md). Builds on the "off means absent" rule of
 [ADR 0159](0159-mate-searches-the-web-on-request.md). Those ADRs are left as written.
 
+Note (2026-11-05): [ADR 0259](0259-a-mate-tool-says-who-may-call-it.md) adds an
+`effect` and per-audience access to the record, because alarm reviews, watch
+reviews and the MCP server now read them. The rejection of an `Effect` enum below
+no longer holds.
+
 ## Context
 
 Adding a Mate tool touched five or six places in `backend/`: the definitions slice, the

@@ -464,6 +464,20 @@ type mateTool struct {
 	// definition's function name, so function.Name stays empty.
 	name     string
 	function openRouterFunctionDef
+	// effect says whether the tool only reads. A tool that has not said is
+	// offered to no one but the operator in chat (ADR 0259).
+	effect mateEffect
+	// audiences says who besides the operator in chat may call the tool: alarm
+	// reviews, watch reviews and outside assistants. Each audience is decided
+	// here, one by one; an audience left undecided is not granted, and a tool
+	// that does not only read is granted to none of them.
+	audiences mateAudiences
+	// drawsCard says the handler puts a card in the run's card sink for the
+	// reply to carry. It is a fact about the handler, kept apart from effect:
+	// a card changes no state, but a review has a live sink and must not
+	// pick one up, so no review may call such a tool. An outside assistant
+	// may, because its sink is nil and the tool then draws nothing (ADR 0259).
+	drawsCard bool
 	// execute runs the tool. The outcome is what the run's trace records about
 	// how it ran (find_places: cache hit or miss); a tool with nothing to
 	// report returns the zero outcome, which plainTool does for it.
@@ -478,6 +492,84 @@ type mateTool struct {
 	// Unavailable means absent from the request and refused by execute (web
 	// search off, ADR 0159). Nil means always available.
 	available func(d assistantToolDeps) bool
+}
+
+// mateEffect is what a tool does to the boat and to Helmcentral's state.
+// Its zero value is undecided, which grants a tool to no audience.
+type mateEffect uint8
+
+const (
+	effectUndecided mateEffect = iota
+	// effectReads: reads the boat, Helmcentral's stores or the web, and changes
+	// nothing.
+	effectReads
+	// effectActs: proposes or makes a change, remembers, starts work or fills
+	// a form.
+	effectActs
+)
+
+// mateAccess is a tool's decision for one audience. Its zero value is
+// undecided, which is not granted.
+type mateAccess uint8
+
+const (
+	accessUndecided mateAccess = iota
+	accessDenied
+	accessGranted
+)
+
+// mateAudiences holds a tool's decision for each audience besides the operator
+// in chat.
+type mateAudiences struct {
+	alarmReview mateAccess
+	watchReview mateAccess
+	mcp         mateAccess
+}
+
+// The decisions most tools share.
+var (
+	audienceReviewsAndMCP = mateAudiences{alarmReview: accessGranted, watchReview: accessGranted, mcp: accessGranted}
+	// A watch review may also search the web when the operator turns that on;
+	// an alarm review and an outside assistant may not.
+	audienceWatchReviewOnly = mateAudiences{alarmReview: accessDenied, watchReview: accessGranted, mcp: accessDenied}
+	audienceMCPOnly         = mateAudiences{alarmReview: accessDenied, watchReview: accessDenied, mcp: accessGranted}
+	audienceNobody          = mateAudiences{alarmReview: accessDenied, watchReview: accessDenied, mcp: accessDenied}
+)
+
+type mateAudience uint8
+
+const (
+	audienceAlarmReview mateAudience = iota
+	audienceWatchReview
+	audienceMCP
+)
+
+// reaches reports whether the tool may be called by the audience. It fails
+// closed: the audience must be granted, the tool must only read, and a tool
+// that draws a card never reaches a review, whose card sink is live.
+func (t mateTool) reaches(a mateAudience) bool {
+	if t.effect != effectReads {
+		return false
+	}
+	if t.drawsCard && a != audienceMCP {
+		return false
+	}
+	switch a {
+	case audienceAlarmReview:
+		return t.audiences.alarmReview == accessGranted
+	case audienceWatchReview:
+		return t.audiences.watchReview == accessGranted
+	case audienceMCP:
+		return t.audiences.mcp == accessGranted
+	}
+	return false
+}
+
+// reachesAudience reports whether the registry has a tool of that name that
+// the audience may call.
+func reachesAudience(name string, a mateAudience) bool {
+	t := lookupMateTool(name)
+	return t != nil && t.reaches(a)
 }
 
 // mateTools is every Mate tool, in the order the model is offered them.
@@ -558,11 +650,17 @@ func assistantToolDefinitions(d assistantToolDeps) []openRouterTool {
 		if !t.availableTo(d) {
 			continue
 		}
-		fn := t.function
-		fn.Name = t.name
-		tools = append(tools, openRouterTool{Type: "function", Function: fn})
+		tools = append(tools, t.definition())
 	}
 	return tools
+}
+
+// definition renders the record as a function-calling schema, with the
+// registry's name stamped in.
+func (t mateTool) definition() openRouterTool {
+	fn := t.function
+	fn.Name = t.name
+	return openRouterTool{Type: "function", Function: fn}
 }
 
 func (d assistantToolDeps) definitions() []openRouterTool { return assistantToolDefinitions(d) }

@@ -791,7 +791,10 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 }
 
 var mateToolShowTelemetryChart = mateTool{
-	name: "show_telemetry_chart",
+	name:      "show_telemetry_chart",
+	effect:    effectReads,
+	audiences: audienceNobody,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Draw a chart card of recorded vessel telemetry: one to four series over time, or one series " +
 			"against another (amps against state of charge, engine RPM against load) as points, one per time bucket. " +

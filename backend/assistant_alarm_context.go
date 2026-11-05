@@ -588,7 +588,9 @@ func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult,
 }
 
 var mateToolGetAlarmContext = mateTool{
-	name: "get_alarm_context",
+	name:      "get_alarm_context",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Everything needed to explain ONE alarm, in one call: the alarm exactly as its card shows it " +
 			"(title, body, severity state, raised/acknowledged/cleared times in boat local time; read these back, never reword them), " +
