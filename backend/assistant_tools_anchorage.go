@@ -12,7 +12,10 @@ import (
 )
 
 var mateToolAnchorageDetails = mateTool{
-	name: "anchorage_details",
+	name:      "anchorage_details",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Assess an anchorage for a stay, from one call: the shelter it has from each wind direction (the charted OpenStreetMap " +
 			"shoreline held on board as the Offline coastline, with the fetch for every 10 degrees up to 15 nm), the wind and wave forecast " +

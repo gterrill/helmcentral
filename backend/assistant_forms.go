@@ -280,7 +280,9 @@ func assistantFormDraftFromToolResult(result string) (*assistantFormDraft, error
 }
 
 var mateToolInspectForm = mateTool{
-	name: assistantInspectFormToolName,
+	name:      assistantInspectFormToolName,
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Read the layout of a PDF form the operator attached or stored as a document, so you can fill it in. " +
 			"A form with fillable fields returns each field's name, kind (text, date, checkbox, radio, combobox, listbox), " +
@@ -306,7 +308,9 @@ var mateToolInspectForm = mateTool{
 }
 
 var mateToolFillForm = mateTool{
-	name: assistantFillFormToolName,
+	name:      assistantFillFormToolName,
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Fill in a PDF form and hand the result to the operator as a card under your reply, where they can open it, " +
 			"download it, save it to Documents or dismiss it. Nothing is saved to Documents until they do. Give inspect_form's " +

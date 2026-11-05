@@ -174,7 +174,9 @@ func (d assistantToolDeps) executeReadConversation(ctx context.Context, raw json
 }
 
 var mateToolSearchConversations = mateTool{
-	name: "search_conversations",
+	name:      "search_conversations",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Search the operator's earlier conversations with you - what they asked, what you " +
 			"answered, and what was established - by keyword. Returns each matching conversation's id, " +
@@ -211,7 +213,9 @@ var mateToolSearchConversations = mateTool{
 }
 
 var mateToolReadConversation = mateTool{
-	name: "read_conversation",
+	name:      "read_conversation",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Read an earlier conversation's operator and assistant messages in order, with the " +
 			"names of any documents attached. Use it on a search_conversations result when its excerpts " +

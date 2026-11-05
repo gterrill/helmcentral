@@ -101,7 +101,9 @@ func (d assistantToolDeps) executeListAlarmRules(ctx context.Context, _ json.Raw
 }
 
 var mateToolListAlarmRules = mateTool{
-	name: "list_alarm_rules",
+	name:      "list_alarm_rules",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "List every alarm rule the boat is watching: id, label, path, op (above, below, equal, notEqual, stale), " +
 			"value and clear_value in the operator's unit (display_unit), severity (state), dwell_seconds, enabled, and origin " +

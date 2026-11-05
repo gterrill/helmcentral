@@ -616,7 +616,9 @@ type rememberResult struct {
 }
 
 var mateToolRememberFact = mateTool{
-	name: "remember_fact",
+	name:      "remember_fact",
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Keep a lasting fact about this boat in Mate's memory, so every later chat and every watch review knows it. " +
 			"Use it when the skipper asks you to remember something, or when they state a lasting fact worth keeping and you offer to. " +

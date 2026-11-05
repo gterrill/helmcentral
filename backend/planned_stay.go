@@ -494,7 +494,9 @@ func (d assistantToolDeps) executeGetPlannedStay(ctx context.Context, _ json.Raw
 }
 
 var mateToolGetPlannedStay = mateTool{
-	name: "get_planned_stay",
+	name:      "get_planned_stay",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Read the stay the operator has planned: a place (name, lat, lon) and the dates they arrive and depart, " +
 			"which the Forecast page shows the weather for. Returns no stay when none is planned or it has ended. " +

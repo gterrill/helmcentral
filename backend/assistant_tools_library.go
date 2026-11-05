@@ -9,7 +9,9 @@ import (
 )
 
 var mateToolReadHelp = mateTool{
-	name: "read_help",
+	name:      "read_help",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Read one page of Helmcentral's own in-app help, or one section of it by " +
 			"heading. Use it before answering any question about how Helmcentral itself works, what a " +
@@ -46,7 +48,9 @@ var mateToolReadHelp = mateTool{
 }
 
 var mateToolSearchDocuments = mateTool{
-	name: "search_documents",
+	name:      "search_documents",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Search the boat's document library - manuals, receipts, logs, notes and photos " +
 			"(ADR 0106) - by keyword. Returns the best-matching page or section per document with a " +
@@ -89,7 +93,9 @@ var mateToolSearchDocuments = mateTool{
 }
 
 var mateToolReadDocument = mateTool{
-	name: "read_document",
+	name:      "read_document",
+	effect:    effectReads,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Read a document from the boat's document library (ADR 0106), in order, from a " +
 			"given point. Use search_documents first to find the document_id, or use the id of a document " +

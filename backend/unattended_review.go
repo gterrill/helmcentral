@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -133,4 +134,26 @@ func runUnattendedReview(ctx context.Context, t unattendedTurn) unattendedOutcom
 		out.Problem = "Mate finished without submitting a review"
 	}
 	return out
+}
+
+// reviewAudienceDefinitions is the tool list a review is offered: the registry's
+// tools that the audience may call and that are on offer for these deps, in
+// registry order, then the review's own submit tool.
+func reviewAudienceDefinitions(deps assistantToolDeps, a mateAudience, submit openRouterFunctionDef) []openRouterTool {
+	var out []openRouterTool
+	for _, t := range mateTools {
+		if t.reaches(a) && t.availableTo(deps) {
+			out = append(out, t.definition())
+		}
+	}
+	return append(out, openRouterTool{Type: "function", Function: submit})
+}
+
+// reviewAudienceExecute runs a call the audience may make and refuses any
+// other. review names the audience in the refusal, such as "an alarm review".
+func reviewAudienceExecute(ctx context.Context, deps assistantToolDeps, a mateAudience, review, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
+	if !reachesAudience(name, a) {
+		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available in %s", name, review)
+	}
+	return deps.execute(ctx, name, args)
 }

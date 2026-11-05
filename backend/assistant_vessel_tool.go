@@ -117,7 +117,9 @@ func (d assistantToolDeps) executeGetVesselParticulars(ctx context.Context, _ js
 }
 
 var mateToolGetVesselParticulars = mateTool{
-	name: "get_vessel_particulars",
+	name:      "get_vessel_particulars",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Read what Helmcentral has on record about the boat and its owner: owner name, phone and email, insurer " +
 			"and policy number, home marina and berth, the storm delegate, length overall and beam, builder, model, year, hull " +

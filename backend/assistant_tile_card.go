@@ -305,7 +305,10 @@ func mateTileParameters() json.RawMessage {
 }
 
 var mateToolShowTile = mateTool{
-	name: "show_tile",
+	name:      "show_tile",
+	effect:    effectReads,
+	audiences: audienceNobody,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Show a dashboard tile in your answer: the tile as the operator knows it, read now. Use it when the " +
 			"picture adds something, such as \"what's our depth?\" or \"what's the tide doing?\", with the depth-tide tile. " +

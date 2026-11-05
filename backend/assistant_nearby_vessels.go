@@ -653,7 +653,9 @@ func assistantSearchNotInRange(d assistantToolDeps, nameQuery string, limit int)
 }
 
 var mateToolGetNearbyVessels = mateTool{
-	name: "get_nearby_vessels",
+	name:      "get_nearby_vessels",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "List the other vessels (AIS targets) currently around this one, or look up when " +
 			"one was last seen. Use this for any question about other boats: who is nearby, how close, " +

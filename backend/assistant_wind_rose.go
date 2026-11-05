@@ -436,7 +436,10 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 }
 
 var mateToolShowWindRose = mateTool{
-	name: "show_wind_rose",
+	name:      "show_wind_rose",
+	effect:    effectReads,
+	audiences: audienceNobody,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Draw a wind rose card: where the true wind came from over a time range, counted from the " +
 			"logged wind into compass sectors and speed bands in the operator's units (knots). Use it for \"where has " +

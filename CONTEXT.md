@@ -26,9 +26,12 @@ never need clearing.
 
 **Mate tool**: one thing the model can call during a run, defined by a single
 record in `mateTools` (`backend/assistant_tools.go`): its name, its definition,
-its handler, its status line, and optionally how its result becomes a card on
-the reply and whether it is on offer for this run. Calls in a round run
-concurrently, so a tool that writes is safe under that on its own.
+its handler, its status line, whether it only reads, and which audiences besides
+the operator in chat (alarm reviews, watch reviews, outside assistants) may call
+it, and optionally how its result becomes a card on the reply and whether it is
+on offer for this run. A tool that has not decided an audience reaches none of
+them. Calls in a round run concurrently, so a tool that writes is safe under that
+on its own.
 _Avoid_: function, plugin, skill.
 
 **Mate event**: one entry in the stream a run sends the browser, from a closed

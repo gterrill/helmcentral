@@ -263,7 +263,9 @@ func (d assistantToolDeps) executeSearchWeb(ctx context.Context, raw json.RawMes
 }
 
 var mateToolSearchWeb = mateTool{
-	name: "search_web",
+	name:      "search_web",
+	effect:    effectReads,
+	audiences: audienceWatchReviewOnly,
 	function: openRouterFunctionDef{
 		Description: "Search the open web and return up to five results, each with a title, url and snippet. " +
 			"Use it only for outside, current or general information that the boat's documents and the other " +

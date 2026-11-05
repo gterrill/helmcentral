@@ -23,7 +23,9 @@ type assistantSavePlaceArgs struct {
 }
 
 var mateToolSavePlace = mateTool{
-	name: "save_place",
+	name:      "save_place",
+	effect:    effectActs,
+	audiences: audienceNobody,
 	function: openRouterFunctionDef{
 		Description: "Offer to save a named position the operator gave you, so find_places knows it in later chats. " +
 			"Use it when the operator states coordinates for a named spot that find_places did not know. " +

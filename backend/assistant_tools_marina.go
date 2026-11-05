@@ -8,7 +8,10 @@ import (
 )
 
 var mateToolMarinaDetails = mateTool{
-	name: "marina_details",
+	name:      "marina_details",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
+	drawsCard: true,
 	function: openRouterFunctionDef{
 		Description: "Evaluate a marina from what OpenStreetMap records about it and the features around it: berth count, fee, power, " +
 			"fuel, haul-out (travel lift), boatyard, launching ramp, water, pump-out, toilets and showers, the names of the pontoon arms, the " +

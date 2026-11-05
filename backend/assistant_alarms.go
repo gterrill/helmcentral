@@ -253,7 +253,9 @@ func sameAlarmSensors(a, b []assistantAlarmSensor) bool {
 }
 
 var mateToolGetActiveAlarms = mateTool{
-	name: "get_active_alarms",
+	name:      "get_active_alarms",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "List the alarms active on the boat right now, worst first. Each has its label and " +
 			"message, state, when it was raised and acknowledged (boat local time, see timezone; if " +

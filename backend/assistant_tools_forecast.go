@@ -11,7 +11,9 @@ import (
 )
 
 var mateToolGetWindForecast = mateTool{
-	name: "get_wind_forecast",
+	name:      "get_wind_forecast",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Fetch the wind forecast (and wave forecast, where available) for a position, as a " +
 			"per-day summary plus a three-hourly breakdown. Use find_places first to resolve a place name " +
@@ -47,7 +49,9 @@ var mateToolGetWindForecast = mateTool{
 }
 
 var mateToolGetTides = mateTool{
-	name: "get_tides",
+	name:      "get_tides",
+	effect:    effectReads,
+	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
 		Description: "Fetch tide predictions (high/low times and heights) for the tide station nearest a position. Use find_places first to resolve a place name to coordinates. " + ruleTides,
 		Parameters: json.RawMessage(`{
@@ -71,7 +75,9 @@ var mateToolGetTides = mateTool{
 }
 
 var mateToolEstimatePassage = mateTool{
-	name: "estimate_passage",
+	name:      "estimate_passage",
+	effect:    effectReads,
+	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
 		Description: "Estimate passage distance, time and fuel for a run to a destination, from this vessel's " +
 			"own logged performance (speed over ground against total fuel rate and rpm, from the last N days " +

@@ -8,9 +8,13 @@ import (
 	"sync"
 )
 
-// What an outside assistant may be offered (ADR 0231). Every Mate tool has one
-// decision here, with its reason; a tool added to the registry without one
-// fails TestMCPPolicy_EveryMateToolHasADecision.
+// What an outside assistant may be offered (ADR 0231). Whether a tool may
+// reach an outside assistant at all is decided in its registry record (ADR
+// 0259); this list gives each tool its reason, its Settings name, whether it
+// starts on, and the wording the outside assistant reads. Every Mate tool has
+// one entry here; a tool added to the registry without one fails
+// TestMCPPolicy_EveryMateToolHasADecision, and one the registry and this list
+// disagree on fails TestMateToolAudience_MCPPolicyAgreesWithRegistry.
 //
 // The decision is enforced on the server, not hidden in Settings: a tool that
 // is never offered is not built into the MCP server for any token, whatever
@@ -171,17 +175,25 @@ func mcpPolicyFor(name string) (mcpToolPolicy, bool) {
 	return mcpToolPolicy{}, false
 }
 
-// mcpOffered says whether a tool can be offered to any token at all.
+// mcpOffered says whether a tool can be offered to any token at all. The
+// registry decides whether the tool may reach an outside assistant (ADR 0259);
+// the policy here names it and says whether it starts on. Both must agree, so
+// a tool granted in only one of them is not offered. get_boat_context is the
+// one exception: it is not a Mate tool, so it has no registry record, and the
+// policy alone offers it (ADR 0259).
 func mcpOffered(name string) bool {
 	p, ok := mcpPolicyFor(name)
-	return ok && p.Status != mcpNever
+	if !ok || p.Status == mcpNever {
+		return false
+	}
+	return name == mcpBoatContextTool || reachesAudience(name, audienceMCP)
 }
 
 // mcpDefaultTools is the curated list a new token starts with.
 func mcpDefaultTools() []string {
 	var out []string
 	for _, p := range mcpToolPolicies {
-		if p.Status == mcpDefaultOn {
+		if p.Status == mcpDefaultOn && mcpOffered(p.Name) {
 			out = append(out, p.Name)
 		}
 	}
@@ -211,10 +223,28 @@ func mcpToolDefs() []mcpToolDef {
 	return mcpToolDefsBuilt
 }
 
-func buildMCPToolDefs() []mcpToolDef {
+func buildMCPToolDefs() []mcpToolDef { return buildMCPToolDefsFor(mcpToolPolicies) }
+
+// buildMCPToolDefsFor builds the definitions from a policy list. It checks the
+// list against the registry before it asks who may reach what, and panics when
+// they disagree: a renamed registry tool must stop the server and not quietly
+// vanish from every token (AGENTS.md, Fallback Policy).
+func buildMCPToolDefsFor(policies []mcpToolPolicy) []mcpToolDef {
+	named := map[string]bool{}
+	for _, p := range policies {
+		named[p.Name] = true
+		if p.Name != mcpBoatContextTool && lookupMateTool(p.Name) == nil {
+			panic(fmt.Sprintf("outside assistant policy names %q, which is not a Mate tool", p.Name))
+		}
+	}
+	for _, mt := range mateTools {
+		if mt.reaches(audienceMCP) && !named[mt.name] {
+			panic(fmt.Sprintf("Mate tool %q is granted to outside assistants but has no policy entry", mt.name))
+		}
+	}
 	var defs []mcpToolDef
-	for _, p := range mcpToolPolicies {
-		if p.Status == mcpNever {
+	for _, p := range policies {
+		if !mcpOffered(p.Name) {
 			continue
 		}
 		def := mcpToolDef{Name: p.Name, Plain: p.Plain, DefaultOn: p.Status == mcpDefaultOn}
@@ -231,10 +261,6 @@ func buildMCPToolDefs() []mcpToolDef {
 			continue
 		}
 		mt := lookupMateTool(p.Name)
-		if mt == nil {
-			// Guarded by TestMCPPolicy_EveryMateToolHasADecision.
-			panic(fmt.Sprintf("outside assistant policy names %q, which is not a Mate tool", p.Name))
-		}
 		def.Description = mt.function.Description
 		if p.Description != "" {
 			def.Description = p.Description
