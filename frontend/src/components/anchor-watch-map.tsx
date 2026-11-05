@@ -19,10 +19,9 @@ import {
   bandClock,
   groupLinesByAge,
   msToNextBandClock,
-  trailNow,
   type AgeBandedLine,
 } from '@/lib/trail-age-bands'
-import { subscribeServerClock } from '@/lib/server-clock'
+import { serverNow, subscribeTrailClock } from '@/lib/trail-clock'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 import { MapIconButton } from '@/components/map-icon-button'
@@ -888,29 +887,22 @@ export function AnchorWatchMap({
 
   // Trail data: the trails are snapshots that change identity only when a point arrives.
   // The own trail is banded across the whole stay, newest brightest.
-  // Ages are worked out on the server's clock (lib/server-clock.ts, through
-  // trailNow). Its listener fires every second, so the map acts only on a
-  // change: the band clock moving to a new mark (setState with the same value
-  // does nothing), or the offset from the browser's clock moving by a second or
-  // more (the first server time, or a corrected clock), which re-runs the own
-  // trail through the epoch.
+  // Ages are worked out on the box's clock (lib/trail-clock.ts). It tells the
+  // map only when its offset from the browser's clock moves by a second or more
+  // (the first answer, or a corrected clock). Then the band clock is set at once
+  // instead of waiting for its next mark, and the epoch re-runs the own trail.
   const [clockEpoch, setClockEpoch] = useState(0)
-  const [bandNowMs, setBandNowMs] = useState(() => bandClock(trailNow()))
-  const clockOffsetRef = useRef(trailNow() - Date.now())
+  const [bandNowMs, setBandNowMs] = useState(() => bandClock(serverNow()))
   useEffect(
     () =>
-      subscribeServerClock(() => {
-        setBandNowMs(bandClock(trailNow()))
-        const offset = trailNow() - Date.now()
-        if (Math.abs(offset - clockOffsetRef.current) >= 1000) {
-          clockOffsetRef.current = offset
-          setClockEpoch(n => n + 1)
-        }
+      subscribeTrailClock(() => {
+        setBandNowMs(bandClock(serverNow()))
+        setClockEpoch(n => n + 1)
       }),
     [],
   )
   const postAnchorTrailGeoJSON = useMemo(() => {
-    const nowMs = trailNow()
+    const nowMs = serverNow()
     const windowMs = Math.max(nowMs - (vesselTrail[0]?.timestampMs ?? nowMs), 1)
     return bandedLinesToGeoJSON(groupLinesByAge(vesselTrail, { nowMs, windowMs }))
     // clockEpoch is not read: it re-runs the memo when the server clock's offset moves.
@@ -932,9 +924,9 @@ export function AnchorWatchMap({
     let id: ReturnType<typeof setTimeout>
     const schedule = () => {
       id = setTimeout(() => {
-        setBandNowMs(bandClock(trailNow()))
+        setBandNowMs(bandClock(serverNow()))
         schedule()
-      }, msToNextBandClock(trailNow()))
+      }, msToNextBandClock(serverNow()))
     }
     schedule()
     return () => clearTimeout(id)

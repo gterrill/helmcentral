@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useAisTrails } from '@/hooks/use-ais-anchor-tracks'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
-import { serverNowMs } from '@/lib/server-clock'
-import { resetTelemetryStoresForTest } from '@/lib/test-reset'
-import { trailNow } from '@/lib/trail-age-bands'
+import { resetTrailClock, serverNow, setServerTimeMs, subscribeTrailClock } from '@/lib/trail-clock'
 
 function makeResponse(body: unknown): Response {
   return { ok: true, json: async () => body } as Response
@@ -15,17 +13,40 @@ const SERVER = Date.UTC(2026, 10, 5, 12, 0, 0)
 const HOUR = 60 * 60 * 1000
 
 afterEach(() => {
-  resetTelemetryStoresForTest()
+  resetTrailClock()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
-describe('trail ages on the shared server clock', () => {
-  it('uses the browser clock until a server time has arrived', () => {
+describe('trail clock', () => {
+  it('is the browser clock until a server time arrives, and ignores a bad one', () => {
     vi.useFakeTimers({ now: SERVER })
-    expect(serverNowMs()).toBeNull()
-    expect(trailNow()).toBe(SERVER)
+    expect(serverNow()).toBe(SERVER)
+    setServerTimeMs(undefined)
+    setServerTimeMs(Number.NaN)
+    setServerTimeMs('soon')
+    expect(serverNow()).toBe(SERVER)
+  })
+
+  it('follows the server when the browser clock is off', () => {
+    vi.useFakeTimers({ now: SERVER + 3 * HOUR })
+    setServerTimeMs(SERVER)
+    expect(serverNow()).toBe(SERVER)
+    vi.advanceTimersByTime(5000)
+    expect(serverNow()).toBe(SERVER + 5000)
+  })
+
+  it('tells a subscriber only when the offset moves by a second or more', () => {
+    vi.useFakeTimers({ now: SERVER })
+    const listener = vi.fn()
+    subscribeTrailClock(listener)
+    setServerTimeMs(SERVER + 3 * HOUR)
+    expect(listener).toHaveBeenCalledTimes(1)
+    setServerTimeMs(SERVER + 3 * HOUR + 400)
+    expect(listener).toHaveBeenCalledTimes(1)
+    setServerTimeMs(SERVER + 3 * HOUR + 1500)
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 
   it('is fed by an answer from the AIS endpoint', async () => {
@@ -35,7 +56,7 @@ describe('trail ages on the shared server clock', () => {
     ))
     renderHook(() => useAisTrails(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(Math.abs(trailNow() - SERVER)).toBeLessThan(1000)
+    expect(serverNow()).toBe(SERVER)
   })
 
   it('is fed by an answer from the own trail endpoint', async () => {
@@ -45,7 +66,7 @@ describe('trail ages on the shared server clock', () => {
     ))
     renderHook(() => useAnchorTrail(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(Math.abs(trailNow() - SERVER)).toBeLessThan(1000)
+    expect(serverNow()).toBe(SERVER)
   })
 
   it('keeps AIS points that are 23 hours old by the server clock while the browser clock is 3 hours ahead', async () => {

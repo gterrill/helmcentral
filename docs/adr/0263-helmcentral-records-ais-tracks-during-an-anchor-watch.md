@@ -32,9 +32,13 @@ fallback to it.
 - **Only during a watch.** With no watch set, nothing is recorded.
 - **Only near the anchor.** A target is recorded while it is within 500 m of the
   anchor position, not of the boat. The 500 m is a constant, not a setting.
-- **One point per new report, at most every 30 seconds.** The poll tick stores a
-  target's position when its report is newer than the target's last stored point
-  and at least `aisAnchorMinInterval` (30 seconds, a constant) after it. A target
+- **One point per new report, at most every 30 seconds unless it moved.** The
+  poll tick stores a target's position when its report is newer than the
+  target's last stored point and either at least `aisAnchorMinInterval` (30
+  seconds) after it or at least `aisAnchorMinMoveM` (25 m) from it. Both are
+  constants. The distance test keeps a boat crossing the anchorage at 10 kn
+  from ending its trail up to 150 m behind its marker, and from losing its last
+  leg before it leaves the circle. A target
   that has not reported since stores nothing, however many ticks pass. The stored
   time is the report's own time (`PositionSeen`, the time Helmcentral received
   that position delta), so the track carries real times. Nothing else smooths or
@@ -44,7 +48,9 @@ fallback to it.
   load sends. A boat that reports every few minutes is not thinned. A report
   skipped for coming too soon that would have started a segment, because the
   target just re-entered the circle, hands the flag to the target's next stored
-  point, so a skipped report never joins the line across the gap.
+  point, so a skipped report never joins the line across the gap. The recorder
+  drops that pending flag when it sees the target outside the circle again,
+  because the re-entry rule flags its next point anyway.
 - **By MMSI.** The key is `vesselContactKey`, the same as the sighting log. The
   name is not stored: the marker already labels the vessel from the live list. A
   target with no MMSI can't be followed from one report to the next, so it is not
@@ -127,12 +133,14 @@ fail for the Nearby map when the track store did, and defeated its ETag.
 - **server_time_ms.** The server's own clock in Unix ms, on this answer and on
   `GET /api/anchor-watch/trails/self`. The map ages both trails and applies the
   24 hour cut against it, not against the browser's clock, since a display
-  without internet can be hours out while the box takes its time from GPS. Each
-  answer feeds the shared server clock of
-  [ADR 0218](0218-the-stream-replays-the-current-payload-to-a-late-listener.md)
-  (`lib/server-clock.ts`), which ages the stamp on the monotonic clock, so a
-  step in the display's clock can't move it. Before any stamp has arrived, ages
-  use the browser's clock.
+  without internet can be hours out while the box takes its time from GPS. A
+  small module of its own keeps the offset (`lib/trail-clock.ts`). It is not the
+  clock of [ADR 0218](0218-the-stream-replays-the-current-payload-to-a-late-listener.md)
+  (`lib/server-clock.ts`), which holds the GNSS fix time. That can lag the box's
+  clock by seconds and ticks every second, so feeding both into one clock would
+  make them overwrite each other. The trail clock tells the map only when the
+  offset moves by a second or more. The offset ignores the request's transit
+  time and is zero before the first answer.
 
 ### The feed behind the markers
 

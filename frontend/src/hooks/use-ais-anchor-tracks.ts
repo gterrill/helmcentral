@@ -1,8 +1,8 @@
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import { apiRequest } from '@/lib/api-query'
 import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
-import { feedServerTimeMs } from '@/lib/server-clock'
-import { AIS_TRACK_WINDOW_MS, trailNow } from '@/lib/trail-age-bands'
+import { AIS_TRACK_WINDOW_MS } from '@/lib/trail-age-bands'
+import { serverNow, setServerTimeMs } from '@/lib/trail-clock'
 
 /** One stored AIS report; `newSegment` marks where the line must not join the point before. */
 export interface AisTrailPoint extends TrailPoint {
@@ -14,7 +14,7 @@ interface AisTrailsResponse {
   trail_started_at?: string | null
   /** Pass back as `since` to get only what was stored after this answer. */
   cursor?: number
-  /** The server's clock in Unix ms, for aging the points (lib/server-clock.ts). */
+  /** The server's clock in Unix ms, for aging the points (lib/trail-clock.ts). */
   server_time_ms?: number
   tracks?: Array<{
     mmsi: string
@@ -40,7 +40,7 @@ async function pollAisTracks(signal: AbortSignal, store: PollStore<AisTracks>): 
         : '/api/anchor-watch/trails/ais'
       const data = await apiRequest<AisTrailsResponse>(url, { signal })
       if (signal.aborted) return
-      feedServerTimeMs(data.server_time_ms)
+      setServerTimeMs(data.server_time_ms)
 
       let tracks = store.get()
       const startedAt = data.trail_started_at ?? null
@@ -59,7 +59,7 @@ async function pollAisTracks(signal: AbortSignal, store: PollStore<AisTracks>): 
 
       // Only the targets with new points get a new array, and the Map is new
       // only when one did.
-      const cutoffMs = trailNow() - AIS_TRACK_WINDOW_MS
+      const cutoffMs = serverNow() - AIS_TRACK_WINDOW_MS
       let next: AisTracks | null = null
       for (const track of data.tracks ?? []) {
         if (track.points.length === 0) continue

@@ -4,9 +4,8 @@ import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
-import { feedServerTimeMs } from '@/lib/server-clock'
-import { AIS_BAND_COLORS, SELF_BAND_COLORS, TRAIL_BANDS, trailNow } from '@/lib/trail-age-bands'
-import { resetTelemetryStoresForTest } from '@/lib/test-reset'
+import { AIS_BAND_COLORS, SELF_BAND_COLORS, TRAIL_BANDS } from '@/lib/trail-age-bands'
+import { resetTrailClock, serverNow, setServerTimeMs } from '@/lib/trail-clock'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -196,13 +195,13 @@ describe('AnchorWatchMap own swing trail', () => {
 })
 
 // The trail points carry the server's times, so the map ages them by the
-// server's clock (lib/server-clock.ts), whatever the browser's says.
+// server's clock (lib/trail-clock.ts), whatever the browser's says.
 describe('AnchorWatchMap trails on a browser clock that is wrong', () => {
-  afterEach(() => resetTelemetryStoresForTest())
+  afterEach(() => resetTrailClock())
 
   it('bands AIS points by their age on the server clock, and keeps 23 hour old points, with the browser 3 hours ahead', () => {
-    feedServerTimeMs(Date.now() - 3 * HOUR) // the server is 3 hours behind this browser
-    const at = (ageMs: number) => trailNow() - ageMs
+    setServerTimeMs(Date.now() - 3 * HOUR) // the server is 3 hours behind this browser
+    const at = (ageMs: number) => serverNow() - ageMs
     const points: AisTrailPoint[] = [
       { lat: -25.29, lon: 152.91, timestampMs: at(23 * HOUR), newSegment: true },
       { lat: -25.291, lon: 152.91, timestampMs: at(22 * HOUR), newSegment: false },
@@ -223,13 +222,13 @@ describe('AnchorWatchMap trails on a browser clock that is wrong', () => {
     renderMap({ aisVessels: [vessel('111111111', 'ALPHA')], aisTrails: tracksOf(points) })
     // Against the browser's clock the two oldest points are past 24 hours.
     expect(bandsOf('ais-trails')).toEqual([TRAIL_BANDS - 1])
-    act(() => feedServerTimeMs(serverMs))
+    act(() => setServerTimeMs(serverMs))
     expect(bandsOf('ais-trails').sort()).toEqual([0, TRAIL_BANDS - 1])
   })
 
   it('keeps the own trail newest band the newest with the browser 3 hours behind', () => {
-    feedServerTimeMs(Date.now() + 3 * HOUR) // the server is 3 hours ahead of this browser
-    const nowMs = trailNow()
+    setServerTimeMs(Date.now() + 3 * HOUR) // the server is 3 hours ahead of this browser
+    const nowMs = serverNow()
     const vesselTrail: TrailPoint[] = [10 * HOUR, 8 * HOUR, 6 * HOUR, 4 * HOUR, 2 * HOUR, 5 * MIN].map((age, i) => ({
       lat: -25.29 - i * 0.0001, lon: 152.91, timestampMs: nowMs - age,
     }))

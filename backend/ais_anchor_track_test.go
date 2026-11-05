@@ -36,6 +36,7 @@ func resetAISAnchorTrackStateForTest() {
 	aisTracks.mu.Lock()
 	aisTracks.inside = map[string]bool{}
 	aisTracks.lastMs = map[string]int64{}
+	aisTracks.lastPos = map[string][2]float64{}
 	aisTracks.pendingSegment = map[string]bool{}
 	aisTracks.warmed = false
 	aisTracks.notBefore = 0

@@ -1,7 +1,7 @@
 import { appendCapped, type TrailPoint } from '@/hooks/use-server-trails'
 import { apiRequest } from '@/lib/api-query'
 import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
-import { feedServerTimeMs } from '@/lib/server-clock'
+import { setServerTimeMs } from '@/lib/trail-clock'
 
 /** Matches the backend's response bound (the newest 10000 points). */
 export const ANCHOR_TRAIL_MAX_POINTS = 10000
@@ -10,7 +10,7 @@ interface AnchorTrailResponse {
   points?: Array<{ lat: number; lon: number; timestamp: string }>
   /** Changes whenever the server restarts the trail (a fresh drop); null with no watch. */
   trail_started_at?: string | null
-  /** The server's clock in Unix ms, for aging the points (lib/server-clock.ts). */
+  /** The server's clock in Unix ms, for aging the points (lib/trail-clock.ts). */
   server_time_ms?: number
 }
 
@@ -30,7 +30,7 @@ async function pollAnchorTrail(signal: AbortSignal, store: PollStore<TrailPoint[
         : '/api/anchor-watch/trails/self'
       const data = await apiRequest<AnchorTrailResponse>(url, { signal })
       if (signal.aborted) return
-      feedServerTimeMs(data.server_time_ms)
+      setServerTimeMs(data.server_time_ms)
 
       let points = store.get()
       const startedAt = data.trail_started_at ?? null

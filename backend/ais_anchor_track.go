@@ -29,10 +29,15 @@ const (
 	// target after which the line between them is not drawn.
 	aisAnchorSegmentGap = 15 * time.Minute
 	// aisAnchorMinInterval is the least time between two stored points of one
-	// target. A Class A boat reports every 2 to 10 seconds, which would store
-	// about 17,000 points a day; a report sooner than this after the target's
-	// last stored point is skipped. Not a setting.
+	// target, unless it has moved aisAnchorMinMoveM. A Class A boat reports every
+	// 2 to 10 seconds, which would store about 17,000 points a day; a report
+	// sooner than this after the target's last stored point is skipped. Not a
+	// setting.
 	aisAnchorMinInterval = 30 * time.Second
+	// aisAnchorMinMoveM is how far from its last stored point a target must be
+	// for a report to be stored inside aisAnchorMinInterval, so a boat crossing
+	// the anchorage at speed keeps its trail up to its marker. Not a setting.
+	aisAnchorMinMoveM = 25.0
 	// aisAnchorPruneEvery is how often the table is trimmed to the retention.
 	// Reads and the client apply the 24 hour cut themselves.
 	aisAnchorPruneEvery = time.Minute
@@ -201,6 +206,9 @@ type aisTrackState struct {
 	inside map[string]bool
 	// lastMs is each target's newest stored report time.
 	lastMs map[string]int64
+	// lastPos is each target's newest stored position, [lat, lon]. A target
+	// known only from the database (after a restart) has none.
+	lastPos map[string][2]float64
 	// pendingSegment holds the targets whose next stored point must start a new
 	// segment because a report that would have was skipped by
 	// aisAnchorMinInterval. It clears when a point is stored.
@@ -212,7 +220,7 @@ type aisTrackState struct {
 	lastPrune time.Time
 }
 
-var aisTracks = &aisTrackState{inside: map[string]bool{}, lastMs: map[string]int64{}, pendingSegment: map[string]bool{}}
+var aisTracks = &aisTrackState{inside: map[string]bool{}, lastMs: map[string]int64{}, lastPos: map[string][2]float64{}, pendingSegment: map[string]bool{}}
 
 // reset forgets every target, after the tracks were erased at reset time (a
 // drop or a raise; moving the anchor mark does not reset).
@@ -221,6 +229,7 @@ func (st *aisTrackState) reset(at time.Time) {
 	defer st.mu.Unlock()
 	st.inside = map[string]bool{}
 	st.lastMs = map[string]int64{}
+	st.lastPos = map[string][2]float64{}
 	st.pendingSegment = map[string]bool{}
 	st.warmed = true // the table was just emptied: nothing to warm from
 	st.notBefore = at.UnixMilli()
@@ -237,8 +246,9 @@ var missingMMSILoggedForAISAnchorTrack sync.Map // key: vessel id (string)
 // within aisAnchorRecordRadiusM of the anchor. It runs once per server poll
 // tick on the vessel list the tick already fetched, and does nothing without a
 // watch. A report is stored only when it is newer than the target's last
-// stored report and than the last reset, and at least aisAnchorMinInterval
-// after that last stored report.
+// stored report and than the last reset, and either at least
+// aisAnchorMinInterval after that last stored report or at least
+// aisAnchorMinMoveM from its position.
 func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 	watch, active, _ := currentAnchorWatch()
 	if !active {
@@ -302,9 +312,12 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 			continue
 		}
 		sm.newSegment = !st.inside[sm.mmsi] || !seen || time.Duration(sm.atMs-last)*time.Millisecond > aisAnchorSegmentGap
-		if seen && time.Duration(sm.atMs-last)*time.Millisecond < aisAnchorMinInterval {
-			// Too soon after the last stored point. A report that would have
-			// started a segment passes the flag on to the next stored point.
+		pos, known := st.lastPos[sm.mmsi]
+		moved := !known || haversineMeters(pos[0], pos[1], sm.lat, sm.lon) >= aisAnchorMinMoveM
+		if seen && !moved && time.Duration(sm.atMs-last)*time.Millisecond < aisAnchorMinInterval {
+			// Too soon after the last stored point, and not far from it. A report
+			// that would have started a segment passes the flag on to the next
+			// stored point.
 			if sm.newSegment {
 				st.pendingSegment[sm.mmsi] = true
 			}
@@ -328,6 +341,7 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 		}
 		for _, sm := range samples {
 			st.lastMs[sm.mmsi] = sm.atMs
+			st.lastPos[sm.mmsi] = [2]float64{sm.lat, sm.lon}
 			delete(st.pendingSegment, sm.mmsi)
 		}
 	}
@@ -336,6 +350,9 @@ func recordAISAnchorTracks(nearby []nearbyVessel, now time.Time) {
 			st.inside[key] = true
 		} else {
 			delete(st.inside, key)
+			// Seen outside, so the re-entry rule flags its next point anyway: a
+			// boat that only clipped the circle leaves nothing pending.
+			delete(st.pendingSegment, key)
 		}
 	}
 

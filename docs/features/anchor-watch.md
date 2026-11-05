@@ -104,10 +104,12 @@ SignalK server for them.
   500 m shows as a marker only. A target with no MMSI can't be followed from one
   report to the next, so it also shows as a marker only.
 - **What is recorded:** A point each time the target reports a new position,
-  stamped with the time of that report, but never more than one every 30
-  seconds. A ship that reports every few seconds is thinned to that, and a boat
-  that reports every few minutes is recorded at every report. A target that has
-  gone quiet adds nothing.
+  stamped with the time of that report. It's no more than one point every 30
+  seconds unless the target has moved 25 m. A ship sitting at anchor that
+  reports every few seconds is thinned to one point every 30 seconds. A boat crossing the
+  anchorage keeps a point for every 25 m, so its track reaches its marker. A
+  boat that reports every few minutes is recorded at every report. A target
+  that has gone quiet adds nothing.
 - **Leaving the circle:** A target that moves out past 500 m stops adding points,
   but its track stays on the map for as long as the target does.
 - **Gaps:** There's no line where a target left the circle and came back, or
