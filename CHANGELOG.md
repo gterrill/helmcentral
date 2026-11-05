@@ -52,6 +52,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A tile you cancel no longer appears on the page.** If you tapped **Save**
+  on an engine cluster whose zones were still saving, then cancelled, the tile
+  could turn up anyway. Cancel now leaves the page as it was. The same delay
+  could also close the next tile's dialog under you, with your edits in it, and
+  that no longer happens.
+- **A tile that fails to save stays open.** When the connection to the boat
+  drops as you tap **Save** on a new tile, the dialog now stays open with what
+  you typed, so you can tap **Save** again. Before, it closed and your changes
+  were gone.
 - **Mate no longer counts a passage check that failed as one that ran.** If the
   go/no-go check errored and Mate then talked about wind against your course or
   your passage limits, the answer went out as it was. Mate now answers again and

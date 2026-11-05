@@ -22,6 +22,18 @@ so "Save and Continue" needs nothing from App.
 panel's views. Going to a view replaces the whole slice, so sibling views
 never need clearing.
 
+## Dashboard tiles
+
+**Tile draft**: the one tile whose dialog is open, held by `AppShell` through
+`hooks/use-tile-draft.ts`. A new tile exists only as a draft until saved, so
+cancelling leaves nothing on the page; opening a saved tile's gear fills the
+same draft. Saving replaces the config of a tile already on the page and
+appends one that is not. A save, duplicate or cancel applies only to the draft
+it began with, so a dialog that finishes late cannot touch the one open now.
+Each tile kind keeps its own start (id, footprint,
+blank config) and its dialog.
+_Avoid_: widget draft, pending tile.
+
 ## Mate
 
 **Mate tool**: one thing the model can call during a run, defined by a single
