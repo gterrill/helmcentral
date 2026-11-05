@@ -52,12 +52,14 @@ const (
 const assistantCheckNotice = "The operator did not write this message. Do not refer to this message or your earlier draft in your reply. Do not ask the operator for anything they have already told you, such as the destination or departure time: take it from the conversation."
 
 const (
-	assistantPassageLimitsClaimInstruction   = "Your draft talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
-	assistantPassageRelativeWindInstruction  = "Your draft judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
-	assistantAnchorageDepthLead              = "Your draft states a water depth for an anchorage that has no source. " + ruleDepth
-	assistantAnchorageDepthInstruction       = assistantAnchorageDepthLead + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
-	assistantAnchorageDepthNoToolInstruction = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and tell the operator to check the chart."
-	assistantAnchorageShelterInstruction     = "Your draft judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (a position the skipper gave, else from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
+	assistantPassageLimitsClaimInstruction             = "Your draft talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
+	assistantPassageRelativeWindInstruction            = "Your draft judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
+	assistantPassageLimitsClaimCheckFailedInstruction  = "Your draft talks about passage limits, and the passage check failed this run. Do not call assess_passage_window again with the same arguments: it will fail the same way. Say the check could not run, and remove the statements about the limits."
+	assistantPassageRelativeWindCheckFailedInstruction = "Your draft judges the wind or sea against the course, and the passage check failed this run. Do not call assess_passage_window again with the same arguments: it will fail the same way. Say the check could not run, and take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
+	assistantAnchorageDepthLead                        = "Your draft states a water depth for an anchorage that has no source. " + ruleDepth
+	assistantAnchorageDepthInstruction                 = assistantAnchorageDepthLead + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
+	assistantAnchorageDepthNoToolInstruction           = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and tell the operator to check the chart."
+	assistantAnchorageShelterInstruction               = "Your draft judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (a position the skipper gave, else from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
 var (
@@ -150,11 +152,12 @@ func judgesAnchorageShelter(sentences []string) bool {
 // fine as it stands:
 //
 //   - "passage limits claim": the draft talks of setting limits that are set,
-//     and assess_passage_window was not called this run (it is the only
-//     source that says the limits are unset).
+//     and assess_passage_window did not run this run (it is the only source
+//     that says the limits are unset). A failed run of it whose error names
+//     the passage limits excuses the claim, since the error is the fix.
 //   - "relative wind": the draft judges wind or sea against the course, and
-//     neither assess_passage_window nor get_wind_forecast with a course_deg
-//     was called this run.
+//     neither assess_passage_window nor a get_wind_forecast that returned
+//     rel_wind or rel_wave labels ran this run.
 //
 // The passage triggers are off when assess_passage_window is not on offer.
 // Unreadable limits skip the claim check (it would be a guess) and log why.
@@ -162,26 +165,27 @@ func judgesAnchorageShelter(sentences []string) bool {
 // A third trigger stands apart from those two:
 //
 //   - "anchorage shelter": the draft judges an anchorage's shelter or exposure
-//     against a wind or direction, and anchorage_details was not called this
-//     run, and no get_wind_forecast result carried shelter_summary. It is on when the tool could run here (the install has an Offline
+//     against a wind or direction, and anchorage_details did not run this
+//     run, and no get_wind_forecast result carried shelter_summary. It is on
+//     when the tool could run here (the install has an Offline
 //     coastline reader; whether the coastline is switched on is not read per
 //     draft), whether or not assess_passage_window ran.
 //
 // A draft that hits more than one trigger gets one message carrying each
 // correction, since the run loop sends a draft back only once.
-func (d assistantToolDeps) checkDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string) {
+func (d assistantToolDeps) checkDraft(draft string, run mateRunRecord) (trigger, instruction string) {
 	var triggers, instructions []string
 	sentences := passageSentenceSplitRE.Split(draft, -1)
 	// Whether anchorage_details can run here reads settings, so it is worked
 	// out at most once per reply, and only for a draft that reaches it.
 	armed := sync.OnceValue(d.anchorageToolArmed)
-	if t, i := d.checkPassageDraft(draft, sentences, calls); t != "" {
+	if t, i := d.checkPassageDraft(draft, sentences, run); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
-	if t, i := d.checkShelterDraft(sentences, calls, results, armed); t != "" {
+	if t, i := d.checkShelterDraft(sentences, run, armed); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
-	if t, i := d.checkDepthDraft(sentences, calls, results, armed); t != "" {
+	if t, i := d.checkDepthDraft(sentences, run, armed); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
 	if len(triggers) == 0 {
@@ -229,15 +233,18 @@ func (d assistantToolDeps) anchorageToolArmed() bool {
 // operator's), or a tool call that carried a depth_m argument and ran, which is
 // the operator's figure being passed on or saved. The checker cannot see the
 // conversation, so it trusts the argument; the tool's description restricts it.
-func depthSourced(calls []openRouterToolCall, results []string) bool {
-	for i, c := range calls {
-		if i >= len(results) || results[i] == "" {
+func depthSourced(run mateRunRecord) bool {
+	for _, c := range run {
+		if !c.ok() {
 			continue // the call errored or did not run
 		}
-		if strings.Contains(string(c.Function.Arguments), `"depth_m"`) {
+		// A null or a word is the model leaving the figure out, not a depth.
+		// The figure can sit deep in the arguments: propose_changes puts it
+		// in operations[].fields.
+		if c.hasNumber("depth_m") {
 			return true
 		}
-		if c.Function.Name != mateToolAnchorageDetails.name {
+		if c.call.Function.Name != mateToolAnchorageDetails.name {
 			continue
 		}
 		var r struct {
@@ -245,7 +252,7 @@ func depthSourced(calls []openRouterToolCall, results []string) bool {
 				Known bool `json:"known"`
 			} `json:"depth"`
 		}
-		if json.Unmarshal([]byte(results[i]), &r) == nil && r.Depth.Known {
+		if json.Unmarshal([]byte(c.result), &r) == nil && r.Depth.Known {
 			return true
 		}
 	}
@@ -253,8 +260,8 @@ func depthSourced(calls []openRouterToolCall, results []string) bool {
 }
 
 // checkDepthDraft is the "anchorage depth" trigger.
-func (d assistantToolDeps) checkDepthDraft(sentences []string, calls []openRouterToolCall, results []string, armed func() bool) (trigger, instruction string) {
-	if !statesAnchorageDepth(sentences) || depthSourced(calls, results) {
+func (d assistantToolDeps) checkDepthDraft(sentences []string, run mateRunRecord, armed func() bool) (trigger, instruction string) {
+	if !statesAnchorageDepth(sentences) || depthSourced(run) {
 		return "", ""
 	}
 	if !armed() {
@@ -271,54 +278,86 @@ func (d assistantToolDeps) checkDepthDraft(sentences []string, calls []openRoute
 }
 
 // checkShelterDraft is the "anchorage shelter" trigger.
-func (d assistantToolDeps) checkShelterDraft(sentences []string, calls []openRouterToolCall, results []string, armed func() bool) (trigger, instruction string) {
+func (d assistantToolDeps) checkShelterDraft(sentences []string, run mateRunRecord, armed func() bool) (trigger, instruction string) {
 	if !judgesAnchorageShelter(sentences) || !armed() {
 		return "", ""
 	}
-	for i, c := range calls {
-		switch c.Function.Name {
-		case mateToolAnchorageDetails.name:
-			// A call whose result is empty errored or did not run.
-			if i < len(results) && results[i] != "" {
-				return "", ""
-			}
-		case mateToolGetWindForecast.name:
-			if i < len(results) && forecastDeliveredShelter(results[i]) {
-				return "", ""
-			}
+	if len(run.succeeded(mateToolAnchorageDetails.name)) > 0 {
+		return "", ""
+	}
+	for _, c := range run.succeeded(mateToolGetWindForecast.name) {
+		if forecastDeliveredShelter(c.result) {
+			return "", ""
 		}
 	}
 	return "anchorage shelter", assistantAnchorageShelterInstruction
 }
 
-// checkPassageDraft is the two passage triggers.
-func (d assistantToolDeps) checkPassageDraft(draft string, sentences []string, calls []openRouterToolCall) (trigger, instruction string) {
+// checkPassageDraft is the two passage triggers. A call that errored or never
+// ran has told Mate nothing, so only calls that ran count, with one exception:
+// a failed assess_passage_window whose error names the passage limits carries
+// the operator's fix, and Mate may relay it. After any failure the send-back
+// must not point Mate at the call again, since the same call fails the same
+// way.
+func (d assistantToolDeps) checkPassageDraft(draft string, sentences []string, run mateRunRecord) (trigger, instruction string) {
 	if !mateToolAvailable(d, mateToolAssessPassageWindow.name) {
 		return "", ""
 	}
-	assessed, angled := false, false
-	for _, c := range calls {
-		switch c.Function.Name {
-		case mateToolAssessPassageWindow.name:
-			assessed = true
-		case mateToolGetWindForecast.name:
-			var args struct {
-				CourseDeg *float64 `json:"course_deg"`
-			}
-			if json.Unmarshal([]byte(c.Function.Arguments), &args) == nil && args.CourseDeg != nil {
-				angled = true
-			}
+	checkFailed, limitsFix := false, false
+	for _, c := range run.named(mateToolAssessPassageWindow.name) {
+		if c.ok() {
+			return "", ""
 		}
+		checkFailed = true
+		limitsFix = limitsFix || strings.Contains(c.err, "Passage limits")
+	}
+	angled := false
+	for _, c := range run.succeeded(mateToolGetWindForecast.name) {
+		angled = angled || forecastDeliveredAngle(c.result)
 	}
 	switch {
-	case assessed:
-		return "", ""
-	case passageLimitsClaimRE.MatchString(draft) && d.limitsAreSet():
+	case passageLimitsClaimRE.MatchString(draft) && d.limitsAreSet() && !limitsFix:
+		if checkFailed {
+			return "passage limits claim", assistantPassageLimitsClaimCheckFailedInstruction
+		}
 		return "passage limits claim", assistantPassageLimitsClaimInstruction
 	case !angled && judgesRelativeWind(sentences):
+		if checkFailed {
+			return "relative wind", assistantPassageRelativeWindCheckFailedInstruction
+		}
 		return "relative wind", assistantPassageRelativeWindInstruction
 	}
 	return "", ""
+}
+
+// forecastDeliveredAngle reports whether a get_wind_forecast result carries a
+// rel_wind or rel_wave label. The host leaves them out when the course was not
+// given or the wind or wave direction is unknown, so asking for a course is not
+// enough.
+func forecastDeliveredAngle(result string) bool {
+	var r struct {
+		Days []struct {
+			RelWindPrevailing string `json:"rel_wind_prevailing"`
+		} `json:"days"`
+		Hourly []struct {
+			RelWind string `json:"rel_wind"`
+			RelWave string `json:"rel_wave"`
+		} `json:"hourly"`
+	}
+	if json.Unmarshal([]byte(result), &r) != nil {
+		return false
+	}
+	for _, d := range r.Days {
+		if d.RelWindPrevailing != "" {
+			return true
+		}
+	}
+	for _, h := range r.Hourly {
+		if h.RelWind != "" || h.RelWave != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // limitsAreSet reports whether any sector has a no-go wind, the test

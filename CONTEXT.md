@@ -45,6 +45,14 @@ have their own, so each can show a different conversation. A session asks one
 question at a time and sends the screen the operator is on with every one.
 _Avoid_: chat, thread (the thread is the rendered list of messages).
 
+**Run record**: what a Mate run's tool calls did, one entry per call in the
+order made: the call, its result, and its error if it failed or never ran. The
+draft checks ask it whether a tool ran and what it returned (`mateRunRecord`,
+`backend/assistant_run_record.go`). A call that failed has told Mate nothing, so
+no check counts it, except a passage check whose error names the passage limits.
+_Avoid_: tool log (the tool log is the forced-final summary of the same calls),
+call history.
+
 ## Passages
 
 **Track point**: one recorded position with the readings taken at that moment
