@@ -21,6 +21,7 @@ import {
   msToNextBandClock,
   type AgeBandedLine,
 } from '@/lib/trail-age-bands'
+import { serverNow, subscribeTrailClock } from '@/lib/trail-clock'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 import { MapIconButton } from '@/components/map-icon-button'
@@ -886,11 +887,27 @@ export function AnchorWatchMap({
 
   // Trail data: the trails are snapshots that change identity only when a point arrives.
   // The own trail is banded across the whole stay, newest brightest.
+  // Ages are worked out on the box's clock (lib/trail-clock.ts). It tells the
+  // map only when its offset from the browser's clock moves by a second or more
+  // (the first answer, or a corrected clock). Then the band clock is set at once
+  // instead of waiting for its next mark, and the epoch re-runs the own trail.
+  const [clockEpoch, setClockEpoch] = useState(0)
+  const [bandNowMs, setBandNowMs] = useState(() => bandClock(serverNow()))
+  useEffect(
+    () =>
+      subscribeTrailClock(() => {
+        setBandNowMs(bandClock(serverNow()))
+        setClockEpoch(n => n + 1)
+      }),
+    [],
+  )
   const postAnchorTrailGeoJSON = useMemo(() => {
-    const nowMs = Date.now()
+    const nowMs = serverNow()
     const windowMs = Math.max(nowMs - (vesselTrail[0]?.timestampMs ?? nowMs), 1)
     return bandedLinesToGeoJSON(groupLinesByAge(vesselTrail, { nowMs, windowMs }))
-  }, [vesselTrail])
+    // clockEpoch is not read: it re-runs the memo when the server clock's offset moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vesselTrail, clockEpoch])
 
   // AIS tracks are banded by age across their 24 hours, against a clock that
   // moves in five minute steps: they are recomputed when a track changes, when
@@ -901,14 +918,15 @@ export function AnchorWatchMap({
   // same step (a clock stepped back, an early timer) does not stop the clock.
   // Trimmed, as the server stores the track's MMSI.
   const activeAisMmsis = aisVessels.map(v => v.mmsi?.trim()).filter((m): m is string => !!m).sort().join('\n')
-  const [bandNowMs, setBandNowMs] = useState(() => bandClock(Date.now()))
+  // The clock is the server's: the points carry its times. The timeout's length
+  // is a duration, the same on either clock.
   useEffect(() => {
     let id: ReturnType<typeof setTimeout>
     const schedule = () => {
       id = setTimeout(() => {
-        setBandNowMs(bandClock(Date.now()))
+        setBandNowMs(bandClock(serverNow()))
         schedule()
-      }, msToNextBandClock(Date.now()))
+      }, msToNextBandClock(serverNow()))
     }
     schedule()
     return () => clearTimeout(id)

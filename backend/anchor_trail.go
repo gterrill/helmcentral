@@ -273,7 +273,7 @@ func getSelfTrailHandler(c echo.Context) error {
 	active := anchorWatchState != nil
 	anchorWatchMu.RUnlock()
 	if !active {
-		return c.JSON(http.StatusOK, map[string]any{"points": []trackPoint{}, "trail_started_at": nil})
+		return c.JSON(http.StatusOK, map[string]any{"points": []trackPoint{}, "trail_started_at": nil, "server_time_ms": time.Now().UnixMilli()})
 	}
 	if globalPassageStore == nil {
 		log.Printf("anchor trail: %v", errAnchorTrailNoStore)
@@ -292,5 +292,5 @@ func getSelfTrailHandler(c echo.Context) error {
 	if !started.IsZero() {
 		startedAt = started.Format(time.RFC3339Nano)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"points": wire, "trail_started_at": startedAt})
+	return c.JSON(http.StatusOK, map[string]any{"points": wire, "trail_started_at": startedAt, "server_time_ms": time.Now().UnixMilli()})
 }

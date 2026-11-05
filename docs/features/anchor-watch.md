@@ -103,9 +103,13 @@ SignalK server for them.
   you're more than 5 km from your anchor. A target that stays further out than
   500 m shows as a marker only. A target with no MMSI can't be followed from one
   report to the next, so it also shows as a marker only.
-- **What is recorded:** One point each time the target reports a new position,
-  stamped with the time of that report. A target that has gone quiet adds
-  nothing.
+- **What is recorded:** A point each time the target reports a new position,
+  stamped with the time of that report. It's no more than one point every 30
+  seconds unless the target has moved 25 m. A ship sitting at anchor that
+  reports every few seconds is thinned to one point every 30 seconds. A boat crossing the
+  anchorage keeps a point for every 25 m, so its track reaches its marker. A
+  boat that reports every few minutes is recorded at every report. A target
+  that has gone quiet adds nothing.
 - **Leaving the circle:** A target that moves out past 500 m stops adding points,
   but its track stays on the map for as long as the target does.
 - **Gaps:** There's no line where a target left the circle and came back, or
@@ -113,7 +117,8 @@ SignalK server for them.
   Helmcentral itself was stopped.
 - **Brightness follows age:** The newest part of a track is solid amber and the
   oldest fades towards clear, in a few steps across the 24 hours that are kept.
-  The newest part is drawn on top.
+  The newest part is drawn on top. Age is counted on the boat's clock, so a
+  screen with the wrong time still shows the same trails as the others.
 - **Starting and ending:** The tracks start empty when you drop the anchor and
   end when you raise it. Moving the anchor position keeps them, as the swing
   trail does, and so does changing the radius. After a move, a boat is recorded
