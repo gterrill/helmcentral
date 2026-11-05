@@ -892,11 +892,12 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 
 // passageHoursFromBundles keys a point's weather and wave hours by the unix
 // time of the hour. A wave hour the provider does not have is absent, never
-// zero, and an hour with no weather point is absent too.
+// zero, and an hour with no weather point or no wind data is absent too, so a
+// leg into it is no_data rather than judged as a calm.
 func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) map[int64]passageHour {
 	out := map[int64]passageHour{}
 	for _, hp := range wb.Hourly {
-		if hp.Time.IsZero() {
+		if hp.Time.IsZero() || hp.noWindData() {
 			continue
 		}
 		out[hp.Time.Truncate(time.Hour).Unix()] = passageHour{WindMS: hp.WindSpeedMS, GustMS: hp.WindGustMS, WindDirDeg: hp.WindDirectionDeg}
