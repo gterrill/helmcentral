@@ -298,7 +298,7 @@ export interface DocumentsPanelProps {
    * triggers a failure doesn't need it. */
   onOpenAssistantSettings?: () => void
   /** Ask Mate about a text selection (ask-mate-selection.tsx): matches
-   * App.tsx's openMate signature exactly, the same way SettingsPage's own
+   * `ask` of useMateSheetRequest, the same way SettingsPage's own
    * onAskMate does - see logs-section.tsx for the identical prop shape.
    * Optional so a test that never selects text doesn't need it. */
   onAskMate?: (question: string, options?: { newConversation?: boolean }) => void

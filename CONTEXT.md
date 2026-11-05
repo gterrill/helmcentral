@@ -45,6 +45,13 @@ have their own, so each can show a different conversation. A session asks one
 question at a time and sends the screen the operator is on with every one.
 _Avoid_: chat, thread (the thread is the rendered list of messages).
 
+**Mate sheet request**: what one opening of the Mate sheet is for: the question
+or draft, how to send it (new conversation, spoken), and the alarm or watch run
+it is about. Each open replaces the last request whole, and closing the sheet
+clears it, so a reopened sheet never re-sends a stale question or keeps a stale
+context. Owned by `useMateSheetRequest`, which also layers the context over the
+screen the operator is on; the app shell keeps only the handle to ask.
+_Avoid_: sheet state, Mate seed, open options.
 **Run record**: what a Mate run's tool calls did, one entry per call in the
 order made: the call, its result, and its error if it failed or never ran. The
 draft checks ask it whether a tool ran and what it returned (`mateRunRecord`,

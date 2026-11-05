@@ -8,13 +8,13 @@ import { orderWatches, WATCHES_DEFAULT_SORT } from '@/lib/index-order'
 import { sameListSort } from '@/lib/list-order'
 import { recordPager } from '@/lib/record-pager'
 import { WATCH_TEMPLATES } from '@/lib/watches'
-import type { MateWatchRunContext } from '@/lib/mate-screen'
+import type { MateAskOptions } from '@/hooks/use-mate-sheet-request'
 
 export interface WatchesRoutePanelProps {
   canWrite: boolean
   /** Settings is admin-only: without it the links to Alarm settings are plain words. */
   canAdmin: boolean
-  onAskMate?: (question: string, options: { newConversation: true; watchRun: MateWatchRunContext; draft?: boolean }) => void
+  onAskMate?: (question: string, options: Required<Pick<MateAskOptions, 'newConversation' | 'watchRun'>> & Pick<MateAskOptions, 'draft'>) => void
 }
 
 // ADR 0227: Watches wired to the app location. The index and one watch's page

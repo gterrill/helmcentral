@@ -1,13 +1,14 @@
 import { memo, useRef, useState } from 'react'
 
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
+import type { MateAskOptions } from '@/hooks/use-mate-sheet-request'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { useSettingsRoute } from '@/hooks/use-settings-route'
 import { settingsSectionOf } from '@/lib/app-location'
 import type { HelpTarget } from '@/lib/help-links'
 
 interface SettingsRoutePanelProps {
-  onAskMate: (question: string, options?: { newConversation?: boolean }) => void
+  onAskMate: (question: string, options?: Pick<MateAskOptions, 'newConversation'>) => void
   onOpenHelp: (target: HelpTarget) => void
 }
 
