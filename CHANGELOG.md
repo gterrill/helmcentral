@@ -22,6 +22,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   short buzz when the hold takes, if your phone can. After you
   confirm a download or a removal, the map goes back to normal.
 
+### Fixed
+
+- **Save now shows it's working in every tile settings dialog.** In the gauge,
+  gauge group, indicator lamps, ribbon, embed and Nearby map dialogs, the
+  button reads "Saving…" and stays greyed out until the tile is saved, so a
+  slow connection no longer leaves it looking ready to tap again. If the save
+  fails, the dialog stays open, says why, and lets you try again. The embed and
+  Nearby map dialogs used to close before the save had finished.
+
 ## [0.61.0] - 2026-11-06
 
 ### Breaking

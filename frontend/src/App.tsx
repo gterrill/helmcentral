@@ -1073,9 +1073,10 @@ function AppShell() {
   // The ribbon (ADR 0082) reuses LampStripConfigDialog under a synthetic
   // { id: 'ribbon' } rather than a real page widget — there is no draft state
   // to hold, since it is vessel-level and already lives in `ribbon` itself.
-  const handleSaveRibbon = useCallback((lamps: LampStripWidgetConfig) => {
-    void saveRibbon(lamps)
-    setRibbonDialogOpen(false)
+  // Closes once the ribbon is written; a failed write is toasted and the dialog
+  // stays open for a retry.
+  const handleSaveRibbon = useCallback(async (lamps: LampStripWidgetConfig) => {
+    if (await saveRibbon(lamps)) setRibbonDialogOpen(false)
   }, [saveRibbon])
 
   const handleRemoveRibbon = useCallback(() => {

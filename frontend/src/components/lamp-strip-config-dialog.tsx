@@ -14,6 +14,7 @@ import { ChoiceCheckbox } from '@/components/patterns'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
+import { useTileSave } from '@/hooks/use-tile-save'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
   GAUGE_GROUP_TITLE_MAX_LENGTH,
@@ -54,13 +55,14 @@ function defaultStripConfig(id: string): LampStripWidgetConfig {
 interface LampStripConfigDialogProps {
   widget: LampStripDialogWidget | null
   onCancel: () => void
-  onSave: (config: LampStripWidgetConfig) => void
+  onSave: (config: LampStripWidgetConfig) => void | Promise<void>
   /** Present only for the ribbon: offers removing it entirely rather than just editing its contents. */
   onRemove?: () => void
 }
 
 export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: LampStripConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
+  const { saving, error: saveError, run, reset } = useTileSave()
   const ctx = useEquipmentTileContext(widget !== null)
   const mappedItems = ctx.items.filter((i) => i.signalk_source !== '')
   // The readings a lamp for an item can watch: the signal a lamp of that kind
@@ -78,7 +80,8 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
   // Re-seed per instance, so editing one strip never shows another's settings.
   useEffect(() => {
     setConfig(widget?.lamps ? structuredClone(widget.lamps) : defaultStripConfig(widget?.id ?? ''))
-  }, [widget?.id, widget?.lamps])
+    reset()
+  }, [widget?.id, widget?.lamps, reset])
 
   // A fresh ribbon (ADR 0085): once the equipment items have loaded, replace
   // the single blank lamp with a suggested set built from the mapped ones.
@@ -304,11 +307,12 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
         </div>
 
         <DialogFooter>
+          {saveError && <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>}
           {onRemove && (
             <Button variant="outline" onClick={onRemove}>Remove ribbon</Button>
           )}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button disabled={!canSave} onClick={() => onSave(config)}>Save</Button>
+          <Button disabled={!canSave || saving} onClick={() => { void run(() => onSave(config)) }}>{saving ? 'Saving…' : 'Save'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
