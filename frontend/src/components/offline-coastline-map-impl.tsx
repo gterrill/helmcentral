@@ -1,8 +1,8 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
-import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
+import { Layer, Map, Marker, NavigationControl, Source } from 'react-map-gl/maplibre'
 
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
@@ -26,16 +26,32 @@ import { hasWebGL2 } from '@/lib/webgl'
 const FIT_PADDING = 32
 /** Squares this old or older are drawn at the faintest shade. */
 const OLDEST_SHADE_DAYS = 365
+/** A press this long without moving starts a block selection. */
+const HOLD_MS = 400
+/** A press that moves further than this before the hold fires is a pan. */
+const HOLD_SLOP_PX = 8
 
 export interface OfflineCoastlineMapProps {
   status: OfflineCoastlineStatus
-  /** Select mode: a tap toggles a square and a drag selects a block; the map does not pan. */
+  /**
+   * Select mode: a tap toggles a square; press and hold then drag on a touch screen, or
+   * Shift-drag with a mouse, selects a block. A plain drag still pans and pinch or wheel zooms.
+   */
   selecting?: boolean
   selected?: ReadonlySet<string>
   onSelectedChange?: (next: Set<string>) => void
 }
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
+
+// A finger on the map pans, zooms or selects while selecting, so the page must
+// not scroll, select text or show a callout under it.
+const SELECTING_STYLE = {
+  touchAction: 'none',
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+  WebkitTouchCallout: 'none',
+} as const
 
 function squareFeature(lat: number, lon: number) {
   return { type: 'Feature' as const, properties: {}, geometry: squarePolygon(lat, lon) }
@@ -46,7 +62,25 @@ interface DragState {
   /** The square the pointer was last over. */
   last: { lat: number; lon: number }
   base: Set<string>
-  moved: boolean
+  /** pending: a tap, or a hold not yet taken; block: selecting a block. */
+  mode: 'pending' | 'block'
+  pointerId: number
+  /** Where the press began, for measuring the slop. */
+  x: number
+  y: number
+  /** The latest pointer position, so the block starts under the finger. */
+  lastX: number
+  lastY: number
+  timer: ReturnType<typeof setTimeout> | null
+  /** Removes the window listeners that end a press released outside the map. */
+  unlisten: (() => void) | null
+  /** The map whose drag a block turned off, so it can be given back even after unmount. */
+  map: { dragPan: { enable: () => void; disable: () => void } } | null
+}
+
+function clearHold(drag: DragState) {
+  if (drag.timer) clearTimeout(drag.timer)
+  drag.timer = null
 }
 
 export default function OfflineCoastlineMapImpl({
@@ -110,6 +144,8 @@ export default function OfflineCoastlineMapImpl({
   const [view, setView] = useState<ViewBounds | null>(null)
   const [preview, setPreview] = useState<ReadonlySet<string> | null>(null)
   const dragRef = useRef<DragState | null>(null)
+  /** Set between the end of a pan and the end of its glide. */
+  const glidingRef = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const readView = useCallback(() => {
@@ -125,6 +161,10 @@ export default function OfflineCoastlineMapImpl({
   }, [])
 
   const canSelect = selecting && view !== null && selectionAllowedAt(view)
+  const canSelectRef = useRef(canSelect)
+  useLayoutEffect(() => {
+    canSelectRef.current = canSelect
+  }, [canSelect])
 
   // The status is a new object on every poll, so the grid depends on what it
   // is made from: the held squares and the selectable range.
@@ -136,6 +176,11 @@ export default function OfflineCoastlineMapImpl({
   const held = useMemo(() => new Set(heldKey ? heldKey.split('|') : []), [heldKey])
   const { lat_min, lat_max, lon_min, lon_max } = status.selectable
   const selectable = useMemo(() => ({ lat_min, lat_max, lon_min, lon_max }), [lat_min, lat_max, lon_min, lon_max])
+  // The hold timer outlives the render that started it, so it reads this.
+  const selectableRef = useRef(selectable)
+  useLayoutEffect(() => {
+    selectableRef.current = selectable
+  }, [selectable])
   const grid = useMemo(() => {
     if (!canSelect || !view) return null
     return {
@@ -157,10 +202,16 @@ export default function OfflineCoastlineMapImpl({
 
   // Selection uses pointer events on the container, not the map's mouse and
   // touch events: a touch would otherwise fire both its touch events and the
-  // browser's emulated mouse events and toggle the square twice, and pointer
-  // capture keeps a drag alive when the pointer crosses the marker or the
-  // attribution on its way out. The handlers do nothing unless a drag began,
-  // and a drag begins only while squares can be selected.
+  // browser's emulated mouse events and toggle the square twice. A plain drag
+  // pans the map and pinch and wheel zoom it, so a block selection starts only
+  // on a deliberate gesture: Shift held with a mouse, or a press that holds
+  // still for HOLD_MS. The browser dispatches pointerdown before the mouse and
+  // touch events the map listens to, so switching dragPan off here stops a
+  // block drag from also panning. Pointer capture then keeps the drag alive
+  // when the pointer crosses the marker or the attribution on its way out. A
+  // press that moves before the hold fires is a pan: the press ends there and
+  // the map keeps the gesture. The handlers do nothing unless a press began,
+  // and a press begins only while squares can be selected.
   const squareAtPoint = (clientX: number, clientY: number) => {
     const map = mapRef.current?.getMap?.()
     const box = containerRef.current?.getBoundingClientRect()
@@ -169,53 +220,148 @@ export default function OfflineCoastlineMapImpl({
     const ll = map.unproject([clientX - box.left, clientY - box.top])
     return { lat: Math.floor(ll.lat), lon: Math.floor(ll.lng) }
   }
-  const cancelDrag = useCallback(() => {
+  const endGesture = useCallback(() => {
+    const drag = dragRef.current
+    if (drag) {
+      clearHold(drag)
+      drag.unlisten?.()
+      drag.unlisten = null
+      if (drag.mode === 'block') drag.map?.dragPan.enable()
+    }
     dragRef.current = null
     setPreview(null)
   }, [])
+  const blockSelection = (drag: DragState, end: { lat: number; lon: number }) =>
+    new Set([...drag.base, ...squaresInBox(drag.start, end, selectableRef.current)])
+  const beginBlock = (drag: DragState, target: HTMLDivElement) => {
+    if (dragRef.current !== drag || drag.mode !== 'pending') return
+    clearHold(drag)
+    // The view may have zoomed out past the limit since the press.
+    if (!canSelectRef.current) {
+      endGesture()
+      return
+    }
+    // The pointer may have drifted inside the slop since the press.
+    const here = squareAtPoint(drag.lastX, drag.lastY)
+    if (here) {
+      drag.start = here
+      drag.last = here
+    }
+    try {
+      target.setPointerCapture?.(drag.pointerId)
+    } catch {
+      // The pointer is already gone (released elsewhere): leave the map the gesture.
+      endGesture()
+      return
+    }
+    drag.mode = 'block'
+    drag.map = mapRef.current?.getMap?.() ?? null
+    drag.map?.dragPan.disable()
+    // Show the start square at once, so the operator sees the hold took.
+    setPreview(blockSelection(drag, drag.start))
+  }
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!canSelect || (e.pointerType === 'mouse' && e.button !== 0)) return
     // The attribution and other map controls keep their own clicks.
     if ((e.target as Element).closest('.maplibregl-ctrl')) return
     if (!e.isPrimary) {
-      cancelDrag() // a second finger is a pinch, not a selection
+      endGesture() // a second finger is a pinch, not a selection
       return
     }
     const here = squareAtPoint(e.clientX, e.clientY)
     if (!here) return
-    e.currentTarget.setPointerCapture?.(e.pointerId)
-    dragRef.current = { start: here, last: here, base: new Set(selected), moved: false }
+    endGesture()
+    const map = mapRef.current?.getMap?.()
+    // Only the glide after a pan counts: a zoom easing from the buttons or the
+    // wheel leaves a press alone.
+    const gliding = glidingRef.current && (map?.isMoving() ?? false)
+    if (gliding) map?.stop()
+    const shiftBlock = e.pointerType === 'mouse' && e.shiftKey
+    // A press that stops a gliding map is not a tap or a hold; a mouse block
+    // is Shift-drag, whatever the map was doing.
+    if (gliding && !shiftBlock) return
+    // Keep Shift from extending a text selection across the page.
+    if (shiftBlock) e.preventDefault()
+    const drag: DragState = {
+      start: here,
+      last: here,
+      base: new Set(selected),
+      mode: 'pending',
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      timer: null,
+      unlisten: null,
+      map: null,
+    }
+    dragRef.current = drag
+    // Until the hold takes there is no pointer capture, so a release outside
+    // the container reaches only the window. Other pointers' releases are not
+    // ours. Ending the gesture removes these listeners.
+    const onLost = (ev: PointerEvent) => {
+      if (ev.pointerId === drag.pointerId && dragRef.current === drag) endGesture()
+    }
+    window.addEventListener('pointerup', onLost)
+    window.addEventListener('pointercancel', onLost)
+    drag.unlisten = () => {
+      window.removeEventListener('pointerup', onLost)
+      window.removeEventListener('pointercancel', onLost)
+    }
+    const target = e.currentTarget
+    if (shiftBlock) {
+      beginBlock(drag, target)
+    } else if (e.pointerType !== 'mouse') {
+      drag.timer = setTimeout(() => {
+        beginBlock(drag, target)
+        // A cue on phones that the hold took.
+        if (dragRef.current === drag && drag.mode === 'block') navigator.vibrate?.(10)
+      }, HOLD_MS)
+    }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag) return
+    if (drag.mode === 'pending') {
+      // Moving before the hold fires hands the gesture to the map.
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > HOLD_SLOP_PX) {
+        endGesture()
+      } else {
+        drag.lastX = e.clientX
+        drag.lastY = e.clientY
+      }
+      return
+    }
     const here = squareAtPoint(e.clientX, e.clientY)
     // Rebuild the preview only when the pointer enters another square.
     if (!here || (here.lat === drag.last.lat && here.lon === drag.last.lon)) return
     drag.last = here
-    if (!drag.moved && here.lat === drag.start.lat && here.lon === drag.start.lon) return
-    drag.moved = true
-    setPreview(new Set([...drag.base, ...squaresInBox(drag.start, here, selectable)]))
+    setPreview(blockSelection(drag, here))
   }
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
-    dragRef.current = null
-    if (!drag) return
-    setPreview(null)
-    if (drag.moved) {
-      const end = squareAtPoint(e.clientX, e.clientY) ?? drag.last
-      onSelectedChange?.(new Set([...drag.base, ...squaresInBox(drag.start, end, selectable)]))
+    if (!drag || drag.pointerId !== e.pointerId) return
+    endGesture()
+    if (drag.mode === 'block') {
+      // A hold released without moving keeps its square, which the preview
+      // showed selected: a block adds and never removes.
+      onSelectedChange?.(blockSelection(drag, squareAtPoint(e.clientX, e.clientY) ?? drag.last))
       return
     }
-    // A tap: toggle the one square.
+    // A tap: toggle the one square in the selection as it is now.
     const tapped = squareContaining(drag.start.lat, drag.start.lon)
     const key = squareKey(tapped.lat, tapped.lon)
-    const next = new Set(drag.base)
+    const next = new Set(selected)
     if (next.has(key)) next.delete(key)
     else if (squareSelectable(selectable, tapped.lat, tapped.lon)) next.add(key)
     onSelectedChange?.(next)
   }
-  const onPointerCancel = () => cancelDrag()
+  const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current && dragRef.current.pointerId !== e.pointerId) return
+    endGesture()
+  }
+  useEffect(() => endGesture, [endGesture])
 
   // cooperativeGestures is read once, when the map is built; the React wrapper
   // does not pass later changes on. Selecting needs a single finger to act, so
@@ -228,8 +374,8 @@ export default function OfflineCoastlineMapImpl({
   }, [selecting])
   useEffect(() => {
     applyGestures()
-    if (!selecting) cancelDrag()
-  }, [applyGestures, selecting, cancelDrag])
+    if (!selecting) endGesture()
+  }, [applyGestures, selecting, endGesture])
 
   if (!hasWebGL2()) {
     return (
@@ -249,11 +395,12 @@ export default function OfflineCoastlineMapImpl({
   const foreground = themeColour('--foreground')
 
   return (
-    // A finger on the map selects while selecting, so the page must not scroll under it.
     <div
       ref={containerRef}
       className="relative h-full w-full"
-      style={selecting ? { touchAction: 'none' } : undefined}
+      style={selecting ? SELECTING_STYLE : undefined}
+      // A held finger must not open the browser's own long-press menu.
+      onContextMenu={selecting ? (e) => e.preventDefault() : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -277,8 +424,19 @@ export default function OfflineCoastlineMapImpl({
           readView()
           applyGestures()
         }}
-        onMoveEnd={readView}
-        dragPan={!selecting}
+        onDragEnd={() => {
+          glidingRef.current = true
+        }}
+        onMoveEnd={() => {
+          glidingRef.current = false
+          readView()
+        }}
+        boxZoom={!selecting}
+        // Nothing pans until a press has moved past the slop, so a pending hold
+        // never has the map moving under it.
+        clickTolerance={HOLD_SLOP_PX}
+        // Quick taps select squares; they must not also zoom.
+        doubleClickZoom={!selecting}
         // Only a move the operator made carries the browser event; fitBounds
         // does not.
         onMoveStart={(e) => {
@@ -289,6 +447,7 @@ export default function OfflineCoastlineMapImpl({
         dragRotate={false}
         touchPitch={false}
       >
+        <NavigationControl position="top-right" showCompass={false} />
         <Source id="coverage-squares" type="geojson" data={squares}>
           {/* Held squares: the newer the download, the stronger the shade. */}
           <Layer

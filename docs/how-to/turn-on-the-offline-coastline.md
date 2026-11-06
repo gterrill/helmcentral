@@ -69,19 +69,29 @@ hasn't reached. The switch has to be on.
 
 1. Open **Settings → Offline coastline** and zoom the map until it shows about
    30° across or less. Until then the page says **Zoom in to select squares**.
-2. Choose **Select squares**. The map stops panning, and a grid of the squares
-   you don't hold appears.
-3. Tap a square to pick it, and tap it again to drop it. Drag across the map to
-   pick a block.
-4. Choose **Download** with the count, for example **Download 12**, and read the
+2. Choose **Select squares**. A grid of the squares you don't hold appears. The
+   map still moves as normal: drag to pan it, pinch or scroll to zoom, or use
+   the **+** and **−** buttons at the top right.
+3. Tap or click a square to select it, and tap it again to drop it.
+4. To select a block with a mouse, hold Shift and drag to the opposite corner.
+   On a touch screen, press and hold on the first square until it shades (a
+   phone gives a short buzz), then drag to the opposite corner and let go. If
+   you move before the hold takes, the map pans and nothing is selected. If you
+   let go without dragging, the square you held is selected, and it stays
+   selected if it already was.
+5. Choose **Download** with the count, for example **Download 12**, and read the
    confirm. It says how many all-land squares it will skip. Confirm to start.
-5. Choose **Done** to go back to moving the map.
+   Once you confirm, the map goes back to normal. If you cancel the confirm, your
+   selection stays.
+6. To back out, choose **Cancel** or press Escape while you're on the map or its
+   buttons. Either one drops your selection and ends select mode.
 
 A selection can include squares you already hold. Then the bar also shows
 **Remove** with a count, and choosing it deletes those squares after a confirm.
 If one is within 200 nm of the boat, the confirm says it will download again.
 **Remove** also works on a square you asked for that is still waiting or has
-failed. It cancels the request.
+failed. It cancels the request. Once you confirm a removal, the map goes back
+to normal too.
 
 You can ask for 100 squares at a time. Squares you asked for show in amber on the
 map. The line under the switch says how many are waiting and how many failed,

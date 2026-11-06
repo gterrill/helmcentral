@@ -166,7 +166,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
     try {
       await requestSquares(download.squares)
       setDownload((d) => ({ ...d, open: false, busy: false }))
-      clearSelection()
+      leaveSelecting()
     } catch (e) {
       const requestError = e instanceof Error ? e.message : 'Download request failed'
       setDownload((d) => ({ ...d, busy: false, requestError }))
@@ -179,7 +179,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
     setRemoving(true)
     try {
       await removeSquares(selection.remove)
-      clearSelection()
+      leaveSelecting()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Removing squares failed')
     } finally {
@@ -315,48 +315,61 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
           title="Coverage"
           description={`Each square is 1° of latitude by 1° of longitude, named by its south-west corner. Shaded squares are held, and stronger shading means a more recent download. Squares drawn as an outline only are within the ring but not downloaded yet. Red squares failed to download. A heavy outline means edits since the download. Amber squares are ones you asked for that are still waiting. The dashed ring is ${status.radius_nm} nm around the boat.`}
         >
-          <div className="flex flex-wrap items-center gap-2" data-testid="offline-coastline-select-bar">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!switchedOn}
-              aria-pressed={selecting}
-              onClick={() => (selecting ? leaveSelecting() : setSelecting(true))}
-            >
-              {selecting ? 'Done' : 'Select squares'}
-            </Button>
-            {!switchedOn && (
-              <p className="text-xs text-muted-foreground">Turn on the offline coastline to download squares</p>
-            )}
-            {selecting && selection && (
-              <>
-                {selection.download.length > 0 && (
-                  <Button type="button" size="sm" onClick={() => void openDownload()}>
-                    Download {selection.download.length}
-                  </Button>
-                )}
-                {selection.remove.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="border-destructive/40 text-destructive"
-                    onClick={() => setConfirmRemove(true)}
-                  >
-                    Remove {selection.remove.length}
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
-          <div className="h-72 overflow-hidden rounded-md border border-border" data-testid="offline-coastline-map">
-            <OfflineCoastlineMap
-              status={status}
-              selecting={selecting}
-              selected={selected}
-              onSelectedChange={setSelected}
-            />
+          {/* Escape ends select mode only from inside this block. Sheets and popups
+              render elsewhere and keep their own Escape. */}
+          <div
+            className="flex flex-col gap-4"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && selecting && !e.defaultPrevented) leaveSelecting()
+            }}
+          >
+            <div className="flex flex-wrap items-center gap-2" data-testid="offline-coastline-select-bar">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!switchedOn}
+                onClick={() => (selecting ? leaveSelecting() : setSelecting(true))}
+              >
+                {selecting ? 'Cancel' : 'Select squares'}
+              </Button>
+              {!switchedOn && (
+                <p className="text-xs text-muted-foreground">Turn on the offline coastline to download squares</p>
+              )}
+              {selecting && selection && (
+                <>
+                  {selection.download.length > 0 && (
+                    <Button type="button" size="sm" onClick={() => void openDownload()}>
+                      Download {selection.download.length}
+                    </Button>
+                  )}
+                  {selection.remove.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/40 text-destructive"
+                      onClick={() => setConfirmRemove(true)}
+                    >
+                      Remove {selection.remove.length}
+                    </Button>
+                  )}
+                </>
+              )}
+              {selecting && (
+                <p className="basis-full text-xs text-muted-foreground">
+                  Tap or click a square to select it. To select a block, Shift-drag with a mouse, or press and hold then drag on a touch screen.
+                </p>
+              )}
+            </div>
+            <div className="h-72 overflow-hidden rounded-md border border-border" data-testid="offline-coastline-map">
+              <OfflineCoastlineMap
+                status={status}
+                selecting={selecting}
+                selected={selected}
+                onSelectedChange={setSelected}
+              />
+            </div>
           </div>
           <Failures status={status} />
         </FormSection>
