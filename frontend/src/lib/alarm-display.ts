@@ -85,13 +85,33 @@ const TENDENCY_WINDOW_WORDS: Record<string, string> = {
   [PRESSURE_CHANGE_24H_PATH]: 'twenty-four hours',
 }
 
+/**
+ * Stands in for 'Hz' on an engine revolutions path (the backend's
+ * engineRevolutionsUnit), so the unit alone says rpm.
+ */
+const ENGINE_REVOLUTIONS_UNIT = 'rev/s'
+
+/**
+ * The unit an alarm reading on this path is shown from. Hz stays Hz unless the
+ * path is an engine's revolutions: the same rule as the backend's alarm text.
+ */
+export function alarmUnitForPath(path: string, siUnit: string | undefined): string | undefined {
+  return siUnit === 'Hz' && path.endsWith('.revolutions') ? ENGINE_REVOLUTIONS_UNIT : siUnit
+}
+
+// quantityForSIUnit only knows the SI unit itself.
+const quantitySIUnit = (siUnit?: string): string | undefined => (siUnit === ENGINE_REVOLUTIONS_UNIT ? 'Hz' : siUnit)
+
 const ALARM_UNIT_OVERRIDES: Record<string, string> = {
   'Pa/s': 'mbph',
   Pa: 'mb',
   K: 'C',
   'm/s': 'kn',
   ratio: 'percent',
-  Hz: 'rpm',
+  // Hz is hertz (shore, inverter). Only an engine's revolutions are rpm, and
+  // alarmUnitForPath marks those 'rev/s'.
+  Hz: 'Hz',
+  [ENGINE_REVOLUTIONS_UNIT]: 'rpm',
   m3: 'L',
   'm3/s': 'Lph',
   // deltaK/deltaPa (the twin-engine differential detector's residual paths)
@@ -111,7 +131,7 @@ export function alarmDisplayUnitId(siUnit?: string): string | null {
   if (trimmed === '') return null
   if (trimmed in ALARM_UNIT_OVERRIDES) return ALARM_UNIT_OVERRIDES[trimmed]
 
-  const quantity = quantityForSIUnit(trimmed)
+  const quantity = quantityForSIUnit(quantitySIUnit(trimmed))
   if (quantity.id === 'raw') return null
   return quantity.units[0].id
 }
@@ -129,7 +149,7 @@ export function formatAlarmReading(value: number, siUnit?: string): string {
     return Number(formatted).toString()
   }
 
-  const quantity = quantityForSIUnit(siUnit)
+  const quantity = quantityForSIUnit(quantitySIUnit(siUnit))
   const formatted = formatQuantity(value, quantity.id, unitId)
   if (formatted === null) return String(value)
 

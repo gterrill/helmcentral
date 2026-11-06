@@ -121,7 +121,7 @@ type signalKStreamClient struct {
 
 	// Injectable so tests can point the client at a stub without writing
 	// settings, and drive the reauth path without a live SignalK server.
-	resolveURLs     func() (streamURL string, httpBaseURL string)
+	resolveURLs     func() (streamURL string, httpBaseURL string, err error)
 	acquireToken    func(httpBaseURL string) (string, error)
 	invalidateToken func()
 }
@@ -133,12 +133,12 @@ func newSignalKStreamClient(snapshot *signalKSnapshot, settingsPath string) *sig
 		minBackoff:   defaultStreamMinBackoff,
 		maxBackoff:   defaultStreamMaxBackoff,
 		now:          func() time.Time { return time.Now().UTC() },
-		resolveURLs: func() (string, string) {
+		resolveURLs: func() (string, string, error) {
 			address, port, err := loadSignalKSettings(settingsPath)
 			if err != nil {
-				log.Printf("signalk stream: settings unreadable, falling back to defaults: %v", err)
+				return "", "", fmt.Errorf("signalk settings unreadable: %w", err)
 			}
-			return buildSignalKStreamURL(address, port), buildSignalKURL(address, port)
+			return buildSignalKStreamURL(address, port), buildSignalKURL(address, port), nil
 		},
 		acquireToken: func(httpBaseURL string) (string, error) {
 			username, password, err := loadSignalKCredentials(settingsPath)
@@ -162,19 +162,25 @@ func (c *signalKStreamClient) run(ctx context.Context) {
 			return
 		}
 
-		streamURL, httpBaseURL := c.resolveURLs()
+		streamURL, httpBaseURL, err := c.resolveURLs()
+		if err != nil {
+			// No server was chosen, so none is dialled: the default host is
+			// not the boat's. The stream stays disconnected, which the
+			// dashboard shows, and the next attempt re-reads the settings.
+			log.Printf("signalk stream: not connecting, %v; retrying in %s", err, backoff)
+		} else {
+			connectedAt := c.now()
+			err = c.connectOnce(ctx, streamURL, httpBaseURL)
+			if ctx.Err() != nil {
+				return
+			}
 
-		connectedAt := c.now()
-		err := c.connectOnce(ctx, streamURL, httpBaseURL)
-		if ctx.Err() != nil {
-			return
+			if c.now().Sub(connectedAt) >= streamStableDuration {
+				backoff = c.minBackoff
+			}
+
+			log.Printf("signalk stream: %s disconnected (%v); reconnecting in %s", streamURL, err, backoff)
 		}
-
-		if c.now().Sub(connectedAt) >= streamStableDuration {
-			backoff = c.minBackoff
-		}
-
-		log.Printf("signalk stream: %s disconnected (%v); reconnecting in %s", streamURL, err, backoff)
 
 		select {
 		case <-ctx.Done():

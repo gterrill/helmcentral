@@ -5,6 +5,7 @@ import {
   alarmConditionSentence,
   alarmFooterText,
   alarmDisplayUnitId,
+  alarmUnitForPath,
   formatAlarmReading,
   formatAlarmTime,
   ignorableSensors,
@@ -33,6 +34,18 @@ function makeAlarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
   }
 }
 
+describe("Hz is hertz unless the path is an engine's revolutions", () => {
+  it('reads a shore frequency in hertz and an engine in rpm', () => {
+    expect(formatAlarmReading(49.5, alarmUnitForPath('electrical.shore.frequency', 'Hz'))).toBe('49.5 Hz')
+    expect(formatAlarmReading(50, alarmUnitForPath('propulsion.port.revolutions', 'Hz'))).toBe('3000 RPM')
+  })
+
+  it('leaves every other unit alone', () => {
+    expect(alarmUnitForPath('electrical.batteries.0.voltage', 'V')).toBe('V')
+    expect(alarmUnitForPath('propulsion.port.revolutions', undefined)).toBeUndefined()
+  })
+})
+
 describe('alarmDisplayUnitId', () => {
   // These are the units the backend contract promises (Pa/s, Pa, K, m/s,
   // ratio, Hz, m3, m3/s); each maps to what a sailor actually reads, not
@@ -43,7 +56,8 @@ describe('alarmDisplayUnitId', () => {
     expect(alarmDisplayUnitId('K')).toBe('C')
     expect(alarmDisplayUnitId('m/s')).toBe('kn')
     expect(alarmDisplayUnitId('ratio')).toBe('percent')
-    expect(alarmDisplayUnitId('Hz')).toBe('rpm')
+    expect(alarmDisplayUnitId('rev/s')).toBe('rpm')
+    expect(alarmDisplayUnitId('Hz')).toBe('Hz')
     expect(alarmDisplayUnitId('m3')).toBe('L')
     expect(alarmDisplayUnitId('m3/s')).toBe('Lph')
   })

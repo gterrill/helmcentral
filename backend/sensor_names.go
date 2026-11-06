@@ -715,7 +715,7 @@ func (n *sensorNamer) identifierEntry(identifier string) sensorHealthEntry {
 
 // sensorLimitUnit is the SI unit of each physicalLimits quantity.
 var sensorLimitUnit = map[string]string{
-	"revolutions":                 "Hz",
+	"revolutions":                 engineRevolutionsUnit,
 	"temperature":                 "K",
 	"oilPressure":                 "Pa",
 	"boostPressure":               "Pa",

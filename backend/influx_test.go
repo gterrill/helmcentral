@@ -418,3 +418,23 @@ func TestFindLastTideTurningPointTooFewPoints(t *testing.T) {
 		t.Fatalf("expected no turning point with fewer than 3 points")
 	}
 }
+
+// With one series per source, max() without group() returns one row per
+// series and the reader keeps the last, not the highest.
+func TestInfluxPeakFlux_MergesSeriesBeforeMax(t *testing.T) {
+	flux := influxPeakFlux(`"b"`, "start: -1h", `"m"`, `"value"`)
+	g := strings.Index(flux, "group()")
+	m := strings.Index(flux, "max(")
+	if g < 0 || m < 0 || g > m {
+		t.Fatalf("expected group() before max() in %s", flux)
+	}
+}
+
+func TestInfluxMeanTrendFlux_MergesSeriesBeforeAggregate(t *testing.T) {
+	flux := influxMeanTrendFlux(`"b"`, "3h", `"m"`, `"value"`, "5m")
+	g := strings.Index(flux, "group()")
+	a := strings.Index(flux, "aggregateWindow(")
+	if g < 0 || a < 0 || g > a {
+		t.Fatalf("expected group() before aggregateWindow() in %s", flux)
+	}
+}

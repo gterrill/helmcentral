@@ -2944,3 +2944,54 @@ func TestSettingsPayloadRoundTripsVerboseRunLog(t *testing.T) {
 		t.Fatal("expected assistant.verbose_run_log to round-trip true")
 	}
 }
+
+func TestFetchSignalKVesselState_StaleApparentWindReadsUnknownNotCalm(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	old := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{
+		"timestamp": %q,
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 9.5, "timestamp": %q},
+				"angleApparent": {"value": 0.5, "timestamp": %q}
+			}
+		}
+	}`, old, old, old))
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedApparentKts != -1 {
+		t.Fatalf("expected unknown apparent wind speed (-1) for a stale reading, got %v", state.WindSpeedApparentKts)
+	}
+	if state.WindAngleApparentDeg != -1 || state.WindAngleRelativeDeg != -1 {
+		t.Fatalf("expected unknown apparent wind angles (-1), got %v / %v", state.WindAngleApparentDeg, state.WindAngleRelativeDeg)
+	}
+	if state.WindSide != "" {
+		t.Fatalf("expected no wind side for a stale reading, got %q", state.WindSide)
+	}
+}
+
+func TestFetchSignalKVesselState_AbsentApparentWindReadsUnknownNotCalm(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"timestamp": "2026-09-05T00:00:00Z", "environment": {}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindSpeedApparentKts != -1 || state.WindAngleApparentDeg != -1 || state.WindAngleRelativeDeg != -1 {
+		t.Fatalf("expected unknown apparent wind (-1) when absent, got %v / %v / %v",
+			state.WindSpeedApparentKts, state.WindAngleApparentDeg, state.WindAngleRelativeDeg)
+	}
+	if state.WindSide != "" {
+		t.Fatalf("expected no wind side when absent, got %q", state.WindSide)
+	}
+}

@@ -12,6 +12,12 @@ import (
 // declared unit, or one whose declared unit has no display mapping here, is
 // shown in its stored unit and is not converted.
 
+// isEngineRevolutionsPath is the one rule for which Hz path is an engine's
+// revolutions, read in rpm; every other frequency stays in hertz.
+func isEngineRevolutionsPath(path string) bool {
+	return strings.HasSuffix(path, ".revolutions")
+}
+
 // chartSIQuantity maps a declared SI unit to the quantities.go quantity it
 // measures.
 var chartSIQuantity = map[string]string{
@@ -82,7 +88,7 @@ func chartDisplayFor(path, siUnit, system string) (string, func(float64) float64
 	identity := func(v float64) float64 { return v }
 	// Hz is the SI unit of every frequency, but only an engine's revolutions
 	// are read in rpm; a mains frequency stays in hertz.
-	if siUnit == "Hz" && !strings.HasSuffix(path, ".revolutions") {
+	if siUnit == "Hz" && !isEngineRevolutionsPath(path) {
 		return siUnit, identity, nil
 	}
 	q, ok := chartSIQuantity[siUnit]

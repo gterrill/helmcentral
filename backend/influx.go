@@ -234,6 +234,27 @@ func queryInfluxMaxWindGustKtsFor(windows []string) map[string]float64 {
 	return results
 }
 
+// influxPeakFlux builds the maximum-over-a-range query. The signalk plugin
+// writes one series per source, so group() merges them first: without it max()
+// returns one row per series and the caller keeps whichever came last, not the
+// highest. rangeArgs is the inside of range(...), already formatted.
+func influxPeakFlux(bucketLiteral, rangeArgs, measurementLiteral, fieldLiteral string) string {
+	return fmt.Sprintf(
+		`from(bucket: %s) |> range(%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> group() |> max(column: "_value") |> keep(columns: ["_value"])`,
+		bucketLiteral, rangeArgs, measurementLiteral, fieldLiteral,
+	)
+}
+
+// influxMeanTrendFlux builds the windowed-mean history query. group() merges the
+// per-source series before aggregateWindow so two sources of one path give one
+// mean per window, not interleaved points from different sensors.
+func influxMeanTrendFlux(bucketLiteral, window, measurementLiteral, fieldLiteral, every string) string {
+	return fmt.Sprintf(
+		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> group() |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, window, measurementLiteral, fieldLiteral, every,
+	)
+}
+
 func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measurement, field, window string) float64 {
 	bucketLiteral, err := fluxStringLiteral(bucket)
 	if err != nil {
@@ -248,16 +269,14 @@ func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measureme
 		return -1
 	}
 
-	flux := fmt.Sprintf(
-		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> max(column: "_value") |> keep(columns: ["_value"])`,
-		bucketLiteral, window, measurementLiteral, fieldLiteral,
-	)
+	flux := influxPeakFlux(bucketLiteral, fmt.Sprintf("start: -%s", window), measurementLiteral, fieldLiteral)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
 	result, err := queryAPI.Query(ctx, flux)
 	if err != nil {
+		log.Printf("influx: max wind gust query (%s) failed: %v", window, err)
 		return -1
 	}
 	defer result.Close()
@@ -269,7 +288,11 @@ func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measureme
 		}
 	}
 
-	if result.Err() != nil || maxMS < 0 {
+	if result.Err() != nil {
+		log.Printf("influx: max wind gust query (%s) failed: %v", window, result.Err())
+		return -1
+	}
+	if maxMS < 0 {
 		return -1
 	}
 	return math.Round((maxMS*metersPerSecondToKnots)*10) / 10
@@ -307,10 +330,7 @@ func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
 		return nil, fmt.Errorf("field: %w", err)
 	}
 
-	flux := fmt.Sprintf(
-		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucketLiteral, window, pathLiteral, fieldLiteral, influxTrendResolution(window),
-	)
+	flux := influxMeanTrendFlux(bucketLiteral, window, pathLiteral, fieldLiteral, influxTrendResolution(window))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -891,10 +911,7 @@ func queryInfluxDepthTrend(window string) []depthTrendPoint {
 		return nil
 	}
 
-	flux := fmt.Sprintf(
-		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: 5m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucketLiteral, window, measurementLiteral, fieldLiteral,
-	)
+	flux := influxMeanTrendFlux(bucketLiteral, window, measurementLiteral, fieldLiteral, "5m")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -976,9 +993,10 @@ func queryInfluxSolarPeakTodayW(now time.Time, loc *time.Location) float64 {
 		return -1
 	}
 
-	flux := fmt.Sprintf(
-		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> max(column: "_value") |> keep(columns: ["_value"])`,
-		bucketLiteral, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurementLiteral, fieldLiteral,
+	flux := influxPeakFlux(
+		bucketLiteral,
+		fmt.Sprintf("start: time(v: %q), stop: time(v: %q)", start.Format(time.RFC3339), now.UTC().Format(time.RFC3339)),
+		measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -986,6 +1004,7 @@ func queryInfluxSolarPeakTodayW(now time.Time, loc *time.Location) float64 {
 
 	result, err := client.QueryAPI(org).Query(ctx, flux)
 	if err != nil {
+		log.Printf("influx: solar peak query failed: %v", err)
 		return -1
 	}
 	defer result.Close()
@@ -997,7 +1016,11 @@ func queryInfluxSolarPeakTodayW(now time.Time, loc *time.Location) float64 {
 		}
 	}
 
-	if result.Err() != nil || peakW < 0 {
+	if result.Err() != nil {
+		log.Printf("influx: solar peak query failed: %v", result.Err())
+		return -1
+	}
+	if peakW < 0 {
 		return -1
 	}
 

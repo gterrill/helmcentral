@@ -225,7 +225,8 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel v
 	if windSpeedApparentOK && windSpeedApparent.Value >= 0 && windDataRecent {
 		state.WindSpeedApparentKts = windSpeedApparent.Value * metersPerSecondToKnots
 	} else {
-		state.WindSpeedApparentKts = 0
+		// Stale or absent reads as unknown (-1), never as a calm 0 kts.
+		state.WindSpeedApparentKts = -1
 	}
 
 	if windAngle, ok := t.Number("environment.wind.angleApparent"); ok && windDataRecent {
@@ -243,9 +244,9 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel v
 			state.WindSide = "starboard"
 		}
 	} else {
-		state.WindAngleApparentDeg = 0
-		state.WindAngleRelativeDeg = 0
-		state.WindSide = "starboard"
+		state.WindAngleApparentDeg = -1
+		state.WindAngleRelativeDeg = -1
+		state.WindSide = ""
 	}
 
 	// True wind: environment.wind.speedTrue/angleTrueWater/directionTrue,
