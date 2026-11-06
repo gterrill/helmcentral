@@ -1287,11 +1287,14 @@ func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, dat
 			entry := "tanks." + category + "." + entryID
 
 			reading, ok := t.Number(entry + ".currentLevel")
-			if !ok || reading.Value < 0 {
+			if !ok {
 				continue
 			}
 
-			level, _ := tankLevelPercent(reading.Value) // negatives were skipped above
+			level, levelOK := tankLevelPercent(reading.Value)
+			if !levelOK {
+				continue // not a 0-1 ratio, so not a level
+			}
 
 			label := tankLabelOverride(labelOverrides, category, entryID)
 			if label == "" {

@@ -35,6 +35,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   report them.** Before, the last device to answer won, even when it was the
   lower one. The history charts for a reading two devices share now show one
   average instead of lines from both.
+- **A tank at 1 percent no longer reads as full.** Tank levels are read as a
+  ratio from 0 to 1, the way SignalK reports them. Before, a level of exactly 1
+  or less was guessed to be a ratio and anything above a percentage, so a
+  sender on a percent scale could show a nearly empty tank as full and keep the
+  low-fuel and low-water alarms quiet. A level outside 0 to 1 now shows as no
+  reading for that tank instead of a guess.
 - **Frequency alarms read in hertz.** An alarm on shore power or inverter
   frequency showed "3600 RPM" on its card, in email, ntfy and webhooks. Only
   an engine's revolutions are read in RPM now.

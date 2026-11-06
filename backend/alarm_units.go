@@ -12,6 +12,12 @@ import "strconv"
 // and degrees C. These two tables must move together: adding or changing a
 // unit on one side without the other means the card and the alarm text stop
 // agreeing with each other.
+type operatorUnitEntry struct {
+	label    string
+	convert  func(float64) float64
+	decimals int
+}
+
 // engineRevolutionsUnit stands in for "Hz" on an engine revolutions path in
 // alarm text, so the unit alone says RPM. It exists only on the alarm side:
 // charts and the paths list keep the SI unit the boat declares.
@@ -26,12 +32,6 @@ func alarmUnitForPath(snapshot *signalKSnapshot, path string) string {
 		return engineRevolutionsUnit
 	}
 	return unit
-}
-
-type operatorUnitEntry struct {
-	label    string
-	convert  func(float64) float64
-	decimals int
 }
 
 var operatorUnitTable = map[string]operatorUnitEntry{
