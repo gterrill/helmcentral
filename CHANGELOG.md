@@ -11,6 +11,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Choosing squares to download on the offline coastline map is easier, and a
+  plain drag now moves the map instead of selecting a block.** You can cancel
+  with **Cancel** or Escape, drag the map and zoom it while you're choosing,
+  and use the **+** and **−** buttons on the map. Tap or click a square to
+  select it. To select a block, hold Shift and drag with a mouse, or press and
+  hold on the first square and then drag on a touch screen. The screen gives a
+  short buzz when the hold takes, if your phone can. After you
+  confirm a download or a removal, the map goes back to normal.
+
 ## [0.61.0] - 2026-11-06
 
 ### Breaking

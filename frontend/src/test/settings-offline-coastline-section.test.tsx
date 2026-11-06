@@ -331,13 +331,85 @@ describe('OfflineCoastlineSection select squares', () => {
     expect(screen.getByText('Turn on the offline coastline to download squares')).toBeInTheDocument()
   })
 
-  it('enters select mode and leaves it with Done', () => {
+  it('enters select mode and leaves it with Cancel', () => {
     hook.status = status({ squares: [held], held: 1 })
     renderSection()
     fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
     expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'yes')
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'no')
+  })
+
+  it('Cancel drops the selection', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    expect(screen.getByRole('button', { name: /^Download/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    expect(screen.queryByRole('button', { name: /^Download/ })).not.toBeInTheDocument()
+  })
+
+  it('Escape inside the coverage block leaves select mode', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: 'Escape' })
+    expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'no')
+  })
+
+  it('Escape from outside the coverage block does nothing', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'yes')
+  })
+
+  it('Escape in the download confirm keeps the selection', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    fireEvent.keyDown(await screen.findByRole('alertdialog'), { key: 'Escape' })
+    expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'yes')
+  })
+
+  it('goes back to the normal map after a download is requested', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await within(dialog).findByText(/3 all-land squares skipped/)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'no'))
+    expect(screen.getByRole('button', { name: 'Select squares' })).toBeInTheDocument()
+  })
+
+  it('goes back to the normal map after squares are removed', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 1' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'no'))
+  })
+
+  it('shows how to select a block only while selecting', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    expect(screen.queryByText(/press and hold/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    expect(screen.getByText(/press and hold/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText(/press and hold/i)).not.toBeInTheDocument()
   })
 
   it('offers Download N and Remove M for a mixed selection', () => {
