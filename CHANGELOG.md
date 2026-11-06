@@ -26,9 +26,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the day cards and the current conditions showed "—" for a wind from exactly
   0°. Mate and the passage check already read it correctly. An hour where the
   weather provider gave no direction still shows "—".
+### Fixed
+
+- **A silent AIS receiver no longer reads as an empty sea.** When SignalK is
+  working but no vessel has reported for ten minutes, the Nearby Vessels tile
+  and the Vessels list on the Nearby map say "AIS silent for 25m" (or "No AIS
+  reports heard") instead of "No vessels". A reconnect to SignalK doesn't
+  reset that count. The Nearby Vessels tile also says "AIS unavailable" when
+  Helmcentral can't read AIS at all, as the Nearby map already did, or that the
+  boat needs a GNSS fix when that is the likelier cause.
+- **Long vessel names are readable on a phone.** In the Nearby Vessels tile,
+  and in the Nearby map's list when it sits under the places, a long name takes
+  a second line instead of being cut off.
 
 ### Changed
 
+- **During an anchor watch the nearby boats list stops at 40.** It holds the
+  boats nearest you, plus those near your anchor, so a very crowded anchorage
+  can't swamp a phone. It keeps the ones closest to your anchor if there are
+  more than that, and the anchor-watch map, the Nearby map and the Nearby
+  Vessels tile all say how many boats it left out.
 - **Choosing squares to download on the offline coastline map is easier, and a
   plain drag now moves the map instead of selecting a block.** You can cancel
   with **Cancel** or Escape, drag the map and zoom it while you're choosing,
@@ -37,6 +54,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   hold on the first square and then drag on a touch screen. The screen gives a
   short buzz when the hold takes, if your phone can. After you
   confirm a download or a removal, the map goes back to normal.
+
+### Fixed
+
+- **Save now shows it's working in every tile settings dialog.** In the gauge,
+  gauge group, indicator lamps, ribbon, embed and Nearby map dialogs, the
+  button reads "Saving…" and stays greyed out until the tile is saved, so a
+  slow connection no longer leaves it looking ready to tap again. If the save
+  fails, the dialog stays open and shows "Could not save the tile" (or "Could
+  not save the indicator ribbon"), and you can try again. A pop-up message still
+  gives the cause. The embed and Nearby map dialogs used to close before the
+  save had finished. Duplicate on a gauge group and Remove ribbon wait for a
+  save in progress too.
 
 ## [0.61.0] - 2026-11-06
 

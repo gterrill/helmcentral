@@ -227,7 +227,8 @@ export function useTileDraft({ pageRef, widgetsRef, updatePage }: TileDraftHost)
   }, [pageRef, updatePage])
 
   // Writes what `build` gives for the draft, then closes it. A failed write
-  // leaves the draft open so the operator can retry.
+  // leaves the draft open so the operator can retry, and rejects so the dialog
+  // shows it.
   const finish = async (from: Entry | null, build: (item: DashboardLayoutItem) => DashboardLayoutItem[]) => {
     if (!from || currentRef.current !== from || writingRef.current === from) return
     writingRef.current = from
@@ -237,7 +238,9 @@ export function useTileDraft({ pageRef, widgetsRef, updatePage }: TileDraftHost)
     } finally {
       writingRef.current = null
     }
-    if (ok) close(from)
+    // updatePage has toasted the cause. The dialog still has to say it failed.
+    if (!ok) throw new Error('Could not save the tile')
+    close(from)
   }
 
   const addTile = useCallback((kind: TileKind) => {

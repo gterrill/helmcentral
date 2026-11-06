@@ -124,6 +124,11 @@ Drag one larger and the dial and its readings grow with it. Make it smaller and
 they shrink. On a phone or a narrow window they fit the width of the screen as
 before.
 
+The Nearby Vessels tile gives the same reasons when its list is empty: "AIS
+unavailable" when Helmcentral can't read AIS, and "AIS silent for 25m" when
+SignalK is working but no vessel has reported for over ten minutes. On a narrow tile a long
+vessel name takes a second line instead of being cut off.
+
 Nearby Vessels and Radar Targets are lists that grow and shrink as contacts
 come and go. How tall one is drawn depends on what's under it:
 
@@ -321,8 +326,9 @@ one to a page, or to different pages, each with its own range and categories.
   distance, bearing and "Seen 7x before, last 2d ago" for vessels you have met.
   The list then has a Places heading and a Vessels heading. On a short tile the
   two groups sit side by side, and on a tall tile Vessels goes below Places. It
-  says why when it can't list vessels, for example "AIS unavailable". If the AIS
-  receiver goes silent while SignalK is still up, it reads as no vessels. See
+  says why when it can't list vessels, for example "AIS unavailable". If no vessel
+  has reported for ten minutes, it says "AIS silent" and for how long, rather than
+  "No vessels". See
   [Add a Nearby map](../how-to/add-a-nearby-map.md#vessels-in-the-list).
 - **Summary cycle:** The Summary cycle is how long each match stays highlighted.
   A longer one, 15 to 20 seconds, gives you more time to read a description.

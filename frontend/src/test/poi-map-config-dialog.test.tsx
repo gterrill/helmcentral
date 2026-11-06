@@ -78,7 +78,8 @@ describe('PoiMapConfigDialog', () => {
       showAis: true,
       showTrail: false,
     })
-    expect(onOpenChange).toHaveBeenCalledWith(false)
+    // The page closes the dialog once the write lands, not the dialog itself.
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 
   test('blocks saving with no categories selected', () => {

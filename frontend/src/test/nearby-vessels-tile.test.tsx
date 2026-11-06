@@ -325,4 +325,83 @@ describe('NearbyVesselsTile collision alarms', () => {
       expect(screen.queryByText(/5 km/)).toBeNull()
     })
   })
+
+  describe('feed health', () => {
+    const empty = (props: Partial<React.ComponentProps<typeof NearbyVesselsTile>>) =>
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} vessels={[]} maxRangeM={5000} {...props} />)
+
+    it('says AIS is unavailable, not "No vessels", when the feed is not from SignalK', () => {
+      empty({ source: 'backend-fallback' })
+      expect(screen.getByText('AIS unavailable')).toBeInTheDocument()
+      expect(screen.queryByText(/No vessels/)).toBeNull()
+    })
+
+    it('says the receiver has been silent, with how long, when nothing has been heard for over ten minutes', () => {
+      empty({ source: 'signalk', aisHeardAgeS: 780 })
+      expect(screen.getByText('AIS silent for 13m')).toBeInTheDocument()
+      expect(screen.queryByText(/No vessels/)).toBeNull()
+    })
+
+    it('says no AIS has been heard when the backend holds no report at all', () => {
+      empty({ source: 'signalk', aisHeardAgeS: -1 })
+      expect(screen.getByText('No AIS reports heard')).toBeInTheDocument()
+      expect(screen.queryByText(/No vessels/)).toBeNull()
+    })
+
+    it('still says no vessels when AIS was heard within ten minutes', () => {
+      empty({ source: 'signalk', aisHeardAgeS: 120 })
+      expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
+    })
+
+    it('says nothing extra while the heartbeat is unknown', () => {
+      empty({ source: 'signalk', aisHeardAgeS: null })
+      expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
+    })
+
+    it('says the boat needs a GNSS fix, not that AIS is unavailable, when the fix is the likelier fault', () => {
+      empty({ source: 'backend-fallback', gnssCriticalAlert: true })
+      expect(screen.getByText('Vessels need a GNSS fix')).toBeInTheDocument()
+      expect(screen.queryByText('AIS unavailable')).toBeNull()
+    })
+
+    it('treats a null source as unknown, not unavailable', () => {
+      empty({ source: null })
+      expect(screen.queryByText('AIS unavailable')).toBeNull()
+      expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
+    })
+
+    it('keeps listing contacts that are still in the feed even when the source is not SignalK', () => {
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} source="backend-fallback"
+        vessels={[{ id: 'a', name: 'A BOAT', range_m: 100, age_seconds: 5 }]} />)
+      expect(screen.getByText('A BOAT')).toBeInTheDocument()
+    })
+  })
+
+  describe('the cap during an anchor watch', () => {
+    it('says how many boats near the anchor the list leaves out', () => {
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} cappedCount={16} feedCap={40}
+        vessels={[{ id: 'a', name: 'A BOAT', range_m: 100, age_seconds: 5 }]} />)
+      expect(screen.getByTestId('nearby-vessels-capped')).toHaveTextContent('16 more boats near the anchor aren\'t shown (limit 40).')
+    })
+
+    it('says nothing when nothing was left out', () => {
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} cappedCount={0}
+        vessels={[{ id: 'a', name: 'A BOAT', range_m: 100, age_seconds: 5 }]} />)
+      expect(screen.queryByTestId('nearby-vessels-capped')).toBeNull()
+    })
+  })
+
+  describe('long names on a phone', () => {
+    it('lets a name wrap onto a second line only in a narrow tile, and keeps one line in a wide one', () => {
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null}
+        vessels={[{ id: 'a', name: 'SOUTHERN CROSS EXPLORER', range_m: 100, age_seconds: 5 }]} />)
+      const name = screen.getByText('SOUTHERN CROSS EXPLORER')
+      expect(name.className).toContain('@max-[28rem]:line-clamp-2')
+      expect(name.className).toContain('@max-[28rem]:break-words')
+      // truncate sets nowrap, which would stop the clamp wrapping at all.
+      expect(name.className).toContain('@max-[28rem]:whitespace-normal')
+      expect(name.className).toContain('truncate')
+      expect(name.closest('.\\@container')).not.toBeNull()
+    })
+  })
 })
