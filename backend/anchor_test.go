@@ -35,6 +35,19 @@ func anchorTestEnv(t *testing.T, gpsFromBowM float64) string {
 
 	t.Setenv("ANCHOR_WATCH_FILE", filepath.Join(dir, "anchor_watch.json"))
 
+	// Start with no watch, and put back whatever was there, so a watch this
+	// test drops can't leak into a later one (a shuffled run caught the
+	// Nearby feed seeing a stale watch).
+	anchorWatchMu.Lock()
+	oldWatch := anchorWatchState
+	anchorWatchState = nil
+	anchorWatchMu.Unlock()
+	t.Cleanup(func() {
+		anchorWatchMu.Lock()
+		anchorWatchState = oldWatch
+		anchorWatchMu.Unlock()
+	})
+
 	// A drop and a raise reset the swing trail (ADR 0199) and fail
 	// without a track store, so every anchor test gets one unless it set up its own.
 	if globalPassageStore == nil {
