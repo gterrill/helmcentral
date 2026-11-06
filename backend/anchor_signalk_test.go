@@ -17,15 +17,6 @@ func anchorPublishEnv(t *testing.T) *publishStub {
 	anchorTestEnv(t, 0)
 	stub := newPublishStub(t)
 	withServiceAccount(t, stub)
-	anchorWatchMu.Lock()
-	old := anchorWatchState
-	anchorWatchState = nil
-	anchorWatchMu.Unlock()
-	t.Cleanup(func() {
-		anchorWatchMu.Lock()
-		anchorWatchState = old
-		anchorWatchMu.Unlock()
-	})
 	return stub
 }
 
