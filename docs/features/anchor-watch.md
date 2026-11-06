@@ -16,6 +16,16 @@ and every screen on board is switched off.
 - **Failsafe GPS handling:** A lost satellite fix will never trigger a false
   drag alarm. If your GNSS signal drops, your position simply freezes at the
   last one the GPS reported reliably, rather than drifting across the screen.
+- **Anchor Position Lost:** A frozen position can't show a dragging boat, so
+  the watch raises its own alarm when it has had no trustworthy GPS fix for a
+  full minute. It says the position is unknown, not that you're dragging, and
+  it reaches you through the same channels as the drag alarm. A fix that drops
+  out for less than a minute raises nothing. The alarm clears by itself when a
+  good fix returns, or when you raise the anchor. If the drag alarm was already
+  sounding, it stays up through the outage until a good fix shows the boat back
+  inside the circle. If Helmcentral loses its link to the instrument network,
+  you get this alarm as well as the instrument alert, because the position is
+  unknown then too.
 - **Dedicated instrument watchdog:** Because a drifting anchor and a failed GPS
   antenna require completely different responses, a lost instrument connection
   triggers its own distinct alert instead of a drag warning.
