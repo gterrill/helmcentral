@@ -78,7 +78,7 @@ func createCoastlineSchema(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "coastline_squares", "data_as_of", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	// Squares the operator asked for (ADR 0265). A row stays until the square
+	// Squares the operator asked for (ADR 0267). A row stays until the square
 	// is held, removed by Clear, or never; batch numbers the requests in the
 	// order they were made and pos keeps the order within one request.
 	if _, err := db.Exec(`

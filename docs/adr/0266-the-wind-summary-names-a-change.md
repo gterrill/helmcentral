@@ -1,4 +1,4 @@
-# ADR 0265: The Wind Summary Names A Change
+# ADR 0266: The Wind Summary Names A Change
 
 ## Status
 

@@ -1,4 +1,4 @@
-# ADR 0265: The Operator Can Ask For Coastline Squares
+# ADR 0267: The Operator Can Ask For Coastline Squares
 
 ## Status
 
