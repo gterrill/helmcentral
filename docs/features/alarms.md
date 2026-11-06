@@ -69,7 +69,11 @@ Anchor drag and the watchdog for a lost instrument connection are built in. They
 use the same logging, acknowledgement and delivery as your own rules.
 
 The watchdog raises an alarm if the connection to the boat's instrument network
-fails, because frozen readings can look like stable conditions. A periodic
+fails, because frozen readings can look like stable conditions. It listens for
+your own boat's readings only. Other boats' AIS signals keep arriving when your
+instruments have gone quiet, so they don't count. If the instrument network
+never connects after Helmcentral starts, for example after a power cut, the
+alarm raises once the usual silence time has passed. A periodic
 heartbeat sent off the boat lets an external monitor notice when the whole
 system stops responding.
 

@@ -117,8 +117,8 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   // Read at the tap, not subscribed: the fix and depth come from the store as
   // the operator drops, and the tide from the reading this page shows.
   const onDropAnchor = useCallback(() => {
-    const { latitude, longitude, depth } = getVesselStateSnapshot()
-    if (latitude === null || longitude === null) return
+    const { latitude, longitude, depth, gnssCriticalAlert } = getVesselStateSnapshot()
+    if (latitude === null || longitude === null || gnssCriticalAlert) return
     void setAnchorHere(latitude, longitude, {
       planningDepthM: depth,
       planningTideHeightFt: tideHeightFtOrNull(tide),
@@ -130,6 +130,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   const aisTrails = useAisTrails(TRAIL_POLL_MS)
   const pins = usePins(watch.active)
   const hasFix = v.latitude !== null && v.longitude !== null
+  const canDrop = hasFix && !v.gnssCriticalAlert
   return (
     <AnchorWatchDrawer
       {...props}
@@ -160,7 +161,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       aisTrails={aisTrails}
       vesselLat={v.latitude ?? watch.anchorLat}
       vesselLon={v.longitude ?? watch.anchorLon}
-      hasGpsFix={hasFix && !v.gnssCriticalAlert && !(v.latitude === -1 && v.longitude === -1)}
+      hasGpsFix={canDrop}
       vesselHeadingDeg={v.headingTrue}
       depthMeters={v.depth}
       depthLastUpdateAgeS={v.depthLastUpdateAgeS}
@@ -170,7 +171,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       distanceMeters={atFix.distanceMeters}
       bearingDeg={atFix.bearingDeg}
       anchorState={atFix.anchorState}
-      canDrop={hasFix}
+      canDrop={canDrop}
       windSpeedApparentKts={v.windSpeedApparentKts}
       maxGustKts={v.maxGustKts}
       vesselLengthOverallM={v.vesselLengthOverallM}

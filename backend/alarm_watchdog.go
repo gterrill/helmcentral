@@ -40,6 +40,7 @@ type streamWatchdog struct {
 	silenceAfter time.Duration
 
 	raised           bool
+	firstLook        time.Time // when the watchdog first judged the feed; starts the startup grace
 	lastTransitionAt time.Time
 }
 
@@ -73,11 +74,21 @@ func watchdogRule() alarmRule {
 	}
 }
 
-// silence reports whether the stream currently counts as dead and how long it
-// has been quiet. judged is false before the first message, when there is
-// nothing to judge — a server that has not finished starting is not an outage.
+// silence reports whether the own-ship feed currently counts as dead and how
+// long it has been quiet. Only this vessel's own context counts: other
+// vessels' AIS keeps arriving after the boat's instruments have gone.
+//
+// judged is false until there is something to judge. A server that has not
+// finished starting is not an outage, so before the first own-ship message the
+// watchdog waits one silence threshold from its first look. After that, a feed
+// that never spoke counts as silent: a power cut that leaves SignalK down must
+// still raise.
 func (w *streamWatchdog) silence(now time.Time) (silent bool, quiet time.Duration, judged bool) {
-	connected, lastMessage := w.snapshot.status()
+	connected, lastMessage := w.snapshot.selfStatus()
+
+	if w.firstLook.IsZero() {
+		w.firstLook = now
+	}
 
 	silent = !connected
 	if !lastMessage.IsZero() {
@@ -85,14 +96,20 @@ func (w *streamWatchdog) silence(now time.Time) (silent bool, quiet time.Duratio
 		if quiet > w.silenceAfter {
 			silent = true
 		}
+		return silent, quiet, true
 	}
-	return silent, quiet, !lastMessage.IsZero()
+
+	if now.Sub(w.firstLook) >= w.silenceAfter {
+		return true, 0, true
+	}
+	return silent, quiet, false
 }
 
 // check reports a transition, if any. Like the rule engine it is edge-triggered:
 // a persistently dead stream produces one alarm, not one per tick.
 func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 	silent, quiet, judged := w.silence(now)
+	connected, _ := w.snapshot.selfStatus()
 
 	if !judged && !w.raised {
 		return alarmEvent{}, false
@@ -106,8 +123,11 @@ func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 
 	if silent {
 		message := "SignalK stream is not connected"
-		if quiet > 0 {
+		switch {
+		case quiet > 0:
 			message = fmt.Sprintf("No SignalK data for %s", quiet.Round(time.Second))
+		case connected:
+			message = "SignalK is connected but sending no data from this boat"
 		}
 		rule := watchdogRule()
 		return alarmEvent{

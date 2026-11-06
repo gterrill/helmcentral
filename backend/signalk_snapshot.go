@@ -58,6 +58,7 @@ type signalKSnapshot struct {
 	selfCtx           string // which context is this vessel, per the stream's hello frame
 	connected         bool
 	lastMessage       time.Time
+	lastSelfMessage   time.Time // last delta for this vessel's own context, not other vessels' AIS
 
 	// sentenceSeen tracks, per NMEA 0183 sentence type ("APB", "RMC", ...),
 	// the receive time of the latest live (not cached-replay) update that
@@ -610,6 +611,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	}
 
 	s.lastMessage = now
+	if (d.Context == vesselContextPrefix+"self" || (s.selfCtx != "" && d.Context == s.selfCtx)) && carriesNonNotificationValue(d) {
+		s.lastSelfMessage = now
+	}
 	// A beacon is filed under whatever context SignalK gives its MMSI
 	// ("vessels.", "sar.", "atons." ...), so any MMSI-named context counts.
 	if strings.HasPrefix(d.Context, vesselContextPrefix) || strings.Contains(d.Context, mmsiContextMarker) {
@@ -931,6 +935,30 @@ func (s *signalKSnapshot) status() (connected bool, lastMessage time.Time) {
 	defer s.mu.RUnlock()
 
 	return s.connected, s.lastMessage
+}
+
+// carriesNonNotificationValue reports whether the delta holds a value outside
+// the notifications tree. Helmcentral's own alarms come back off the stream as
+// notifications on the boat's context, and are not proof the instruments are
+// talking.
+func carriesNonNotificationValue(d signalKDelta) bool {
+	for _, update := range d.Updates {
+		for _, val := range update.Values {
+			if val.Path != notificationsRoot && !strings.HasPrefix(val.Path, notificationsRoot+".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// selfStatus is status for this vessel's own context only. Other vessels'
+// AIS keeps lastMessage fresh while the own-ship feed is dead.
+func (s *signalKSnapshot) selfStatus() (connected bool, lastSelfMessage time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.connected, s.lastSelfMessage
 }
 
 // knownContexts returns a sorted slice of all contexts that have received

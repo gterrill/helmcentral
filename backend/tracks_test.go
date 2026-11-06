@@ -727,3 +727,41 @@ func TestSampleTracks_RecordsPressureWhenPathIsFresh(t *testing.T) {
 		t.Fatalf("expected one fresh pressure sample: %+v", pts)
 	}
 }
+
+// The -1,-1 pair is the "no fix" sentinel. It is inside the lat/lon range, so a
+// range check alone let it into the self track and the motoring trail.
+func TestSampleTracks_DoesNotRecordTheNoFixSentinel(t *testing.T) {
+	resetTracksStateForTest(t)
+	motoringTrailMu.Lock()
+	motoringTrail = newVesselTrail()
+	motoringTrailMu.Unlock()
+
+	body := `{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "motoring"},
+			"position": {"value": {"latitude": -1, "longitude": -1}}
+		}
+	}`
+	seedSelfTree(t, body)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	sampleTracks(settingsFileForServer(t, srv.URL))
+
+	trackMu.RLock()
+	selfPts := selfTrack.pointsSince(time.Time{})
+	trackMu.RUnlock()
+	if len(selfPts) != 0 {
+		t.Fatalf("the -1,-1 sentinel must not enter the self track, got %+v", selfPts)
+	}
+	motoringTrailMu.RLock()
+	motoringPts := motoringTrail.pointsSince(time.Time{})
+	motoringTrailMu.RUnlock()
+	if len(motoringPts) != 0 {
+		t.Fatalf("the -1,-1 sentinel must not enter the motoring trail, got %+v", motoringPts)
+	}
+}
