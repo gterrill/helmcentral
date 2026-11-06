@@ -123,35 +123,35 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 		UTCOffsetSeconds: 36000, // Sydney: UTC+10:00
 		Timezone:         "Australia/Sydney",
 		Current: &struct {
-			Time                     string  `json:"time"`
-			Temperature2m            float64 `json:"temperature_2m"`
-			WeatherCode              int     `json:"weather_code"`
-			WindSpeed10m             float64 `json:"wind_speed_10m"`
-			WindGusts10m             float64 `json:"wind_gusts_10m"`
-			WindDirection10m         int     `json:"wind_direction_10m"`
-			IsDay                    int     `json:"is_day"`
-			PrecipitationProbability int     `json:"precipitation_probability"`
+			Time                     string   `json:"time"`
+			Temperature2m            float64  `json:"temperature_2m"`
+			WeatherCode              int      `json:"weather_code"`
+			WindSpeed10m             float64  `json:"wind_speed_10m"`
+			WindGusts10m             float64  `json:"wind_gusts_10m"`
+			WindDirection10m         *float64 `json:"wind_direction_10m"`
+			IsDay                    int      `json:"is_day"`
+			PrecipitationProbability int      `json:"precipitation_probability"`
 		}{
 			Time:                     "2026-07-19T18:30",
 			Temperature2m:            14.5,
 			WeatherCode:              2, // partlycloudy
 			WindSpeed10m:             5.5,
 			WindGusts10m:             12.3,
-			WindDirection10m:         180,
+			WindDirection10m:         degPtr(180),
 			IsDay:                    0,
 			PrecipitationProbability: 25,
 		},
 		Daily: &struct {
-			Time                        []string  `json:"time"`
-			WeatherCode                 []int     `json:"weather_code"`
-			Temperature2mMax            []float64 `json:"temperature_2m_max"`
-			Temperature2mMin            []float64 `json:"temperature_2m_min"`
-			WindSpeed10mMax             []float64 `json:"wind_speed_10m_max"`
-			WindGusts10mMax             []float64 `json:"wind_gusts_10m_max"`
-			WindDirection10mDominant    []int     `json:"wind_direction_10m_dominant"`
-			PrecipitationProbabilityMax []int     `json:"precipitation_probability_max"`
-			Sunrise                     []string  `json:"sunrise"`
-			Sunset                      []string  `json:"sunset"`
+			Time                        []string   `json:"time"`
+			WeatherCode                 []int      `json:"weather_code"`
+			Temperature2mMax            []float64  `json:"temperature_2m_max"`
+			Temperature2mMin            []float64  `json:"temperature_2m_min"`
+			WindSpeed10mMax             []float64  `json:"wind_speed_10m_max"`
+			WindGusts10mMax             []float64  `json:"wind_gusts_10m_max"`
+			WindDirection10mDominant    []*float64 `json:"wind_direction_10m_dominant"`
+			PrecipitationProbabilityMax []int      `json:"precipitation_probability_max"`
+			Sunrise                     []string   `json:"sunrise"`
+			Sunset                      []string   `json:"sunset"`
 		}{
 			Time:                        []string{"2026-07-19"},
 			WeatherCode:                 []int{3}, // cloudy
@@ -159,7 +159,7 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 			Temperature2mMin:            []float64{12.0},
 			WindSpeed10mMax:             []float64{8.0},
 			WindGusts10mMax:             []float64{15.0},
-			WindDirection10mDominant:    []int{190},
+			WindDirection10mDominant:    []*float64{degPtr(190)},
 			PrecipitationProbabilityMax: []int{30},
 			Sunrise:                     []string{"2026-07-19T06:45"},
 			Sunset:                      []string{"2026-07-19T17:15"},
@@ -170,7 +170,7 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 			WeatherCode              []int      `json:"weather_code"`
 			WindSpeed10m             []float64  `json:"wind_speed_10m"`
 			WindGusts10m             []float64  `json:"wind_gusts_10m"`
-			WindDirection10m         []int      `json:"wind_direction_10m"`
+			WindDirection10m         []*float64 `json:"wind_direction_10m"`
 			PrecipitationProbability []int      `json:"precipitation_probability"`
 			Precipitation            []float64  `json:"precipitation"`
 			UVIndex                  []float64  `json:"uv_index"`
@@ -183,7 +183,7 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 			WeatherCode:              []int{2, 3},
 			WindSpeed10m:             []float64{5.0, 5.5},
 			WindGusts10m:             []float64{11.0, 12.3},
-			WindDirection10m:         []int{175, 180},
+			WindDirection10m:         []*float64{degPtr(175), degPtr(180)},
 			PrecipitationProbability: []int{20, 25},
 			Precipitation:            []float64{0.0, 0.1},
 			UVIndex:                  []float64{0.0, 0.0},
@@ -212,7 +212,7 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 	if out.Current.WindGustMS != 12.3 {
 		t.Errorf("current.wind_gust_ms = %v, want 12.3", out.Current.WindGustMS)
 	}
-	if out.Current.WindDirectionDeg != 180.0 {
+	if out.Current.WindDirectionDeg == nil || *out.Current.WindDirectionDeg != 180.0 {
 		t.Errorf("current.wind_direction_deg = %v, want 180", out.Current.WindDirectionDeg)
 	}
 	if out.Current.PrecipitationChancePct != 25.0 {
@@ -333,14 +333,14 @@ func TestParseOpenMeteoForecast_MalformedCurrentTime(t *testing.T) {
 		UTCOffsetSeconds: 36000,
 		Timezone:         "Australia/Sydney",
 		Current: &struct {
-			Time                     string  `json:"time"`
-			Temperature2m            float64 `json:"temperature_2m"`
-			WeatherCode              int     `json:"weather_code"`
-			WindSpeed10m             float64 `json:"wind_speed_10m"`
-			WindGusts10m             float64 `json:"wind_gusts_10m"`
-			WindDirection10m         int     `json:"wind_direction_10m"`
-			IsDay                    int     `json:"is_day"`
-			PrecipitationProbability int     `json:"precipitation_probability"`
+			Time                     string   `json:"time"`
+			Temperature2m            float64  `json:"temperature_2m"`
+			WeatherCode              int      `json:"weather_code"`
+			WindSpeed10m             float64  `json:"wind_speed_10m"`
+			WindGusts10m             float64  `json:"wind_gusts_10m"`
+			WindDirection10m         *float64 `json:"wind_direction_10m"`
+			IsDay                    int      `json:"is_day"`
+			PrecipitationProbability int      `json:"precipitation_probability"`
 		}{
 			Time: "not-a-valid-time",
 		},
@@ -437,14 +437,14 @@ func TestParseOpenMeteoForecast_MapsHumidityAndVisibility(t *testing.T) {
 	resp := &openMeteoResponse{
 		UTCOffsetSeconds: 0,
 		Current: &struct {
-			Time                     string  `json:"time"`
-			Temperature2m            float64 `json:"temperature_2m"`
-			WeatherCode              int     `json:"weather_code"`
-			WindSpeed10m             float64 `json:"wind_speed_10m"`
-			WindGusts10m             float64 `json:"wind_gusts_10m"`
-			WindDirection10m         int     `json:"wind_direction_10m"`
-			IsDay                    int     `json:"is_day"`
-			PrecipitationProbability int     `json:"precipitation_probability"`
+			Time                     string   `json:"time"`
+			Temperature2m            float64  `json:"temperature_2m"`
+			WeatherCode              int      `json:"weather_code"`
+			WindSpeed10m             float64  `json:"wind_speed_10m"`
+			WindGusts10m             float64  `json:"wind_gusts_10m"`
+			WindDirection10m         *float64 `json:"wind_direction_10m"`
+			IsDay                    int      `json:"is_day"`
+			PrecipitationProbability int      `json:"precipitation_probability"`
 		}{Time: "2026-07-19T18:30"},
 		Hourly: &struct {
 			Time                     []string   `json:"time"`
@@ -452,7 +452,7 @@ func TestParseOpenMeteoForecast_MapsHumidityAndVisibility(t *testing.T) {
 			WeatherCode              []int      `json:"weather_code"`
 			WindSpeed10m             []float64  `json:"wind_speed_10m"`
 			WindGusts10m             []float64  `json:"wind_gusts_10m"`
-			WindDirection10m         []int      `json:"wind_direction_10m"`
+			WindDirection10m         []*float64 `json:"wind_direction_10m"`
 			PrecipitationProbability []int      `json:"precipitation_probability"`
 			Precipitation            []float64  `json:"precipitation"`
 			UVIndex                  []float64  `json:"uv_index"`
@@ -465,7 +465,7 @@ func TestParseOpenMeteoForecast_MapsHumidityAndVisibility(t *testing.T) {
 			WeatherCode:              []int{2, 3},
 			WindSpeed10m:             []float64{5.0, 5.5},
 			WindGusts10m:             []float64{11.0, 12.3},
-			WindDirection10m:         []int{175, 180},
+			WindDirection10m:         []*float64{degPtr(175), degPtr(180)},
 			PrecipitationProbability: []int{20, 25},
 			Precipitation:            []float64{0.0, 0.1},
 			UVIndex:                  []float64{0.0, 0.0},
@@ -503,14 +503,14 @@ func TestParseOpenMeteoForecast_NullVisibilityEntryBecomesNilNotZero(t *testing.
 	humidity := 70.0
 	resp := &openMeteoResponse{
 		Current: &struct {
-			Time                     string  `json:"time"`
-			Temperature2m            float64 `json:"temperature_2m"`
-			WeatherCode              int     `json:"weather_code"`
-			WindSpeed10m             float64 `json:"wind_speed_10m"`
-			WindGusts10m             float64 `json:"wind_gusts_10m"`
-			WindDirection10m         int     `json:"wind_direction_10m"`
-			IsDay                    int     `json:"is_day"`
-			PrecipitationProbability int     `json:"precipitation_probability"`
+			Time                     string   `json:"time"`
+			Temperature2m            float64  `json:"temperature_2m"`
+			WeatherCode              int      `json:"weather_code"`
+			WindSpeed10m             float64  `json:"wind_speed_10m"`
+			WindGusts10m             float64  `json:"wind_gusts_10m"`
+			WindDirection10m         *float64 `json:"wind_direction_10m"`
+			IsDay                    int      `json:"is_day"`
+			PrecipitationProbability int      `json:"precipitation_probability"`
 		}{Time: "2026-07-19T18:30"},
 		Hourly: &struct {
 			Time                     []string   `json:"time"`
@@ -518,7 +518,7 @@ func TestParseOpenMeteoForecast_NullVisibilityEntryBecomesNilNotZero(t *testing.
 			WeatherCode              []int      `json:"weather_code"`
 			WindSpeed10m             []float64  `json:"wind_speed_10m"`
 			WindGusts10m             []float64  `json:"wind_gusts_10m"`
-			WindDirection10m         []int      `json:"wind_direction_10m"`
+			WindDirection10m         []*float64 `json:"wind_direction_10m"`
 			PrecipitationProbability []int      `json:"precipitation_probability"`
 			Precipitation            []float64  `json:"precipitation"`
 			UVIndex                  []float64  `json:"uv_index"`
@@ -531,7 +531,7 @@ func TestParseOpenMeteoForecast_NullVisibilityEntryBecomesNilNotZero(t *testing.
 			WeatherCode:              []int{2},
 			WindSpeed10m:             []float64{5.0},
 			WindGusts10m:             []float64{11.0},
-			WindDirection10m:         []int{175},
+			WindDirection10m:         []*float64{degPtr(175)},
 			PrecipitationProbability: []int{20},
 			Precipitation:            []float64{0.0},
 			UVIndex:                  []float64{0.0},
@@ -563,14 +563,14 @@ func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.
 	visibility := 24140.0
 	resp := &openMeteoResponse{
 		Current: &struct {
-			Time                     string  `json:"time"`
-			Temperature2m            float64 `json:"temperature_2m"`
-			WeatherCode              int     `json:"weather_code"`
-			WindSpeed10m             float64 `json:"wind_speed_10m"`
-			WindGusts10m             float64 `json:"wind_gusts_10m"`
-			WindDirection10m         int     `json:"wind_direction_10m"`
-			IsDay                    int     `json:"is_day"`
-			PrecipitationProbability int     `json:"precipitation_probability"`
+			Time                     string   `json:"time"`
+			Temperature2m            float64  `json:"temperature_2m"`
+			WeatherCode              int      `json:"weather_code"`
+			WindSpeed10m             float64  `json:"wind_speed_10m"`
+			WindGusts10m             float64  `json:"wind_gusts_10m"`
+			WindDirection10m         *float64 `json:"wind_direction_10m"`
+			IsDay                    int      `json:"is_day"`
+			PrecipitationProbability int      `json:"precipitation_probability"`
 		}{Time: "2026-07-19T18:30"},
 		Hourly: &struct {
 			Time                     []string   `json:"time"`
@@ -578,7 +578,7 @@ func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.
 			WeatherCode              []int      `json:"weather_code"`
 			WindSpeed10m             []float64  `json:"wind_speed_10m"`
 			WindGusts10m             []float64  `json:"wind_gusts_10m"`
-			WindDirection10m         []int      `json:"wind_direction_10m"`
+			WindDirection10m         []*float64 `json:"wind_direction_10m"`
 			PrecipitationProbability []int      `json:"precipitation_probability"`
 			Precipitation            []float64  `json:"precipitation"`
 			UVIndex                  []float64  `json:"uv_index"`
@@ -591,7 +591,7 @@ func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.
 			WeatherCode:              []int{2, 2, 2},
 			WindSpeed10m:             []float64{5.0, 5.0, 5.0},
 			WindGusts10m:             []float64{11.0, 11.0, 11.0},
-			WindDirection10m:         []int{175, 175, 175},
+			WindDirection10m:         []*float64{degPtr(175), degPtr(175), degPtr(175)},
 			PrecipitationProbability: []int{20, 20, 20},
 			Precipitation:            []float64{0.0, 0.0, 0.0},
 			UVIndex:                  []float64{0.0, 0.0, 0.0},
@@ -625,24 +625,24 @@ func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.
 // --- minutely_15 (nowcast) ---
 
 func minimalCurrentForNextHourTests() *struct {
-	Time                     string  `json:"time"`
-	Temperature2m            float64 `json:"temperature_2m"`
-	WeatherCode              int     `json:"weather_code"`
-	WindSpeed10m             float64 `json:"wind_speed_10m"`
-	WindGusts10m             float64 `json:"wind_gusts_10m"`
-	WindDirection10m         int     `json:"wind_direction_10m"`
-	IsDay                    int     `json:"is_day"`
-	PrecipitationProbability int     `json:"precipitation_probability"`
+	Time                     string   `json:"time"`
+	Temperature2m            float64  `json:"temperature_2m"`
+	WeatherCode              int      `json:"weather_code"`
+	WindSpeed10m             float64  `json:"wind_speed_10m"`
+	WindGusts10m             float64  `json:"wind_gusts_10m"`
+	WindDirection10m         *float64 `json:"wind_direction_10m"`
+	IsDay                    int      `json:"is_day"`
+	PrecipitationProbability int      `json:"precipitation_probability"`
 } {
 	return &struct {
-		Time                     string  `json:"time"`
-		Temperature2m            float64 `json:"temperature_2m"`
-		WeatherCode              int     `json:"weather_code"`
-		WindSpeed10m             float64 `json:"wind_speed_10m"`
-		WindGusts10m             float64 `json:"wind_gusts_10m"`
-		WindDirection10m         int     `json:"wind_direction_10m"`
-		IsDay                    int     `json:"is_day"`
-		PrecipitationProbability int     `json:"precipitation_probability"`
+		Time                     string   `json:"time"`
+		Temperature2m            float64  `json:"temperature_2m"`
+		WeatherCode              int      `json:"weather_code"`
+		WindSpeed10m             float64  `json:"wind_speed_10m"`
+		WindGusts10m             float64  `json:"wind_gusts_10m"`
+		WindDirection10m         *float64 `json:"wind_direction_10m"`
+		IsDay                    int      `json:"is_day"`
+		PrecipitationProbability int      `json:"precipitation_probability"`
 	}{Time: "2026-07-19T18:30"}
 }
 
@@ -997,3 +997,63 @@ func TestParseOpenMeteoForecast_RealFixture_SingaporeRain(t *testing.T) {
 		t.Errorf("expected next_hour_source=hourly for the Singapore fixture, got %q", out.NextHourSource)
 	}
 }
+
+// Open-Meteo sends a real JSON null for a wind direction it has no value for,
+// and a real 0 for a wind from due north. The plugin must pass the null on as
+// null and the 0 as 0, never turn both into 0.
+func TestParseOpenMeteoForecast_NullWindDirectionStaysNullAndNorthStaysZero(t *testing.T) {
+	raw := `{
+	  "utc_offset_seconds": 0, "timezone": "UTC",
+	  "current": {"time": "2026-07-19T18:30", "wind_direction_10m": 0},
+	  "daily": {"time": ["2026-07-19", "2026-07-20"], "weather_code": [1, 1],
+	    "temperature_2m_max": [20, 20], "temperature_2m_min": [10, 10],
+	    "wind_speed_10m_max": [5, 5], "wind_gusts_10m_max": [6, 6],
+	    "wind_direction_10m_dominant": [0, null],
+	    "precipitation_probability_max": [0, 0],
+	    "sunrise": ["2026-07-19T06:00", "2026-07-20T06:00"],
+	    "sunset": ["2026-07-19T17:00", "2026-07-20T17:00"]},
+	  "hourly": {"time": ["2026-07-19T17:00", "2026-07-19T18:00"],
+	    "temperature_2m": [15, 15], "weather_code": [1, 1],
+	    "wind_speed_10m": [6.1, null], "wind_gusts_10m": [7, null],
+	    "wind_direction_10m": [0, null],
+	    "precipitation_probability": [0, 0], "precipitation": [0, 0],
+	    "uv_index": [0, 0], "is_day": [0, 0]}
+	}`
+	var resp openMeteoResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatal(err)
+	}
+	out, err := parseOpenMeteoForecast(&resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Current struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"current"`
+		Days []struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"days"`
+		Hourly []struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"hourly"`
+	}
+	if err := json.Unmarshal(b, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Current.Dir == nil || *wire.Current.Dir != 0 {
+		t.Errorf("current direction = %v, want 0", wire.Current.Dir)
+	}
+	if wire.Days[0].Dir == nil || *wire.Days[0].Dir != 0 || wire.Days[1].Dir != nil {
+		t.Errorf("day directions = %v %v, want 0 and null", wire.Days[0].Dir, wire.Days[1].Dir)
+	}
+	if wire.Hourly[0].Dir == nil || *wire.Hourly[0].Dir != 0 || wire.Hourly[1].Dir != nil {
+		t.Errorf("hour directions = %v %v, want 0 and null", wire.Hourly[0].Dir, wire.Hourly[1].Dir)
+	}
+}
+
+func degPtr(v float64) *float64 { return &v }

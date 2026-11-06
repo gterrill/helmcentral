@@ -55,7 +55,7 @@ func shelterForecastDeps(t *testing.T, lines []shorelineLine, enabled bool) assi
 	wx := &capturingWeatherProvider{bundle: weatherForecastBundle{Hourly: []weatherHourPoint{
 		{Time: now, WindSpeedMS: 5, WindDirectionDeg: 5},
 		{Time: now.Add(3 * time.Hour), WindSpeedMS: 5, WindDirectionDeg: 180},
-		{Time: now.Add(6 * time.Hour)},
+		{Time: now.Add(6 * time.Hour), WindDirectionDeg: -1},
 	}}}
 	wv := &stubWaveProvider{id: "wv", bundle: waveForecastBundle{}}
 	return assistantToolDeps{

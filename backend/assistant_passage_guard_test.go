@@ -103,7 +103,7 @@ func windFromEast(d assistantToolDeps) assistantToolDeps {
 // provider has no data for arrives, so get_wind_forecast returns no rel_wind
 // labels.
 func windUnknown(d assistantToolDeps) assistantToolDeps {
-	return withForecastHours(d, weatherHourPoint{})
+	return withForecastHours(d, weatherHourPoint{WindDirectionDeg: -1})
 }
 
 // guardRunWith is guardRun with the tool deps given.

@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-// An hour the provider has no wind for decodes to speed 0 and direction 0. The
+// An hour the provider has no wind for carries speed 0 and the -1 unknown direction. The
 // passage check must see no hour there, not a calm from the north.
 func noWindDataForecast() forecastSource {
 	var hours []weatherHourPoint
 	for t := pwDay(19, 0); !t.After(pwDay(23, 23)); t = t.Add(time.Hour) {
-		hp := weatherHourPoint{Time: t.UTC()}
+		hp := weatherHourPoint{Time: t.UTC(), WindDirectionDeg: -1}
 		if t.Before(pwDay(22, 19)) {
 			hp.WindSpeedMS, hp.WindGustMS, hp.WindDirectionDeg = kn(5), kn(6), 180
 		}
@@ -28,12 +28,12 @@ func TestPassageHoursFromBundles_HourWithNoWindDataIsAbsent(t *testing.T) {
 	north := tm.Add(time.Hour)
 	calm := tm.Add(2 * time.Hour)
 	out := passageHoursFromBundles(weatherForecastBundle{Hourly: []weatherHourPoint{
-		{Time: tm},
+		{Time: tm, WindDirectionDeg: -1},
 		{Time: north, WindSpeedMS: 6.1, WindDirectionDeg: 0},
 		{Time: calm, WindSpeedMS: 0, WindDirectionDeg: 90},
 	}}, nil)
 	if h, ok := out[tm.Unix()]; ok {
-		t.Errorf("speed 0 and direction 0 must be absent, got %+v", h)
+		t.Errorf("an unknown direction must be absent, got %+v", h)
 	}
 	if h, ok := out[north.Unix()]; !ok || h.WindMS != 6.1 || h.WindDirDeg != 0 {
 		t.Errorf("wind from due north must stay, got %+v (present %v)", h, ok)

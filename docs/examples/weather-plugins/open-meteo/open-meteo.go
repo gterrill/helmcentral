@@ -23,38 +23,38 @@ type openMeteoResponse struct {
 	UTCOffsetSeconds int     `json:"utc_offset_seconds"`
 	Timezone         string  `json:"timezone"`
 	Current          *struct {
-		Time                     string  `json:"time"`
-		Temperature2m            float64 `json:"temperature_2m"`
-		WeatherCode              int     `json:"weather_code"`
-		WindSpeed10m             float64 `json:"wind_speed_10m"`
-		WindGusts10m             float64 `json:"wind_gusts_10m"`
-		WindDirection10m         int     `json:"wind_direction_10m"`
-		IsDay                    int     `json:"is_day"`
-		PrecipitationProbability int     `json:"precipitation_probability"`
+		Time                     string   `json:"time"`
+		Temperature2m            float64  `json:"temperature_2m"`
+		WeatherCode              int      `json:"weather_code"`
+		WindSpeed10m             float64  `json:"wind_speed_10m"`
+		WindGusts10m             float64  `json:"wind_gusts_10m"`
+		WindDirection10m         *float64 `json:"wind_direction_10m"`
+		IsDay                    int      `json:"is_day"`
+		PrecipitationProbability int      `json:"precipitation_probability"`
 	} `json:"current"`
 	Daily *struct {
-		Time                        []string  `json:"time"`
-		WeatherCode                 []int     `json:"weather_code"`
-		Temperature2mMax            []float64 `json:"temperature_2m_max"`
-		Temperature2mMin            []float64 `json:"temperature_2m_min"`
-		WindSpeed10mMax             []float64 `json:"wind_speed_10m_max"`
-		WindGusts10mMax             []float64 `json:"wind_gusts_10m_max"`
-		WindDirection10mDominant    []int     `json:"wind_direction_10m_dominant"`
-		PrecipitationProbabilityMax []int     `json:"precipitation_probability_max"`
-		Sunrise                     []string  `json:"sunrise"`
-		Sunset                      []string  `json:"sunset"`
+		Time                        []string   `json:"time"`
+		WeatherCode                 []int      `json:"weather_code"`
+		Temperature2mMax            []float64  `json:"temperature_2m_max"`
+		Temperature2mMin            []float64  `json:"temperature_2m_min"`
+		WindSpeed10mMax             []float64  `json:"wind_speed_10m_max"`
+		WindGusts10mMax             []float64  `json:"wind_gusts_10m_max"`
+		WindDirection10mDominant    []*float64 `json:"wind_direction_10m_dominant"`
+		PrecipitationProbabilityMax []int      `json:"precipitation_probability_max"`
+		Sunrise                     []string   `json:"sunrise"`
+		Sunset                      []string   `json:"sunset"`
 	} `json:"daily"`
 	Hourly *struct {
-		Time                     []string  `json:"time"`
-		Temperature2m            []float64 `json:"temperature_2m"`
-		WeatherCode              []int     `json:"weather_code"`
-		WindSpeed10m             []float64 `json:"wind_speed_10m"`
-		WindGusts10m             []float64 `json:"wind_gusts_10m"`
-		WindDirection10m         []int     `json:"wind_direction_10m"`
-		PrecipitationProbability []int     `json:"precipitation_probability"`
-		Precipitation            []float64 `json:"precipitation"`
-		UVIndex                  []float64 `json:"uv_index"`
-		IsDay                    []int     `json:"is_day"`
+		Time                     []string   `json:"time"`
+		Temperature2m            []float64  `json:"temperature_2m"`
+		WeatherCode              []int      `json:"weather_code"`
+		WindSpeed10m             []float64  `json:"wind_speed_10m"`
+		WindGusts10m             []float64  `json:"wind_gusts_10m"`
+		WindDirection10m         []*float64 `json:"wind_direction_10m"`
+		PrecipitationProbability []int      `json:"precipitation_probability"`
+		Precipitation            []float64  `json:"precipitation"`
+		UVIndex                  []float64  `json:"uv_index"`
+		IsDay                    []int      `json:"is_day"`
 		// RelativeHumidity2m/Visibility are POINTER slices, deliberately -
 		// unlike every other hourly field above. Open-Meteo sends real JSON
 		// nulls in these two (confirmed via a live 16-day capture, see this
@@ -168,39 +168,39 @@ func validateFetchForecastInput(input wasmFetchForecastInput) error {
 }
 
 type wasmWeatherCurrentOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
 }
 
 type wasmWeatherDayOutput struct {
-	Start                  string  `json:"start"`
-	Condition              string  `json:"condition"`
-	TempMaxC               float64 `json:"temp_max_c"`
-	TempMinC               float64 `json:"temp_min_c"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	Sunrise                string  `json:"sunrise"`
-	Sunset                 string  `json:"sunset"`
+	Start                  string   `json:"start"`
+	Condition              string   `json:"condition"`
+	TempMaxC               float64  `json:"temp_max_c"`
+	TempMinC               float64  `json:"temp_min_c"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	Sunrise                string   `json:"sunrise"`
+	Sunset                 string   `json:"sunset"`
 }
 
 type wasmWeatherHourOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	PrecipitationMM        float64 `json:"precipitation_mm"`
-	UVIndex                float64 `json:"uv_index"`
-	IsDaylight             bool    `json:"is_daylight"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	PrecipitationMM        float64  `json:"precipitation_mm"`
+	UVIndex                float64  `json:"uv_index"`
+	IsDaylight             bool     `json:"is_daylight"`
 	// HumidityPct/VisibilityM are *float64 - see the doc comment on
 	// openMeteoResponse.Hourly.RelativeHumidity2m/Visibility above. nil here
 	// means "Open-Meteo had no value for this hour" (either a real JSON null
@@ -385,7 +385,7 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 		Condition:              wmoCodeToCondition(resp.Current.WeatherCode),
 		WindSpeedMS:            resp.Current.WindSpeed10m,
 		WindGustMS:             resp.Current.WindGusts10m,
-		WindDirectionDeg:       float64(resp.Current.WindDirection10m),
+		WindDirectionDeg:       resp.Current.WindDirection10m,
 		PrecipitationChancePct: float64(resp.Current.PrecipitationProbability),
 	}
 
@@ -416,7 +416,7 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 				TempMinC:               resp.Daily.Temperature2mMin[i],
 				WindSpeedMS:            resp.Daily.WindSpeed10mMax[i],
 				WindGustMS:             resp.Daily.WindGusts10mMax[i],
-				WindDirectionDeg:       float64(resp.Daily.WindDirection10mDominant[i]),
+				WindDirectionDeg:       resp.Daily.WindDirection10mDominant[i],
 				PrecipitationChancePct: float64(resp.Daily.PrecipitationProbabilityMax[i]),
 				Sunrise:                sunrise.UTC().Format(time.RFC3339),
 				Sunset:                 sunset.UTC().Format(time.RFC3339),
@@ -457,7 +457,7 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 				Condition:              wmoCodeToCondition(resp.Hourly.WeatherCode[i]),
 				WindSpeedMS:            resp.Hourly.WindSpeed10m[i],
 				WindGustMS:             resp.Hourly.WindGusts10m[i],
-				WindDirectionDeg:       float64(resp.Hourly.WindDirection10m[i]),
+				WindDirectionDeg:       resp.Hourly.WindDirection10m[i],
 				PrecipitationChancePct: float64(resp.Hourly.PrecipitationProbability[i]),
 				PrecipitationMM:        resp.Hourly.Precipitation[i],
 				UVIndex:                resp.Hourly.UVIndex[i],

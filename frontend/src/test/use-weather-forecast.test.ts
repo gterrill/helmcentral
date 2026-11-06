@@ -501,4 +501,46 @@ describe('useWeatherForecast', () => {
     expect(hourly[2].humidityPct).toBe(71)
     expect(hourly[2].visibilityNm).toBe(6.2)
   })
+
+  it('keeps a wind from due north at 0 degrees and an unknown direction at -1', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'open-meteo',
+        days: [
+          {
+            day_key: '2026-08-09',
+            date: 'Aug 9',
+            day_name: 'Sunday',
+            condition: 'Clear',
+            wind_direction: 'N',
+            hourly_wind: [
+              { label: '6AM', hour_of_day: 6, wind_speed_kts: 12, wind_direction: 'N', wind_direction_deg: 0 },
+              { label: '7AM', hour_of_day: 7, wind_speed_kts: -1, wind_direction: '—', wind_direction_deg: -1 },
+            ],
+          },
+        ],
+        hourly_today: [
+          { label: 'Now', wind_speed_kts: 12, wind_direction: 'N', wind_direction_deg: 0, kind: 'forecast' },
+          { label: '1PM', wind_speed_kts: -1, wind_direction: '—', wind_direction_deg: -1, kind: 'forecast' },
+        ],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast[0].windDirection).toBe('N')
+    const wind = result.current.forecast[0].hourlyWind
+    expect(wind[0].windDirection).toBe('N')
+    expect(wind[0].windDirectionDeg).toBe(0)
+    expect(wind[1].windDirection).toBe('—')
+    expect(wind[1].windDirectionDeg).toBe(-1)
+    expect(result.current.hourlyToday[0].windDirectionDeg).toBe(0)
+    expect(result.current.hourlyToday[1].windDirectionDeg).toBe(-1)
+  })
 })

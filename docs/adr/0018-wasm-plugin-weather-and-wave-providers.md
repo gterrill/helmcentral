@@ -47,6 +47,8 @@ fetch_waves({"lat": float64, "lon": float64, "days": int}) -> {
 }
 ```
 
+`wind_direction_deg` is nullable in all three places: null or absent means the provider gave no direction, and 0 is due north. The host carries an unknown direction as -1, as it does for humidity and visibility.
+
 `condition` uses the existing WeatherKit condition-code vocabulary (`clear`, `cloudy`, `mostlycloudy`, `partlycloudy`, `rain`, `heavyrain`, `snow`, `thunderstorms`, `mixedrainandsnow`, etc.). The full list is documented in `backend/weather_providers.go` and enforced by `formatWeatherConditionAt` in `main.go`. WeatherKit's `conditionCode` values already match, and the display logic, including the `mostlyclear` day/night split, remains unchanged. Open-Meteo maps WMO weather codes onto this vocabulary and falls back to `"cloudy"` for unmapped codes. That fallback is an accepted reference-plugin simplification; the mapping is not exhaustive.
 
 ### Host-side derivation, including a new one: moon phase

@@ -275,39 +275,39 @@ type fetchForecastInput struct {
 }
 
 type weatherCurrentOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
 }
 
 type weatherDayOutput struct {
-	Start                  string  `json:"start"`
-	Condition              string  `json:"condition"`
-	TempMaxC               float64 `json:"temp_max_c"`
-	TempMinC               float64 `json:"temp_min_c"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	Sunrise                string  `json:"sunrise"`
-	Sunset                 string  `json:"sunset"`
+	Start                  string   `json:"start"`
+	Condition              string   `json:"condition"`
+	TempMaxC               float64  `json:"temp_max_c"`
+	TempMinC               float64  `json:"temp_min_c"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	Sunrise                string   `json:"sunrise"`
+	Sunset                 string   `json:"sunset"`
 }
 
 type weatherHourOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	PrecipitationMM        float64 `json:"precipitation_mm"`
-	UVIndex                float64 `json:"uv_index"`
-	IsDaylight             bool    `json:"is_daylight"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	PrecipitationMM        float64  `json:"precipitation_mm"`
+	UVIndex                float64  `json:"uv_index"`
+	IsDaylight             bool     `json:"is_daylight"`
 	// HumidityPct/VisibilityM are *float64 - nil means "WeatherKit sent
 	// nothing for this hour", mirroring weatherKitHourForecast.Humidity/
 	// Visibility below. The host maps nil to its own -1 sentinel
@@ -365,7 +365,7 @@ type weatherKitCurrentWeather struct {
 	ConditionCode          string   `json:"conditionCode"`
 	WindSpeed              float64  `json:"windSpeed"`
 	WindGust               float64  `json:"windGust"`
-	WindDirection          float64  `json:"windDirection"`
+	WindDirection          *float64 `json:"windDirection"`
 	PrecipitationChance    *float64 `json:"precipitationChance"`
 	PrecipitationIntensity *float64 `json:"precipitationIntensity"`
 }
@@ -404,7 +404,7 @@ type weatherKitHourForecast struct {
 	Temperature            float64  `json:"temperature"`
 	WindSpeed              float64  `json:"windSpeed"`
 	WindGust               *float64 `json:"windGust"`
-	WindDirection          float64  `json:"windDirection"`
+	WindDirection          *float64 `json:"windDirection"`
 	PrecipitationChance    *float64 `json:"precipitationChance"`
 	PrecipitationIntensity *float64 `json:"precipitationIntensity"`
 	UVIndex                float64  `json:"uvIndex"`
@@ -555,7 +555,8 @@ func mapForecastDays(rawDays []weatherKitDayForecast, maxDays int) ([]weatherDay
 			return nil, fmt.Errorf("weatherkit: forecastDaily day missing forecastStart")
 		}
 
-		var windSpeedMS, windGustMS, windDirectionDeg float64
+		var windSpeedMS, windGustMS float64
+		var windDirectionDeg *float64
 		if d.DaytimeForecast != nil {
 			if d.DaytimeForecast.WindSpeed != nil {
 				windSpeedMS = kphToMS(*d.DaytimeForecast.WindSpeed)
@@ -564,7 +565,7 @@ func mapForecastDays(rawDays []weatherKitDayForecast, maxDays int) ([]weatherDay
 				windGustMS = kphToMS(*d.DaytimeForecast.WindGustSpeedMax)
 			}
 			if d.DaytimeForecast.WindDirection != nil {
-				windDirectionDeg = *d.DaytimeForecast.WindDirection
+				windDirectionDeg = d.DaytimeForecast.WindDirection
 			}
 		}
 		if windSpeedMS == 0 && d.WindSpeed != nil {
@@ -573,8 +574,8 @@ func mapForecastDays(rawDays []weatherKitDayForecast, maxDays int) ([]weatherDay
 		if windGustMS == 0 && d.WindGustSpeedMax != nil {
 			windGustMS = kphToMS(*d.WindGustSpeedMax)
 		}
-		if windDirectionDeg == 0 && d.WindDirection != nil {
-			windDirectionDeg = *d.WindDirection
+		if windDirectionDeg == nil {
+			windDirectionDeg = d.WindDirection
 		}
 
 		precipPct := precipitationChancePct(d.PrecipitationChance)
