@@ -85,6 +85,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A photo moment now grows the sign's card itself.** In a replay and in a
+  video, the small card used to stay on the map behind the grown one. Now the
+  card leaves its place as it grows and comes back as it shrinks, so you only
+  ever see one.
 - **Your own swing trail now ages by the boat's clock.** A display whose own
   clock is wrong, such as a wall screen with no internet, used to shade the
   yellow trail at the wrong pace. It now follows the clock on the box, so it

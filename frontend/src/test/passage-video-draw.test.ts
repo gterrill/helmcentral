@@ -254,6 +254,20 @@ describe('drawOverlay', () => {
       expect(img.slice(5)).toEqual([8, 8, 240, 180])
     })
 
+    it('leaves out the sign\'s own card on the map, so only the grown card shows', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ cards: [card()], moment: moment() }), photos, themeFor(false))
+      expect(r.texts()).toEqual(['Whale', 'A humpback off the bow'])
+      expect(r.ops('drawImage')).toHaveLength(1)
+      expect(r.ops('lineTo')).toHaveLength(0)
+    })
+
+    it('still draws the other cards on the map', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ cards: [card(), card({ sign: sign({ id: 'b', title: 'Reef' }) })], moment: moment() }), photos, themeFor(false))
+      expect(r.texts()).toContain('Reef')
+    })
+
     it('draws nothing when the photo is not there', () => {
       const r = recorder()
       drawOverlay(r.ctx, model({ moment: moment({ sign: sign({ id: 'gone' }) }) }), photos, themeFor(false))

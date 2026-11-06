@@ -213,7 +213,8 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: OverlayModel, 
   ctx.scale(model.scale, model.scale)
   if (model.dot) drawBoatDot(ctx, model.dot, theme)
   for (const pin of model.pins) drawPin(ctx, pin, theme)
-  for (const card of model.cards) drawCard(ctx, card, photos, theme)
+  // The card a photo moment is growing is drawn grown, not also where it stood.
+  for (const card of model.cards) if (card.sign.id !== model.moment?.sign.id) drawCard(ctx, card, photos, theme)
   if (model.moment) drawMoment(ctx, model.moment, photos, theme)
   if (model.stay) drawLabel(ctx, model.stay.text, model.stay.box, theme)
   if (model.passage) drawLabel(ctx, model.passage.text, model.passage.box, theme)
