@@ -135,7 +135,7 @@ func TestAssessItinerary_GoCellShowsItsWorstFigure(t *testing.T) {
 	if c.State != "go" || c.Limiting == nil {
 		t.Fatalf("a light-air go cell must still say what it was judged on, got %+v", c)
 	}
-	if want := "Wind S 5 kn astern · Alpha → Bravo"; c.Limiting.Text != want {
+	if want := "Wind 5 kn from S, astern · Alpha → Bravo"; c.Limiting.Text != want {
 		t.Fatalf("text = %q, want %q", c.Limiting.Text, want)
 	}
 }
@@ -150,7 +150,7 @@ func TestAssessItinerary_SameWindPassesAsternAndFailsAhead(t *testing.T) {
 	if ahead.Limiting.Sector == nil || *ahead.Limiting.Sector != "ahead" {
 		t.Fatalf("sector = %v, want ahead", ahead.Limiting.Sector)
 	}
-	if want := "Wind N 25 kn ahead · Alpha → Bravo"; ahead.Limiting.Text != want {
+	if want := "Wind 25 kn from N, ahead · Alpha → Bravo"; ahead.Limiting.Text != want {
 		t.Fatalf("text = %q, want %q", ahead.Limiting.Text, want)
 	}
 
@@ -176,7 +176,7 @@ func TestAssessItinerary_ViaAtAHeadlandChangesSectorMidLeg(t *testing.T) {
 	if c.Limiting.Sector == nil || *c.Limiting.Sector != "ahead" {
 		t.Fatalf("sector = %v, want ahead", c.Limiting.Sector)
 	}
-	if want := "Wind E 25 kn ahead · Cape Via → Bravo"; c.Limiting.Text != want {
+	if want := "Wind 25 kn from E, ahead · Cape Via → Bravo"; c.Limiting.Text != want {
 		t.Fatalf("text = %q, want %q", c.Limiting.Text, want)
 	}
 }
@@ -407,8 +407,8 @@ func TestAssessItinerary_MarginalIsComputedFromNoGoAndNamed(t *testing.T) {
 		text  string
 	}{
 		{"just under marginal", 24, "go", ""},
-		{"marginal", 25, "marginal", "Wind S 25 kn astern (marginal from 24.5) · Alpha → Bravo"},
-		{"no-go", 35, "no_go", "Wind S 35 kn astern · Alpha → Bravo"},
+		{"marginal", 25, "marginal", "Wind 25 kn from S, astern (marginal from 24.5) · Alpha → Bravo"},
+		{"no-go", 35, "no_go", "Wind 35 kn from S, astern · Alpha → Bravo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -444,8 +444,8 @@ func TestAssessItinerary_GustsAreJudgedFromTheSectorNoGoWind(t *testing.T) {
 		text  string
 	}{
 		{"under the gust marginal", 27, "go", ""},
-		{"gust marginal", 34, "marginal", "Gusts 34 kn abeam (marginal from 28) · Alpha → Bravo"},
-		{"gust no-go", 41, "no_go", "Gusts 41 kn abeam · Alpha → Bravo"},
+		{"gust marginal", 34, "marginal", "Gusts 34 kn from E, abeam (marginal from 28) · Alpha → Bravo"},
+		{"gust no-go", 41, "no_go", "Gusts 41 kn from E, abeam · Alpha → Bravo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -804,7 +804,7 @@ func TestAssessPassageWindowTool_CollectsExactlyOneCardAndTellsTheModelNotToRepe
 	if !strings.Contains(result, "A card showing this grid is attached; do not repeat it as a table") {
 		t.Fatalf("the model is not told to leave the grid to the card: %s", result)
 	}
-	if !strings.Contains(result, "Wind N 25 kn ahead · Alpha → Bravo") {
+	if !strings.Contains(result, "Wind 25 kn from N, ahead · Alpha → Bravo") {
 		t.Fatalf("the model needs the limiting text: %s", result)
 	}
 	cards := d.takeCards(result)
@@ -1043,11 +1043,11 @@ func TestAssessItinerary_CapturedForecastTownsvilleUpstartBowen(t *testing.T) {
 	// while its wind peaks at 12-13 kn, which is only marginal against the 14 kn
 	// no-go. 21 October's gusts reach 22 kn, past the 16.8 kn gust marginal.
 	if got := p.Rows[0]; got.Verdict != "no_go" || got.Cells[0].State != "no_go" || got.Cells[0].Limiting == nil ||
-		got.Cells[0].Limiting.Factor != "gust" || got.Cells[0].Limiting.Text != "Gusts 32 kn ahead · Cape Bowling Green → Cape Upstart" {
+		got.Cells[0].Limiting.Factor != "gust" || got.Cells[0].Limiting.Text != "Gusts 32 kn from E, ahead · Cape Bowling Green → Cape Upstart" {
 		t.Fatalf("20 October = %+v / %+v", got, got.Cells[0].Limiting)
 	}
 	if got := p.Rows[1]; got.Verdict != "marginal" || got.Cells[0].Limiting == nil ||
-		got.Cells[0].Limiting.Text != "Gusts 22 kn ahead (marginal from 16.8) · Townsville → Cape Bowling Green" {
+		got.Cells[0].Limiting.Text != "Gusts 22 kn from ENE, ahead (marginal from 16.8) · Townsville → Cape Bowling Green" {
 		t.Fatalf("21 October = %+v / %+v", got, got.Cells[0].Limiting)
 	}
 	// Leaving the 25th, the second leg is on the 26th: beyond the captured week.
@@ -1275,8 +1275,8 @@ func TestAssessItinerary_JudgesTheFigureAsDisplayed(t *testing.T) {
 		state string
 		text  string
 	}{
-		{"gust 24.6 reads 25 and is marginal", gustLimits(), pwUniform(10, 90, 24.6, nil, 0, pwDay(19, 0), pwDay(25, 23)), "marginal", "Gusts 25 kn abeam (marginal from 24.5) · Alpha → Bravo"},
-		{"gust 24.4 reads 24 and is go", gustLimits(), pwUniform(10, 90, 24.4, nil, 0, pwDay(19, 0), pwDay(25, 23)), "go", "Gusts 24 kn abeam · Alpha → Bravo"},
+		{"gust 24.6 reads 25 and is marginal", gustLimits(), pwUniform(10, 90, 24.6, nil, 0, pwDay(19, 0), pwDay(25, 23)), "marginal", "Gusts 25 kn from E, abeam (marginal from 24.5) · Alpha → Bravo"},
+		{"gust 24.4 reads 24 and is go", gustLimits(), pwUniform(10, 90, 24.4, nil, 0, pwDay(19, 0), pwDay(25, 23)), "go", "Gusts 24 kn from E, abeam · Alpha → Bravo"},
 		{"wave 1.75 reads 1.8 and is no-go", waveLimits(), pwUniform(5, 180, 5, pwF(1.75), 0, pwDay(19, 0), pwDay(25, 23)), "no_go", "Waves 1.8 m ahead · Alpha → Bravo"},
 	}
 	for _, tc := range cases {

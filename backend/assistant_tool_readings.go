@@ -58,7 +58,9 @@ const (
 
 	rulePassageWindow = "A go means none of the operator's no-go limits is reached: it is not a go-ahead and not a statement that conditions are safe or comfortable, " +
 		"so never present a go as a recommendation to sail. no_data means there is no forecast that far ahead; it is not a good day. " +
-		"The figures come from a model forecast, not observation. When Helmcentral shows a card, the result's instruction says so."
+		"The figures come from a model forecast, not observation. Each cell's wind field says how the wind sits over the whole leg: describe the leg's wind angle from it, " +
+		"never from why, which is only the hour that decided the cell. \"at departure\" or \"at arrival\" means the wind was that way only at that end, and \"no forecast\" with hours means those hours are unknown. When a cell has no wind field, say nothing about the leg's wind angle beyond the deciding hour in why. " +
+		"When Helmcentral shows a card, the result's instruction says so."
 
 	// readingTidalDeparture depends on the wind and the course, which the
 	// result and the forecast supply.

@@ -52,7 +52,7 @@ it checked, the wave height at which you would wait. Mate works out the rest.
 6. Choose **Save** in the bar at the bottom of the page.
 
 On the weather window card, a marginal cell says which figure made it so, for
-example "Wind SE 12 kn ahead (marginal from 10.5)". A wave line shows the
+example "Wind 12 kn from SE, ahead (marginal from 10.5)". A wave line shows the
 period beside the height when the forecast has one, for example "Waves 1.8 m ·
 6 s abeam". There's no period limit. It's there so that you can tell a short,
 steep sea from a long swell of the same height.
