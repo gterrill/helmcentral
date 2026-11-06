@@ -12,6 +12,7 @@ import {
 import { ChoiceList } from '@/components/patterns'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useTileSave } from '@/hooks/use-tile-save'
 import { Switch } from '@/components/ui/switch'
 import {
   GAUGE_GROUP_TITLE_MAX_LENGTH,
@@ -31,7 +32,7 @@ interface PoiMapConfigDialogProps {
   widget: DashboardLayoutItem | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (id: DashboardWidgetId, config: PoiMapWidgetConfig) => void
+  onSave: (id: DashboardWidgetId, config: PoiMapWidgetConfig) => void | Promise<void>
 }
 
 function defaultPoiMapConfig(): PoiMapWidgetConfig {
@@ -47,6 +48,7 @@ function defaultPoiMapConfig(): PoiMapWidgetConfig {
 
 export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMapConfigDialogProps) {
   const [config, setConfig] = useState<PoiMapWidgetConfig>(defaultPoiMapConfig)
+  const { saving, error: saveError, run } = useTileSave(widget?.id)
 
   // Re-seed whenever a different widget is opened, so editing one Nearby
   // widget never shows another's settings.
@@ -58,10 +60,11 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
 
   const canSave = isValidPoiMapConfig(config)
 
+  // The page closes the dialog once the tile is written. Closing here would
+  // also close it over a failed write.
   const handleSave = () => {
     if (!canSave) return
-    onSave(widget.id, { ...config, title: config.title.trim() })
-    onOpenChange(false)
+    void run(() => onSave(widget.id, { ...config, title: config.title.trim() }))
   }
 
   return (
@@ -167,11 +170,12 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
         </div>
 
         <DialogFooter>
+          {saveError && <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>}
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            Save
+          <Button onClick={handleSave} disabled={!canSave || saving}>
+            {saving ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

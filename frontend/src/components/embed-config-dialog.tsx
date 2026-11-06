@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
+import { useTileSave } from '@/hooks/use-tile-save'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -25,13 +26,14 @@ interface EmbedConfigDialogProps {
   widget: DashboardLayoutItem | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (id: DashboardWidgetId, config: EmbedWidgetConfig) => void
+  onSave: (id: DashboardWidgetId, config: EmbedWidgetConfig) => void | Promise<void>
 }
 
 export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedConfigDialogProps) {
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [frameless, setFrameless] = useState(false)
+  const { saving, error: saveError, run } = useTileSave(widget?.id)
 
   // Re-seed whenever a different widget is opened, so editing one embed never
   // shows another's URL.
@@ -48,10 +50,11 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
   // embed opens with an empty URL, which is expected, not an error.
   const showUrlError = url.trim() !== '' && !canSave
 
+  // The page closes the dialog once the tile is written. Closing here would
+  // also close it over a failed write.
   const handleSave = () => {
     if (!canSave) return
-    onSave(widget.id, { title: title.trim(), url: url.trim(), frameless })
-    onOpenChange(false)
+    void run(() => onSave(widget.id, { title: title.trim(), url: url.trim(), frameless }))
   }
 
   return (
@@ -107,11 +110,12 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
         </div>
 
         <DialogFooter>
+          {saveError && <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>}
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            Save
+          <Button onClick={handleSave} disabled={!canSave || saving}>
+            {saving ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -57,7 +57,8 @@ describe('EmbedConfigDialog', () => {
       url: 'https://grafana.local/d-solo/x?panelId=7',
       frameless: false,
     })
-    expect(onOpenChange).toHaveBeenCalledWith(false)
+    // The page closes the dialog once the write lands, not the dialog itself.
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 
   test('blocks saving a non-http(s) URL and explains why', () => {
