@@ -20,6 +20,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   release and replace the one in your weather plugins folder. A plugin you
   wrote yourself should send `null` for a wind direction it doesn't have.
 
+### Added
+
+- **Anchor Position Lost alarm.** With an anchor watch set, Helmcentral now
+  raises an alarm when the GPS fix has been missing or untrustworthy for a full
+  minute. Before, a dead or jammed GPS left the anchor watch quietly frozen,
+  and a dragging boat raised nothing. The alarm says the position is unknown,
+  not that you're dragging. It reaches you through the same channels as the drag
+  alarm, and it clears when a good fix returns. A drag alarm already sounding
+  stays up until then.
+
 ### Fixed
 
 - **The SignalK stream alarm now fires when your own instruments go quiet.**
