@@ -75,7 +75,106 @@ func createCoastlineSchema(db *sql.DB) error {
 		)`); err != nil {
 		return fmt.Errorf("create coastline squares table: %w", err)
 	}
-	return addColumnIfMissing(db, "coastline_squares", "data_as_of", "INTEGER NOT NULL DEFAULT 0")
+	if err := addColumnIfMissing(db, "coastline_squares", "data_as_of", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// Squares the operator asked for (ADR 0265). A row stays until the square
+	// is held, removed by Clear, or never; batch numbers the requests in the
+	// order they were made and pos keeps the order within one request.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS coastline_requests (
+			lat   INTEGER NOT NULL,
+			lon   INTEGER NOT NULL,
+			batch INTEGER NOT NULL,
+			pos   INTEGER NOT NULL,
+			PRIMARY KEY (lat, lon)
+		)`); err != nil {
+		return fmt.Errorf("create coastline requests table: %w", err)
+	}
+	return nil
+}
+
+// coastlineRequest is one square the operator asked to download.
+type coastlineRequest struct {
+	Square coverageSquare
+	Batch  int // which request, counting up in the order made
+	Pos    int // position within that request, in selection order
+}
+
+// AddRequests stores squares as one new request, in the order given. A square
+// that is already requested keeps its place in the earlier request. It returns
+// how many were newly stored.
+func (s *coastlineStore) AddRequests(squares []coverageSquare) (int, error) {
+	added := 0
+	err := s.RunTx("request coastline squares", func(tx *sql.Tx) error {
+		var batch int
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(batch), 0) + 1 FROM coastline_requests`).Scan(&batch); err != nil {
+			return err
+		}
+		for i, sq := range squares {
+			res, err := tx.Exec(`INSERT OR IGNORE INTO coastline_requests (lat, lon, batch, pos) VALUES (?, ?, ?, ?)`, sq.Lat, sq.Lon, batch, i)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				added++
+			}
+		}
+		return nil
+	})
+	return added, err
+}
+
+// Requests returns the waiting requests in the order they were made.
+func (s *coastlineStore) Requests() ([]coastlineRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT lat, lon, batch, pos FROM coastline_requests ORDER BY batch, pos`)
+	if err != nil {
+		return nil, fmt.Errorf("read coastline requests: %w", err)
+	}
+	defer rows.Close()
+	var out []coastlineRequest
+	for rows.Next() {
+		var r coastlineRequest
+		if err := rows.Scan(&r.Square.Lat, &r.Square.Lon, &r.Batch, &r.Pos); err != nil {
+			return nil, fmt.Errorf("read coastline requests: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RemoveSquares removes the squares that are held, with their geometry, and
+// cancels any waiting request for a square, with the failed row that request
+// left behind. It returns the squares it changed. A square that failed in the
+// ring's top-up and was never requested is not touched.
+func (s *coastlineStore) RemoveSquares(squares []coverageSquare) ([]coverageSquare, error) {
+	var changed []coverageSquare
+	err := s.RunTx("remove coastline squares", func(tx *sql.Tx) error {
+		for _, sq := range squares {
+			held, err := tx.Exec(`DELETE FROM coastline_squares WHERE lat = ? AND lon = ? AND status = ?`, sq.Lat, sq.Lon, coastlineStatusReady)
+			if err != nil {
+				return err
+			}
+			req, err := tx.Exec(`DELETE FROM coastline_requests WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon)
+			if err != nil {
+				return err
+			}
+			nHeld, _ := held.RowsAffected()
+			nReq, _ := req.RowsAffected()
+			if nReq > 0 {
+				if _, err := tx.Exec(`DELETE FROM coastline_squares WHERE lat = ? AND lon = ? AND status = ?`, sq.Lat, sq.Lon, coastlineStatusFailed); err != nil {
+					return err
+				}
+			}
+			if nHeld > 0 || nReq > 0 {
+				changed = append(changed, sq)
+			}
+		}
+		return nil
+	})
+	return changed, err
 }
 
 func newCoastlineStore(dbPath string) (*coastlineStore, error) {
@@ -209,6 +308,11 @@ func (s *coastlineStore) SaveSquareAsOf(sq coverageSquare, lines []shorelineLine
 				checked_at = excluded.checked_at, last_error = '', attempts = 0, next_attempt_at = 0,
 				geometry = excluded.geometry, data_as_of = excluded.data_as_of`,
 			sq.Lat, sq.Lon, coastlineStatusReady, unixOrZero(at), unixOrZero(at), blob, unixOrZero(dataAsOf))
+		if err != nil {
+			return err
+		}
+		// A held square is no longer a request: it is kept like any other.
+		_, err = tx.Exec(`DELETE FROM coastline_requests WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon)
 		return err
 	})
 }
@@ -339,9 +443,12 @@ func (s *coastlineStore) Lines(squares []coverageSquare) ([]shorelineLine, error
 	return out, nil
 }
 
-// Clear deletes every square.
+// Clear deletes every square and every waiting request.
 func (s *coastlineStore) Clear() error {
 	return s.RunTx("clear coastline coverage", func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM coastline_requests`); err != nil {
+			return err
+		}
 		_, err := tx.Exec(`DELETE FROM coastline_squares`)
 		return err
 	})

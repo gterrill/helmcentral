@@ -25,6 +25,10 @@ func usableOwnShipFix(state vesselStateData, err error) (lat, lon float64, ok bo
 // offlineCoastlineReader is what the Mate tool needs of the offline coastline:
 // the switch, the squares held, and the boat's position (only to tell a square
 // still on its way from one that will never come).
+// coastlineDownloadHint ends every error about a square that is not held, so
+// Mate's reply tells the operator where to ask for it.
+const coastlineDownloadHint = "Squares can be downloaded in Settings → Offline coastline."
+
 type offlineCoastlineReader struct {
 	Enabled func() (bool, error)
 	Store   *coastlineStore
@@ -126,15 +130,15 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 		if ownMissing {
 			switch describe(own) {
 			case "outside coverage":
-				return shorelineSet{}, fmt.Errorf("%.4f, %.4f is outside Offline coastline coverage: Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier (%s is not among them)",
-					lat, lon, coastlineCoverageRadiusNm, own.Label())
+				return shorelineSet{}, fmt.Errorf("%.4f, %.4f is outside Offline coastline coverage: Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier (%s is not among them). %s",
+					lat, lon, coastlineCoverageRadiusNm, own.Label(), coastlineDownloadHint)
 			case "still downloading":
 				return shorelineSet{}, fmt.Errorf("Offline coastline coverage for this area is still downloading (%s); try again later", own.Label())
 			default:
-				return shorelineSet{}, fmt.Errorf("Offline coastline coverage for this area is not available: %s: %s", own.Label(), describe(own))
+				return shorelineSet{}, fmt.Errorf("Offline coastline coverage for this area is not available: %s: %s. %s", own.Label(), describe(own), coastlineDownloadHint)
 			}
 		}
-		return shorelineSet{}, fmt.Errorf("shelter at %.4f, %.4f needs neighbouring Offline coastline squares that are not held: %s", lat, lon, strings.Join(missing, ", "))
+		return shorelineSet{}, fmt.Errorf("shelter at %.4f, %.4f needs neighbouring Offline coastline squares that are not held: %s. %s", lat, lon, strings.Join(missing, ", "), coastlineDownloadHint)
 	}
 
 	// Inland squares that were never downloaded hold no coastline.

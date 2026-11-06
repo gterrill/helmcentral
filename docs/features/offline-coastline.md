@@ -58,6 +58,33 @@ lists the square with the reason and says the old copy is kept. The page also
 says when it will try again. The weekly edit check skips a square until it has
 been downloaded again.
 
+## Asking for squares
+
+Coverage follows the boat, so it can't help with a coast you haven't reached.
+To fill squares ahead of a passage, ask for them yourself in **Settings →
+Offline coastline**. The steps are in [Turn on the offline
+coastline](../how-to/turn-on-the-offline-coastline.md).
+
+- **Zoomed in:** Squares can be picked only when the map shows about 30° across
+  or less.
+- **Switch on:** The switch has to be on. A request never turns it on, and with
+  it off the page says so.
+- **Before the ring:** Squares you ask for download before the squares around
+  the boat. They go in the order you asked, and within one request the nearest
+  the boat comes first.
+- **One hundred at a time:** A request can add up to 100 squares. If you
+  select more, the confirm says how many need downloading and asks you to select
+  fewer.
+- **All land:** An all-land square can be selected. It isn't downloaded, and the
+  confirm says how many it skips.
+- **Changing your mind:** **Remove** on a square you asked for, while it's still
+  waiting or has failed, cancels the request.
+- **Kept like any other:** A square you asked for is held once it arrives. It's
+  checked each week, counted by **Update** and removed only by you.
+
+Requests are kept if the switch goes off or Helmcentral restarts, and carry on
+when it's back. **Clear coverage** cancels them as well.
+
 A square with no coastline in it, which is open sea, is still a square, and
 it's stored as one. If a square fails, Helmcentral keeps the reason, shows it on
 the page, and tries it again later, waiting longer after each failure.
@@ -167,7 +194,9 @@ give a passage distance and why.
 ## Where it stops
 
 - Coverage doesn't cross the 180° meridian or reach the poles. In those areas
-  the page says so and downloads nothing.
+  the page says so and downloads nothing, and you can't pick squares there.
+- Mate can't ask for squares. It names the missing one and points you to
+  **Settings → Offline coastline**.
 - It's OpenStreetMap's coastline, so it's only as accurate and complete as the
   people who drew it. A position drawn as open sea reads as exposed all round.
 - A route knows nothing of depth, tidal gates, restricted areas or reefs. It

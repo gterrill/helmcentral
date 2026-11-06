@@ -148,6 +148,8 @@
     --gauge-primary-label: 39 100% 32%;
     --chart-wind: 226 72% 53%;
     --chart-gust: 38 92% 50%;
+    /* Offline coastline map: a square the operator asked for and is still waiting. */
+    --coverage-requested: 38 92% 50%;
     --chart-wave: 173 80% 40%;
     --chart-swell: 258 90% 66%;
     --chart-temp: 32 95% 44%;
@@ -437,6 +439,7 @@
     --gauge-primary-label: var(--gauge-primary);
     --chart-wind: 226 85% 68%;
     --chart-gust: 38 95% 64%;
+    --coverage-requested: 38 95% 64%;
     --chart-wave: 173 70% 55%;
     --chart-swell: 258 90% 76%;
     --chart-temp: 32 90% 60%;

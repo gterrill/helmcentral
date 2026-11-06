@@ -19,8 +19,10 @@ import (
 // most one unit of work, in this order:
 //
 //  1. a square the operator asked to update (Update),
-//  2. the nearest wanted square not yet held (needs a position fix),
-//  3. the weekly edit check of a held square.
+//  2. a square the operator asked to download (Request), in the order the
+//     requests were made,
+//  3. the nearest wanted square not yet held (needs a position fix),
+//  4. the weekly edit check of a held square.
 //
 // Wanted squares are every square within coastlineCoverageRadiusNm of the
 // boat. Squares downloaded earlier are never dropped; only Clear removes
@@ -276,6 +278,15 @@ type coastlineManager struct {
 	// written under this lock.
 	gateMu sync.Mutex
 	gen    uint64
+	// Remove must win over a call already in flight for the same square, and
+	// only that one: removeSeq counts removals, removedAt says when each square
+	// was last removed, stepSeq is removeSeq as the current step began, and
+	// callSq is the square the current plugin call is for. A result is stale
+	// when its square was removed after the step began. All guarded by gateMu.
+	removeSeq uint64
+	removedAt map[coverageSquare]uint64
+	stepSeq   uint64
+	callSq    coverageSquare
 
 	mu        sync.Mutex
 	queue     []coverageSquare // operator-requested updates, in order
@@ -314,7 +325,7 @@ func newCoastlineManager(cfg coastlineManagerConfig) *coastlineManager {
 	if cfg.Zone == nil {
 		cfg.Zone = func() *time.Location { return time.UTC }
 	}
-	return &coastlineManager{cfg: cfg, wake: make(chan struct{}, 1)}
+	return &coastlineManager{cfg: cfg, wake: make(chan struct{}, 1), removedAt: map[coverageSquare]uint64{}}
 }
 
 // refresh reads the switch and the boat's position once and keeps them for
@@ -368,6 +379,10 @@ func (m *coastlineManager) commit(gen uint64, what string, save func() error) {
 		log.Printf("offline coastline: %s discarded: coverage was cleared while it ran", what)
 		return
 	}
+	if m.removedDuringCall() {
+		log.Printf("offline coastline: %s discarded: the square was removed while it ran", what)
+		return
+	}
 	enabled, err := m.cfg.Enabled()
 	if err != nil {
 		m.setError(fmt.Sprintf("could not read the offline coastline setting: %v", err))
@@ -380,6 +395,19 @@ func (m *coastlineManager) commit(gen uint64, what string, save func() error) {
 	if err := save(); err != nil {
 		m.setError(err.Error())
 	}
+}
+
+// removedDuringCall reports whether the square of the current plugin call was
+// removed after the step began. The caller holds gateMu.
+func (m *coastlineManager) removedDuringCall() bool {
+	return m.removedAt[m.callSq] > m.stepSeq
+}
+
+// beginCall notes the square the step is about to call the plugin for.
+func (m *coastlineManager) beginCall(sq coverageSquare) {
+	m.gateMu.Lock()
+	m.callSq = sq
+	m.gateMu.Unlock()
 }
 
 // step does one unit of work and reports whether it called the plugin.
@@ -407,6 +435,7 @@ func (m *coastlineManager) step() bool {
 
 	m.gateMu.Lock()
 	gen := m.gen
+	m.stepSeq = m.removeSeq
 	m.gateMu.Unlock()
 
 	now := m.cfg.Now()
@@ -447,7 +476,7 @@ func (m *coastlineManager) step() bool {
 	}
 
 	// wanted is the squares around the boat, nearest first. It is empty with
-	// no fix, and the top-up below then waits.
+	// no fix, and the top-up waits.
 	var wanted []coverageSquare
 	if snap.fix {
 		w, _, err := coverageWanted(snap.lat, snap.lon)
@@ -457,15 +486,15 @@ func (m *coastlineManager) step() bool {
 			wanted = w
 		}
 	}
-	for _, sq := range wanted {
-		rec, held := byKey[sq]
-		if held && rec.Status == coastlineStatusReady {
-			continue
-		}
-		if held && now.Before(rec.NextAttemptAt) {
-			continue
-		}
-		m.download(src, gen, sq, rec, now, nil)
+	// Requested squares come before the top-up. They are stored, so they
+	// survive a restart and a switch turned off and on again.
+	reqs, err := m.cfg.Store.Requests()
+	if err != nil {
+		m.setError(err.Error())
+		return false
+	}
+	if due, _ := dueDownloads(downloadOrder(reqs, wanted, snap), byKey, now); len(due) > 0 {
+		m.download(src, gen, due[0], byKey[due[0]], now, nil)
 		return true
 	}
 
@@ -511,6 +540,57 @@ func (m *coastlineManager) step() bool {
 	return false
 }
 
+// downloadOrder is every square the worker may download, in the order it
+// takes them: the operator's requests first, earliest request first and within
+// one the square nearest the boat (or the order selected, with no fix), then
+// the ring around the boat, nearest first.
+func downloadOrder(reqs []coastlineRequest, ring []coverageSquare, snap coastlineSnapshot) []coverageSquare {
+	reqs = append([]coastlineRequest(nil), reqs...)
+	// One distance per square, not one per comparison.
+	dist := make(map[coverageSquare]float64, len(reqs))
+	if snap.fix {
+		for _, r := range reqs {
+			dist[r.Square] = squareDistanceNm(snap.lat, snap.lon, r.Square)
+		}
+	}
+	sort.SliceStable(reqs, func(i, j int) bool {
+		if reqs[i].Batch != reqs[j].Batch {
+			return reqs[i].Batch < reqs[j].Batch
+		}
+		if di, dj := dist[reqs[i].Square], dist[reqs[j].Square]; di != dj {
+			return di < dj
+		}
+		return reqs[i].Pos < reqs[j].Pos
+	})
+	order := make([]coverageSquare, 0, len(reqs)+len(ring))
+	seen := make(map[coverageSquare]bool, len(reqs)+len(ring))
+	for _, r := range reqs {
+		order, seen[r.Square] = append(order, r.Square), true
+	}
+	for _, sq := range ring {
+		if !seen[sq] {
+			order = append(order, sq)
+		}
+	}
+	return order
+}
+
+// dueDownloads splits order into the squares to download now and a count of
+// those backing off after a failure. A held square is not downloaded here.
+func dueDownloads(order []coverageSquare, byKey map[coverageSquare]coastlineSquareRecord, now time.Time) (due []coverageSquare, backingOff int) {
+	for _, sq := range order {
+		rec, held := byKey[sq]
+		switch {
+		case held && rec.Status == coastlineStatusReady:
+		case held && now.Before(rec.NextAttemptAt):
+			backingOff++
+		default:
+			due = append(due, sq)
+		}
+	}
+	return due, backingOff
+}
+
 // serviceFailed pauses the whole job after the map server refused it, if the
 // work that hit the refusal is still wanted, and reports whether it was (the
 // generation it started under is still current). The wait is the longer of the
@@ -536,7 +616,7 @@ func (m *coastlineManager) editCheckFailed(gen uint64, what string, p *coastline
 func (m *coastlineManager) pauseFor(gen uint64, what string, p *coastlineServiceProblem, now time.Time, requeue *coverageSquare, target *coastlinePause, until string) bool {
 	m.gateMu.Lock()
 	defer m.gateMu.Unlock()
-	if gen != m.gen {
+	if gen != m.gen || m.removedDuringCall() {
 		return false
 	}
 	enabled, err := m.cfg.Enabled()
@@ -576,6 +656,7 @@ func (m *coastlineManager) serviceWorked(editCheckRan bool) {
 // serviceFailed, under the same lock as the Clear/switch-off check, so a Clear
 // cannot land between the check and the requeue.
 func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverageSquare, prev coastlineSquareRecord, now time.Time, requeue *coverageSquare) {
+	m.beginCall(sq)
 	lines, dataAsOfRaw, err := src.ShorelineSquare(sq)
 	if err != nil {
 		log.Printf("offline coastline: download of %s failed: %v", sq.Label(), err)
@@ -604,6 +685,7 @@ func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverage
 
 func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineSquareRecord, now time.Time) {
 	what := "edit check of " + rec.Square.Label()
+	m.beginCall(rec.Square)
 	if rec.DataAsOf.IsZero() {
 		// step never picks such a square: it is downloaded again first. Reaching
 		// here is a bug, and a zero since must never go to the plugin.
@@ -688,11 +770,217 @@ func (m *coastlineManager) Update() (int, error) {
 	return n, nil
 }
 
-// Clear deletes all coverage and forgets any queued update.
+// coastlineMaxRequest is the most squares one download request may add.
+const coastlineMaxRequest = 100
+
+// coastlineMaxRequestInput bounds the squares one call may name, held and
+// all-land ones included, so a bad client cannot send an unbounded list.
+const coastlineMaxRequestInput = 2000
+
+var (
+	// errCoastlineOff is a request made while Offline coastline is off.
+	errCoastlineOff = errors.New("Offline coastline is off: turn it on in Settings first")
+	// errCoastlineBadRequest marks every refusal of what the operator named.
+	errCoastlineBadRequest = errors.New("bad coastline request")
+)
+
+// coastlineBadRequest is a refusal worded for the operator: the page shows its
+// text as it is. It matches errCoastlineBadRequest.
+type coastlineBadRequest struct{ msg string }
+
+func (e coastlineBadRequest) Error() string        { return e.msg }
+func (e coastlineBadRequest) Is(target error) bool { return target == errCoastlineBadRequest }
+
+func badRequest(format string, args ...any) error {
+	return coastlineBadRequest{msg: fmt.Sprintf(format, args...)}
+}
+
+// coastlineRequestResult says what a download request did with the squares.
+type coastlineRequestResult struct {
+	// Requested is how many squares were newly stored for download.
+	Requested int `json:"requested"`
+	// AlreadyRequested were waiting from an earlier request and keep their place.
+	AlreadyRequested int `json:"already_requested"`
+	// Held were already downloaded and left alone.
+	Held int `json:"held"`
+	// InlandSkipped are all-land squares, which are never downloaded.
+	InlandSkipped int `json:"inland_skipped"`
+}
+
+// The south-west corners of the squares that may be asked for: on the grid,
+// and clear of the poles by the same margin as the boat's own ring. The status
+// serves these so the page applies the same limits.
+const (
+	coastlineSelectLatMin = -int(coastlineMaxLat)
+	coastlineSelectLatMax = int(coastlineMaxLat) - 1
+	coastlineSelectLonMin = -180
+	coastlineSelectLonMax = 179
+)
+
+// coastlineSelectable reports whether a square may be asked for.
+func coastlineSelectable(sq coverageSquare) bool {
+	return sq.Lat >= coastlineSelectLatMin && sq.Lat <= coastlineSelectLatMax &&
+		sq.Lon >= coastlineSelectLonMin && sq.Lon <= coastlineSelectLonMax
+}
+
+// parseCoastlineSquares reads, validates and de-duplicates the squares of a
+// request, keeping the order given.
+func parseCoastlineSquares(squares []coverageSquare) ([]coverageSquare, error) {
+	if len(squares) == 0 {
+		return nil, badRequest("Select at least one square.")
+	}
+	seen := make(map[coverageSquare]bool, len(squares))
+	out := make([]coverageSquare, 0, len(squares))
+	for _, sq := range squares {
+		if !coastlineSelectable(sq) {
+			return nil, badRequest("%s is too close to a pole. The offline coastline covers squares up to 89°N and 89°S.", sq.Label())
+		}
+		if !seen[sq] {
+			seen[sq] = true
+			out = append(out, sq)
+		}
+	}
+	return out, nil
+}
+
+// lockedWhileOn takes gateMu and checks that Offline coastline is on, so a
+// Clear or a switch-off cannot land between the check and the write that
+// follows. The caller unlocks gateMu unless it gets an error back, in which
+// case the lock is already released.
+func (m *coastlineManager) lockedWhileOn() error {
+	m.gateMu.Lock()
+	enabled, err := m.cfg.Enabled()
+	if err == nil && !enabled {
+		err = errCoastlineOff
+	}
+	if err != nil {
+		m.gateMu.Unlock()
+	}
+	return err
+}
+
+// planRequest decides what a request would do, without storing anything. The
+// caller holds gateMu.
+func (m *coastlineManager) planRequest(squares []coverageSquare) (add []coverageSquare, res coastlineRequestResult, err error) {
+	recs, err := m.cfg.Store.Records()
+	if err != nil {
+		return nil, res, err
+	}
+	held := make(map[coverageSquare]bool, len(recs))
+	for _, r := range recs {
+		if r.Status == coastlineStatusReady {
+			held[r.Square] = true
+		}
+	}
+	reqs, err := m.cfg.Store.Requests()
+	if err != nil {
+		return nil, res, err
+	}
+	waiting := make(map[coverageSquare]bool, len(reqs))
+	for _, r := range reqs {
+		waiting[r.Square] = true
+	}
+	for _, sq := range squares {
+		switch {
+		case held[sq]:
+			res.Held++
+		case squareInland(sq):
+			res.InlandSkipped++
+		case waiting[sq]:
+			res.AlreadyRequested++
+		default:
+			add = append(add, sq)
+		}
+	}
+	if len(add) > coastlineMaxRequest {
+		return nil, coastlineRequestResult{}, badRequest("%d squares need downloading, and one request can take at most %d. Select fewer.", len(add), coastlineMaxRequest)
+	}
+	res.Requested = len(add)
+	return add, res, nil
+}
+
+// Request stores squares for download ahead of the top-up around the boat. It
+// never switches Offline coastline on. Squares already held are left alone,
+// all-land squares are skipped and counted, and one request adds at most
+// coastlineMaxRequest squares, all or nothing. With dryRun it stores nothing
+// and only counts, so the page can state the counts before the operator
+// confirms.
+func (m *coastlineManager) Request(squares []coverageSquare, dryRun bool) (coastlineRequestResult, error) {
+	squares, err := parseCoastlineSquares(squares)
+	if err != nil {
+		return coastlineRequestResult{}, err
+	}
+	if err := m.lockedWhileOn(); err != nil {
+		return coastlineRequestResult{}, err
+	}
+	defer m.gateMu.Unlock()
+	add, res, err := m.planRequest(squares)
+	if err != nil || dryRun || len(add) == 0 {
+		return res, err
+	}
+	n, err := m.cfg.Store.AddRequests(add)
+	if err != nil {
+		return coastlineRequestResult{}, err
+	}
+	res.Requested = n
+	m.Wake()
+	return res, nil
+}
+
+// Remove deletes the held squares among squares, with their geometry, and
+// cancels any waiting request for them, and returns how many squares that
+// changed. A square within range of the boat is downloaded again by the
+// top-up.
+func (m *coastlineManager) Remove(squares []coverageSquare) (int, error) {
+	squares, err := parseCoastlineSquares(squares)
+	if err != nil {
+		return 0, err
+	}
+	if err := m.lockedWhileOn(); err != nil {
+		return 0, err
+	}
+	defer m.gateMu.Unlock()
+	changed, err := m.cfg.Store.RemoveSquares(squares)
+	if err != nil || len(changed) == 0 {
+		return 0, err
+	}
+	// A plugin call already in flight for a removed square would save it
+	// again, or a refused one would requeue it. Marking only the removed
+	// squares discards that one call and leaves any other work alone.
+	m.removeSeq++
+	for _, sq := range changed {
+		m.removedAt[sq] = m.removeSeq
+	}
+	m.dropQueued(changed)
+	m.Wake()
+	return len(changed), nil
+}
+
+// dropQueued forgets queued updates for squares that are gone, which would
+// otherwise bring them straight back.
+func (m *coastlineManager) dropQueued(squares []coverageSquare) {
+	gone := make(map[coverageSquare]bool, len(squares))
+	for _, sq := range squares {
+		gone[sq] = true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.queue[:0:0]
+	for _, sq := range m.queue {
+		if !gone[sq] {
+			kept = append(kept, sq)
+		}
+	}
+	m.queue = kept
+}
+
+// Clear deletes all coverage and forgets any queued update and any waiting
+// download request.
 func (m *coastlineManager) Clear() error {
 	m.gateMu.Lock()
 	defer m.gateMu.Unlock()
 	m.gen++ // any plugin call already in flight is now stale
+	m.removedAt = map[coverageSquare]uint64{}
 	m.mu.Lock()
 	m.queue = nil
 	m.pause.reset()
@@ -754,10 +1042,24 @@ type coastlineStatusSquare struct {
 	// RefreshError is why the last attempt to download an awaiting square
 	// again failed. The old copy is kept.
 	RefreshError string `json:"refresh_error,omitempty"`
+	// Requested marks a square the operator asked to download that is not yet
+	// held. If it has failed, Error says why, as for any failed square.
+	Requested bool `json:"requested,omitempty"`
+}
+
+// coastlineSelectableBounds are the south-west corners the page may offer for
+// selection (see the coastlineSelect constants).
+type coastlineSelectableBounds struct {
+	LatMin int `json:"lat_min"`
+	LatMax int `json:"lat_max"`
+	LonMin int `json:"lon_min"`
+	LonMax int `json:"lon_max"`
 }
 
 type coastlineStatus struct {
 	Enabled bool `json:"enabled"`
+	// Selectable is the range of squares the operator may ask for.
+	Selectable coastlineSelectableBounds `json:"selectable"`
 	// State is off, error, paused, waiting_for_fix, updating, downloading,
 	// retrying or idle.
 	State string `json:"state"`
@@ -792,7 +1094,11 @@ type coastlineStatus struct {
 	// AwaitingRefresh counts held squares waiting for their download again.
 	AwaitingRefresh int `json:"awaiting_refresh"`
 	// RefreshFailed counts those whose last download failed.
-	RefreshFailed      int        `json:"refresh_failed"`
+	RefreshFailed int `json:"refresh_failed"`
+	// RequestedWaiting counts requested squares not yet downloaded and not
+	// failed; RequestedFailed counts those whose last try failed.
+	RequestedWaiting   int        `json:"requested_waiting"`
+	RequestedFailed    int        `json:"requested_failed"`
 	OldestDownloadedAt *time.Time `json:"oldest_downloaded_at,omitempty"`
 }
 
@@ -800,7 +1106,14 @@ type coastlineStatus struct {
 // the worker cached on its last step; it never calls SignalK or the settings
 // file itself, because every open settings page polls it.
 func (m *coastlineManager) Status() (coastlineStatus, error) {
-	st := coastlineStatus{RadiusNm: coastlineCoverageRadiusNm, Squares: []coastlineStatusSquare{}}
+	st := coastlineStatus{
+		RadiusNm: coastlineCoverageRadiusNm,
+		Squares:  []coastlineStatusSquare{},
+		Selectable: coastlineSelectableBounds{
+			LatMin: coastlineSelectLatMin, LatMax: coastlineSelectLatMax,
+			LonMin: coastlineSelectLonMin, LonMax: coastlineSelectLonMax,
+		},
+	}
 	m.mu.Lock()
 	snap := m.snap
 	m.mu.Unlock()
@@ -856,7 +1169,6 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 	st.Wanted = len(wanted)
 
 	byKey := make(map[coverageSquare]coastlineSquareRecord, len(recs))
-	missingDue, missingWaiting := 0, 0
 	for _, r := range recs {
 		byKey[r.Square] = r
 		s := coastlineStatusSquare{
@@ -903,15 +1215,40 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 		switch {
 		case held && r.Status == coastlineStatusReady:
 			st.WantedHeld++
-		case held && now.Before(r.NextAttemptAt):
-			missingWaiting++
-		default:
-			missingDue++
-			if !held {
-				st.Squares = append(st.Squares, coastlineStatusSquare{Lat: sq.Lat, Lon: sq.Lon, State: "pending", InRange: true})
-			}
+		case !held:
+			st.Squares = append(st.Squares, coastlineStatusSquare{Lat: sq.Lat, Lon: sq.Lon, State: "pending", InRange: true})
 		}
 	}
+
+	// Requested squares not yet held. A record for one is a failed square (a
+	// held one would have dropped its request when it was saved).
+	reqs, err := m.cfg.Store.Requests()
+	if err != nil {
+		return st, err
+	}
+	listed := make(map[coverageSquare]int, len(st.Squares))
+	for i, s := range st.Squares {
+		listed[coverageSquare{Lat: s.Lat, Lon: s.Lon}] = i
+	}
+	for _, rq := range reqs {
+		r, held := byKey[rq.Square]
+		if held && r.Status == coastlineStatusReady {
+			continue
+		}
+		i, shown := listed[rq.Square]
+		if !shown {
+			st.Squares = append(st.Squares, coastlineStatusSquare{Lat: rq.Square.Lat, Lon: rq.Square.Lon, State: "pending"})
+			i = len(st.Squares) - 1
+			listed[rq.Square] = i
+		}
+		st.Squares[i].Requested = true
+		if held && r.LastError != "" {
+			st.RequestedFailed++
+		} else {
+			st.RequestedWaiting++
+		}
+	}
+	due, backingOff := dueDownloads(downloadOrder(reqs, wanted, snap), byKey, now)
 
 	switch {
 	case !enabled:
@@ -922,11 +1259,11 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 		st.State = "paused"
 	case st.Updating > 0:
 		st.State = "updating"
+	case len(due) > 0:
+		st.State = "downloading"
 	case !fix:
 		st.State = "waiting_for_fix"
-	case missingDue > 0:
-		st.State = "downloading"
-	case missingWaiting > 0:
+	case backingOff > 0:
 		st.State = "retrying"
 	default:
 		st.State = "idle"

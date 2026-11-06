@@ -62,6 +62,35 @@ clears on its own. A message that the plugin isn't installed or is too old
 doesn't clear on its own. For that one, update the OpenStreetMap place-names
 plugin as described in [Provider plugins](../reference/plugins.md).
 
+## Download squares ahead of the boat
+
+Use this before a passage, while you have a good link, to fill a coast the boat
+hasn't reached. The switch has to be on.
+
+1. Open **Settings → Offline coastline** and zoom the map until it shows about
+   30° across or less. Until then the page says **Zoom in to select squares**.
+2. Choose **Select squares**. The map stops panning, and a grid of the squares
+   you don't hold appears.
+3. Tap a square to pick it, and tap it again to drop it. Drag across the map to
+   pick a block.
+4. Choose **Download** with the count, for example **Download 12**, and read the
+   confirm. It says how many all-land squares it will skip. Confirm to start.
+5. Choose **Done** to go back to moving the map.
+
+A selection can include squares you already hold. Then the bar also shows
+**Remove** with a count, and choosing it deletes those squares after a confirm.
+If one is within 200 nm of the boat, the confirm says it will download again.
+**Remove** also works on a square you asked for that is still waiting or has
+failed. It cancels the request.
+
+You can ask for 100 squares at a time. Squares you asked for show in amber on the
+map. The line under the switch says how many are waiting and how many failed,
+for example "Requested: 9 waiting, 1 failed". A failed one is red and
+lists its reason, like any other failed square. Requested squares download
+before the squares around the boat, in the order you asked. They wait if the
+boat has no signal, and they carry on by themselves when it returns. If you
+switch the offline coastline off they wait, and the line says so.
+
 ## Update to the latest map
 
 1. Open **Settings → Offline coastline**. The **Update** button appears when
@@ -77,6 +106,7 @@ count is current within a week.
 Switching **Keep an offline coastline** off and saving stops all downloads and
 checks. What is aboard stays, but Mate won't use it while the switch is off.
 
-To delete the squares as well, choose **Clear coverage** and confirm. If the
+To delete the squares as well, choose **Clear coverage** and confirm. That also
+cancels any squares you asked for that are still waiting. If the
 switch is still on, the squares within 200 nm of the boat start downloading
 again at once, so switch it off first when you want the space back.
