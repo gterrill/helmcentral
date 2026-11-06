@@ -293,12 +293,36 @@ describe('useTileDraft', () => {
     expect(result.current.draft).toBeNull()
   })
 
-  it('with no page, writes nothing and leaves the draft open', async () => {
+  it('with no page, writes nothing, leaves the draft open and says so', async () => {
     const { result, updatePage } = setup(page, false)
     act(() => result.current.addTile('embed'))
-    await act(() => result.current.saveTile('embed', { title: 't', url: 'u' }))
+    await act(async () => {
+      await expect(result.current.saveTile('embed', { title: 't', url: 'u' })).rejects.toThrow('Could not save the tile')
+    })
     expect(updatePage).not.toHaveBeenCalled()
     expect(result.current.draftOfKind('embed')).not.toBeNull()
+  })
+
+  it('a refused write (updatePage answers null) rejects, so the dialog can say so, and the draft stays open', async () => {
+    const { result, updatePage } = setup()
+    updatePage.mockResolvedValueOnce(null)
+    act(() => result.current.addTile('gauge'))
+    await act(async () => {
+      await expect(result.current.saveTile('gauge', gaugeConfig)).rejects.toThrow('Could not save the tile')
+    })
+    expect(result.current.draft).not.toBeNull()
+    await act(() => result.current.saveTile('gauge', gaugeConfig))
+    expect(result.current.draft).toBeNull()
+  })
+
+  it('a refused Save As rejects too', async () => {
+    const { result, updatePage } = setup()
+    updatePage.mockResolvedValueOnce(null)
+    act(() => result.current.addTile('gaugeGroup'))
+    await act(async () => {
+      await expect(result.current.duplicateTile('gaugeGroup', { title: 'P', gauges: [gaugeConfig] })).rejects.toThrow('Could not save the tile')
+    })
+    expect(result.current.draft).not.toBeNull()
   })
 
   describe('a dialog that finishes late', () => {
@@ -354,7 +378,7 @@ describe('useTileDraft', () => {
       const { result, updatePage } = setup()
       updatePage.mockResolvedValueOnce(null)
       act(() => result.current.addTile('cluster'))
-      await act(() => result.current.saveTile('cluster', clusterConfig))
+      await act(async () => { await expect(result.current.saveTile('cluster', clusterConfig)).rejects.toThrow() })
       expect(result.current.draftOfKind('cluster')).not.toBeNull()
       await act(() => result.current.saveTile('cluster', clusterConfig))
       expect(updatePage).toHaveBeenCalledTimes(2)
@@ -365,7 +389,7 @@ describe('useTileDraft', () => {
       const { result, updatePage } = setup()
       updatePage.mockResolvedValueOnce(null)
       act(() => result.current.addTile('gaugeGroup'))
-      await act(() => result.current.duplicateTile('gaugeGroup', { title: 'P', gauges: [gaugeConfig] }))
+      await act(async () => { await expect(result.current.duplicateTile('gaugeGroup', { title: 'P', gauges: [gaugeConfig] })).rejects.toThrow() })
       expect(result.current.draftOfKind('gaugeGroup')).not.toBeNull()
     })
 
@@ -393,8 +417,10 @@ describe('useTileDraft', () => {
       const { result, answer } = slowSetup()
       act(() => result.current.addTile('embed'))
       const { saveTile, cancelTile } = result.current
-      act(() => { void saveTile('embed', { title: 't', url: 'u' }); cancelTile() })
+      let outcome!: Promise<unknown>
+      act(() => { outcome = saveTile('embed', { title: 't', url: 'u' }).catch((e: unknown) => e); cancelTile() })
       await answer(null)
+      expect(await outcome).toBeInstanceOf(Error)
       expect(result.current.draftOfKind('embed')).not.toBeNull()
     })
   })

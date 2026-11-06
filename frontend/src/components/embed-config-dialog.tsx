@@ -33,7 +33,7 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [frameless, setFrameless] = useState(false)
-  const { saving, error: saveError, run, reset } = useTileSave()
+  const { saving, error: saveError, run } = useTileSave(widget?.id)
 
   // Re-seed whenever a different widget is opened, so editing one embed never
   // shows another's URL.
@@ -41,8 +41,7 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
     setUrl(widget?.embed?.url ?? '')
     setTitle(widget?.embed?.title ?? '')
     setFrameless(widget?.embed?.frameless ?? false)
-    reset()
-  }, [widget?.id, widget?.embed?.url, widget?.embed?.title, widget?.embed?.frameless, reset])
+  }, [widget?.id, widget?.embed?.url, widget?.embed?.title, widget?.embed?.frameless])
 
   if (!widget) return null
 

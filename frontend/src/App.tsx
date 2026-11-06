@@ -1073,16 +1073,14 @@ function AppShell() {
   // The ribbon (ADR 0082) reuses LampStripConfigDialog under a synthetic
   // { id: 'ribbon' } rather than a real page widget — there is no draft state
   // to hold, since it is vessel-level and already lives in `ribbon` itself.
-  // Closes once the ribbon is written; a failed write is toasted and the dialog
-  // stays open for a retry.
-  const handleSaveRibbon = useCallback(async (lamps: LampStripWidgetConfig) => {
-    if (await saveRibbon(lamps)) setRibbonDialogOpen(false)
-  }, [saveRibbon])
-
-  const handleRemoveRibbon = useCallback(() => {
-    void saveRibbon(null)
+  // Closes once the ribbon is written. A failed write is toasted by saveRibbon
+  // and rejects here, so the dialog says so and stays open for a retry.
+  const writeRibbon = useCallback(async (lamps: LampStripWidgetConfig | null) => {
+    if (!(await saveRibbon(lamps))) throw new Error('Could not save the indicator ribbon')
     setRibbonDialogOpen(false)
   }, [saveRibbon])
+  const handleSaveRibbon = useCallback((lamps: LampStripWidgetConfig) => writeRibbon(lamps), [writeRibbon])
+  const handleRemoveRibbon = useCallback(() => writeRibbon(null), [writeRibbon])
 
 
   // One handler for every widget's gear: WidgetHost binds the id. It reads the

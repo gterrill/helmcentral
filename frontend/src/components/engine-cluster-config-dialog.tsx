@@ -466,7 +466,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const pathNames = useMemo(() => paths.map((p) => p.path), [paths])
   const pathsState: PathsState = pathsError ? 'error' : pathsLoading ? 'loading' : 'ready'
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
-  const { saving, error: saveError, run: runSave, reset: clearSaveError } = useTileSave()
+  const { saving, error: saveError, run: runSave } = useTileSave(widget?.id)
   // The slot of the card being edited. Null until the card has loaded and the
   // first slot needing attention (or the ring) has been chosen.
   // 'none' is a phone row the operator folded.
@@ -498,7 +498,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   useEffect(() => {
     setConfig(widget?.cluster ? withBlankSlots(structuredClone(widget.cluster)) : null)
     setCornerKeys((widget?.cluster?.corners ?? []).map(newKey))
-    clearSaveError()
     operatorChose.current = false
     switchPending.current = false
   }, [widget?.id, widget?.cluster])
@@ -577,13 +576,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
       await onSave(pruneUnbound(config))
       return
     }
-    let cleared: Set<number>
-    try {
-      cleared = await zoneEditing.commit()
-    } catch (err) {
-      throw err instanceof Error ? err : new Error('Could not save the profile zones')
-    }
-    await onSave(pruneUnbound(withoutSettledZones(config, cleared)))
+    await onSave(pruneUnbound(withoutSettledZones(config, await zoneEditing.commit())))
   })
 
   // The card never reads a slot's display, so the form leaves it out and folds

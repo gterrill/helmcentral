@@ -48,14 +48,13 @@ function defaultPoiMapConfig(): PoiMapWidgetConfig {
 
 export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMapConfigDialogProps) {
   const [config, setConfig] = useState<PoiMapWidgetConfig>(defaultPoiMapConfig)
-  const { saving, error: saveError, run, reset } = useTileSave()
+  const { saving, error: saveError, run } = useTileSave(widget?.id)
 
   // Re-seed whenever a different widget is opened, so editing one Nearby
   // widget never shows another's settings.
   useEffect(() => {
     setConfig(widget?.poiMap ? { ...widget.poiMap, categories: [...widget.poiMap.categories] } : defaultPoiMapConfig())
-    reset()
-  }, [widget?.id, widget?.poiMap, reset])
+  }, [widget?.id, widget?.poiMap])
 
   if (!widget) return null
 

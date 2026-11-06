@@ -7,6 +7,7 @@ import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
+import { useTileDraft } from '@/hooks/use-tile-draft'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
 // Every tile dialog's Save goes busy while the write is out (the pattern the
@@ -103,5 +104,76 @@ describe('Embed and Nearby map dialogs leave closing to the save', () => {
     fireEvent.click(saveButton())
     await vi.waitFor(() => expect(saveButton().disabled).toBe(false))
     expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('a write the page refuses reaches the dialog', () => {
+  // The real shape: useTileDraft's saveTile, over an updatePage that answers
+  // null after toasting. Nothing rejects in the dialog's own code.
+  test('Gauge dialog shows the failure, stays open and saves on retry', async () => {
+    const updatePage = vi.fn<() => Promise<object | null>>().mockResolvedValueOnce(null).mockResolvedValue({})
+    function Harness() {
+      const tiles = useTileDraft({
+        pageRef: { current: { id: 'p1' } },
+        widgetsRef: { current: [] },
+        updatePage,
+      })
+      return (
+        <>
+          <button onClick={() => tiles.addTile('gauge')}>add</button>
+          <GaugeConfigDialog
+            widget={tiles.draftOfKind('gauge')}
+            onCancel={tiles.cancelTile}
+            onSave={(config) => tiles.saveTile('gauge', config)}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+    fireEvent.click(screen.getByText('add'))
+    fireEvent.change(await screen.findByLabelText('SignalK path'), { target: { value: 'environment.depth.belowTransducer' } })
+    fireEvent.click(saveButton())
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save the tile')
+    expect(saveButton().disabled).toBe(false)
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(updatePage).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('other buttons wait for the save', () => {
+  test('Duplicate on a gauge group is disabled while Save is out', async () => {
+    const write = deferred()
+    render(<GaugeGroupConfigDialog widget={groupWidget} onCancel={vi.fn()} onSave={() => write.promise} onDuplicate={vi.fn()} />)
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    expect((screen.getByRole('button', { name: 'Duplicate this tile' }) as HTMLButtonElement).disabled).toBe(true)
+    write.resolve()
+    await vi.waitFor(() => expect((screen.getByRole('button', { name: 'Duplicate this tile' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  test('Duplicate shows a refused copy and does not cancel', async () => {
+    const onCancel = vi.fn()
+    render(<GaugeGroupConfigDialog widget={groupWidget} onCancel={onCancel} onSave={vi.fn()} onDuplicate={() => Promise.reject(new Error('refused'))} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate this tile' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('refused')
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  test('Remove ribbon is disabled while Save is out, and while it removes', async () => {
+    const write = deferred()
+    const removal = deferred()
+    const onRemove = vi.fn(() => removal.promise)
+    render(<LampStripConfigDialog widget={lampsWidget} onCancel={vi.fn()} onSave={() => write.promise} onRemove={onRemove} />)
+    const remove = () => screen.getByRole('button', { name: 'Remove ribbon' }) as HTMLButtonElement
+    fireEvent.click(saveButton())
+    await vi.waitFor(() => expect(remove().disabled).toBe(true))
+    write.resolve()
+    await vi.waitFor(() => expect(remove().disabled).toBe(false))
+    fireEvent.click(remove())
+    await vi.waitFor(() => expect(saveButton().disabled).toBe(true))
+    expect(remove().disabled).toBe(true)
+    removal.resolve()
+    await vi.waitFor(() => expect(remove().disabled).toBe(false))
   })
 })

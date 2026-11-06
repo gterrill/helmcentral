@@ -12,7 +12,7 @@ const deferred = () => {
 
 describe('useTileSave', () => {
   test('is busy until the task settles, then free with no error', async () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     const write = deferred()
     let run!: Promise<void>
     act(() => { run = result.current.run(() => write.promise) })
@@ -23,34 +23,34 @@ describe('useTileSave', () => {
   })
 
   test('starts the task in the same tick', () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     let called = 0
     act(() => { void result.current.run(() => { called++ }) })
     expect(called).toBe(1)
   })
 
   test('shows a rejection and frees the button', async () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     await act(async () => { await result.current.run(() => Promise.reject(new Error('refused'))) })
     expect(result.current.saving).toBe(false)
     expect(result.current.error).toBe('refused')
   })
 
   test('shows a synchronous throw', async () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     await act(async () => { await result.current.run(() => { throw new Error('wired wrong') }) })
     expect(result.current.error).toBe('wired wrong')
     expect(result.current.saving).toBe(false)
   })
 
   test('names a non-Error rejection with the fallback', async () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     await act(async () => { await result.current.run(() => Promise.reject('nope')) })
     expect(result.current.error).toBe('Could not save the tile')
   })
 
   test('a second run while busy is ignored', async () => {
-    const { result } = renderHook(() => useTileSave())
+    const { result } = renderHook(() => useTileSave('t1'))
     const write = deferred()
     let calls = 0
     let first!: Promise<void>
@@ -60,8 +60,8 @@ describe('useTileSave', () => {
     await act(async () => { write.resolve(); await first })
   })
 
-  test('a retry clears the last failure, and reset clears it too', async () => {
-    const { result } = renderHook(() => useTileSave())
+  test('a retry clears the last failure', async () => {
+    const { result } = renderHook(() => useTileSave('t1'))
     await act(async () => { await result.current.run(() => Promise.reject(new Error('refused'))) })
     const write = deferred()
     let retry!: Promise<void>
@@ -69,7 +69,30 @@ describe('useTileSave', () => {
     expect(result.current.error).toBeNull()
     await act(async () => { write.reject(new Error('again')); await retry })
     expect(result.current.error).toBe('again')
-    act(() => result.current.reset())
+  })
+
+  test('fail shows an error from outside run', () => {
+    const { result } = renderHook(() => useTileSave('t1'))
+    act(() => result.current.fail('zones refused'))
+    expect(result.current.error).toBe('zones refused')
+  })
+
+  test('opening another tile drops the busy state and the error of the last one', async () => {
+    const { result, rerender } = renderHook(({ k }) => useTileSave(k), { initialProps: { k: 't1' as string | null } })
+    await act(async () => { await result.current.run(() => Promise.reject(new Error('refused'))) })
+    const write = deferred()
+    act(() => { void result.current.run(() => write.promise) })
+    expect(result.current.saving).toBe(true)
+    rerender({ k: 't2' })
+    expect(result.current.saving).toBe(false)
     expect(result.current.error).toBeNull()
+    // The old tile's write failing late must not show on the new tile.
+    await act(async () => { write.reject(new Error('late')); await Promise.resolve() })
+    expect(result.current.error).toBeNull()
+    expect(result.current.saving).toBe(false)
+    // The new tile can save at once.
+    let called = 0
+    await act(async () => { await result.current.run(() => { called++ }) })
+    expect(called).toBe(1)
   })
 })

@@ -38,7 +38,7 @@ interface GaugeGroupConfigDialogProps {
   widget: DashboardLayoutItem | null
   onCancel: () => void
   onSave: (config: GaugeGroupWidgetConfig) => void | Promise<void>
-  onDuplicate?: (config: GaugeGroupWidgetConfig) => void
+  onDuplicate?: (config: GaugeGroupWidgetConfig) => void | Promise<void>
 }
 
 /**
@@ -53,13 +53,12 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
   const { paths } = useSignalKPaths(widget !== null)
   const ctx = useEquipmentTileContext(widget !== null)
   const [config, setConfig] = useState<GaugeGroupWidgetConfig>(defaultGroupConfig)
-  const { saving, error: saveError, run: runSave, reset: clearSaveError, fail: failSave } = useTileSave()
+  const { saving, error: saveError, run: runSave } = useTileSave(widget?.id)
 
   // Re-seed per instance, so editing one group never shows another's settings.
   useEffect(() => {
     setConfig(widget?.gaugeGroup ? structuredClone(widget.gaugeGroup) : defaultGroupConfig())
-    clearSaveError()
-  }, [widget?.id, widget?.gaugeGroup, clearSaveError])
+  }, [widget?.id, widget?.gaugeGroup])
 
   const kind = (config.equipmentKind ?? '') as SourceKind | ''
   const item = findItem(ctx, config.equipmentId)
@@ -146,13 +145,14 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
       await onSave(config)
       return
     }
-    let cleared: Set<number>
-    try {
-      cleared = await zoneEditing.commit()
-    } catch (err) {
-      throw err instanceof Error ? err : new Error('Could not save the profile zones')
-    }
-    await onSave(settled(cleared))
+    await onSave(settled(await zoneEditing.commit()))
+  })
+
+  // Duplicate waits for the same busy state, so it cannot race Save's own
+  // zone commit, and a refused copy shows in the dialog.
+  const duplicate = () => runSave(async () => {
+    await onDuplicate?.(zoneEditing.dirty ? settled(await zoneEditing.commit()) : config)
+    onCancel()
   })
 
   return (
@@ -308,22 +308,8 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
             <Button
               variant="outline"
               className="w-fit border-dashed border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
-              onClick={() => {
-                if (!zoneEditing.dirty) {
-                  onDuplicate?.(config)
-                  onCancel()
-                  return
-                }
-                void (async () => {
-                  try {
-                    onDuplicate?.(settled(await zoneEditing.commit()))
-                  } catch (err) {
-                    failSave(err instanceof Error ? err.message : 'Could not save the profile zones')
-                    return
-                  }
-                  onCancel()
-                })()
-              }}
+              disabled={saving}
+              onClick={() => { void duplicate() }}
               title="Duplicate this tile"
               aria-label="Duplicate this tile"
             >

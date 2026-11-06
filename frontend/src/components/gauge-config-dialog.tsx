@@ -23,13 +23,12 @@ interface GaugeConfigDialogProps {
 export function GaugeConfigDialog({ widget, onCancel, onSave }: GaugeConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
   const [config, setConfig] = useState<GaugeWidgetConfig>(defaultGaugeConfig)
-  const { saving, error: saveError, run, reset } = useTileSave()
+  const { saving, error: saveError, run } = useTileSave(widget?.id)
 
   // Re-seed per instance, so editing one gauge never shows another's settings.
   useEffect(() => {
     setConfig(widget?.gauge ? { ...widget.gauge } : defaultGaugeConfig())
-    reset()
-  }, [widget?.id, widget?.gauge, reset])
+  }, [widget?.id, widget?.gauge])
 
   const canSave = config.path.trim() !== ''
 
