@@ -306,6 +306,13 @@ func isWatchWordByte(c byte) bool {
 	return isWatchASCIILetter(c) || isWatchDigit(c) || c >= 0x80
 }
 
+// watchDigitFollows reports whether a digit comes next in p at j, after any
+// spaces.
+func watchDigitFollows(p string, j int) bool {
+	t := strings.TrimLeft(p[j:], " \t")
+	return t != "" && isWatchDigit(t[0])
+}
+
 // watchSentenceEnd is the index just after the first sentence of p, a single
 // line, or -1 when it has none.
 func watchSentenceEnd(p string) int {
@@ -345,7 +352,10 @@ func watchSentenceEnd(p string) int {
 				for k > 0 && (isWatchASCIILetter(p[k-1]) || p[k-1] == '.') {
 					k--
 				}
-				if watchAbbreviations[strings.ToLower(strings.TrimLeft(p[k:i], "."))] {
+				// "no." is an abbreviation only before a number, as in
+				// "No. 2"; "Shore power: no." is an answer.
+				word := strings.ToLower(strings.TrimLeft(p[k:i], "."))
+				if watchAbbreviations[word] && (word != "no" || watchDigitFollows(p, j)) {
 					continue
 				}
 			}

@@ -121,6 +121,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A watch report that answers "no." now ends its first sentence there.** A
+  review opening "Shore power: no." used to run on into the next sentence in the
+  headline and the push. "No. 2" still reads as a number.
+- **Selecting offline coastline squares works past the 180° meridian.** If the
+  coverage map is showing the far side of the date line, tapping or dragging a
+  square now picks the right one, and the grid is drawn there too.
 - **A photo moment now grows the sign's card itself.** In a replay and in a
   video, the small card used to stay on the map behind the grown one. Now the
   card leaves its place as it grows and comes back as it shrinks, so you only

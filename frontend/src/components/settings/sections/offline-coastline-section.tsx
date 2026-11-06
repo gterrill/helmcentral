@@ -192,6 +192,8 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
   const hasEdits = (status?.squares_with_edits ?? 0) > 0
   const hasSquares = (status?.squares.some((q) => q.state !== 'pending' || q.requested)) ?? false
   const waiting = status ? waitingRequests(status) : 0
+  // The radius is the server's; until the status loads the text names no figure.
+  const withinRadius = status ? `within ${status.radius_nm} nm of the boat` : 'within range of the boat'
 
   const handleUpdate = async () => {
     setActionError(null)
@@ -261,7 +263,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
             <FieldContent>
               <FieldLabel>Keep an offline coastline</FieldLabel>
               <FieldDescription>
-                Downloads OpenStreetMap coastline and reefs for every 1° square within 200 nm of the boat, one square at a
+                Downloads OpenStreetMap coastline and reefs for every 1° square {withinRadius}, one square at a
                 time in the background, and checks each week whether the public map has changed. It uses the internet while
                 it fills. Off, nothing is downloaded or checked.
               </FieldDescription>
@@ -311,7 +313,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
       {status && (status.squares.length > 0 || (status.enabled && status.position)) && (
         <FormSection
           title="Coverage"
-          description="Each square is 1° of latitude by 1° of longitude, named by its south-west corner. Shaded squares are held, and stronger shading means a more recent download. Squares drawn as an outline only are within the ring but not downloaded yet. Red squares failed to download. A heavy outline means edits since the download. Amber squares are ones you asked for that are still waiting. The dashed ring is 200 nm around the boat."
+          description={`Each square is 1° of latitude by 1° of longitude, named by its south-west corner. Shaded squares are held, and stronger shading means a more recent download. Squares drawn as an outline only are within the ring but not downloaded yet. Red squares failed to download. A heavy outline means edits since the download. Amber squares are ones you asked for that are still waiting. The dashed ring is ${status.radius_nm} nm around the boat.`}
         >
           <div className="flex flex-wrap items-center gap-2" data-testid="offline-coastline-select-bar">
             <Button
@@ -397,7 +399,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
         title={selection ? `Remove ${plural(selection.remove.length, 'square', 'squares')}?` : 'Remove squares?'}
-        description={selection ? removeConfirmText(selection) : undefined}
+        description={selection && status ? removeConfirmText(selection, status.radius_nm) : undefined}
         confirmLabel="Remove"
         onConfirm={() => void handleRemove()}
         deleting={removing}
@@ -407,7 +409,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="Clear coverage?"
-        description={`This deletes every downloaded square${waiting > 0 ? ` and cancels the ${plural(waiting, 'square', 'squares')} you asked to download` : ''}. Mate cannot judge shelter until squares are downloaded again. With the offline coastline on, the squares within 200 nm of the boat start downloading again straight away; turn it off first to keep them gone.`}
+        description={`This deletes every downloaded square${waiting > 0 ? ` and cancels the ${plural(waiting, 'square', 'squares')} you asked to download` : ''}. Mate cannot judge shelter until squares are downloaded again. With the offline coastline on, the squares ${withinRadius} start downloading again straight away; turn it off first to keep them gone.`}
         confirmLabel="Clear coverage"
         onConfirm={() => void handleClear()}
         deleting={clearing}
