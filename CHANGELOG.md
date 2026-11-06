@@ -68,9 +68,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Helmcentral no longer connects to the default SignalK address when it
   can't read your settings.** It logs the problem, shows SignalK as
   disconnected and keeps retrying until the settings can be read.
-
-### Fixed
-
+- **Kiosk launchers that check the page first now start.** A launcher that
+  waits for the display page with `wget --spider` or `curl -I` got "not found"
+  on every page, so the wall display never opened. Those checks now get the
+  same answer as opening the page in a browser.
 - **A silent AIS receiver no longer reads as an empty sea.** When SignalK is
   working but no vessel has reported for ten minutes, the Nearby Vessels tile
   and the Vessels list on the Nearby map say "AIS silent for 25m" (or "No AIS
