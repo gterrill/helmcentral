@@ -100,27 +100,46 @@ live data as :5173 and the two can be compared side by side. To see the boat's
 own data instead, prefix `VITE_API_PROXY_TARGET=http://192.168.50.240:9091`.
 That page writes to the boat, so use it only to look.
 
+If the change needs the worktree's own Go code, or a click that saves something,
+run its backend too. `NAME` is the suffix you gave `make worktree`:
+
+```bash
+make preview-backend NAME=<name>        # builds, copies the dev state, prints VITE_API_PROXY_TARGET=...
+make preview-backend-stop NAME=<name>
+```
+
+It runs on the first free port from 8091 against a throwaway copy of the dev
+state (`HELMCENTRAL_STATE_DIR`, ADR 0026), with push subscriptions and the
+notification queue deleted from the copy. Nothing it saves reaches
+`backend/data`. Its SignalK points at a black hole, so tiles show `—`
+placeholders. `LIVE=1` keeps the boat's address for live data, and then
+setting an anchor publishes to the real SignalK: use it only to look.
+
 Ports 5173 and 5174 belong to the dev and e2e stacks; go up from 5175 if another
-worktree already holds it. Stop the server once the change is checked: `make
-prune-merged` will not remove a worktree while it runs.
+worktree already holds it. Stop the server and the preview backend once the
+change is checked: `make prune-merged` will not remove a worktree while vite runs.
 
 ## 3. Screenshot it
 
-No `chromium-cli` in this environment. Use Playwright's screenshot CLI
-via `npx` (auto-downloads Chromium on first run, ~1min). From a worktree, use
-its own port in place of 5173, or the shot shows the main checkout's code:
+Phone width is the case that matters. One command, from the repo root or a
+worktree's absolute path; Playwright is a pinned devDependency of `frontend`:
 
 ```bash
-npx --yes playwright screenshot \
-  --viewport-size=1600,1000 --wait-for-timeout=3000 \
-  http://localhost:5173/ /tmp/shot.png
+node <worktree>/frontend/scripts/phone-preview.mjs http://localhost:5175/ <scratchpad>/phone.png
 ```
 
-Then view it with the Read tool. `--wait-for-timeout` is a blunt
-instrument (there's no `wait-for` command in this CLI, unlike
-`chromium-cli`) — 3000ms has been enough for the dashboard's client
-fetches to settle in practice; bump it if a screenshot looks
-mid-fetch.
+It opens a 390x844 context with touch, `isMobile` and 2x scale, waits for the
+page to settle (3 s, or `--wait-for`) and prints the page's `scrollWidth`, with a warning when that
+is wider than the viewport. `--width`, `--height`, `--wait-for <selector>` and
+`--full-page` are optional. From a worktree, use its own port in place of 5173,
+or the shot shows the main checkout's code. Then view the PNG with the Read tool.
+`Executable doesn't exist at .../chromium-NNNN` means the cached browser does
+not match the pinned Playwright: run `npx playwright install chromium` from
+`frontend`. `ERR_MODULE_NOT_FOUND` for `playwright` means the shared
+`node_modules` predates it: `make check-frontend-deps`, then `npm ci`.
+
+Do not use Chrome's `resize_window` for this. It reports success and leaves the
+viewport at desktop width.
 
 ### Viewport matrix
 
@@ -141,54 +160,24 @@ is the only band where two columns and a fixed sidebar compete, and
 it's where large fixed type (`text-3xl` values, `md:` step-ups written
 back when `md` meant "more room") spills its card.
 
-Two CLI gotchas:
-
-- There is **no `--device` flag** on `playwright screenshot`, and it
-  emulates neither touch nor DPR. `--viewport-size` alone is fine for
-  layout and overflow checks, which is all this is for.
-- The CLI can't run `document.documentElement.scrollWidth`, so the
-  tell for horizontal overflow is a `--full-page` shot at `390` that
-  comes back **wider than 390px**.
-
-Note `sips -c` crops from the **centre**, not the top-left, so it's
-awkward for grabbing a header. Easier to re-shoot without
-`--full-page` to get just the viewport.
-
-There is no `--clip` flag for cropping to one element. Crop the full
-screenshot afterward instead:
-
-```bash
-sips -c <height> <width> --cropOffset <y> <x> /tmp/shot.png --out /tmp/shot-crop.png
-```
+Pass `--width`/`--height` from the table. The overflow tell is the script's
+`scrollWidth` warning at 390.
 
 ## Driving a page
 
-To click, type or read a page rather than shoot it, write a Playwright script.
-`frontend/node_modules` has no Playwright. Require it from the `npx` cache and
-pass that path in, so the script holds no hash. Take the highest version: the
-browsers installed in `~/Library/Caches/ms-playwright` match the newest copy,
-and an older one can fail to launch.
-
-```bash
-PW=$(for d in ~/.npm/_npx/*/node_modules/playwright; do
-  echo "$(node -p "require('$d/package.json').version") $d"
-done | sort -V | tail -1 | cut -d' ' -f2)
-node <scratchpad>/drive.js "$PW"
-```
-
-```js
-const { chromium } = require(process.argv[2]);
-(async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  // From a worktree, use its own preview port in place of 5173.
-  await page.goto('http://localhost:5173/');
-  console.log(await page.title());
-  await browser.close();
-})();
-```
-
+To click, type or read a page, import Playwright the same way the script does.
+Run the file with `node` from inside `frontend`'s tree (for instance a scratch
+`.mjs` that does `import { chromium } from '<worktree>/frontend/node_modules/playwright/index.mjs'`).
+Use `devices['iPhone 14']` or the same context options as `phone-preview.mjs`.
 Keep the script in the session scratchpad, not the repo.
+
+Gotchas for driving:
+
+- `left_click_drag` in the Chrome tools does not pass `modifiers: "shift"`: the
+  pointerdown shows `shiftKey: false`. Shift-drag needs a Playwright script
+  (`page.keyboard.down('Shift')`, then `page.mouse`).
+- Layout edit mode does not exist below the `lg` breakpoint. `canEditLayout` in
+  `App.tsx` gates `LayoutModeToggle`, so a phone-width shot never shows it.
 
 ## Gotchas
 

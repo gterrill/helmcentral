@@ -13,15 +13,18 @@ policies in `AGENTS.md`, including findings applied with `--fix`.
 checkout, and `git status` must hold only your changes. Run `git fetch
 origin` and rebase onto `origin/main`; local `main` often lags.
 
-`/code-review` and `/security-review` review the session's own directory,
-whatever a `cd` says. When a subagent built the change and this session
-still sits in the main checkout, switch the session in first: `EnterWorktree`
-with the worktree's path. If it refuses (a session already in another
-worktree, or a subagent, whose switch never moves its parent), review
-`git diff origin/main...HEAD` inside the worktree by hand for steps 5 and 7.
+`/code-review` reviews the path you give it, so step 5 passes the worktree's
+path. `/security-review` takes no argument and diffs the session's own
+directory, whatever a `cd` says. When a subagent built the change and this
+session still sits in the main checkout, move it with `EnterWorktree` and the
+worktree's path. Tell the operator first: it waits on a permission prompt,
+which has held sessions for 15 minutes. It refuses a session that has already
+entered another worktree, naming `.claude/worktrees` as the reason; then
+review `git diff origin/main...HEAD` inside the worktree by hand for step 7.
 
-**Done:** all three true, and the session's directory is the worktree. If
-the first two are not, stop and ask.
+**Done:** the first two are true, and the session's directory is the
+worktree or step 7 will be a hand review. If the first two are not, stop and
+ask.
 
 ## 2. Release notes and docs
 
@@ -70,17 +73,19 @@ that test file alone before you call it a flake. Reproduce a failure this way:
   the tests.
 - A failure in a CI job: rerun the failed job too. Failing twice the same way
   means it is real.
-- A failure in "Backend tests (shuffled)", which runs on main only: run `go
-  test -short -count=1 -shuffle=<seed> .` from `backend/`, with the
-  `-test.shuffle <seed>` printed in its log. A rerun draws a new seed, so a
-  passing rerun proves nothing, and it is never called a flake.
+- A failure in `make check-backend` or in main's "Backend tests (shuffled)",
+  both of which run the tests in random order: run `go test -short -count=1
+  -shuffle=<seed> .` from `backend/`, with the `-test.shuffle <seed>` printed
+  in its log. A rerun draws a new seed, so a passing rerun proves nothing, and
+  it is never called a flake. When the same seed fails on `origin/main` too,
+  the leak predates this change: tell the operator and carry on.
 
 **Done:** every suite you ran is green, and a UI change has been previewed at
 desktop and phone widths. Keep the pass counts for the PR body.
 
 ## 5. Review
 
-Run `/code-review medium` on the working tree. Then read the
+Run `/code-review medium <worktree path>`. Then read the
 `CODING_STANDARDS.md` sections the diff touches and check every changed line
 against them. Check each finding against the code. Fix the real ones
 test-first, then go back to step 4. Test-first means the new test has been run

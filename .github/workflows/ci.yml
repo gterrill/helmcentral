@@ -67,8 +67,9 @@ jobs:
   # One shuffled run of the whole suite, on pushes to main only. The shards
   # above run tests in file order, so a test that leaks process-wide state into
   # the next one can pass there and fail on another ordering. A random seed
-  # must not turn an unrelated PR red, so a PR does not run it; a failure
-  # surfaces in main's CI run, which `ship` step 8 checks after a merge. The
+  # must not turn an unrelated PR red, so a PR does not run it; `make
+  # check-backend` runs the same shuffle before a PR, and a failure that gets
+  # past it surfaces in main's CI run, which `ship` step 8 checks. The
   # seed is printed in the log ("-test.shuffle <seed>"); rerun with
   # -shuffle=<seed> to reproduce.
   backend-test-shuffled:

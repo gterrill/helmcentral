@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree prune-merged check-vite-config check-frontend-deps check-backend check-frontend
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop prune-merged check-vite-config check-frontend-deps check-backend check-frontend
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -87,12 +87,22 @@ worktree:
 			echo "worktree: npm ci failed, so the worktree has no node_modules. Run npm ci in its frontend once it can reach the registry."; exit 1; }; \
 	fi
 
+# Runs the worktree's Go backend on the first free port from 8091 against a
+# throwaway copy of the dev state, and prints the VITE_API_PROXY_TARGET line for
+# the worktree's vite. SignalK points at a black hole unless `LIVE=1`.
+# Rules in scripts/preview-backend.sh.
+preview-backend:
+	@LIVE="$(LIVE)" sh scripts/preview-backend.sh start "$(NAME)"
+
+preview-backend-stop:
+	@sh scripts/preview-backend.sh stop "$(NAME)"
+
 # Exits 1 and lists each package whose installed version differs from
 # DIR's package-lock.json. DIR defaults to this checkout's frontend.
 check-frontend-deps:
 	@node scripts/check-frontend-deps.mjs "$(or $(DIR),frontend)"
 
-# The backend checks before a PR: go vet and go test -short. See scripts/check.sh.
+# The backend checks before a PR: go vet and go test -short, shuffled. See scripts/check.sh.
 check-backend:
 	@sh scripts/check.sh backend
 

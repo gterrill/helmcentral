@@ -106,6 +106,7 @@ section before writing or reviewing:
 - Dashboard tiles, Tailwind classes, colours, type sizes and chart labels:
   **High-Density Tailwind UI/UX Specification**.
 - Anything saved to disk, a store or a Mate transcript: **Saved Data**.
+- Pointer, touch or drag handling on a map or chart: **Map And Gesture Input**.
 
 ## Modern Web Guidance
 
