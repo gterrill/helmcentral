@@ -73,7 +73,9 @@ the picker. Save stays available, because the boat may be quiet for a good
 reason.
 
 **The tab is called "Alternator & more".** The picker sits at the top, the five
-reading rows follow, then the battery, transmission and exhaust rows.
+reading rows follow, then the battery, transmission and exhaust rows. ADR 0264
+later replaced the tabs with the card itself. The picker is now the editor of
+an "Alternator" slot above its five rows.
 
 ## Alternatives rejected
 

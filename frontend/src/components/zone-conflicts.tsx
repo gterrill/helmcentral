@@ -1,7 +1,7 @@
 import { ChoiceList } from '@/components/patterns'
 import { FieldDescription } from '@/components/ui/field'
 import type { ZoneChoice } from '@/hooks/use-slot-zone-editing'
-import type { TileZonePlan } from '@/lib/equipment-tiles'
+import type { TileZoneHeld, TileZonePlan } from '@/lib/equipment-tiles'
 import { cn } from '@/lib/utils'
 
 interface ZoneConflictsProps {
@@ -9,7 +9,7 @@ interface ZoneConflictsProps {
   choices: Record<number, ZoneChoice>
   onChoose: (index: number, choice: ZoneChoice) => void
   /** Labels of readings whose zones this tile holds while it has no equipment. */
-  heldWithoutItem: string[]
+  heldWithoutItem: TileZoneHeld[]
   className?: string
 }
 
@@ -26,13 +26,13 @@ export function ZoneConflicts({ plan, choices, onChoose, heldWithoutItem, classN
     <div data-testid="zone-migration" className={cn('grid gap-2 rounded-md border border-amber-500/40 bg-amber-50/60 p-3 text-sm dark:bg-amber-950/30', className)}>
       {heldWithoutItem.length > 0 && (
         <FieldDescription>
-          This tile keeps its zones ({heldWithoutItem.join(', ')}) and they still raise their alarms. Choose the equipment
+          This tile keeps its zones ({heldWithoutItem.map((h) => h.label).join(', ')}) and they still raise their alarms. Choose the equipment
           and they move to its profile.
         </FieldDescription>
       )}
       {plan.stays.length > 0 && (
         <FieldDescription>
-          Zones on {plan.stays.join(', ')} stay on this tile, and keep raising their alarms, until the equipment has a
+          Zones on {plan.stays.map((s) => s.label).join(', ')} stay on this tile, and keep raising their alarms, until the equipment has a
           profile with a gauge for them. They move the first time you save this tile after that.
         </FieldDescription>
       )}

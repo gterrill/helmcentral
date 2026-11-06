@@ -23,6 +23,8 @@ interface EquipmentPickerProps {
   value: string
   onChange: (id: string) => void
   ctx: EquipmentTileContext
+  /** The empty choice's text, for a field whose purpose is narrower than its kind ("Pick the exhaust sensor…"). */
+  placeholder?: string
 }
 
 /**
@@ -33,7 +35,7 @@ interface EquipmentPickerProps {
  * changes the item itself, for every tile and feature that uses it, and the
  * notice says so. It is the same field as the source on the item's own page.
  */
-export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx }: EquipmentPickerProps) {
+export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx, placeholder }: EquipmentPickerProps) {
   const mapped = ctx.items.filter((i) => i.source_kind === kind)
   const chosen = ctx.items.find((i) => i.id === value)
   // Items with no source are offered only if they could be this kind of
@@ -54,7 +56,7 @@ export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx }:
           value={chosen ? chosen.id : ''}
           onChange={(e) => onChange(e.target.value)}
         >
-          <option value="">Pick {noun}…</option>
+          <option value="">{placeholder ?? `Pick ${noun}…`}</option>
           {chosen && chosen.signalk_source !== '' && chosen.source_kind !== kind && (
             <option value={chosen.id}>{chosen.name} (not {noun})</option>
           )}

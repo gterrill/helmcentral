@@ -7,7 +7,9 @@ whose equipment model the tile's slots use. Supersedes the layout in ADR 0054
 section 5a (the telltale strip) and ADR 0061 (the straight fuel rail). The rest
 of ADR 0054 stands: one tile is one engine, every slot is a `GaugeWidgetConfig`,
 zones are the alarm source (ADR 0050), skin tokens (ADR 0060), colour is state
-only (ADR 0080), engine off (ADR 0163-a).
+only (ADR 0080), engine off (ADR 0163-a). The settings dialog this ADR
+describes as tabs was rebuilt around the card itself in
+[ADR 0264](0264-the-engine-cluster-settings-dialog-is-the-card.md).
 
 ## Context
 

@@ -15,6 +15,7 @@ import {
   withGaugeZones,
   type EquipmentTileContext,
   type TileItem,
+  type TileZoneHeld,
 } from '@/lib/equipment-tiles'
 
 interface ZoneEdit {
@@ -39,22 +40,43 @@ export type ZoneChoice = 'profile' | 'tile'
  * linked, so there is no separate action to remember. Nothing is dropped
  * without a choice.
  */
-export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | undefined, slots: readonly GaugeWidgetConfig[] = [], paths: readonly { path: string }[] = []) {
+export function useSlotZoneEditing(
+  ctx: EquipmentTileContext, item: TileItem | undefined, slots: readonly GaugeWidgetConfig[] = [], paths: readonly { path: string }[] = [],
+  /**
+   * A stable name for each slot, in the order of `slots`. The operator's choices are
+   * kept against it, so adding or removing a slot doesn't move a choice onto
+   * another. Absent, a slot is its position in the list.
+   */
+  keys?: readonly string[],
+) {
   const profile = item ? profileOf(ctx, item) : undefined
   const [edits, setEdits] = useState<Record<string, ZoneEdit>>({})
-  const [choices, setChoices] = useState<Record<number, ZoneChoice>>({})
+  const [chosen, setChosen] = useState<Record<string, ZoneChoice>>({})
+  const keyAt = useCallback((index: number) => keys?.[index] ?? String(index), [keys])
 
   // A different item or profile is a different set of zones.
   const profileId = profile?.id ?? ''
   useEffect(() => {
     setEdits({})
-    setChoices({})
+    setChosen({})
   }, [item?.id, profileId])
+
+  // The choices as the plan reads them, by position in the list as it is now.
+  const choices = useMemo(() => {
+    const byPosition: Record<number, ZoneChoice> = {}
+    slots.forEach((_, index) => {
+      const choice = chosen[keyAt(index)]
+      if (choice !== undefined) byPosition[index] = choice
+    })
+    return byPosition
+  }, [slots, chosen, keyAt])
 
   const plan = useMemo(() => planTileZones(item ? profile : undefined, item ? slots : []), [item, profile, slots])
   // Zones are only held while there is no item to hold them for (stays).
   const heldWithoutItem = useMemo(
-    () => (item ? [] : slots.filter((s) => (s.zones?.length ?? 0) > 0).map((s) => s.label.trim() || (s.suffix ?? ''))),
+    (): TileZoneHeld[] => (item
+      ? []
+      : slots.flatMap((s, index) => ((s.zones?.length ?? 0) > 0 ? [{ index, label: s.label.trim() || (s.suffix ?? '') }] : []))),
     [item, slots],
   )
 
@@ -116,5 +138,5 @@ export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | u
     return cleared
   }, [profile, edits, plan, choices])
 
-  return { profile, modeFor, commit, dirty, plan, choices, setChoice: (index: number, choice: ZoneChoice) => setChoices((c) => ({ ...c, [index]: choice })), unresolved, heldWithoutItem }
+  return { profile, modeFor, commit, dirty, plan, choices, setChoice: (index: number, choice: ZoneChoice) => setChosen((c) => ({ ...c, [keyAt(index)]: choice })), unresolved, heldWithoutItem }
 }

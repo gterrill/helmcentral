@@ -312,12 +312,12 @@ describe('zones a converted tile still holds', () => {
     const plan = planTileZones(bare, [{ ...heldOil, unit: 'furlongs' }])
     expect(plan.moves).toEqual([])
     expect(plan.conflicts).toEqual([])
-    expect(plan.stays).toEqual(['Oil'])
+    expect(plan.stays).toEqual([{ index: 0, label: 'Oil' }])
   })
 
   it('stays on the tile when there is no profile, or no gauge for the reading', () => {
-    expect(planTileZones(undefined, [heldOil]).stays).toEqual(['Oil'])
-    expect(planTileZones(bare, [{ ...heldOil, suffix: 'exhaust' }]).stays).toEqual(['Oil'])
+    expect(planTileZones(undefined, [heldOil]).stays).toEqual([{ index: 0, label: 'Oil' }])
+    expect(planTileZones(bare, [{ ...heldOil, suffix: 'exhaust' }]).stays).toEqual([{ index: 0, label: 'Oil' }])
   })
 })
 
