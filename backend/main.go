@@ -58,6 +58,7 @@ func main() {
 	}
 
 	e := echo.New()
+	e.IPExtractor = clientIPExtractor()
 	port := getEnv("PORT", "8080")
 
 	// Fail-fast startup guard (ADR 0141): refuse to start against a
