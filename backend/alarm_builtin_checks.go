@@ -5,10 +5,11 @@ package main
 // check from a rule the operator has since deleted. Add an id here when a new
 // built-in check starts raising alarms.
 var builtInAlarmCheckIDs = map[string]bool{
-	collisionProfileRuleID: true,
-	watchdogRuleID:         true,
-	anchorWatchStateRuleID: true,
-	anchorDragRuleID:       true,
+	collisionProfileRuleID:   true,
+	watchdogRuleID:           true,
+	anchorWatchStateRuleID:   true,
+	anchorDragRuleID:         true,
+	anchorPositionLostRuleID: true,
 }
 
 func isBuiltInAlarmCheck(ruleID string) bool {

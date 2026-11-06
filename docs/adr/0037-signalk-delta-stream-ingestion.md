@@ -35,6 +35,8 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 
    To avoid masking stream failures with REST data, `signalKSelfPayload` returns an error whenever the snapshot is empty. `fetchSignalKVesselState` routes that into `criticalVesselState`, freezing position at the last trusted fix so a stream outage does not appear as a jump and trip the anchor alarm. This follows `AGENTS.md`'s Fallback Policy.
 
+   The frozen position hides the outage from the drag check, so a lost fix needs its own alarm: ADR 0038 describes Anchor Position Lost, which raises after 60 s without a trusted fix while an anchor watch is active.
+
 7. **REST survives in exactly one place: probing.** Connection *setup* has to reach a server that is not the configured one and has no stream open — discovery names every host it finds on the LAN, and the settings screen verifies a new address before saving it (ADR 0028). Answering either from the snapshot would report the currently configured vessel, so discovery would label every result with the same boat name and a broken address would validate clean and take the dashboard offline on save. `backend/signalk_probe.go` holds `probeSignalKTree`/`probeSignalKReachable`/`probeSignalKVesselName` for that, and nothing else may use them.
 
    The tracks plugin endpoint (`/signalk/v1/api/tracks`, read by `fetchSignalKAISTrails`) also stayed REST: it served historical track geometry, which deltas do not carry at all. ADR 0263 later removed that read.

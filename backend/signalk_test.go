@@ -2995,3 +2995,50 @@ func TestFetchSignalKVesselState_AbsentApparentWindReadsUnknownNotCalm(t *testin
 		t.Fatalf("expected no wind side when absent, got %q", state.WindSide)
 	}
 }
+
+// lookupNumber answers -1 for a missing field, which is inside the latitude
+// range, so a target with no longitude used to pass as a vessel at lon -1.
+func TestFetchSignalKNearbyVessels_SkipsTargetsWithAMissingCoordinate(t *testing.T) {
+	body := []byte(`{
+		"self": {"name": "Pikorua"},
+		"urn:mrn:imo:mmsi:111111111": {
+			"mmsi": "111111111",
+			"name": "NO LON",
+			"navigation": {"position": {"value": {"latitude": -21.592353}}}
+		},
+		"urn:mrn:imo:mmsi:222222222": {
+			"mmsi": "222222222",
+			"name": "NO LAT",
+			"navigation": {"position": {"value": {"longitude": -1.01}}}
+		},
+		"urn:mrn:imo:mmsi:333333333": {
+			"mmsi": "333333333",
+			"name": "SENTINEL",
+			"navigation": {"position": {"value": {"latitude": -1, "longitude": -1}}}
+		},
+		"urn:mrn:imo:mmsi:444444444": {
+			"mmsi": "444444444",
+			"name": "GOOD",
+			"navigation": {"position": {"value": {"latitude": -21.592353, "longitude": -1.01}}}
+		}
+	}`)
+	seedVesselTrees(t, string(body))
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, -1.0, time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 || vessels[0].Mmsi != "444444444" {
+		t.Fatalf("expected only the target with a full position, got %+v", vessels)
+	}
+}
+
+// Ranges measured from the no-fix sentinel are meaningless, so the fetch
+// refuses it instead of ranking targets around a place the boat is not.
+func TestFetchSignalKNearbyVessels_RefusesAnUnusableOwnPosition(t *testing.T) {
+	seedVesselTrees(t, `{"self": {"name": "Pikorua"}}`)
+
+	if _, err := fetchSignalKNearbyVessels(-1, -1, time.Now().UTC(), nil); err == nil {
+		t.Fatalf("expected an error for the -1,-1 own position")
+	}
+}

@@ -20,8 +20,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   release and replace the one in your weather plugins folder. A plugin you
   wrote yourself should send `null` for a wind direction it doesn't have.
 
+### Added
+
+- **Anchor Position Lost alarm.** With an anchor watch set, Helmcentral now
+  raises an alarm when the GPS fix has been missing or untrustworthy for a full
+  minute. Before, a dead or jammed GPS left the anchor watch quietly frozen,
+  and a dragging boat raised nothing. The alarm says the position is unknown,
+  not that you're dragging. It reaches you through the same channels as the drag
+  alarm, and it clears when a good fix returns. A drag alarm already sounding
+  stays up until then.
+
 ### Fixed
 
+- **The SignalK stream alarm now fires when your own instruments go quiet.**
+  Other boats' AIS traffic used to keep the watchdog satisfied, so a dead
+  instrument feed in a busy anchorage raised nothing. The alarm now also fires
+  when SignalK never connects after a restart, such as after a power cut.
+- **Drop anchor no longer accepts a position with no fix.** The Drop button is
+  greyed out while GPS has no fix or the fix isn't trusted, and the server
+  refuses an anchor set at an unusable position. The Route and Nearby tiles
+  no longer treat a boat with no fix as sitting at 1°S, 1°W.
+- **Tracks and the Nearby list ignore a missing fix.** A boat with no fix no
+  longer adds a point to its track or ranks other boats around a made-up
+  position, and an AIS target missing a coordinate is left out.
 - **A wind from due north now shows as N on the forecast.** The hourly strip,
   the day cards and the current conditions showed "—" for a wind from exactly
   0°. Mate and the passage check already read it correctly. An hour where the

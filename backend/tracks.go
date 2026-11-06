@@ -186,8 +186,7 @@ func sampleTracks(settingsPath string) {
 		observeLiveTrack(globalSignalKSnapshot, state, settingsPath, now)
 	}
 
-	if err == nil && state.Latitude >= -90 && state.Latitude <= 90 &&
-		state.Longitude >= -180 && state.Longitude <= 180 {
+	if err == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
 		recordTrackSelf(state.Latitude, state.Longitude)
 
 		// The anchor swing trail (ADR 0199) is stored only while a watch is on.
@@ -198,13 +197,8 @@ func sampleTracks(settingsPath string) {
 		}
 
 		// Place name resolution (place_name.go) runs here, on the server's
-		// own poll tick, per docs/adr/0056 - it needs a real fix (not the
-		// -1,-1/0,0 "no data yet" sentinels the loose range check above
-		// still lets through), so it's gated separately.
-		geoname := ""
-		if hasUsableVesselPosition(state.Latitude, state.Longitude) {
-			geoname = updateTickPlaceName(state.Latitude, state.Longitude)
-		}
+		// own poll tick, per docs/adr/0056.
+		geoname := updateTickPlaceName(state.Latitude, state.Longitude)
 
 		// One fetch of the nearby vessels serves both the sighting log and the
 		// anchor watch's AIS tracks (ADR 0263); each recorder guards itself.

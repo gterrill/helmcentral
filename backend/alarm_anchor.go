@@ -23,6 +23,14 @@ const (
 	anchorDragBufferMeters = 4.572
 
 	anchorDragCheckInterval = 5 * time.Second
+
+	anchorPositionLostRuleID = "helmcentral:anchor-position-lost"
+	anchorPositionLostPath   = "notifications.navigation.anchorPosition"
+
+	// How long the fix must stay missing or untrusted, without a break, before
+	// the position-lost alarm raises. A GPS resettling after a brief dropout
+	// should not wake anyone.
+	anchorPositionLostDelay = 60 * time.Second
 )
 
 type anchorDragWatcher struct {
@@ -68,8 +76,11 @@ func (w *anchorDragWatcher) check(now time.Time) (alarmEvent, bool) {
 
 	// A lost fix is not a drag. The position freezes at its last trusted value
 	// during an outage (ADR 0037), so treating that as movement would cry wolf
-	// exactly when the operator can least verify it — and the stream watchdog
-	// already reports the outage itself.
+	// exactly when the operator can least verify it. The outage itself is
+	// reported by anchorPositionWatcher below, not here, and an already-raised
+	// drag alarm stays raised until a trusted fix says the boat is back inside
+	// the circle. (The stream watchdog only notices when the whole SignalK
+	// stream goes quiet, so it does not cover a dead or untrusted GPS.)
 	if !ok || gnssCritical {
 		return alarmEvent{}, false
 	}
@@ -131,8 +142,100 @@ func (w *anchorDragWatcher) transition(dragging bool, distance float64, now time
 	}, true
 }
 
+// anchorPositionWatcher raises a separate alarm when an active anchor watch has
+// had no trusted fix for anchorPositionLostDelay. The drag check stands down on
+// a lost fix (a lost fix is not a drag), which at 3am would leave a dragging
+// boat silent; this alarm says so plainly without claiming a drag.
+//
+// A drag alarm already raised is left alone during the outage: it keeps
+// showing, neither cleared nor re-evaluated, until a trusted fix lets the drag
+// check judge the real position. Cancelling the watch clears both.
+type anchorPositionWatcher struct {
+	anchor   func() *anchorWatchData
+	position func() (lat float64, lon float64, gnssCritical bool, ok bool)
+
+	// lostSince is when the current unbroken run of missing or untrusted fixes
+	// began; zero while the fix is good or no watch is active.
+	lostSince time.Time
+	raised    bool
+}
+
+func newAnchorPositionWatcher() *anchorPositionWatcher {
+	drag := newAnchorDragWatcher()
+	return &anchorPositionWatcher{anchor: drag.anchor, position: drag.position}
+}
+
+func (w *anchorPositionWatcher) check(now time.Time) (alarmEvent, bool) {
+	if w.anchor() == nil {
+		return w.settle(now)
+	}
+
+	_, _, gnssCritical, ok := w.position()
+	if ok && !gnssCritical {
+		return w.settle(now)
+	}
+
+	if w.lostSince.IsZero() {
+		w.lostSince = now
+	}
+	if w.raised || now.Sub(w.lostSince) < anchorPositionLostDelay {
+		return alarmEvent{}, false
+	}
+	w.raised = true
+
+	rule := w.rule()
+	return alarmEvent{
+		Kind: alarmEventRaised,
+		Rule: rule,
+		Status: alarmStatus{
+			RuleID:   rule.ID,
+			Label:    rule.Label,
+			Path:     rule.Path,
+			Phase:    alarmPhaseActive,
+			State:    alarmStateAlarm,
+			Message:  "Position unknown. The anchor watch can't tell whether the boat is holding.",
+			RaisedAt: now,
+		},
+	}, true
+}
+
+// settle ends an outage: the timer restarts, and a raised alarm clears.
+func (w *anchorPositionWatcher) settle(now time.Time) (alarmEvent, bool) {
+	w.lostSince = time.Time{}
+	if !w.raised {
+		return alarmEvent{}, false
+	}
+	w.raised = false
+
+	rule := w.rule()
+	return alarmEvent{
+		Kind: alarmEventCleared,
+		Rule: rule,
+		Status: alarmStatus{
+			RuleID:  rule.ID,
+			Label:   rule.Label,
+			Path:    rule.Path,
+			Phase:   alarmPhaseNormal,
+			State:   alarmStateNormal,
+			Message: "Position restored",
+		},
+	}, true
+}
+
+func (w *anchorPositionWatcher) rule() alarmRule {
+	return alarmRule{
+		ID:      anchorPositionLostRuleID,
+		Enabled: true,
+		Label:   "Anchor Position Lost",
+		Path:    anchorPositionLostPath,
+		State:   alarmStateAlarm,
+		Methods: []string{"visual", "sound"},
+	}
+}
+
 func startAnchorDragWatcher(ctx context.Context, interval time.Duration) {
 	watcher := newAnchorDragWatcher()
+	positionWatcher := newAnchorPositionWatcher()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -143,6 +246,9 @@ func startAnchorDragWatcher(ctx context.Context, interval time.Duration) {
 			return
 		case now := <-ticker.C:
 			if event, ok := watcher.check(now.UTC()); ok {
+				recordAlarmEvent(event, now.UTC())
+			}
+			if event, ok := positionWatcher.check(now.UTC()); ok {
 				recordAlarmEvent(event, now.UTC())
 			}
 		}

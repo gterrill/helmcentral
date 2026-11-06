@@ -1337,3 +1337,19 @@ func TestSetAnchorWatch_DropAfterRaiseResetsRodeAndConditions(t *testing.T) {
 		t.Fatalf("expected a new anchorage to start at seabed_type sand, got %q", got)
 	}
 }
+
+// -1,-1 is the "no fix" sentinel and 0,0 the unset value: an anchor dropped
+// there would be watched against a place the boat is not.
+func TestSetAnchorWatch_RejectsAnUnusablePosition(t *testing.T) {
+	anchorTestEnv(t, 0)
+
+	for _, pos := range [][2]float64{{-1, -1}, {0, 0}} {
+		code, resp := postAnchorWatch(t, map[string]any{"lat": pos[0], "lon": pos[1]})
+		if code != http.StatusBadRequest {
+			t.Fatalf("%v: expected 400, got %d: %+v", pos, code, resp)
+		}
+		if msg, _ := resp["error"].(string); !strings.Contains(msg, "usable") {
+			t.Fatalf("%v: the error should say the position is not usable, got %q", pos, msg)
+		}
+	}
+}

@@ -166,12 +166,12 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   const dragDistanceLabel = formatDragDistance(distanceMeters, radiusMeters, isImperial)
 
   const handleDropHere = useCallback(() => {
-    if (lat === null || lon === null) return
+    if (lat === null || lon === null || gnssCritical) return
     void setAnchorHere(lat, lon, {
       planningDepthM: depthMeters,
       planningTideHeightFt: tideHeightFtOrNull(tide),
     })
-  }, [lat, lon, setAnchorHere, depthMeters, tide])
+  }, [lat, lon, gnssCritical, setAnchorHere, depthMeters, tide])
 
   // Nothing truthful to center a map on without either a live fix or an
   // anchor point — falls back from the live fix to the anchor (e.g. GPS lost
@@ -339,7 +339,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           <AnchorDropRaiseButton
             className="w-full"
             anchorActive={false}
-            canDrop={lat !== null && lon !== null}
+            canDrop={lat !== null && lon !== null && !gnssCritical}
             onDrop={handleDropHere}
           />
         </div>

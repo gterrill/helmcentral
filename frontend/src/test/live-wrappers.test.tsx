@@ -44,7 +44,13 @@ vi.mock('@/hooks/use-anchor-map-inputs', async (importOriginal) => {
 })
 // The maps and the page are lazy chunks that pull in maplibre; the wrappers hand them their props before they load.
 vi.mock('@/components/anchor-watch-map', () => ({ AnchorWatchMap: () => null }))
-vi.mock('@/components/anchor-watch-drawer', () => ({ AnchorWatchDrawer: () => null }))
+const drawerSeen: Array<{ canDrop: boolean }> = []
+vi.mock('@/components/anchor-watch-drawer', () => ({
+  AnchorWatchDrawer: (props: { canDrop: boolean }) => {
+    drawerSeen.push(props)
+    return null
+  },
+}))
 
 // The Nearby map's own chunk pulls in maplibre; the wrapper is what these tests read.
 vi.mock('@/components/poi-map-tile-impl', () => ({ default: () => null }))
@@ -150,6 +156,49 @@ describe.each(Object.entries(wrappers))('%s hands its map the watch at the live 
     expect(last).not.toBe(first)
     expect(last.distanceMeters).toBeGreaterThan(first.distanceMeters ?? 0)
     expect(last.anchorState).toBe('set')
+  })
+})
+
+describe('Drop needs a trusted fix', () => {
+  beforeEach(() => { drawerSeen.length = 0 })
+
+  async function mountDrawer() {
+    landWatch()
+    render(<Suspense fallback={null}><LiveAnchorWatchDrawer {...drawerProps} /></Suspense>)
+    await act(async () => {})
+  }
+
+  it('lets the drawer drop on a good fix', async () => {
+    await mountDrawer()
+    emitFix(-20.2747, 149.0737)
+    expect(drawerSeen[drawerSeen.length - 1].canDrop).toBe(true)
+  })
+
+  it('refuses a drop on the -1,-1 no-fix pair', async () => {
+    await mountDrawer()
+    emitFix(-1, -1)
+    expect(drawerSeen[drawerSeen.length - 1].canDrop).toBe(false)
+  })
+
+  it('refuses a drop while the GNSS critical alert is set', async () => {
+    await mountDrawer()
+    stream.emit('vessel-state', { latitude: -20.2747, longitude: 149.0737, gnss_critical_alert: true })
+    expect(drawerSeen[drawerSeen.length - 1].canDrop).toBe(false)
+  })
+
+  it('disables the tile Drop button on the no-fix pair and under the critical alert', async () => {
+    landWatch()
+    render(<Suspense fallback={null}><LiveAnchorWatchTile {...tileProps} /></Suspense>)
+    await act(async () => {})
+
+    emitFix(-20.2747, 149.0737)
+    expect(screen.getByRole('button', { name: 'Drop' })).toBeEnabled()
+
+    emitFix(-1, -1)
+    expect(screen.getByRole('button', { name: 'Drop' })).toBeDisabled()
+
+    act(() => { stream.emit('vessel-state', { latitude: -20.2747, longitude: 149.0737, gnss_critical_alert: true }) })
+    expect(screen.getByRole('button', { name: 'Drop' })).toBeDisabled()
   })
 })
 
