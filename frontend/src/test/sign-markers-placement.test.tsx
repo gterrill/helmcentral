@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PhotoMoment } from '@/components/passages/photo-moment'
 import { SignMarkers } from '@/components/passages/sign-markers'
 import { signCardBox, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { cardModes } from '@/lib/sign-modes'
 import { signNoteLines } from '@/lib/sign-note'
 import { momentView } from '@/lib/replay-time'
 
@@ -65,6 +66,29 @@ describe('SignMarkers placement', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('hides the card and its leader while its photo moment grows it, and keeps the dot and its place', () => {
+    const sign = photoSign()
+    const { rerender } = mount(sign)
+    observeCard(sign)
+    const before = placed()
+    const markers = (momentId: string | null) => <SignMarkers cards={[resolvedOf(sign)]} pins={[]} openId={null} momentId={momentId} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />
+    rerender(markers('s1'))
+    expect(wrapper().style.visibility).toBe('hidden')
+    expect(leader()).toBeNull()
+    expect(placed()).toEqual(before)
+    expect(cardModes.get('s1')).toBeDefined()
+    rerender(markers(null))
+    expect(wrapper().style.visibility).toBe('')
+    expect(leader()).not.toBeNull()
+  })
+
+  it('shows the other cards during a photo moment', () => {
+    render(<SignMarkers cards={[resolvedOf(photoSign()), resolvedOf(photoSign({ id: 's2', title: 'Bommie' }))]} pins={[]} openId={null} momentId="s1" canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />)
+    const shown = (title: string) => (screen.getAllByTestId('sign-card').find((c) => c.textContent?.includes(title))!.parentElement as HTMLElement).style.visibility
+    expect(shown('Reef')).toBe('hidden')
+    expect(shown('Bommie')).toBe('')
   })
 
   it('places a card once its size is known, with no map move: slid left to stay inside, the leader on it', () => {

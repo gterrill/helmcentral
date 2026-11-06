@@ -607,6 +607,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
               cards={cards}
               pins={pins}
               openId={openId}
+              momentId={momentAt?.sign.id ?? null}
               canOpenPhoto={!replay.playing}
               still={reducedMotion}
               onOpenPhoto={(sign) => setPhotoSignId(sign.id)}

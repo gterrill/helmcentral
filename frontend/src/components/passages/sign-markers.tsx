@@ -28,11 +28,13 @@ const sameLayout = (a: Layout, b: Layout) => a.x === b.x && a.y === b.y && a.sca
  * whole inside the map as the camera moves, with the leader and dot staying on
  * the point. Sizes are cached (card by observer, map on resize), so a camera
  * move costs one projection and the placement arithmetic. */
-function SignCardMarker({ c, lift, z, opened, canOpenPhoto, still, onOpenPhoto, onClose }: {
+function SignCardMarker({ c, lift, z, opened, growing, canOpenPhoto, still, onOpenPhoto, onClose }: {
   c: ResolvedSign
   lift: number
   z: number
   opened: boolean
+  /** A photo moment is growing this card over the map: it is hidden here, but stays placed so the moment grows from its place. */
+  growing: boolean
   canOpenPhoto: boolean
   still: boolean
   onOpenPhoto: (sign: ReplaySign) => void
@@ -93,11 +95,11 @@ function SignCardMarker({ c, lift, z, opened, canOpenPhoto, still, onOpenPhoto, 
         <div
           ref={cardRef}
           className="absolute left-0 top-0"
-          style={{ transform: `translate(${layout.x}px, ${layout.y}px) scale(${layout.scale})`, transformOrigin: '0 0', visibility: layout.hidden ? 'hidden' : undefined }}
+          style={{ transform: `translate(${layout.x}px, ${layout.y}px) scale(${layout.scale})`, transformOrigin: '0 0', visibility: layout.hidden || growing ? 'hidden' : undefined }}
         >
           <SignCard sign={c.sign} canOpenPhoto={canOpenPhoto} still={still} onOpenPhoto={onOpenPhoto} onClose={opened ? onClose : undefined} noteLines={noteLines} maxWidthPx={mapW > 0 ? Math.max(0, mapW - 2 * SIGN_EDGE_MARGIN_PX) : undefined} />
         </div>
-        {layout.leader && !layout.hidden && (
+        {layout.leader && !layout.hidden && !growing && (
           <span
             data-testid="sign-leader"
             className="absolute left-0 top-0 h-px bg-foreground"
@@ -118,6 +120,8 @@ export interface SignMarkersProps {
   pins: ResolvedSign[]
   /** A pin the operator opened into its card. */
   openId: string | null
+  /** The sign whose photo moment is under way, if any. */
+  momentId?: string | null
   canOpenPhoto: boolean
   still: boolean
   onOpenPhoto: (sign: ReplaySign) => void
@@ -128,7 +132,7 @@ export interface SignMarkersProps {
 /** The signs as map markers: a card on a leader line from its point on the
  * track, or a pin. They are map markers, so they stay on their point through
  * pitch and terrain. */
-export function SignMarkers({ cards, pins, openId, canOpenPhoto, still, onOpenPhoto, onPinClick, onCloseOpen }: SignMarkersProps) {
+export function SignMarkers({ cards, pins, openId, momentId = null, canOpenPhoto, still, onOpenPhoto, onPinClick, onCloseOpen }: SignMarkersProps) {
   const shown = new Set(cards.map((c) => c.sign.id))
   const opened = openId && !shown.has(openId) ? pins.find((p) => p.sign.id === openId) : undefined
   return (
@@ -145,6 +149,7 @@ export function SignMarkers({ cards, pins, openId, canOpenPhoto, still, onOpenPh
           lift={SIGN_LIFT_PX[Math.min(i, SIGN_LIFT_PX.length - 1)]}
           z={10 + i}
           opened={c === opened}
+          growing={c.sign.id === momentId}
           canOpenPhoto={canOpenPhoto}
           still={still}
           onOpenPhoto={onOpenPhoto}
