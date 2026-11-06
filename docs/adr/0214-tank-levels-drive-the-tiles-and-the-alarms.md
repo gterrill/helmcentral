@@ -70,9 +70,9 @@ alarms.
 - A reading older than 120 seconds, the age the Tanks tile calls stale, raises
   nothing, and a live alarm is held rather than cleared by it. The silent
   sender is the Instruments Silent alarm's business, not a level alarm's.
-- The alarm reads the level as the tile does. Some senders publish 0-100
-  instead of SignalK's 0-1, so `tankLevelPercent` is the one place that decides
-  which a number is, and both the tile and an alarm-engine reader wrapper use it.
+- The alarm reads the level as the tile does. `tankLevelPercent` is the one
+  place that decides what a number means, and both the tile and an alarm-engine
+  reader wrapper use it. (Corrected 2026-11-07: see Correction below.)
 - **A tank is one alarm.** The rule carries two thresholds (`Value` for warn,
   `AlarmLevelValue` for alarm), and the engine moves the one alarm's severity
   between them, each level with its own 60 second dwell and 5 point deadband.
@@ -143,3 +143,20 @@ one operator and no installed base, so there is no migration.
   the tile does not colour by defaults.
 - The Alarms rules list shows each tank's rule, read-only, marked as coming
   from the tank levels.
+
+## Correction (2026-11-07)
+
+The first version of `tankLevelPercent` guessed the scale from each reading: a
+value up to 1 was a ratio, and anything above was a percentage. No sender on
+the boat publishes a percentage. Every tank declares `ratio` in SignalK, as the
+specification says, and fuel volume, passages and Mate's status already read the
+level as a ratio. The guess did harm: a 0-100 sender at 1 percent, or at 0.5,
+read as full or as 50 percent, so the low-fuel and low-water alarms stayed
+silent exactly when the tank was nearly empty.
+
+Every tank level is now a ratio from 0 to 1. A value outside that range, or NaN,
+is not a level, and the code does not clamp it. The Tanks tile leaves that tank
+out, the alarm sees no reading, Mate says the sender reports a level that cannot
+be read, and the watch charts skip the point. This matches how a negative level
+was already treated. A sender on the wrong scale therefore shows up as a missing
+tank instead of a believable wrong one.

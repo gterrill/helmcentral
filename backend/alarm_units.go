@@ -18,16 +18,35 @@ type operatorUnitEntry struct {
 	decimals int
 }
 
+// engineRevolutionsUnit stands in for "Hz" on an engine revolutions path in
+// alarm text, so the unit alone says RPM. It exists only on the alarm side:
+// charts and the paths list keep the SI unit the boat declares.
+const engineRevolutionsUnit = "rev/s"
+
+// alarmUnitForPath is the unit an alarm on path is worded in: the SI unit the
+// boat declares (unitForAlarmPath), except an engine's revolutions, whose Hz
+// the operator reads as RPM (isEngineRevolutionsPath is the one rule for that).
+func alarmUnitForPath(snapshot *signalKSnapshot, path string) string {
+	unit := unitForAlarmPath(snapshot, path)
+	if unit == "Hz" && isEngineRevolutionsPath(path) {
+		return engineRevolutionsUnit
+	}
+	return unit
+}
+
 var operatorUnitTable = map[string]operatorUnitEntry{
 	"Pa/s":  {"mb/hr", func(v float64) float64 { return v * 36 }, 1},
 	"Pa":    {"mb", func(v float64) float64 { return v / 100 }, 1},
 	"K":     {"°C", func(v float64) float64 { return v - 273.15 }, 1},
 	"m/s":   {"kts", func(v float64) float64 { return v * 1.943844 }, 1},
 	"ratio": {"%", func(v float64) float64 { return v * 100 }, 0},
-	"Hz":    {"RPM", func(v float64) float64 { return v * 60 }, 0},
-	"m3":    {"L", func(v float64) float64 { return v * 1000 }, 0},
-	"m3/s":  {"L/h", func(v float64) float64 { return v * 3600000 }, 1},
-	"s":     {"h", func(v float64) float64 { return v / 3600 }, 0},
+	"Hz":    {"Hz", func(v float64) float64 { return v }, 1},
+	// engineRevolutionsUnit is Hz that an engine's revolutions publish in,
+	// which the operator reads as RPM. A plain "Hz" (shore, inverter) stays hertz.
+	engineRevolutionsUnit: {"RPM", func(v float64) float64 { return v * 60 }, 0},
+	"m3":                  {"L", func(v float64) float64 { return v * 1000 }, 0},
+	"m3/s":                {"L/h", func(v float64) float64 { return v * 3600000 }, 1},
+	"s":                   {"h", func(v float64) float64 { return v / 3600 }, 0},
 	// deltaK and deltaPa are difference units, for a residual between two
 	// readings rather than an absolute one (the twin-engine differential
 	// detector). "K" above converts absolutely (subtracts 273.15), which is

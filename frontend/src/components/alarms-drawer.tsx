@@ -8,7 +8,7 @@ import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { StopShowingAlarm } from '@/components/stop-showing-alarm'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { alarmConditionSentence, alarmFooterText, formatAlarmReading, TANK_ALARM_RULE_PREFIX, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
+import { alarmConditionSentence, alarmFooterText, alarmUnitForPath, formatAlarmReading, TANK_ALARM_RULE_PREFIX, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { groupRulesByDomain } from '@/lib/alarm-rules-view'
 import { severityClass } from '@/lib/severity'
@@ -134,7 +134,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   // row and the edit form can both show the reading in operator units.
   const unitsByPath = useMemo(() => {
     const map = new Map<string, string | undefined>()
-    for (const path of signalKPaths) map.set(path.path, path.units)
+    for (const path of signalKPaths) map.set(path.path, alarmUnitForPath(path.path, path.units))
     return map
   }, [signalKPaths])
 

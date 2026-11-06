@@ -181,7 +181,7 @@ func buildVesselStatePayload() map[string]any {
 		WindAngleRelativeDeg: -1,
 		// True wind (ADR 0129 / ADR 0130) — see fetchSignalKVesselState's
 		// own comment on these fields for why they default to -1/"" rather
-		// than the apparent fields' 0/starboard fallback.
+		// than a calm 0. Apparent wind reads the same way when stale.
 		WindSpeedTrueKts:         -1,
 		WindAngleTrueDeg:         -1,
 		WindAngleTrueRelativeDeg: -1,

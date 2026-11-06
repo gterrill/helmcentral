@@ -374,17 +374,16 @@ func withTankAlarmBodies(statuses []alarmStatus) []alarmStatus {
 }
 
 // tankLevelPercent is the percentage a reading of currentLevel means. SignalK
-// publishes a ratio, but some senders publish 0-100, so a value over 1 is
-// already a percentage. The Tanks tile and the alarms both read it through
-// here, so they cannot disagree. A negative reading is not a level.
+// publishes the level as a ratio from 0 to 1, so 1 is full and 0.01 is one
+// percent. A number outside that range, or NaN, is not a level: it is reported
+// as no reading rather than clamped, so a sender on the wrong scale shows up as
+// a missing tank instead of a plausible wrong one. The Tanks tile and the
+// alarms both read it through here, so they cannot disagree.
 func tankLevelPercent(raw float64) (percent float64, ok bool) {
-	if raw < 0 || math.IsNaN(raw) {
+	if math.IsNaN(raw) || raw < 0 || raw > 1 {
 		return 0, false
 	}
-	if raw <= 1 {
-		raw *= 100
-	}
-	return math.Max(0, math.Min(100, roundTo1(raw))), true
+	return roundTo1(raw * 100), true
 }
 
 // tankLevelAlarmReader makes the alarm engine read a tank's currentLevel as the

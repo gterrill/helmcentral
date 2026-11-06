@@ -17,7 +17,8 @@ func TestFormatAlarmReading(t *testing.T) {
 		{300.15, "K", "27.0 °C"},
 		{5.144, "m/s", "10.0 kts"},
 		{0.5, "ratio", "50 %"},
-		{50, "Hz", "3000 RPM"},
+		{50, "rev/s", "3000 RPM"},
+		{50.1, "Hz", "50.1 Hz"},
 		{12.34, "V", "12.3 V"},
 		// deltaK and deltaPa are difference units, not absolute ones: a
 		// residual carried in K would otherwise convert through the -273.15
@@ -63,5 +64,28 @@ func TestOperatorUnitKnownAndUnknown(t *testing.T) {
 	}
 	if _, _, _, ok := operatorUnit(""); ok {
 		t.Fatalf("expected an empty unit to report ok=false")
+	}
+}
+
+// Only an engine's revolutions are read in RPM; a shore or inverter frequency
+// stays in hertz in every alarm sentence.
+func TestUnitForAlarmPath_OnlyEngineRevolutionsAreRPM(t *testing.T) {
+	s := newSignalKSnapshot()
+	const vessel = "vessels.urn:mrn:imo:mmsi:503000111"
+	s.setSelfContext(vessel)
+	declareUnit(s, vessel, "propulsion.port.revolutions", "Hz")
+	declareUnit(s, vessel, "electrical.shore.frequency", "Hz")
+	s.flushUnits()
+
+	rev := alarmUnitForPath(s, "propulsion.port.revolutions")
+	if got := formatAlarmReading(50, rev); got != "3000 RPM" {
+		t.Fatalf("engine revolutions alarm text = %q, want 3000 RPM", got)
+	}
+	shore := alarmUnitForPath(s, "electrical.shore.frequency")
+	if got := unitForAlarmPath(s, "propulsion.port.revolutions"); got != "Hz" {
+		t.Fatalf("charts must keep the declared unit, got %q", got)
+	}
+	if got := formatAlarmReading(49.5, shore); got != "49.5 Hz" {
+		t.Fatalf("shore frequency alarm text = %q, want 49.5 Hz", got)
 	}
 }

@@ -27,7 +27,7 @@ const recordTypeAlarmRule = "alarm_rule"
 
 // alarmRuleUnitFor is the SI unit the boat declares for a path, "" when it
 // has never declared one. Tests replace it.
-var alarmRuleUnitFor = func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) }
+var alarmRuleUnitFor = func(path string) string { return alarmUnitForPath(globalSignalKSnapshot, path) }
 
 func init() {
 	defaultRecordRegistry.register(alarmRuleRecordType())

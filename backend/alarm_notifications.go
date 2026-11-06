@@ -116,7 +116,7 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 		// the same reason a rule alarm's is (a Helmcentral echo of one of its
 		// own derived-path rules can turn up here before ownership filters it
 		// out on some other instance).
-		status.Unit = unitForAlarmPath(snapshot, status.Label)
+		status.Unit = alarmUnitForPath(snapshot, status.Label)
 		live = append(live, status)
 	}
 	out = live

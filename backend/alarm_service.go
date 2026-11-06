@@ -68,7 +68,7 @@ func evaluateAlarmsOnce(now time.Time) {
 	// both the snapshot and globalAlarmEngine itself per case, and a stale
 	// closure would resolve units against whichever snapshot existed when it
 	// was created rather than the one the test just installed.
-	globalAlarmEngine.unitFor = func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) }
+	globalAlarmEngine.unitFor = func(path string) string { return alarmUnitForPath(globalSignalKSnapshot, path) }
 
 	// derivedAwareAlarmReader rather than snapshotAlarmReader, so a rule can
 	// name a helmcentral.* path. Reading through the snapshot alone made those

@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,7 +225,7 @@ func TestStreamClientReconnectsAfterServerClosesConnection(t *testing.T) {
 
 	snapshot := newSignalKSnapshot()
 	client := testStreamClient(snapshot)
-	client.resolveURLs = func() (string, string) { return stub.wsURL(), "" }
+	client.resolveURLs = func() (string, string, error) { return stub.wsURL(), "", nil }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -244,7 +248,7 @@ func TestStreamClientRunReturnsPromptlyOnContextCancel(t *testing.T) {
 
 	snapshot := newSignalKSnapshot()
 	client := testStreamClient(snapshot)
-	client.resolveURLs = func() (string, string) { return stub.wsURL(), "" }
+	client.resolveURLs = func() (string, string, error) { return stub.wsURL(), "", nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -452,4 +456,40 @@ func TestStreamClientAcceptsDeltaLargerThanDefaultReadLimit(t *testing.T) {
 	waitFor(t, 2*time.Second, "oversized delta to reach the snapshot", func() bool {
 		return snapshotDepth(snapshot) == 2.5
 	})
+}
+
+// Unreadable settings must not send the stream to the default host: that would
+// dial a server the operator never chose and report it as the boat's.
+func TestStreamClientUnreadableSettingsIsAnErrorNotTheDefaultHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	if err := os.WriteFile(path, []byte("signalk: [unclosed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := newSignalKStreamClient(newSignalKSnapshot(), path)
+	if _, _, err := client.resolveURLs(); err == nil {
+		t.Fatal("expected an error for unreadable settings, got default URLs")
+	}
+}
+
+func TestStreamClientKeepsRetryingWhileSettingsAreUnreadable(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	client := testStreamClient(snapshot)
+	var calls atomic.Int32
+	client.resolveURLs = func() (string, string, error) {
+		calls.Add(1)
+		return "", "", errors.New("settings unreadable")
+	}
+	client.acquireToken = func(string) (string, error) {
+		t.Error("must not dial while the settings are unreadable")
+		return "", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go client.run(ctx)
+
+	waitFor(t, 1500*time.Millisecond, "resolver retried with backoff", func() bool { return calls.Load() >= 3 })
+	if connected, _ := snapshot.status(); connected {
+		t.Fatal("stream must read as disconnected while settings are unreadable")
+	}
 }

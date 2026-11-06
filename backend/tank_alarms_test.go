@@ -446,9 +446,9 @@ func TestStaleTankReadingRaisesNothing(t *testing.T) {
 	}
 }
 
-// The tile shows senders that publish 0-100 as well as 0-1; the alarm reads the
-// same percentage.
-func TestTankAlarmReaderNormalisesBothScales(t *testing.T) {
+// SignalK's currentLevel is a ratio from 0 to 1, whatever the sender. The
+// alarm reads it as the tile does; a number outside that range is not a level.
+func TestTankAlarmReaderReadsRatiosOnly(t *testing.T) {
 	read := tankLevelAlarmReader(func(path string) alarmSample {
 		switch path {
 		case "tanks.fuel.0.currentLevel":
@@ -457,6 +457,8 @@ func TestTankAlarmReaderNormalisesBothScales(t *testing.T) {
 			return alarmSample{Value: 45, Present: true}
 		case "tanks.fuel.2.currentLevel":
 			return alarmSample{Value: -1, Present: true}
+		case "tanks.fuel.3.currentLevel":
+			return alarmSample{Value: 0.01, Present: true}
 		case "tanks.fuel.0.capacity":
 			return alarmSample{Value: 1.2, Present: true}
 		}
@@ -465,8 +467,11 @@ func TestTankAlarmReaderNormalisesBothScales(t *testing.T) {
 	if v := read("tanks.fuel.0.currentLevel").Value; math.Abs(v-0.19) > 1e-9 {
 		t.Errorf("ratio sender: %v", v)
 	}
-	if v := read("tanks.fuel.1.currentLevel").Value; math.Abs(v-0.45) > 1e-9 {
-		t.Errorf("percent sender must read 0.45, got %v", v)
+	if v := read("tanks.fuel.3.currentLevel").Value; math.Abs(v-0.01) > 1e-9 {
+		t.Errorf("1%% must stay 0.01, not become 100%%: %v", v)
+	}
+	if read("tanks.fuel.1.currentLevel").Present {
+		t.Error("a level above 1 is not a ratio, so it is absent")
 	}
 	if read("tanks.fuel.2.currentLevel").Present {
 		t.Error("a negative level is absent, as on the tile")
@@ -474,8 +479,22 @@ func TestTankAlarmReaderNormalisesBothScales(t *testing.T) {
 	if v := read("tanks.fuel.0.capacity").Value; v != 1.2 {
 		t.Errorf("capacity is left alone: %v", v)
 	}
-	if body := tankAlarmBody(0.45, nil); body != "45%" {
-		t.Errorf("never 4500%%: %q", body)
+}
+
+func TestTankLevelPercent(t *testing.T) {
+	cases := []struct {
+		raw  float64
+		want float64
+		ok   bool
+	}{
+		{0, 0, true}, {0.005, 0.5, true}, {0.01, 1, true}, {0.45, 45, true}, {1, 100, true},
+		{1.5, 0, false}, {45, 0, false}, {-0.1, 0, false}, {math.NaN(), 0, false}, {math.Inf(1), 0, false},
+	}
+	for _, c := range cases {
+		got, ok := tankLevelPercent(c.raw)
+		if ok != c.ok || (ok && math.Abs(got-c.want) > 1e-9) {
+			t.Errorf("tankLevelPercent(%v) = %v, %v; want %v, %v", c.raw, got, ok, c.want, c.ok)
+		}
 	}
 }
 
