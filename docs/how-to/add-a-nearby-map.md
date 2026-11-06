@@ -55,8 +55,9 @@ group shows:
   listed even when it's outside the tile's range. It lists four, with "+N more"
   beside the heading when others qualify. The map still draws every contact it
   has. During an anchor watch, the AIS list holds every boat within 500 m of
-  your anchor as well as the 10 nearest to you. So the Vessels group can have
-  more boats to pick from.
+  your anchor as well as the 10 nearest to you, up to 40 boats. So the Vessels
+  group can have more boats to pick from. Boats the cap leaves out count in
+  "+N more".
 - Each row: the vessel's name on the left, and its distance and bearing from you
   on the right. A vessel with no name shows the short ID Helmcentral gives it. The
   bearing is left out when the vessel's position or yours isn't known.
@@ -76,6 +77,8 @@ group shows:
   Places keep their
   numbers, and the vessels aren't part of the highlight cycle, the arrow or how
   the map is framed.
+- Long names: when the list sits under the places, a long name takes a second
+  line. Beside the places it stays on one line and is cut short.
 - Names on the map: each ship marker shows the vessel's name below it. A place's
   name wins when the two would overlap.
 
@@ -83,15 +86,22 @@ When the group can't list vessels it says why, in this order:
 
 - **Loading…:** The tile hasn't heard from the AIS feed yet.
 - **AIS unavailable:** Helmcentral can't read AIS from SignalK.
+- **AIS silent for 25m:** SignalK is working but no vessel has reported for
+  over ten minutes, so the receiver may have stopped. The time is how long it
+  has been quiet. The list is empty because nothing has been heard, which isn't
+  the same as an empty sea.
+- **No AIS reports heard:** Helmcentral holds no AIS report from any vessel,
+  not even from beyond the tile's range.
 - **Vessels need a GNSS fix:** Your position isn't trustworthy, so every
   distance would be wrong. No vessels are listed.
 - **No vessels within 5 km:** The feed is working and nothing is in range. The
   distance is the smaller of the tile's range and the feed's.
 
-There's one limit to know about. If your AIS receiver goes silent while
-SignalK is still running, Helmcentral can't tell. The group reads "No vessels
-within" the range, as it would on an empty sea. If that looks wrong, check the
-receiver.
+A receiver that is working but has no boats near you reads "No vessels within"
+the range. Helmcentral tells that apart from a stopped receiver by how long
+it has been since any vessel reported, near you or far away. In a remote
+anchorage with no traffic at all, expect "AIS silent" after ten quiet minutes.
+That's the receiver or the sea, and Helmcentral can't tell which.
 
 ## What the map does during the summary cycle
 
