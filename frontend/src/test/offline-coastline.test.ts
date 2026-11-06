@@ -13,6 +13,7 @@ import {
   removeConfirmText,
   requestedLine,
   selectionAllowedAt,
+  squareContaining,
   squareKey,
   squareLabel,
   squareSelectable,
@@ -258,6 +259,22 @@ describe('selecting squares', () => {
     expect(grid.map((q) => squareKey(q.lat, q.lon)).sort()).toEqual(['-21,149', '-22,148', '-22,149'])
   })
 
+  it('wraps the grid and taps across the 180° meridian', () => {
+    const grid = gridSquares({ west: 178, south: -22, east: 182, north: -21 }, new Set(), SELECTABLE)
+    expect(grid.map((q) => squareKey(q.lat, q.lon)).sort()).toEqual(['-22,-179', '-22,-180', '-22,178', '-22,179'])
+    expect(squareContaining(-21.5, 181.5)).toEqual({ lat: -22, lon: -179 })
+    expect(squareContaining(-21.5, -181.5)).toEqual({ lat: -22, lon: 178 })
+    expect(squareContaining(-21.5, 148.2)).toEqual({ lat: -22, lon: 148 })
+  })
+
+  it('selects only the squares under a drag across the 180° meridian', () => {
+    // The map keeps counting past 180, so a drag's corners arrive unwrapped.
+    expect(squaresInBox({ lat: -22, lon: 179 }, { lat: -22, lon: 181 }, SELECTABLE)).toEqual(
+      ['-22,179', '-22,-180', '-22,-179'],
+    )
+    expect(squaresInBox({ lat: -22, lon: -181 }, { lat: -22, lon: -180 }, SELECTABLE)).toEqual(['-22,179', '-22,-180'])
+  })
+
   it('splits a mixed selection into download and remove, a waiting request counting as a remove', () => {
     const sum = summariseSelection(new Set(['-21,148', '-21,100', '-22,148', '-30,160']), status({ squares }))
     expect(sum.download).toEqual(['-30,160'])
@@ -282,11 +299,14 @@ describe('selecting squares', () => {
   it('states the counts in the confirms', () => {
     expect(downloadConfirmText({ requested: 12, already_requested: 0, held: 0, inland_skipped: 3 })).toContain('3 all-land squares skipped')
     expect(downloadConfirmText({ requested: 1, already_requested: 0, held: 0, inland_skipped: 0 })).not.toContain('skipped')
-    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 1, removeRequested: 0 })).toContain(
+    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 1, removeRequested: 0 }, 200)).toContain(
       '1 square is within 200 nm of the boat and will download again',
     )
-    expect(removeConfirmText({ download: [], remove: ['a'], removeInRange: 0, removeRequested: 0 })).not.toContain('again')
-    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 0, removeRequested: 2 })).toBe(
+    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 1, removeRequested: 0 }, 150)).toContain(
+      '1 square is within 150 nm of the boat and will download again',
+    )
+    expect(removeConfirmText({ download: [], remove: ['a'], removeInRange: 0, removeRequested: 0 }, 200)).not.toContain('again')
+    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 0, removeRequested: 2 }, 200)).toBe(
       '2 squares you asked for will no longer be downloaded.',
     )
   })

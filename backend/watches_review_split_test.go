@@ -22,6 +22,8 @@ func TestSplitWatchReview(t *testing.T) {
 		{"list has no opening", "1. Bank fell 4%\n2. Fridge up", "", "1. Bank fell 4%\n2. Fridge up"},
 		{"dash list has no opening", "- Bank fell 4%\n- Fridge up", "", "- Bank fell 4%\n- Fridge up"},
 		{"no. is not a sentence end", "Tank no. 2 fell overnight. Worth a look.", "Tank no. 2 fell overnight.", "Worth a look."},
+		{"No. before a number stays one sentence", "Use pump No. 2 now.", "Use pump No. 2 now.", ""},
+		{"no as an answer ends the sentence", "Shore power: no. House bank is fine.", "Shore power: no.", "House bank is fine."},
 		{"St. is not a sentence end", "Anchored off St. Helena overnight. Calm.", "Anchored off St. Helena overnight.", "Calm."},
 		{"approx. is not a sentence end", "approx. 13 V at dawn. Fine.", "approx. 13 V at dawn.", "Fine."},
 		{"emphasis opening", "*Quiet night.* Bank fell.", "Quiet night.", "Bank fell."},

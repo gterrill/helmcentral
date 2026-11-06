@@ -13,6 +13,7 @@ import {
   gridSquares,
   parseSquareKey,
   selectionAllowedAt,
+  squareContaining,
   squareKey,
   squarePolygon,
   squareSelectable,
@@ -164,6 +165,7 @@ export default function OfflineCoastlineMapImpl({
     const map = mapRef.current?.getMap?.()
     const box = containerRef.current?.getBoundingClientRect()
     if (!map || !box) return null
+    // Unwrapped, so a drag across the 180° meridian keeps its corners in order.
     const ll = map.unproject([clientX - box.left, clientY - box.top])
     return { lat: Math.floor(ll.lat), lon: Math.floor(ll.lng) }
   }
@@ -206,10 +208,11 @@ export default function OfflineCoastlineMapImpl({
       return
     }
     // A tap: toggle the one square.
-    const key = squareKey(drag.start.lat, drag.start.lon)
+    const tapped = squareContaining(drag.start.lat, drag.start.lon)
+    const key = squareKey(tapped.lat, tapped.lon)
     const next = new Set(drag.base)
     if (next.has(key)) next.delete(key)
-    else if (squareSelectable(selectable, drag.start.lat, drag.start.lon)) next.add(key)
+    else if (squareSelectable(selectable, tapped.lat, tapped.lon)) next.add(key)
     onSelectedChange?.(next)
   }
   const onPointerCancel = () => cancelDrag()

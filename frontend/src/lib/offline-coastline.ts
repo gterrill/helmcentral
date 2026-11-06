@@ -278,11 +278,16 @@ export function squareSelectable(b: SelectableBounds, lat: number, lon: number):
   return Number.isInteger(lat) && Number.isInteger(lon) && lat >= b.lat_min && lat <= b.lat_max && lon >= b.lon_min && lon <= b.lon_max
 }
 
-/** The selectable squares in the rectangle between two squares, either corner first. */
+/**
+ * The selectable squares in the rectangle between two squares, either corner
+ * first. The corners are the map's unwrapped longitudes, so a drag across the
+ * 180° meridian keeps its order; each square is wrapped as it is listed.
+ */
 export function squaresInBox(a: { lat: number; lon: number }, b: { lat: number; lon: number }, bounds: SelectableBounds): string[] {
   const out: string[] = []
   for (let lat = Math.min(a.lat, b.lat); lat <= Math.max(a.lat, b.lat); lat++) {
-    for (let lon = Math.min(a.lon, b.lon); lon <= Math.max(a.lon, b.lon); lon++) {
+    for (let unwrapped = Math.min(a.lon, b.lon); unwrapped <= Math.max(a.lon, b.lon); unwrapped++) {
+      const lon = Math.floor(wrapLongitude(unwrapped))
       if (squareSelectable(bounds, lat, lon)) out.push(squareKey(lat, lon))
     }
   }
@@ -301,7 +306,21 @@ export function selectionAllowedAt(b: ViewBounds): boolean {
   return Math.max(b.north - b.south, b.east - b.west) <= SELECT_MAX_SPAN_DEG
 }
 
-/** The not-held squares in view that can be selected, for the grid. */
+/** A longitude wrapped into [-180, 180): the map keeps counting past the antimeridian. */
+export function wrapLongitude(lng: number): number {
+  return ((((lng + 180) % 360) + 360) % 360) - 180
+}
+
+/** The 1° square holding a point, with the longitude wrapped first. */
+export function squareContaining(lat: number, lng: number): { lat: number; lon: number } {
+  return { lat: Math.floor(lat), lon: Math.floor(wrapLongitude(lng)) }
+}
+
+/**
+ * The not-held squares in view that can be selected, for the grid. A view
+ * across the 180° meridian reports longitudes past 180, so each square's
+ * longitude is wrapped; the map draws the square in every copy of the world.
+ */
 export function gridSquares(
   b: ViewBounds,
   held: ReadonlySet<string>,
@@ -309,7 +328,8 @@ export function gridSquares(
 ): Array<{ lat: number; lon: number }> {
   const out: Array<{ lat: number; lon: number }> = []
   for (let lat = Math.floor(b.south); lat < Math.ceil(b.north); lat++) {
-    for (let lon = Math.floor(b.west); lon < Math.ceil(b.east); lon++) {
+    for (let unwrapped = Math.floor(b.west); unwrapped < Math.ceil(b.east); unwrapped++) {
+      const lon = Math.floor(wrapLongitude(unwrapped))
       if (squareSelectable(bounds, lat, lon) && !held.has(squareKey(lat, lon))) out.push({ lat, lon })
     }
   }
@@ -381,7 +401,7 @@ export function downloadConfirmText(preview: RequestPreview): string {
 }
 
 /** The confirm text for removing held squares, saying when some will come back. */
-export function removeConfirmText(sum: SelectionSummary): string {
+export function removeConfirmText(sum: SelectionSummary, radiusNm: number): string {
   const held = sum.remove.length - sum.removeRequested
   const parts: string[] = []
   if (held > 0) parts.push(`${plural(held, 'held square', 'held squares')} will be deleted.`)
@@ -389,7 +409,7 @@ export function removeConfirmText(sum: SelectionSummary): string {
     parts.push(`${plural(sum.removeRequested, 'square you asked for', 'squares you asked for')} will no longer be downloaded.`)
   }
   if (sum.removeInRange > 0) {
-    parts.push(`${plural(sum.removeInRange, 'square is', 'squares are')} within 200 nm of the boat and will download again.`)
+    parts.push(`${plural(sum.removeInRange, 'square is', 'squares are')} within ${radiusNm} nm of the boat and will download again.`)
   }
   return parts.join(' ')
 }
