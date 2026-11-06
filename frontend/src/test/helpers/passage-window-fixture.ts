@@ -23,7 +23,7 @@ export function passageWindowPayload(): Record<string, unknown> {
             depart: '2026-10-23T06:00:00+10:00',
             arrive: '2026-10-23T14:30:00+10:00',
             state: 'no_go',
-            limiting: { factor: 'wind', sector: 'ahead', text: 'Wind SE 27 kn ahead · Cape Bowling Green → Cape Upstart' },
+            limiting: { factor: 'wind', sector: 'ahead', text: 'Wind 27 kn from SE, ahead · Cape Bowling Green → Cape Upstart' },
             not_checked: ['wave', 'wind_against_tide'],
           },
           {

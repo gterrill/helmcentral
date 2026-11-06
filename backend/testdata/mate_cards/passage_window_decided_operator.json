@@ -26,7 +26,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "ahead",
-              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+              "text": "Wind 25 kn from N, ahead · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -48,7 +48,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "ahead",
-              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+              "text": "Wind 25 kn from N, ahead · Alpha → Bravo"
             },
             "not_checked": [
               "wave",

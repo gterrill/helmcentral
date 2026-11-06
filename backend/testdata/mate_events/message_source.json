@@ -56,7 +56,7 @@
                   "limiting": {
                     "factor": "wind",
                     "sector": "ahead",
-                    "text": "Wind E 12 kn ahead · Cape Bowling Green → Cape Upstart"
+                    "text": "Wind 12 kn from E, ahead · Cape Bowling Green → Cape Upstart"
                   },
                   "not_checked": [
                     "gust",

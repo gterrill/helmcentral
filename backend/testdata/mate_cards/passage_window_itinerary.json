@@ -29,7 +29,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "astern",
-              "text": "Wind S 5 kn astern · Alpha → Bravo"
+              "text": "Wind 5 kn from S, astern · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -45,7 +45,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "astern",
-              "text": "Wind S 25 kn astern (marginal from 24.5) · Bravo → Charlie"
+              "text": "Wind 25 kn from S, astern (marginal from 24.5) · Bravo → Charlie"
             },
             "not_checked": [
               "wave",
@@ -67,7 +67,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "astern",
-              "text": "Wind S 25 kn astern (marginal from 24.5) · Alpha → Bravo"
+              "text": "Wind 25 kn from S, astern (marginal from 24.5) · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -83,7 +83,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "ahead",
-              "text": "Wind N 25 kn ahead · Bravo → Charlie"
+              "text": "Wind 25 kn from N, ahead · Bravo → Charlie"
             },
             "not_checked": [
               "wave",
@@ -105,7 +105,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "ahead",
-              "text": "Wind N 25 kn ahead · Alpha → Bravo"
+              "text": "Wind 25 kn from N, ahead · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -121,7 +121,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "abeam",
-              "text": "Wind E 30 kn abeam · Bravo → Charlie"
+              "text": "Wind 30 kn from E, abeam · Bravo → Charlie"
             },
             "not_checked": [
               "wave",
@@ -143,7 +143,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "abeam",
-              "text": "Wind E 30 kn abeam · Alpha → Bravo"
+              "text": "Wind 30 kn from E, abeam · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -195,7 +195,7 @@
             "limiting": {
               "factor": "gust",
               "sector": "astern",
-              "text": "Gusts 45 kn astern · Bravo → Charlie"
+              "text": "Gusts 45 kn from S, astern · Bravo → Charlie"
             },
             "not_checked": [
               "wave",
@@ -217,7 +217,7 @@
             "limiting": {
               "factor": "gust",
               "sector": "astern",
-              "text": "Gusts 45 kn astern · Alpha → Bravo"
+              "text": "Gusts 45 kn from S, astern · Alpha → Bravo"
             },
             "not_checked": [
               "wave",
@@ -233,7 +233,7 @@
             "limiting": {
               "factor": "wind",
               "sector": "astern",
-              "text": "Wind S 5 kn astern · Bravo → Charlie"
+              "text": "Wind 5 kn from S, astern · Bravo → Charlie"
             },
             "not_checked": [
               "wave",

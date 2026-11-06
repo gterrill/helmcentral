@@ -44,6 +44,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   one-hour squall shows in the range. A slow swing over the day reads "from X
   to Y" without a time. A steady day still reads as one short sentence. See
   [Forecast](docs/features/forecast.md).
+- **Mate describes the wind along a whole leg, not just its worst hour.** The
+  weather window now tells Mate how the wind lies on each leg: its direction and
+  speed range, and how many hours the leg runs with the wind ahead, abeam and
+  astern. Before, a northerly that was ahead for the first half hour out of a
+  creek and astern for the rest could come back as "dead to windward the whole
+  way". The lines on the card now read "Wind 16 kn from N, ahead" and "Gusts 16 kn
+  from N, ahead", so a gust names its direction too.
 - **The Engine Cluster settings now work from a picture of the card.** Click the
   ring, an arc, a readout card, the alternator, the battery, the exhaust or the
   fuel rail, and only that part's settings open beside it. The four tabs and the

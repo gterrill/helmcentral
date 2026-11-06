@@ -795,7 +795,8 @@ leg.
 The answer comes with a card under it, with one row for each departure day and
 one column for each leg. Every cell reads **GO**, **MARGINAL**, **NO-GO** or
 **NO DATA**. It also shows the departure and arrival times and the figure that
-decided it ("Wind SE 27 kn ahead · Cape Bowling Green → Cape Upstart").
+decided it ("Wind 27 kn from SE, ahead · Cape Bowling Green → Cape Upstart"). A
+gust reads the same way ("Gusts 32 kn from SE, ahead").
 
 The grading uses your [passage limits](../how-to/set-passage-limits.md): a
 no-go wind, and if you want it, a no-go wave height. You set these separately
@@ -806,6 +807,12 @@ knots can be a go on a downwind leg and a no-go on a beat.
 - **Gusts:** They're judged against the no-go wind plus 10 knots.
 - **Angles:** Mate works out the angle for each part of a leg, including after
   it rounds a headland.
+- **The whole leg:** The figure on the card is the one hour that decided the
+  cell. Mate also gets, for each leg, the range of wind direction and speed and
+  how many hours the leg runs with the wind ahead, abeam and astern. So a leg
+  that is astern for five and a half hours and ahead for the first half hour out
+  of a creek is described that way, not as a beat.
+  On a very long itinerary Mate may get only the verdicts.
 - **No limits set:** Until you set the limits, Mate says so and doesn't grade
   the trip.
 
