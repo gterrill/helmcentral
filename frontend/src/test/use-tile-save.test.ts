@@ -71,12 +71,6 @@ describe('useTileSave', () => {
     expect(result.current.error).toBe('again')
   })
 
-  test('fail shows an error from outside run', () => {
-    const { result } = renderHook(() => useTileSave('t1'))
-    act(() => result.current.fail('zones refused'))
-    expect(result.current.error).toBe('zones refused')
-  })
-
   test('opening another tile drops the busy state and the error of the last one', async () => {
     const { result, rerender } = renderHook(({ k }) => useTileSave(k), { initialProps: { k: 't1' as string | null } })
     await act(async () => { await result.current.run(() => Promise.reject(new Error('refused'))) })

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
- * The busy state of a tile dialog's Save (ADR 0260). `run` starts the task in
+ * The busy state of a tile dialog's Save. `run` starts the task in
  * the same tick, keeps `saving` true until it settles, and turns a rejection or
  * a throw into `error` for the dialog to show. A second `run` while one is out
  * is ignored, so Save cannot be submitted twice. Every tile dialog uses this
@@ -43,8 +43,5 @@ export function useTileSave(tileKey: string | null | undefined) {
     }
   }, [])
 
-  /** Shows an error from outside `run`. */
-  const fail = setError
-
-  return { saving, error, run, fail }
+  return { saving, error, run }
 }
