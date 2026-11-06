@@ -36,7 +36,7 @@ describe('AssistantPassageWindowCard', () => {
     expect(within(table).getAllByText('Townsville → Cape Upstart')[0]).toBeInTheDocument()
     expect(within(table).getByText('2 nights')).toBeInTheDocument()
     expect(within(table).queryByText(/1 night/)).toBeNull()
-    expect(within(table).getByText('Wind SE 27 kn ahead · Cape Bowling Green → Cape Upstart')).toBeInTheDocument()
+    expect(within(table).getByText('Wind 27 kn from SE, ahead · Cape Bowling Green → Cape Upstart')).toBeInTheDocument()
     expect(within(table).getByText('Fri 23 Oct')).toBeInTheDocument()
   })
 
@@ -50,7 +50,7 @@ describe('AssistantPassageWindowCard', () => {
   it('puts depart and arrive local times in the cell title', () => {
     render(<AssistantPassageWindowCard card={passageWindowCard()} />)
     const titled = screen.getAllByTitle(/6.00 AM → 2.30 PM/)
-    expect(titled[0].getAttribute('title')).toContain('Wind SE 27 kn ahead')
+    expect(titled[0].getAttribute('title')).toContain('Wind 27 kn from SE, ahead')
   })
 
   it('shows depart and arrive times visibly in each cell', () => {

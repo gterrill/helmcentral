@@ -82,6 +82,10 @@ type passageWindowCell struct {
 	Limiting   *passageWindowLimiting `json:"limiting"`
 	Note       string                 `json:"note,omitempty"`
 	NotChecked []string               `json:"not_checked"`
+
+	// wind is what the model reads beside the limiting line (ADR 0265). It is
+	// not part of the card.
+	wind string
 }
 
 type passageWindowRow struct {
@@ -612,6 +616,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 	}
 	missing := false
 	anyGust := false
+	tally := newPassageWindTally(plan.hours, len(plan.segs))
 
 	// Wind against tide: only for a leg with a known flood set and a band.
 	var cycles []tidalHalfCycle
@@ -654,6 +659,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		h, ok := hours[t.Unix()]
 		if !ok {
 			missing = true
+			tally.gap(t, depart, arrive)
 			continue
 		}
 		// Judged at the precision the card prints, so what the operator
@@ -662,6 +668,8 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		rawGustKn := h.GustMS * metersPerSecondToKnots
 		windKn, gustKn, waveM := math.Round(rawWindKn), math.Round(rawGustKn), roundTo1(h.WaveM)
 		sector := passageSector(angleBetween(h.WindDirDeg, seg.bearing))
+		tally.add(t, depart, arrive, h.WindDirDeg, windKn, sector, seg.label)
+		windFrom := degreesToDirection(h.WindDirDeg)
 		lim := as.limits.sector(sector)
 		if lim.WindKnNoGo == nil {
 			return cell, fmt.Errorf("assess_passage_window: Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
@@ -669,7 +677,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		windNoGo := *lim.WindKnNoGo
 		sev, ratio := judge(windKn, rawWindKn, windNoGo)
 		consider(passageCandidate{sev, ratio, "wind", sector,
-			fmt.Sprintf("Wind %s %d kn %s%s · %s", degreesToDirection(h.WindDirDeg), int(windKn), sector, marginalNote(sev, windNoGo), seg.label)})
+			fmt.Sprintf("Wind %d kn from %s, %s%s · %s", int(windKn), windFrom, sector, marginalNote(sev, windNoGo), seg.label)})
 
 		// Providers leave a gust they do not have at 0. An hour at 0 beside
 		// hours with a figure is a calm hour (0 cannot exceed a positive
@@ -680,7 +688,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			gustNoGo := windNoGo + passageGustAboveWindKn
 			sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
 			consider(passageCandidate{sev, ratio, "gust", sector,
-				fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
+				fmt.Sprintf("Gusts %d kn from %s, %s%s · %s", int(gustKn), windFrom, sector, marginalNote(sev, gustNoGo), seg.label)})
 		}
 
 		switch {
@@ -750,6 +758,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 	}
 
+	cell.wind = tally.summary(plan.name)
 	switch {
 	case haveWorst && worst.sev == 2:
 		cell.State = "no_go"
@@ -959,6 +968,9 @@ type passageModelCell struct {
 	State string `json:"state"`
 	Why   string `json:"why,omitempty"`
 	Times string `json:"times,omitempty"`
+	// Wind says how the wind lies along the whole leg, which Why (one hour's
+	// figure) does not.
+	Wind string `json:"wind,omitempty"`
 }
 
 func newPassageModelResult(p passageWindowPayload, withCard bool) *passageModelResult {
@@ -983,6 +995,7 @@ func newPassageModelResult(p passageWindowPayload, withCard bool) *passageModelR
 			if c.Limiting != nil {
 				mc.Why = c.Limiting.Text
 			}
+			mc.Wind = c.wind
 			if d, a := clock(c.Depart), clock(c.Arrive); d != "" && a != "" {
 				mc.Times = d + "→" + a
 			}
@@ -994,24 +1007,39 @@ func newPassageModelResult(p passageWindowPayload, withCard bool) *passageModelR
 }
 
 // trim removes one level of detail from a row and reports whether anything
-// was there to remove: go cells' reasons, then every reason, then the times,
-// then the cells themselves. A row's verdict is never removed.
+// was there to remove: go cells' reasons, then go cells' wind summaries, then
+// the summaries of the other cells, then every reason, then the times, then the
+// cells themselves. A reason that decided a no-go or marginal cell, and the
+// summary beside it, outlast everything on a go cell. A row's verdict is never
+// removed.
 func (r *passageModelRow) trim(level int) bool {
 	changed := false
 	switch level {
-	case 0, 1:
+	case 0, 3:
 		for i := range r.Cells {
-			if r.Cells[i].Why != "" && (level == 1 || r.Cells[i].State == "go") {
+			if r.Cells[i].Why != "" && (level == 3 || r.Cells[i].State == "go") {
 				r.Cells[i].Why, changed = "", true
 			}
 		}
-	case 2:
+	case 1: // go cells' summaries
+		for i := range r.Cells {
+			if r.Cells[i].Wind != "" && r.Cells[i].State == "go" {
+				r.Cells[i].Wind, changed = "", true
+			}
+		}
+	case 2: // the other cells' summaries
+		for i := range r.Cells {
+			if r.Cells[i].Wind != "" && r.Cells[i].State != "go" {
+				r.Cells[i].Wind, changed = "", true
+			}
+		}
+	case 4:
 		for i := range r.Cells {
 			if r.Cells[i].Times != "" {
 				r.Cells[i].Times, changed = "", true
 			}
 		}
-	case 3:
+	case 5:
 		if r.Cells != nil {
 			r.Cells, changed = nil, true
 		}
@@ -1022,7 +1050,7 @@ func (r *passageModelRow) trim(level int) bool {
 // shrink is capToolResultJSON's trim: one row's detail per call, the last row
 // first, a level at a time. It reports false only once only verdicts remain.
 func (m *passageModelResult) shrink() bool {
-	for m.level < 4 {
+	for m.level < 6 {
 		for m.next < len(m.Rows) {
 			row := &m.Rows[len(m.Rows)-1-m.next]
 			m.next++
