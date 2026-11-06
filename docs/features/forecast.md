@@ -12,6 +12,20 @@ early, delay a passage or pick a different anchorage.
   pattern. Each panel header shows its span and a small meter for how far ahead
   it reaches. That way today's conditions don't get mixed up with the longer
   pattern you plan from.
+- **The wind headline names a change:** Each day's wind line describes the day
+  in stretches, not just its start and end. If the wind turns by 90 degrees or
+  more within about three hours, the line says which way and when. A slower
+  swing over the day shows as "turning X ... and settling Y" or "from X to Y",
+  so check the hourly graph for when it gets there. For example, "NNW to NW 3 to 5 kts, going light around 4 AM, then turning SSE around 5 AM and settling E 3 to 8 kts. Gusts to 20 kts around 5 PM."
+  Hours under 2 knots count as calm, so the line says the wind goes light
+  rather than quoting a direction that isn't there. When the wind comes back
+  after a calm, the line says so and gives the new speeds. An odd hour or two
+  between steady stretches reads as "variable" rather than as a turn, or
+  "briefly variable" when the steady wind comes back. Beside a calm and under
+  5 knots it reads as "light and variable". Its speed still counts, so a
+  strong one-hour squall shows in the speed range. A single odd hour at the very
+  start or end of the day can still show as a change. The peak gust comes with
+  its hour, and a steady day stays one short sentence.
 - **A planned stay:** The forecast page can also show the weather at a marina
   or anchorage you have booked for later. See
   [Looking ahead to a planned stay](#looking-ahead-to-a-planned-stay).

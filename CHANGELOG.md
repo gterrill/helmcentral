@@ -33,6 +33,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The day's wind line now names a change of direction.** It used to compare
+  only the first and last hour, so a day that began north-westerly, went calm
+  and came back south-easterly could read as a steady "NNW-E". Now the line
+  describes the day in stretches and says when the wind turns, for example
+  "NNW to NW 3 to 5 kts, going light around 4 AM, then turning SSE around 5 AM and settling E 3 to 8 kts. Gusts to 20 kts around 5 PM."
+  A calm ends a stretch, and the wind coming back is a new one with its own
+  speeds. An odd hour or two between steady stretches reads as "variable" or
+  "briefly variable" rather than as a turn, and its speed still counts, so a
+  one-hour squall shows in the range. A slow swing over the day reads "from X
+  to Y" without a time. A steady day still reads as one short sentence. See
+  [Forecast](docs/features/forecast.md).
 - **Mate describes the wind along a whole leg, not just its worst hour.** The
   weather window now tells Mate how the wind lies on each leg: its direction and
   speed range, and how many hours the leg runs with the wind ahead, abeam and
