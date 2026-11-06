@@ -119,7 +119,7 @@ func buildNearbyVesselsPayload() map[string]any {
 		excludedNames = []string{signalkSelfName}
 
 		state, selfErr := fetchSignalKVesselState()
-		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
+		if selfErr == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
 			// One fetch of the whole list, then the selection: the 10 nearest, plus
 			// during an anchor watch every boat within 500 m of the anchor.
 			all, nearbyErr := fetchSignalKNearbyVesselsLimit(state.Latitude, state.Longitude, now, excludedNames, nearbyVesselsUnlimited)

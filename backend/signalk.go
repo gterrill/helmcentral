@@ -985,6 +985,9 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 // instead of the tile's hard-coded 10 (ADR 0128) - a behaviour-preserving
 // split, not a change to fetchSignalKNearbyVessels' own contract.
 func fetchSignalKNearbyVesselsLimit(selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string, limit int) ([]nearbyVessel, error) {
+	if !hasUsableVesselPosition(selfLatitude, selfLongitude) {
+		return nil, fmt.Errorf("own position %.4f,%.4f is not a usable fix", selfLatitude, selfLongitude)
+	}
 	payload, err := signalKVesselsPayload()
 	if err != nil {
 		return nil, err
@@ -1001,17 +1004,18 @@ func fetchSignalKNearbyVesselsLimit(selfLatitude float64, selfLongitude float64,
 			continue
 		}
 
-		latitude := lookupNumber(vesselMap, "navigation", "position", "value", "latitude")
-		if latitude == -1 {
-			latitude = lookupNumber(vesselMap, "navigation", "position", "latitude")
+		// lookupNumber answers -1 for a missing field, which is a real
+		// longitude, so a target missing either coordinate is dropped here
+		// rather than ranked at -1.
+		latitude, latOK := lookupNumberOK(vesselMap, "navigation", "position", "value", "latitude")
+		if !latOK {
+			latitude, latOK = lookupNumberOK(vesselMap, "navigation", "position", "latitude")
 		}
-
-		longitude := lookupNumber(vesselMap, "navigation", "position", "value", "longitude")
-		if longitude == -1 {
-			longitude = lookupNumber(vesselMap, "navigation", "position", "longitude")
+		longitude, lonOK := lookupNumberOK(vesselMap, "navigation", "position", "value", "longitude")
+		if !lonOK {
+			longitude, lonOK = lookupNumberOK(vesselMap, "navigation", "position", "longitude")
 		}
-
-		if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
+		if !latOK || !lonOK || !hasUsableVesselPosition(latitude, longitude) {
 			continue
 		}
 
@@ -1373,6 +1377,30 @@ func lookupString(payload map[string]any, keys ...string) string {
 	}
 
 	return value
+}
+
+// lookupNumberOK is lookupNumber with the missing case told apart from a
+// genuine -1.
+func lookupNumberOK(payload map[string]any, keys ...string) (float64, bool) {
+	var current any = payload
+	for _, key := range keys {
+		asMap, ok := current.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		current, ok = asMap[key]
+		if !ok {
+			return 0, false
+		}
+	}
+	switch v := current.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func lookupNumber(payload map[string]any, keys ...string) float64 {

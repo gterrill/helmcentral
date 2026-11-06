@@ -306,3 +306,23 @@ describe('vessel identity fields', () => {
     expect(result.current.now?.toISOString()).toBe('2026-09-14T03:04:05.000Z')
   })
 })
+
+describe('useVesselState no-fix position', () => {
+  it('reads the -1,-1 pair as no position, not as a spot off Africa', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    emit({ ...basePayload, latitude: -1, longitude: -1 })
+
+    expect(result.current.latitude).toBeNull()
+    expect(result.current.longitude).toBeNull()
+  })
+
+  it('keeps a real position that merely has a -1 component', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    emit({ ...basePayload, latitude: 51.5, longitude: -1 })
+
+    expect(result.current.latitude).toBe(51.5)
+    expect(result.current.longitude).toBe(-1)
+  })
+})

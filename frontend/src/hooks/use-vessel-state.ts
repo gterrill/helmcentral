@@ -198,6 +198,9 @@ function ladder(raw: Record<string, number> | undefined): GustLadder {
 
 /** One vessel-state event, parsed the way every tile reads it. -1 and absent both read as null. */
 function parseVesselState(data: VesselState): VesselStateValue {
+  // The backend's "no fix" pair. Each half is a valid coordinate alone, so only
+  // the pair together means there is no position.
+  const noFix = data.latitude === -1 && data.longitude === -1
   return {
     depth: nonNegative(data.depth),
     vesselLengthOverallM: numberOrNull(data.length_overall_m),
@@ -210,8 +213,8 @@ function parseVesselState(data: VesselState): VesselStateValue {
     timeZone: textOrNull(data.timezone),
     timeZoneSource: data.timezone_source === 'fix' || data.timezone_source === 'last_fix' || data.timezone_source === 'none' ? data.timezone_source : null,
     source: textOrNull(data.source),
-    latitude: typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
-    longitude: typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,
+    latitude: !noFix && typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
+    longitude: !noFix && typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,
     gnssQualityIndicator: nonNegative(data.gnss_quality_indicator),
     gnssHdop: nonNegative(data.gnss_hdop),
     gnssSatellites: nonNegative(data.gnss_satellites),

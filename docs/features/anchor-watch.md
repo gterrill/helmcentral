@@ -170,6 +170,10 @@ bottom left. During Adjust, Raise stays available. On a narrow screen it sits
 just above Cancel and Save. Raising closes Adjust. Without a map, they sit in a
 row below the page's map area.
 
+Drop is greyed out while there's no GPS fix, or while Helmcentral doesn't trust
+the one it has, so you can't set a watch on a position the boat isn't at.
+Wait for the fix to come back, then drop.
+
 Your GPS antenna sits back from the bow, and the anchor goes down at the bow.
 If you've set how far the antenna is from the bow in Settings → Anchor Watch,
 **Drop** puts the anchor mark ahead of the GPS by that distance, in the direction

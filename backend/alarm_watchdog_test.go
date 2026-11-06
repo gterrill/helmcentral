@@ -93,13 +93,64 @@ func TestWatchdogClearsWhenStreamRecovers(t *testing.T) {
 }
 
 // A server still starting up has simply not spoken yet; alarming on that would
-// fire on every boot.
-func TestWatchdogStaysQuietBeforeTheFirstMessage(t *testing.T) {
+// fire on every boot. The grace is one silence threshold, counted from the
+// watchdog's first look.
+func TestWatchdogStaysQuietBeforeTheFirstMessageWithinGrace(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	watchdog := newStreamWatchdog(snapshot, time.Minute)
 
-	if _, ok := watchdog.check(alarmNow.Add(time.Hour)); ok {
-		t.Fatalf("must not alarm before the stream has ever delivered anything")
+	if _, ok := watchdog.check(alarmNow); ok {
+		t.Fatalf("must not alarm on the first look")
+	}
+	if _, ok := watchdog.check(alarmNow.Add(30 * time.Second)); ok {
+		t.Fatalf("must not alarm inside the startup grace")
+	}
+}
+
+// After a power cut with SignalK down, nothing ever connects. That is an
+// outage, not a slow start.
+func TestWatchdogRaisesWhenSignalKNeverConnectsAfterGrace(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	watchdog.check(alarmNow)
+	event, ok := watchdog.check(alarmNow.Add(2 * time.Minute))
+	if !ok || event.Kind != alarmEventRaised {
+		t.Fatalf("expected a raise once the grace passed with no data, got %+v", event)
+	}
+	if !strings.Contains(event.Status.Message, "not connected") {
+		t.Fatalf("message should say it never connected, got %q", event.Status.Message)
+	}
+}
+
+// Other vessels' AIS keeps the stream busy while the boat's own feed is dead.
+func TestWatchdogRaisesWhenOnlyOtherVesselsAreHeard(t *testing.T) {
+	snapshot := connectedSnapshot(alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.urn:mrn:imo:mmsi:123456789",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 2.0}}}},
+	}, alarmNow.Add(100*time.Second))
+
+	event, ok := watchdog.check(alarmNow.Add(2 * time.Minute))
+	if !ok || event.Kind != alarmEventRaised {
+		t.Fatalf("AIS traffic must not hide a dead own-ship feed, got %+v", event)
+	}
+}
+
+func TestWatchdogCountsTheSelfContextByItsFullName(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setConnected(true)
+	snapshot.setSelfContext("vessels.urn:mrn:imo:mmsi:111111111")
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.urn:mrn:imo:mmsi:111111111",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 2.0}}}},
+	}, alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	if _, ok := watchdog.check(alarmNow.Add(10 * time.Second)); ok {
+		t.Fatalf("own-ship data under its full context name must count as live")
 	}
 }
 
@@ -301,12 +352,45 @@ func TestWatchdogDoesNotReconcileBeforeTheStreamHasSaidAnything(t *testing.T) {
 	snapshot.setConnected(true)
 	snapshot.setSelfContext("vessels.self")
 	raiseWatchdogNotification(snapshot, alarmNow)
-	// applyDelta stamps lastMessage, so wind it back to "nothing judged yet".
+	// applyDelta stamps the message times, so wind them back to "nothing judged yet".
 	snapshot.lastMessage = time.Time{}
+	snapshot.lastSelfMessage = time.Time{}
 
 	watchdog := newStreamWatchdog(snapshot, time.Minute)
 
 	if _, ok := watchdog.reconcile(alarmNow.Add(time.Hour)); ok {
 		t.Fatalf("a stream that has never spoken cannot prove a notification stale")
+	}
+}
+
+// The watchdog publishes its own alarm as a notification under the boat's
+// context, and the server echoes it back. That echo is not instrument data.
+func TestWatchdogIgnoresNotificationEchoesOnTheSelfContext(t *testing.T) {
+	snapshot := connectedSnapshot(alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	raiseWatchdogNotification(snapshot, alarmNow.Add(100*time.Second))
+
+	event, ok := watchdog.check(alarmNow.Add(2 * time.Minute))
+	if !ok || event.Kind != alarmEventRaised {
+		t.Fatalf("an echoed notification must not count as live instrument data, got %+v", event)
+	}
+}
+
+func TestWatchdogMessageSaysWhenSignalKIsUpButSilentAboutThisBoat(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setConnected(true)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	watchdog.check(alarmNow)
+	event, ok := watchdog.check(alarmNow.Add(2 * time.Minute))
+	if !ok || event.Kind != alarmEventRaised {
+		t.Fatalf("expected a raise, got %+v", event)
+	}
+	if strings.Contains(event.Status.Message, "not connected") {
+		t.Fatalf("SignalK is connected, so the message must not say otherwise: %q", event.Status.Message)
+	}
+	if !strings.Contains(event.Status.Message, "this boat") {
+		t.Fatalf("the message should say no data has come from this boat, got %q", event.Status.Message)
 	}
 }
