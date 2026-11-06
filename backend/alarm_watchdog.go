@@ -84,6 +84,13 @@ func watchdogRule() alarmRule {
 // that never spoke counts as silent: a power cut that leaves SignalK down must
 // still raise.
 func (w *streamWatchdog) silence(now time.Time) (silent bool, quiet time.Duration, judged bool) {
+	silent, quiet, judged, _ = w.assess(now)
+	return silent, quiet, judged
+}
+
+// assess is silence plus the connected flag it judged by, so a caller wording
+// an alarm reads the snapshot once and cannot disagree with the verdict.
+func (w *streamWatchdog) assess(now time.Time) (silent bool, quiet time.Duration, judged bool, connected bool) {
 	connected, lastMessage := w.snapshot.selfStatus()
 
 	if w.firstLook.IsZero() {
@@ -96,20 +103,19 @@ func (w *streamWatchdog) silence(now time.Time) (silent bool, quiet time.Duratio
 		if quiet > w.silenceAfter {
 			silent = true
 		}
-		return silent, quiet, true
+		return silent, quiet, true, connected
 	}
 
 	if now.Sub(w.firstLook) >= w.silenceAfter {
-		return true, 0, true
+		return true, 0, true, connected
 	}
-	return silent, quiet, false
+	return silent, quiet, false, connected
 }
 
 // check reports a transition, if any. Like the rule engine it is edge-triggered:
 // a persistently dead stream produces one alarm, not one per tick.
 func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
-	silent, quiet, judged := w.silence(now)
-	connected, _ := w.snapshot.selfStatus()
+	silent, quiet, judged, connected := w.assess(now)
 
 	if !judged && !w.raised {
 		return alarmEvent{}, false

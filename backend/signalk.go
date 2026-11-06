@@ -1404,29 +1404,10 @@ func lookupNumberOK(payload map[string]any, keys ...string) (float64, bool) {
 }
 
 func lookupNumber(payload map[string]any, keys ...string) float64 {
-	var current any = payload
-	for _, key := range keys {
-		asMap, ok := current.(map[string]any)
-		if !ok {
-			return -1
-		}
-
-		next, ok := asMap[key]
-		if !ok {
-			return -1
-		}
-
-		current = next
-	}
-
-	switch v := current.(type) {
-	case float64:
+	if v, ok := lookupNumberOK(payload, keys...); ok {
 		return v
-	case int:
-		return float64(v)
-	default:
-		return -1
 	}
+	return -1
 }
 
 func lookupBool(payload map[string]any, keys ...string) (bool, bool) {

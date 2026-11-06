@@ -275,7 +275,7 @@ func setAnchorWatch(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	if !hasUsableVesselPosition(body.Lat, body.Lon) {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "position is not a usable fix; wait for a GPS fix before dropping the anchor"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "position is not usable (-1,-1 and 0,0 mean no fix); wait for a GPS fix before dropping the anchor"})
 	}
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
@@ -636,7 +636,7 @@ func patchAnchorWatch(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	if body.Lat != nil && !hasUsableVesselPosition(*body.Lat, *body.Lon) {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "position is not a usable fix; wait for a GPS fix before moving the anchor"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "position is not usable (-1,-1 and 0,0 mean no fix)"})
 	}
 	if body.RadiusMeters != nil && *body.RadiusMeters <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "radius_meters must be positive"})

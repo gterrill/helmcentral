@@ -317,6 +317,15 @@ describe('useVesselState no-fix position', () => {
     expect(result.current.longitude).toBeNull()
   })
 
+  it('reads the 0,0 unset pair as no position too, matching the backend', () => {
+    const { result } = renderHook(() => useVesselState())
+
+    emit({ ...basePayload, latitude: 0, longitude: 0 })
+
+    expect(result.current.latitude).toBeNull()
+    expect(result.current.longitude).toBeNull()
+  })
+
   it('keeps a real position that merely has a -1 component', () => {
     const { result } = renderHook(() => useVesselState())
 

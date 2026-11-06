@@ -198,9 +198,10 @@ function ladder(raw: Record<string, number> | undefined): GustLadder {
 
 /** One vessel-state event, parsed the way every tile reads it. -1 and absent both read as null. */
 function parseVesselState(data: VesselState): VesselStateValue {
-  // The backend's "no fix" pair. Each half is a valid coordinate alone, so only
-  // the pair together means there is no position.
-  const noFix = data.latitude === -1 && data.longitude === -1
+  // The backend's "no fix" (-1,-1) and unset (0,0) pairs, as hasUsableVesselPosition
+  // refuses them. Each half is a valid coordinate alone, so only the pair means
+  // there is no position.
+  const noFix = (data.latitude === -1 && data.longitude === -1) || (data.latitude === 0 && data.longitude === 0)
   return {
     depth: nonNegative(data.depth),
     vesselLengthOverallM: numberOrNull(data.length_overall_m),
