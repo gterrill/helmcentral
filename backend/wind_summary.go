@@ -10,7 +10,7 @@ import (
 // comparison. A period is a run of hours whose direction stays within
 // windSplitDeg of the period's own mean. Hours under windCalmKts are calm and
 // their direction means nothing; a calm always ends a group. A change is a
-// turn of windChangeDeg or more that lasts more than one hour (ADR 0265).
+// turn of windChangeDeg or more that lasts more than one hour (ADR 0266).
 const (
 	windCalmKts           = 2.0
 	windSplitDeg          = 45.0
@@ -388,22 +388,22 @@ func groupWindSegs(segs []windSeg, day windDay) []windSeg {
 	return out
 }
 
-// windSpan names a group's direction at its start and at its end.
-type windSpan struct{ start, end string }
+// windDirSpan names a group's direction at its start and at its end.
+type windDirSpan struct{ start, end string }
 
-func (w windSpan) label() string {
+func (w windDirSpan) label() string {
 	if w.start == w.end {
 		return w.start
 	}
 	return w.start + " to " + w.end
 }
 
-func (g *windGroup) span() windSpan {
+func (g *windGroup) span() windDirSpan {
 	start, end, ok := windSpanDegs(g.dirs())
 	if !ok {
-		return windSpan{}
+		return windDirSpan{}
 	}
-	return windSpan{degreesToDirection(start), degreesToDirection(end)}
+	return windDirSpan{degreesToDirection(start), degreesToDirection(end)}
 }
 
 // buildWindSummary describes a day's wind in periods, naming any change of
