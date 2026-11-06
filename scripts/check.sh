@@ -76,7 +76,10 @@ mkdir -p "$logdir"
 case $target in
 backend)
 	step go-vet backend go vet ./...
-	step go-test backend go test -short ./...
+	# Shuffled, like main's "Backend tests (shuffled)" job, so a test that
+	# leaks state into the next fails here rather than after the merge. The
+	# log holds the seed as "-test.shuffle <seed>".
+	step go-test backend go test -short -shuffle=on ./...
 	;;
 frontend)
 	step deps . make --no-print-directory check-frontend-deps

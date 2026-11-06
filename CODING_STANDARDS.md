@@ -139,3 +139,19 @@ The floor for anything the operator reads as a value is `text-xs` (12px). That c
 
 - No hex improvisation. Never write raw arbitrary color values (e.g., `bg-[#f4f3ef]`, `text-[#334455]`). Use the project's semantic tokens (see Telemetry & Color Mapping above) or, for alert semantics only, the standard Tailwind palette scale. Arbitrary values for type size/tracking fine-tuning (e.g., `tracking-[0.16em]`) remain expected, but the sizes themselves must come from the Micro-Typography Scale above — this rule targets color escapes and undisciplined sizing, not fine-tuning in general. Hex, `rgb()`, `hsl()` and `oklch()` colour escapes in class tokens, and hex/`rgb()`/`hsl()` values in SVG `fill`/`stroke`/`color`/`stopColor` and in style-object colour properties, are enforced by `helm/no-arbitrary-color`; colours held in variables or data objects are not checked.
 - Maintain zero-state integrity. Do not use fake marketing metrics or placeholder strings. Use structural dashes (`--`), realistic operational defaults (`0.0`), or clear state toggles (`ON` / `OFF`).
+
+## Map And Gesture Input
+
+Any mode that takes pointer input on a map or chart (selecting squares,
+drawing, measuring) has to work on the wall display's mouse and on a phone.
+
+- While the mode is on, the map still pans and zooms by drag, wheel and
+  pinch, and a visible control (Cancel or Done) plus `Escape` leaves it.
+- Handle input with pointer events only. One touch must not also reach a
+  click or mouse handler, or a tap toggles twice.
+- A listener added to `window` for a drag checks the `pointerId` that started
+  the drag. A press-and-hold gesture stops the browser's context menu.
+- Tests send pointer events through the component's real handlers on a mocked
+  map, the way `frontend/src/test/offline-coastline-map-select.test.tsx`
+  does, not through a stub that replaces them. The preview covers every state
+  of the mode at phone width with touch.
