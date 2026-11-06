@@ -398,6 +398,8 @@ describe('NearbyVesselsTile collision alarms', () => {
       const name = screen.getByText('SOUTHERN CROSS EXPLORER')
       expect(name.className).toContain('@max-[28rem]:line-clamp-2')
       expect(name.className).toContain('@max-[28rem]:break-words')
+      // truncate sets nowrap, which would stop the clamp wrapping at all.
+      expect(name.className).toContain('@max-[28rem]:whitespace-normal')
       expect(name.className).toContain('truncate')
       expect(name.closest('.\\@container')).not.toBeNull()
     })

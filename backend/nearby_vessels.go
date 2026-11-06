@@ -159,8 +159,8 @@ func buildNearbyVesselsPayload() map[string]any {
 		// The cap itself, so no client repeats a number it was never told.
 		"feed_cap": nearbyFeedCap,
 		// Seconds since any other vessel last reported a position, in range or
-		// not; -1 when none has been heard (or none in the last hour, when
-		// the snapshot drops a silent vessel). Unlike last_update_age_s it
+		// not; -1 when none has been heard since the process started. It outlives
+		// the snapshot's eviction of a silent vessel. Unlike last_update_age_s it
 		// still ages when the list is empty, so a silent receiver reads as
 		// silent and an empty sea does not.
 		"ais_heard_age_s": aisHeardAge(now, excludedNames),

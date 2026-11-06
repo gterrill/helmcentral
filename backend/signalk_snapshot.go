@@ -1342,7 +1342,13 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 	}
 	sort.Strings(evicted)
 
+	selfName := lookupString(s.contexts[s.selfCtx], "name")
 	for _, context := range evicted {
+		// This boat's second context was excluded from the heartbeat by name;
+		// once its tree is gone that name is too, so its entry goes with it.
+		if matchesExcludedName(lookupString(s.contexts[context], "name"), []string{selfName}) {
+			delete(s.positionHeard, context)
+		}
 		delete(s.contexts, context)
 		delete(s.contextHeard, context)
 		prefix := context + "|"

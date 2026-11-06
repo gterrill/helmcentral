@@ -186,7 +186,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
               )}
             >
               <div className="min-w-0">
-                <p className="truncate font-display text-lg uppercase leading-tight text-foreground @max-[28rem]:line-clamp-2 @max-[28rem]:break-words">{vessel.name}</p>
+                <p className="truncate font-display text-lg uppercase leading-tight text-foreground @max-[28rem]:whitespace-normal @max-[28rem]:line-clamp-2 @max-[28rem]:break-words">{vessel.name}</p>
                 {tierStyle ? (
                   <p className={cn('mt-1 text-[10px] font-semibold uppercase tracking-[0.16em]', tierStyle.text)}>{tierStyle.label}</p>
                 ) : null}

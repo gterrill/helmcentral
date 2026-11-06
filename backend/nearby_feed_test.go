@@ -162,9 +162,6 @@ func TestNearbyFeedSelectionCapsOnlyTheWatchExtras(t *testing.T) {
 	}
 }
 
-// ais_heard_age_s is the feed-health signal: how long since ANY other vessel
-// reported a live position, in range or not, so a silent receiver is told apart
-// from an empty sea.
 func positionDelta(context, timestamp string) signalKDelta {
 	return signalKDelta{Context: context, Updates: []signalKUpdate{{
 		Timestamp: timestamp,
@@ -172,6 +169,9 @@ func positionDelta(context, timestamp string) signalKDelta {
 	}}}
 }
 
+// ais_heard_age_s is the feed-health signal: how long since ANY other vessel
+// reported a live position, in range or not, so a silent receiver is told apart
+// from an empty sea.
 func TestNearbyPayloadReportsHowLongSinceAnyAISPositionWasHeard(t *testing.T) {
 	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
 	now := time.Now().UTC()
@@ -263,5 +263,21 @@ func TestNearbyFeedCapKeepsTheBoatsNearestTheAnchor(t *testing.T) {
 func TestNearbyPayloadSendsTheCap(t *testing.T) {
 	if got := buildNearbyVesselsPayload()["feed_cap"]; got != nearbyFeedCap {
 		t.Fatalf("feed_cap = %v, want %d", got, nearbyFeedCap)
+	}
+}
+
+// This boat's second context is evicted after an hour of silence. Its
+// heartbeat entry must go with it, or the name check that excluded it is lost
+// and its old reports count as AIS.
+func TestNearbyHeartbeatForgetsThisBoatsSecondContextWhenItIsEvicted(t *testing.T) {
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	globalSignalKSnapshot.contexts["vessels.self"]["name"] = "OWN BOAT"
+	ctx := vesselContextPrefix + "urn:mrn:imo:mmsi:111"
+	then := time.Now().UTC().Add(-2 * time.Hour)
+	globalSignalKSnapshot.contexts[ctx] = map[string]any{"name": "Own Boat"}
+	globalSignalKSnapshot.applyDelta(positionDelta(ctx, then.Format(time.RFC3339Nano)), then)
+	globalSignalKSnapshot.evictStaleVesselContexts(time.Now().UTC())
+	if got := aisHeardAge(time.Now().UTC(), nil); got != -1 {
+		t.Fatalf("aisHeardAge = %v, want -1: the only report was this boat's own", got)
 	}
 }
