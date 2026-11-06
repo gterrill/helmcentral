@@ -5,9 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a PR cancels its older run. Each push to main gets a group of
+# its own, so no run on main is cancelled or replaced while pending: each merge
+# commit is the first build of that PR together with the ones merged before it,
+# and a cancelled run would hide a broken main.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:

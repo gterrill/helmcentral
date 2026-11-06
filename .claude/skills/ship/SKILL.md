@@ -35,7 +35,8 @@ change; and every ADR and `docs/` page the change contradicts is updated.
 
 ## 3. Simplify
 
-For anything larger than a small edit, run `/simplify`. It applies its fixes,
+For anything larger than a small edit, run `/simplify` once, before the first
+review; its fixes then get reviewed with the rest. It applies its fixes,
 so run it only in your own worktree or a tree holding nothing but your changes.
 Its edits are refactors: no test-first, no CHANGELOG entry.
 
@@ -82,7 +83,14 @@ desktop and phone widths. Keep the pass counts for the PR body.
 Run `/code-review medium` on the working tree. Then read the
 `CODING_STANDARDS.md` sections the diff touches and check every changed line
 against them. Check each finding against the code. Fix the real ones
-test-first, then go back to step 4.
+test-first, then go back to step 4. Test-first means the new test has been run
+and seen failing on the unfixed code; a builder subagent's brief asks for that
+run and its hand-back shows it.
+
+When the second `/code-review` pass still finds bugs in the function or
+mechanism the first pass flagged, the design is the problem, not the next
+finding. Stop fixing and ask the operator, naming the logic and the findings
+it keeps producing, whether to simplify it, cut it or carry on.
 
 A real finding gets fixed in this PR, even when it sits in code the change
 only passes through. Dismiss a finding only when the code proves it wrong.
@@ -140,7 +148,9 @@ which.
 
 - A failed check: read its log with `gh run view --log-failed`, fix it,
   go back to step 4.
-- `CONFLICTING`: rebase onto `origin/main`, go back to step 4.
+- `CONFLICTING`, or `BEHIND` (main has moved, and a PR must be tested against
+  the latest main before it merges): rebase onto `origin/main`, go back to
+  step 4. The push after a rebase is `git push --force-with-lease`.
 - `CLOSED`: stop and tell the operator.
 - `MERGED`: tell the operator it merged. Get the merge commit with `gh pr
   view <N> --json mergeCommit`, find its run with `gh run list --workflow CI
