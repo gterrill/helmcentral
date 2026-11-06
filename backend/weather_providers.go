@@ -96,6 +96,11 @@
 // the frontend can caption a "hourly" strip honestly rather than presenting
 // it as a true nowcast (AGENTS.md fallback policy).
 //
+// wind_direction_deg is nullable on the wire in current, days and hourly
+// (*float64 in wasmWeatherCurrentOutput/DayOutput/HourOutput). null or absent
+// is an unknown direction, which the host carries as -1; 0 is due north. A
+// plugin must send null for a direction its upstream did not give, never 0.
+//
 // humidity_pct/visibility_m are hourly-only - there is no daily aggregate in
 // this contract, deliberately: the host derives the day figure itself
 // (humidity as the mean of the day's valid hourly samples, visibility as
@@ -126,7 +131,7 @@
 // the host does its own local-day bucketing in the place's zone, never
 // trusting an offset embedded in a plugin's timestamp for that purpose). Any
 // numeric field may be omitted/zero if the upstream API genuinely lacks it;
-// the host treats an exactly-zero value for wind speed/gust/direction and
+// the host treats an exactly-zero value for wind speed/gust and
 // temperature as "no data", the same -1-sentinel convention
 // weatherHourlyEntryData/weatherHourlyWindData/weatherHourlyCloudData
 // already used for WeatherKit's raw JSON. precipitation_chance_pct,
@@ -201,12 +206,10 @@ type weatherHourPoint struct {
 	VisibilityNm           float64
 }
 
-// noWindData reports an hour the provider has no wind for. The flat plugin
-// contract turns a null into 0, and Open-Meteo sends a null direction only with
-// a null speed, so speed 0 with direction 0 is no data. Wind with a direction
-// of 0 is due north.
-func (hp weatherHourPoint) noWindData() bool {
-	return hp.WindSpeedMS == 0 && hp.WindDirectionDeg == 0
+// hasWindDirection reports whether the hour carries a direction. -1 is
+// unknown; 0 is due north.
+func (hp weatherHourPoint) hasWindDirection() bool {
+	return hp.WindDirectionDeg >= 0
 }
 
 // weatherNextHourPoint is a single time-stamped nowcast sample, SI units, as
@@ -391,15 +394,25 @@ func sentinelGustKts(gustMS float64, sustainedKts float64) float64 {
 	return -1
 }
 
-// sentinelDirection converts a degrees value into (compass string, degrees),
-// treating an exactly-zero input as "no data" - see this file's top doc
-// comment for why the flat plugin contract can't distinguish "true north"
-// from "omitted".
+// sentinelDirection converts a degrees value into (compass string, degrees).
+// A negative input is the -1 "no direction" sentinel (see
+// sentinelWindDirectionDeg); 0 is due north.
 func sentinelDirection(degrees float64) (string, float64) {
-	if degrees == 0 {
+	if degrees < 0 {
 		return "—", -1
 	}
 	return degreesToDirection(degrees), degrees
+}
+
+// sentinelWindDirectionDeg maps the wire's nullable wind_direction_deg to the
+// host's -1-for-unknown convention. Null or absent is unknown and a negative
+// value is too, but a real 0 is due north and survives. This is why the wire
+// field is a *float64, as humidity_pct and visibility_m are.
+func sentinelWindDirectionDeg(deg *float64) float64 {
+	if deg == nil || *deg < 0 {
+		return -1
+	}
+	return *deg
 }
 
 // sentinelTemperatureF converts an SI Celsius value to Fahrenheit, treating

@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// A forecast direction of 0 is due north when there is wind. Open-Meteo sends a
-// null direction only with a null speed, which decodes to 0 for both, so a
-// zero direction with no wind is the only unknown.
+// A forecast direction of 0 is due north. A null direction on the plugin wire is
+// carried as -1 and is the only unknown.
 
 func northShelter() *shelterResult {
 	return &shelterResult{shelterEstimate: shelterEstimate{Bearings: []shelterBearing{
@@ -38,7 +37,7 @@ func TestBuildWindHour_DueNorthWindKeepsItsDirection(t *testing.T) {
 
 func TestBuildWindHour_ZeroDirectionWithNoWindStaysUnknown(t *testing.T) {
 	course := 90.0
-	hp := weatherHourPoint{Time: time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)}
+	hp := weatherHourPoint{Time: time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC), WindDirectionDeg: -1}
 	row := buildWindHour(hp, time.UTC, nil, &course, northShelter())
 
 	if row.Dir != nil || row.DirDeg != nil {

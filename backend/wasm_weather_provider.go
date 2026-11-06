@@ -90,39 +90,39 @@ type wasmFetchForecastInput struct {
 // exactly (snake_case field names) - see weather_providers.go's top doc
 // comment for the full JSON shape.
 type wasmWeatherCurrentOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
 }
 
 type wasmWeatherDayOutput struct {
-	Start                  string  `json:"start"`
-	Condition              string  `json:"condition"`
-	TempMaxC               float64 `json:"temp_max_c"`
-	TempMinC               float64 `json:"temp_min_c"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	Sunrise                string  `json:"sunrise"`
-	Sunset                 string  `json:"sunset"`
+	Start                  string   `json:"start"`
+	Condition              string   `json:"condition"`
+	TempMaxC               float64  `json:"temp_max_c"`
+	TempMinC               float64  `json:"temp_min_c"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	Sunrise                string   `json:"sunrise"`
+	Sunset                 string   `json:"sunset"`
 }
 
 type wasmWeatherHourOutput struct {
-	Time                   string  `json:"time"`
-	TemperatureC           float64 `json:"temperature_c"`
-	Condition              string  `json:"condition"`
-	WindSpeedMS            float64 `json:"wind_speed_ms"`
-	WindGustMS             float64 `json:"wind_gust_ms"`
-	WindDirectionDeg       float64 `json:"wind_direction_deg"`
-	PrecipitationChancePct float64 `json:"precipitation_chance_pct"`
-	PrecipitationMM        float64 `json:"precipitation_mm"`
-	UVIndex                float64 `json:"uv_index"`
-	IsDaylight             bool    `json:"is_daylight"`
+	Time                   string   `json:"time"`
+	TemperatureC           float64  `json:"temperature_c"`
+	Condition              string   `json:"condition"`
+	WindSpeedMS            float64  `json:"wind_speed_ms"`
+	WindGustMS             float64  `json:"wind_gust_ms"`
+	WindDirectionDeg       *float64 `json:"wind_direction_deg"`
+	PrecipitationChancePct float64  `json:"precipitation_chance_pct"`
+	PrecipitationMM        float64  `json:"precipitation_mm"`
+	UVIndex                float64  `json:"uv_index"`
+	IsDaylight             bool     `json:"is_daylight"`
 	// HumidityPct/VisibilityM are *float64, deliberately - see
 	// sentinelHumidityPct/sentinelVisibilityNm (weather_providers.go). A bare
 	// float64 field decodes a JSON-absent key to exactly 0.0, indistinguishable
@@ -204,7 +204,7 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 		Condition:              out.Current.Condition,
 		WindSpeedMS:            out.Current.WindSpeedMS,
 		WindGustMS:             out.Current.WindGustMS,
-		WindDirectionDeg:       out.Current.WindDirectionDeg,
+		WindDirectionDeg:       sentinelWindDirectionDeg(out.Current.WindDirectionDeg),
 		PrecipitationChancePct: out.Current.PrecipitationChancePct,
 	}
 
@@ -229,7 +229,7 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 			TempMinC:               d.TempMinC,
 			WindSpeedMS:            d.WindSpeedMS,
 			WindGustMS:             d.WindGustMS,
-			WindDirectionDeg:       d.WindDirectionDeg,
+			WindDirectionDeg:       sentinelWindDirectionDeg(d.WindDirectionDeg),
 			PrecipitationChancePct: d.PrecipitationChancePct,
 			Sunrise:                sunrise,
 			Sunset:                 sunset,
@@ -248,7 +248,7 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 			Condition:              h.Condition,
 			WindSpeedMS:            h.WindSpeedMS,
 			WindGustMS:             h.WindGustMS,
-			WindDirectionDeg:       h.WindDirectionDeg,
+			WindDirectionDeg:       sentinelWindDirectionDeg(h.WindDirectionDeg),
 			PrecipitationChancePct: h.PrecipitationChancePct,
 			PrecipitationMM:        math.Max(0, h.PrecipitationMM),
 			UVIndex:                math.Max(0, h.UVIndex),

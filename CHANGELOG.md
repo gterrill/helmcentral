@@ -11,6 +11,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Rebuild and reinstall your weather plugin after upgrading.** The plugin now
+  reports a missing wind direction as missing instead of as 0°. With an older
+  plugin build, an hour with no wind data reads as a calm wind from the north.
+  What to do: build the Open-Meteo or Apple WeatherKit plugin from the same
+  release and replace the one in your weather plugins folder. A plugin you
+  wrote yourself should send `null` for a wind direction it doesn't have.
+
+### Fixed
+
+- **A wind from due north now shows as N on the forecast.** The hourly strip,
+  the day cards and the current conditions showed "—" for a wind from exactly
+  0°. Mate and the passage check already read it correctly. An hour where the
+  weather provider gave no direction still shows "—".
+
 ### Changed
 
 - **Choosing squares to download on the offline coastline map is easier, and a

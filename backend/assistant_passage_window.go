@@ -906,7 +906,7 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) map[int64]passageHour {
 	out := map[int64]passageHour{}
 	for _, hp := range wb.Hourly {
-		if hp.Time.IsZero() || hp.noWindData() {
+		if hp.Time.IsZero() || !hp.hasWindDirection() {
 			continue
 		}
 		out[hp.Time.Truncate(time.Hour).Unix()] = passageHour{WindMS: hp.WindSpeedMS, GustMS: hp.WindGustMS, WindDirDeg: hp.WindDirectionDeg}

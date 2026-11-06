@@ -584,8 +584,8 @@ func (d assistantToolDeps) fetchWaveSeries(lat, lon float64, days int) waveSerie
 // in knots, the direction, the wave figures when the wave model has them, the
 // angles relative to course_deg when given, and the shelter grade for the wind
 // direction when the position has a shelter estimate. A speed or gust the
-// provider gave as zero is unknown, never a calm. A direction of zero is
-// unknown only when the hour has no wind data (noWindData). Shared by
+// provider gave as zero is unknown, never a calm. A direction of zero is due
+// north; an unknown direction is -1 (hasWindDirection). Shared by
 // get_wind_forecast and anchorage_details so the two cannot read the same hour
 // differently.
 func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64]waveHourPoint, courseDeg *float64, shelter *shelterResult) assistantWindHour {
@@ -603,7 +603,7 @@ func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64
 	}
 	var dir *string
 	var dirDeg *int
-	if !hp.noWindData() {
+	if hp.hasWindDirection() {
 		dv := degreesToDirection(hp.WindDirectionDeg)
 		dgv := int(math.Round(hp.WindDirectionDeg))
 		dir, dirDeg = &dv, &dgv

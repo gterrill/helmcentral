@@ -412,7 +412,7 @@ func TestExecuteGetWindForecast_RoundsFiltersNullsAndJoinsWaves(t *testing.T) {
 				{Time: time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC), WindSpeedMS: 5.0},
 				{Time: time.Date(2026, 9, 12, 1, 0, 0, 0, time.UTC), WindSpeedMS: 5.0},
 				// local 12:00, kept: the all-zero sentinel row.
-				{Time: time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)},
+				{Time: time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC), WindDirectionDeg: -1},
 				// local 15:00, kept: real wind, joined to a wave hour below.
 				{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WindSpeedMS: 5.0, WindGustMS: 6.0, WindDirectionDeg: 135},
 			},
@@ -584,7 +584,7 @@ func TestExecuteGetWindForecast_CourseDegAddsRelativeAngles(t *testing.T) {
 				// local 15:00: the all-zero sentinel row, wind direction
 				// unknown - the relative fields must stay nil, not fold to
 				// a fabricated "head".
-				{Time: now.Add(3 * time.Hour)},
+				{Time: now.Add(3 * time.Hour), WindDirectionDeg: -1},
 			},
 		},
 	}

@@ -243,7 +243,7 @@ func TestParseWeatherKitResponse_MapsCannedResponseCorrectly(t *testing.T) {
 	if out.Current.WindGustMS != 10.0 {
 		t.Errorf("expected current.wind_gust_ms=10.0 (36kph->m/s), got %v", out.Current.WindGustMS)
 	}
-	if out.Current.WindDirectionDeg != 270 {
+	if out.Current.WindDirectionDeg == nil || *out.Current.WindDirectionDeg != 270 {
 		t.Errorf("expected current.wind_direction_deg=270, got %v", out.Current.WindDirectionDeg)
 	}
 	// 0.25 fraction -> 25 pct
@@ -274,7 +274,7 @@ func TestParseWeatherKitResponse_MapsCannedResponseCorrectly(t *testing.T) {
 	if day0.WindGustMS != 12.0 {
 		t.Errorf("expected days[0].wind_gust_ms=12.0, got %v", day0.WindGustMS)
 	}
-	if day0.WindDirectionDeg != 180 {
+	if day0.WindDirectionDeg == nil || *day0.WindDirectionDeg != 180 {
 		t.Errorf("expected days[0].wind_direction_deg=180 (daytimeForecast preferred), got %v", day0.WindDirectionDeg)
 	}
 	if day0.PrecipitationChancePct != 10 {
@@ -290,7 +290,7 @@ func TestParseWeatherKitResponse_MapsCannedResponseCorrectly(t *testing.T) {
 	// wind fields present at all for day1, so daytimeForecast is the only
 	// source (also proves the daytimeForecast path works with no day-level
 	// fallback data present).
-	if day1.WindSpeedMS != 4.0 || day1.WindGustMS != 8.0 || day1.WindDirectionDeg != 90 {
+	if day1.WindSpeedMS != 4.0 || day1.WindGustMS != 8.0 || day1.WindDirectionDeg == nil || *day1.WindDirectionDeg != 90 {
 		t.Errorf("expected days[1] wind from daytimeForecast (speed=4.0 gust=8.0 dir=90), got speed=%v gust=%v dir=%v", day1.WindSpeedMS, day1.WindGustMS, day1.WindDirectionDeg)
 	}
 
@@ -316,7 +316,7 @@ func TestParseWeatherKitResponse_MapsCannedResponseCorrectly(t *testing.T) {
 	if hour0.WindGustMS != 6.0 {
 		t.Errorf("expected hourly[0].wind_gust_ms=6.0, got %v", hour0.WindGustMS)
 	}
-	if hour0.WindDirectionDeg != 200 {
+	if hour0.WindDirectionDeg == nil || *hour0.WindDirectionDeg != 200 {
 		t.Errorf("expected hourly[0].wind_direction_deg=200, got %v", hour0.WindDirectionDeg)
 	}
 	if hour0.PrecipitationChancePct != 5 {
@@ -688,5 +688,59 @@ func TestMapCurrentWeather_DoesNotSubstituteIntensityForAbsentChance(t *testing.
 	if out.PrecipitationChancePct != -1 {
 		t.Errorf("expected absent current chance to stay absent (-1), got %v - a %v mm/hr intensity or another window's %v must not be substituted",
 			out.PrecipitationChancePct, intensity, dailyChance)
+	}
+}
+
+// WeatherKit omits windDirection when it has none, and sends 0 for a wind from
+// due north. The plugin must send null for the first and 0 for the second.
+func TestParseWeatherKitResponse_AbsentWindDirectionIsNullAndNorthIsZero(t *testing.T) {
+	body := []byte(`{
+	  "currentWeather": {"asOf": "2026-07-19T10:00:00Z", "temperature": 18, "conditionCode": "Clear",
+	    "windSpeed": 18, "windGust": 36, "windDirection": 0},
+	  "forecastDaily": {"days": [
+	    {"forecastStart": "2026-07-19T00:00:00Z", "conditionCode": "Clear", "temperatureMax": 20, "temperatureMin": 10,
+	     "daytimeForecast": {"windSpeed": 10, "windDirection": 0}, "windDirection": 90},
+	    {"forecastStart": "2026-07-20T00:00:00Z", "conditionCode": "Clear", "temperatureMax": 20, "temperatureMin": 10,
+	     "windSpeed": 10}
+	  ]},
+	  "forecastHourly": {"hours": [
+	    {"forecastStart": "2026-07-19T10:00:00Z", "conditionCode": "Clear", "temperature": 18, "windSpeed": 20, "windDirection": 0},
+	    {"forecastStart": "2026-07-19T11:00:00Z", "conditionCode": "Clear", "temperature": 18, "windSpeed": 20}
+	  ]}
+	}`)
+	out, err := parseWeatherKitResponse(body, 0)
+	if err != nil {
+		t.Fatalf("parseWeatherKitResponse failed: %v", err)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Current struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"current"`
+		Days []struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"days"`
+		Hourly []struct {
+			Dir *float64 `json:"wind_direction_deg"`
+		} `json:"hourly"`
+	}
+	if err := json.Unmarshal(b, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Current.Dir == nil || *wire.Current.Dir != 0 {
+		t.Errorf("current direction = %v, want 0", wire.Current.Dir)
+	}
+	// A daytime direction of 0 is north and must not be replaced by the day's 90.
+	if wire.Days[0].Dir == nil || *wire.Days[0].Dir != 0 {
+		t.Errorf("day 0 direction = %v, want 0 from the daytime forecast", wire.Days[0].Dir)
+	}
+	if wire.Days[1].Dir != nil {
+		t.Errorf("day 1 direction = %v, want null", *wire.Days[1].Dir)
+	}
+	if wire.Hourly[0].Dir == nil || *wire.Hourly[0].Dir != 0 || wire.Hourly[1].Dir != nil {
+		t.Errorf("hour directions = %v %v, want 0 and null", wire.Hourly[0].Dir, wire.Hourly[1].Dir)
 	}
 }
