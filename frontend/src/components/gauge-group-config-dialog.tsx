@@ -15,6 +15,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { GaugeFields, defaultGaugeConfig, slotFromProfileGauge } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
+import { useTileSave } from '@/hooks/use-tile-save'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import { ZoneConflicts } from '@/components/zone-conflicts'
@@ -36,8 +37,8 @@ function defaultGroupConfig(): GaugeGroupWidgetConfig {
 interface GaugeGroupConfigDialogProps {
   widget: DashboardLayoutItem | null
   onCancel: () => void
-  onSave: (config: GaugeGroupWidgetConfig) => void
-  onDuplicate?: (config: GaugeGroupWidgetConfig) => void
+  onSave: (config: GaugeGroupWidgetConfig) => void | Promise<void>
+  onDuplicate?: (config: GaugeGroupWidgetConfig) => void | Promise<void>
 }
 
 /**
@@ -52,13 +53,11 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
   const { paths } = useSignalKPaths(widget !== null)
   const ctx = useEquipmentTileContext(widget !== null)
   const [config, setConfig] = useState<GaugeGroupWidgetConfig>(defaultGroupConfig)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const { saving, error: saveError, run: runSave } = useTileSave(widget?.id)
 
   // Re-seed per instance, so editing one group never shows another's settings.
   useEffect(() => {
     setConfig(widget?.gaugeGroup ? structuredClone(widget.gaugeGroup) : defaultGroupConfig())
-    setSaveError(null)
   }, [widget?.id, widget?.gaugeGroup])
 
   const kind = (config.equipmentKind ?? '') as SourceKind | ''
@@ -139,22 +138,22 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
     gauges: config.gauges.map((g, i) => (cleared.has(i) ? { ...g, zones: undefined } : g)),
   })
 
-  const save = async () => {
-    // Nothing to write to a profile: save the tile at once, in the same tick.
+  // Busy until the tile write settles, profile zones included. With no zones
+  // to write, onSave is called in the same tick.
+  const save = () => runSave(async () => {
     if (!zoneEditing.dirty) {
-      onSave(config)
+      await onSave(config)
       return
     }
-    setSaving(true)
-    setSaveError(null)
-    try {
-      onSave(settled(await zoneEditing.commit()))
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
-    } finally {
-      setSaving(false)
-    }
-  }
+    await onSave(settled(await zoneEditing.commit()))
+  })
+
+  // Duplicate waits for the same busy state, so it cannot race Save's own
+  // zone commit, and a refused copy shows in the dialog.
+  const duplicate = () => runSave(async () => {
+    await onDuplicate?.(zoneEditing.dirty ? settled(await zoneEditing.commit()) : config)
+    onCancel()
+  })
 
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => { if (!open) onCancel() }}>
@@ -309,22 +308,8 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
             <Button
               variant="outline"
               className="w-fit border-dashed border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
-              onClick={() => {
-                if (!zoneEditing.dirty) {
-                  onDuplicate?.(config)
-                  onCancel()
-                  return
-                }
-                void (async () => {
-                  try {
-                    onDuplicate?.(settled(await zoneEditing.commit()))
-                  } catch (err) {
-                    setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
-                    return
-                  }
-                  onCancel()
-                })()
-              }}
+              disabled={saving}
+              onClick={() => { void duplicate() }}
               title="Duplicate this tile"
               aria-label="Duplicate this tile"
             >
@@ -335,7 +320,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
           <div className="flex shrink-0 items-center justify-end gap-2">
             {saveError && <p role="alert" className="mr-2 text-sm text-destructive">{saveError}</p>}
             <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-            <Button disabled={!canSave || saving} onClick={() => { void save() }}>Save</Button>
+            <Button disabled={!canSave || saving} onClick={() => { void save() }}>{saving ? 'Saving…' : 'Save'}</Button>
           </div>
         </DialogFooter>
       </DialogContent>

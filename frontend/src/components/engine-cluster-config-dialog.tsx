@@ -19,6 +19,7 @@ import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { useVesselRoles } from '@/hooks/use-vessel-roles'
+import { useTileSave } from '@/hooks/use-tile-save'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import { ZoneConflicts } from '@/components/zone-conflicts'
 import {
@@ -465,8 +466,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const pathNames = useMemo(() => paths.map((p) => p.path), [paths])
   const pathsState: PathsState = pathsError ? 'error' : pathsLoading ? 'loading' : 'ready'
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const { saving, error: saveError, run: runSave } = useTileSave(widget?.id)
   // The slot of the card being edited. Null until the card has loaded and the
   // first slot needing attention (or the ring) has been chosen.
   // 'none' is a phone row the operator folded.
@@ -498,7 +498,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   useEffect(() => {
     setConfig(widget?.cluster ? withBlankSlots(structuredClone(widget.cluster)) : null)
     setCornerKeys((widget?.cluster?.corners ?? []).map(newKey))
-    setSaveError(null)
     operatorChose.current = false
     switchPending.current = false
   }, [widget?.id, widget?.cluster])
@@ -567,40 +566,18 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const setFuel = (update: (rail: ClusterFuelRailRef) => ClusterFuelRailRef) =>
     setSlot((c) => (c.fuel ? { ...c, fuel: update(c.fuel) } : c))
 
-  const save = async () => {
+  // Save stays busy until the tile write settles (onSave may return a promise).
+  // With no zones to write to a profile, onSave is called in the same tick. A
+  // failed write is toasted by the caller and the draft stays open for a retry;
+  // a rejection is shown in the dialog, not swallowed.
+  const save = () => runSave(async () => {
     if (!config) return
-    // Nothing to write to a profile: save the tile at once, in the same tick.
-    // Save stays busy until the tile write settles (onSave may return a promise).
     if (!zoneEditing.dirty) {
-      await writeTile(pruneUnbound(config))
+      await onSave(pruneUnbound(config))
       return
     }
-    setSaving(true)
-    setSaveError(null)
-    let next: EngineClusterConfig
-    try {
-      next = pruneUnbound(withoutSettledZones(config, await zoneEditing.commit()))
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
-      setSaving(false)
-      return
-    }
-    await writeTile(next)
-  }
-
-  // The tile write. A failed write is toasted by the caller and the draft stays
-  // open for a retry, so Save comes back; a rejection is shown, not swallowed.
-  const writeTile = async (next: EngineClusterConfig) => {
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await onSave(next)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save the tile')
-    } finally {
-      setSaving(false)
-    }
-  }
+    await onSave(pruneUnbound(withoutSettledZones(config, await zoneEditing.commit())))
+  })
 
   // The card never reads a slot's display, so the form leaves it out and folds
   // the quantity and unit away. `scaled` is whether the card draws the slot on a
