@@ -281,6 +281,14 @@ describe('Vessels group states', () => {
     expect(screen.getAllByTestId('poi-vessel-row')).toHaveLength(1)
   })
 
+  it('counts boats the backend cap left out in +N more', async () => {
+    await renderTile({
+      nearbyVesselFeed: { source: 'signalk', maxRangeM: 5000, cappedCount: 9, feedCap: 40 },
+      nearbyVessels: [ves('a', 100), ves('b', 200)],
+    })
+    expect(screen.getByTestId('poi-vessel-more')).toHaveTextContent('+9 more')
+  })
+
   it('names the smaller range when nothing is in range', async () => {
     const { rerender } = await renderTile()
     expect(state()).toBe('No vessels within 5 km')

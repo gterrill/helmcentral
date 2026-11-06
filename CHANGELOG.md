@@ -16,9 +16,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **A silent AIS receiver no longer reads as an empty sea.** When SignalK is
   working but no vessel has reported for ten minutes, the Nearby Vessels tile
   and the Vessels list on the Nearby map say "AIS silent for 25m" (or "No AIS
-  reports heard") instead of "No vessels". The Nearby Vessels tile also says
-  "AIS unavailable" when Helmcentral can't read AIS at all, as the Nearby map
-  already did.
+  reports heard") instead of "No vessels". A reconnect to SignalK doesn't
+  reset that count. The Nearby Vessels tile also says "AIS unavailable" when
+  Helmcentral can't read AIS at all, as the Nearby map already did, or that the
+  boat needs a GNSS fix when that is the likelier cause.
 - **Long vessel names are readable on a phone.** In the Nearby Vessels tile,
   and in the Nearby map's list when it sits under the places, a long name takes
   a second line instead of being cut off.
@@ -27,8 +28,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - **During an anchor watch the nearby boats list stops at 40.** It holds the
   boats nearest you, plus those near your anchor, so a very crowded anchorage
-  can't swamp a phone. The Nearby Vessels tile says how many boats near the
-  anchor it left out.
+  can't swamp a phone. It keeps the ones closest to your anchor if there are
+  more than that, and the anchor-watch map, the Nearby map and the Nearby
+  Vessels tile all say how many boats it left out.
 - **Choosing squares to download on the offline coastline map is easier, and a
   plain drag now moves the map instead of selecting a block.** You can cancel
   with **Cancel** or Escape, drag the map and zoom it while you're choosing,

@@ -163,22 +163,23 @@ func TestNearbyFeedSelectionCapsOnlyTheWatchExtras(t *testing.T) {
 }
 
 // ais_heard_age_s is the feed-health signal: how long since ANY other vessel
-// reported a position, in range or not, so a silent receiver is told apart from
-// an empty sea.
+// reported a live position, in range or not, so a silent receiver is told apart
+// from an empty sea.
+func positionDelta(context, timestamp string) signalKDelta {
+	return signalKDelta{Context: context, Updates: []signalKUpdate{{
+		Timestamp: timestamp,
+		Values:    []signalKValue{{Path: "navigation.position", Value: map[string]any{"latitude": -20.0, "longitude": 149.0}}},
+	}}}
+}
+
 func TestNearbyPayloadReportsHowLongSinceAnyAISPositionWasHeard(t *testing.T) {
-	seedFeedScene(t)
-	// A boat 100 km away is out of range and not in the list, but it was heard.
-	id := "urn:mrn:imo:mmsi:500000001"
-	globalSignalKSnapshot.contexts[vesselContextPrefix+id] = map[string]any{"name": "FARAWAY"}
-	globalSignalKSnapshot.pathSeen[vesselContextPrefix+id+"|navigation.position"] = time.Now().UTC().Add(-90 * time.Second)
-	for k := range globalSignalKSnapshot.pathSeen {
-		if k != vesselContextPrefix+id+"|navigation.position" {
-			delete(globalSignalKSnapshot.pathSeen, k)
-		}
-	}
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	now := time.Now().UTC()
+	// 100 km away would be out of range, but it was heard.
+	globalSignalKSnapshot.applyDelta(positionDelta(vesselContextPrefix+"urn:mrn:imo:mmsi:500000001", now.Add(-90*time.Second).Format(time.RFC3339Nano)), now.Add(-90*time.Second))
 	age, ok := buildNearbyVesselsPayload()["ais_heard_age_s"].(float64)
 	if !ok || age < 89 || age > 95 {
-		t.Fatalf("ais_heard_age_s = %v, want about 90", buildNearbyVesselsPayload()["ais_heard_age_s"])
+		t.Fatalf("ais_heard_age_s = %v, want about 90", age)
 	}
 }
 
@@ -189,13 +190,78 @@ func TestNearbyPayloadSaysNoAISHeardWithMinusOne(t *testing.T) {
 	}
 }
 
+// A reconnect makes signalk-server replay its cached positions, each stamped
+// with the time it was first written. They are not reports heard now.
+func TestNearbyHeartbeatIgnoresPositionsReplayedOnReconnect(t *testing.T) {
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	now := time.Now().UTC()
+	old := now.Add(-3 * time.Hour).Format(time.RFC3339Nano)
+	globalSignalKSnapshot.applyDelta(positionDelta(vesselContextPrefix+"urn:mrn:imo:mmsi:500000001", old), now)
+	if got := buildNearbyVesselsPayload()["ais_heard_age_s"]; got != -1.0 {
+		t.Fatalf("a replayed position must not count as heard, got %v", got)
+	}
+}
+
+// Evicting a silent vessel's tree must not erase how long the receiver has
+// been quiet: -1 means never heard since the process started.
+func TestNearbyHeartbeatSurvivesEvictionOfTheSilentVessel(t *testing.T) {
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	ctx := vesselContextPrefix + "urn:mrn:imo:mmsi:500000001"
+	then := time.Now().UTC().Add(-2 * time.Hour)
+	globalSignalKSnapshot.applyDelta(positionDelta(ctx, then.Format(time.RFC3339Nano)), then)
+	globalSignalKSnapshot.evictStaleVesselContexts(time.Now().UTC())
+	if _, still := globalSignalKSnapshot.contexts[ctx]; still {
+		t.Fatalf("test setup: the context should have been evicted")
+	}
+	age, _ := buildNearbyVesselsPayload()["ais_heard_age_s"].(float64)
+	if age < 7190 {
+		t.Fatalf("ais_heard_age_s = %v, want about 7200 after eviction", age)
+	}
+}
+
 // SignalK can publish this boat under a second context. Its reports are not
 // AIS, so they must not keep the heartbeat alive.
 func TestNearbyPayloadHeartbeatIgnoresThisBoatsOwnSecondContext(t *testing.T) {
 	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
-	globalSignalKSnapshot.contexts[vesselContextPrefix+"urn:mrn:imo:mmsi:111"] = map[string]any{"name": "OWN BOAT"}
-	globalSignalKSnapshot.pathSeen[vesselContextPrefix+"urn:mrn:imo:mmsi:111|navigation.position"] = time.Now().UTC()
-	if got := aisHeardAge(time.Now().UTC(), []string{"own boat"}); got != -1 {
+	ctx := vesselContextPrefix + "urn:mrn:imo:mmsi:111"
+	now := time.Now().UTC()
+	globalSignalKSnapshot.contexts[ctx] = map[string]any{"name": "OWN BOAT"}
+	globalSignalKSnapshot.applyDelta(positionDelta(ctx, now.Format(time.RFC3339Nano)), now)
+	if got := aisHeardAge(now, []string{"own boat"}); got != -1 {
 		t.Fatalf("aisHeardAge = %v, want -1: the only reports are this boat's own", got)
+	}
+}
+
+// When the cap bites, it keeps the boats nearest the anchor, not the nearest
+// the boat.
+func TestNearbyFeedCapKeepsTheBoatsNearestTheAnchor(t *testing.T) {
+	watch := &anchorWatchData{Lat: aisTestAnchorLat, Lon: aisTestAnchorLon}
+	all := make([]nearbyVessel, 0, 60)
+	for i := 0; i < 60; i++ {
+		// All inside 500 m. Range from the boat rises with i, but the distance
+		// from the anchor falls, so the last boats are the ones nearest the anchor.
+		all = append(all, nearbyVessel{Name: fmt.Sprintf("V%02d", i), RangeM: float64(i), Lat: aisTestAnchorLat - 0.004 + float64(i)*0.00006, Lon: aisTestAnchorLon})
+	}
+	feed, capped := nearbyFeedVessels(all, watch)
+	if len(feed) != nearbyFeedCap || capped != 60-nearbyFeedCap {
+		t.Fatalf("want %d kept and %d capped, got %d and %d", nearbyFeedCap, 60-nearbyFeedCap, len(feed), capped)
+	}
+	names := map[string]bool{}
+	for _, v := range feed {
+		names[v.Name] = true
+	}
+	if !names["V59"] || names["V10"] {
+		t.Fatalf("the cap must keep the boats nearest the anchor (V59) and drop far ones (V10), got %v", names)
+	}
+	for i := 1; i < len(feed); i++ {
+		if feed[i].RangeM < feed[i-1].RangeM {
+			t.Fatalf("feed must stay in range order")
+		}
+	}
+}
+
+func TestNearbyPayloadSendsTheCap(t *testing.T) {
+	if got := buildNearbyVesselsPayload()["feed_cap"]; got != nearbyFeedCap {
+		t.Fatalf("feed_cap = %v, want %d", got, nearbyFeedCap)
 	}
 }

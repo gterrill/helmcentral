@@ -78,9 +78,10 @@ Nearby AIS targets draw on the anchor-watch map as amber circles carrying the
 vessel's name, range and bearing. Usually that is the 10 boats nearest to you.
 While a watch is set, every boat within 500 m of your anchor draws as well. A
 crowded anchorage can't hide a boat close to your anchor behind ten that are
-nearer your hull. The list stops at 40 boats, nearest to you first, so a very
-crowded anchorage can't swamp a phone. The Nearby Vessels tile reads the same
-list and tells you how many boats near the anchor it left out.
+nearer your hull. The list stops at 40 boats so a very
+crowded anchorage can't swamp a phone. If more than that are near your anchor,
+it keeps the ones closest to the anchor, and the anchor-watch map and the Nearby
+Vessels tile both tell you how many it left out.
 
 - **Collision alarms:** When a collision alarm is in force for one of them, its
   marker turns red. It gains a ring once the alarm reaches alarm severity. It

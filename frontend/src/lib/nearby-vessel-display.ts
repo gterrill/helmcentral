@@ -54,6 +54,16 @@ export function aisSilenceKey(aisHeardAgeS: number | null): string {
   return aisSilenceMessage(aisHeardAgeS) ?? (aisHeardAgeS === null ? 'unknown' : 'heard')
 }
 
+/**
+ * Said where the backend's cap left boats out of the list during an anchor
+ * watch, or null when it left none. `feedCap` is the cap the backend sent.
+ */
+export function cappedBoatsMessage(cappedCount: number | undefined, feedCap: number | null | undefined): string | null {
+  if (cappedCount === undefined || cappedCount <= 0) return null
+  const boats = `${cappedCount} more ${cappedCount === 1 ? 'boat' : 'boats'} near the anchor ${cappedCount === 1 ? "isn't" : "aren't"} shown`
+  return feedCap ? `${boats} (limit ${feedCap}).` : `${boats}.`
+}
+
 export function formatRelativeAge(seconds: number): string {
   return `${formatRelativeDuration(seconds)} ago`
 }

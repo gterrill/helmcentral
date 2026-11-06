@@ -85,6 +85,13 @@ type signalKSnapshot struct {
 	// distressCleared latches AIS distress labels declared gone (ADR 0185).
 	connectedSince  time.Time
 	contextHeard    map[string]time.Time
+	// positionHeard is, per non-self vessel context, when a LIVE position last
+	// arrived (a cached value replayed on reconnect is skipped, as for
+	// sentenceSeen). It is the AIS feed's heartbeat. Eviction of a silent
+	// vessel's tree does not clear it, so the heartbeat can still say how long
+	// the receiver has been quiet; entries are dropped after
+	// positionHeardKeepFor to bound the map.
+	positionHeard map[string]time.Time
 	distressCleared map[string]struct{}
 }
 
@@ -305,6 +312,7 @@ func newSignalKSnapshot() *signalKSnapshot {
 		deviceNames:       make(map[string]map[string]string),
 		sentenceSeen:      make(map[string]time.Time),
 		contextHeard:      make(map[string]time.Time),
+		positionHeard:     make(map[string]time.Time),
 		distressCleared:   make(map[string]struct{}),
 	}
 }
@@ -617,6 +625,38 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 			s.contextHeard[d.Context] = now
 			break
+		}
+	}
+	s.notePositionHeardLocked(d, now)
+}
+
+// positionReplayAfter is how old an update's own timestamp may be before it
+// counts as a cached value replayed on reconnect and not a live report.
+const positionReplayAfter = 10 * time.Minute
+
+// positionHeardKeepFor bounds positionHeard: a vessel not heard for this long
+// is forgotten.
+const positionHeardKeepFor = 30 * 24 * time.Hour
+
+// notePositionHeardLocked records a live navigation.position from another
+// vessel. An update whose own timestamp is old is a replay and is skipped
+// (ADR 0144), or a dead receiver would look heard again after every reconnect.
+func (s *signalKSnapshot) notePositionHeardLocked(d signalKDelta, now time.Time) {
+	if !strings.HasPrefix(d.Context, vesselContextPrefix) || d.Context == s.selfCtx || d.Context == vesselContextPrefix+"self" {
+		return
+	}
+	for _, update := range d.Updates {
+		if ts, err := time.Parse(time.RFC3339Nano, update.Timestamp); err == nil && now.Sub(ts) > positionReplayAfter {
+			continue
+		}
+		for _, val := range update.Values {
+			if val.Path == "navigation.position" {
+				if s.positionHeard == nil {
+					s.positionHeard = make(map[string]time.Time)
+				}
+				s.positionHeard[d.Context] = now
+				return
+			}
 		}
 	}
 }
@@ -1115,13 +1155,8 @@ func (s *signalKSnapshot) lastOtherVesselPositionSeen(excludedNames []string) ti
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var latest time.Time
-	for key, seen := range s.pathSeen {
-		context, path, ok := strings.Cut(key, "|")
-		if !ok || path != "navigation.position" || !strings.HasPrefix(context, vesselContextPrefix) ||
-			context == s.selfCtx || context == vesselContextPrefix+"self" {
-			continue
-		}
-		if !seen.After(latest) {
+	for context, seen := range s.positionHeard {
+		if !seen.After(latest) || context == s.selfCtx {
 			continue
 		}
 		// SignalK may publish this vessel under a second context. Its reports
@@ -1287,6 +1322,12 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 	for context, at := range s.contextHeard {
 		if !strings.HasPrefix(context, vesselContextPrefix) && now.Sub(at) > vesselContextStaleAfter {
 			delete(s.contextHeard, context)
+		}
+	}
+
+	for context, at := range s.positionHeard {
+		if now.Sub(at) > positionHeardKeepFor {
+			delete(s.positionHeard, context)
 		}
 	}
 

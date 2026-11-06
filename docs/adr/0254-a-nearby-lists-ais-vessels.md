@@ -92,9 +92,11 @@ in this order:
 The known limit here was that a silent AIS receiver and an empty sea both gave
 an empty list. The feed now carries `ais_heard_age_s`, the age of the latest
 position from any vessel other than this one, in range or not. The snapshot
-already stamps every position on receipt, so no receiver heartbeat is needed.
-It reads -1 when the snapshot holds none. The snapshot drops a vessel after an
-hour of silence, so -1 also covers a receiver quiet for longer than that.
+stamps each live position on receipt, per vessel context, and skips a cached
+value signalk-server replays on reconnect by its own old timestamp (ADR 0144),
+so a reconnect does not make a dead receiver look heard. The stamp survives the
+snapshot's hour-long eviction of a silent vessel, so -1 means nothing has been
+heard since the process started.
 
 With an empty list, the Vessels group and the Nearby Vessels tile say "AIS
 silent for 25m" once the age passes ten minutes, the window after which the
@@ -107,8 +109,11 @@ A remote anchorage with no traffic reads "AIS silent" after ten minutes. The
 tile cannot tell that from a dead receiver and says what it knows, how long
 nothing has been heard.
 
-During an anchor watch the feed is capped at 40 boats, nearest first, and
-reports `capped_count`, the boats near the anchor it left out. Without a watch
+During an anchor watch the feed is capped at 40 boats. The 10 nearest the boat
+always stay; when the boats near the anchor exceed the rest, the cap keeps those
+nearest the anchor. The feed stays in range order and reports `capped_count`,
+the boats it left out, and `feed_cap`. The Nearby Vessels tile, the Nearby map's
+"+N more" and the anchor-watch map all say so. Without a watch
 the 10-boat limit stands and `capped_count` is zero.
 
 ## Alternatives rejected

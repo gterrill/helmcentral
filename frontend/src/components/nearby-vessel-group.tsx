@@ -95,7 +95,8 @@ export function VesselGroup({
 }) {
   const message = vesselGroupMessage({ vessels, gnssCriticalAlert, feed, limitM, distanceUnits })
   const shown = message === null ? vessels.slice(0, VESSEL_LIST_SIZE) : []
-  const more = message === null ? vessels.length - shown.length : 0
+  // Boats the backend's cap left out of the feed count as more: they exist.
+  const more = message === null ? vessels.length - shown.length + (feed?.cappedCount ?? 0) : 0
 
   return (
     <div

@@ -126,7 +126,7 @@ before.
 
 The Nearby Vessels tile gives the same reasons when its list is empty: "AIS
 unavailable" when Helmcentral can't read AIS, and "AIS silent for 25m" when
-SignalK is working but no vessel has reported for over ten minutes. A long
+SignalK is working but no vessel has reported for over ten minutes. On a narrow tile a long
 vessel name takes a second line instead of being cut off.
 
 Nearby Vessels and Radar Targets are lists that grow and shrink as contacts

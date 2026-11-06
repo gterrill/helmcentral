@@ -358,6 +358,18 @@ describe('NearbyVesselsTile collision alarms', () => {
       expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
     })
 
+    it('says the boat needs a GNSS fix, not that AIS is unavailable, when the fix is the likelier fault', () => {
+      empty({ source: 'backend-fallback', gnssCriticalAlert: true })
+      expect(screen.getByText('Vessels need a GNSS fix')).toBeInTheDocument()
+      expect(screen.queryByText('AIS unavailable')).toBeNull()
+    })
+
+    it('treats a null source as unknown, not unavailable', () => {
+      empty({ source: null })
+      expect(screen.queryByText('AIS unavailable')).toBeNull()
+      expect(screen.getByText('No vessels within 5 km')).toBeInTheDocument()
+    })
+
     it('keeps listing contacts that are still in the feed even when the source is not SignalK', () => {
       render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} source="backend-fallback"
         vessels={[{ id: 'a', name: 'A BOAT', range_m: 100, age_seconds: 5 }]} />)
@@ -367,9 +379,9 @@ describe('NearbyVesselsTile collision alarms', () => {
 
   describe('the cap during an anchor watch', () => {
     it('says how many boats near the anchor the list leaves out', () => {
-      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} cappedCount={16}
+      render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null} cappedCount={16} feedCap={40}
         vessels={[{ id: 'a', name: 'A BOAT', range_m: 100, age_seconds: 5 }]} />)
-      expect(screen.getByTestId('nearby-vessels-capped')).toHaveTextContent('Nearest 40 boats shown. 16 more near the anchor are not listed.')
+      expect(screen.getByTestId('nearby-vessels-capped')).toHaveTextContent('16 more boats near the anchor aren\'t shown (limit 40).')
     })
 
     it('says nothing when nothing was left out', () => {
@@ -380,13 +392,14 @@ describe('NearbyVesselsTile collision alarms', () => {
   })
 
   describe('long names on a phone', () => {
-    it('lets a name wrap onto a second line instead of cutting it off', () => {
+    it('lets a name wrap onto a second line only in a narrow tile, and keeps one line in a wide one', () => {
       render(<NearbyVesselsTile loading={false} distanceUnits="metric" lastUpdateAgeS={null}
         vessels={[{ id: 'a', name: 'SOUTHERN CROSS EXPLORER', range_m: 100, age_seconds: 5 }]} />)
       const name = screen.getByText('SOUTHERN CROSS EXPLORER')
-      expect(name.className).toContain('line-clamp-2')
-      expect(name.className).toContain('break-words')
-      expect(name.className).not.toContain('truncate')
+      expect(name.className).toContain('@max-[28rem]:line-clamp-2')
+      expect(name.className).toContain('@max-[28rem]:break-words')
+      expect(name.className).toContain('truncate')
+      expect(name.closest('.\\@container')).not.toBeNull()
     })
   })
 })

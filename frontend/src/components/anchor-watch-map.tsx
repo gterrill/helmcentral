@@ -8,6 +8,7 @@ import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, circlePolygon } from '@/lib/geo'
 import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
+import { AisCappedNote } from '@/components/ais-capped-note'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
@@ -2200,6 +2201,7 @@ export function AnchorWatchMap({
         </div>
       )}
 
+      <AisCappedNote />
     </div>
   )
 }

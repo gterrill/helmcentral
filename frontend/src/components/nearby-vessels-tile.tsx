@@ -12,6 +12,7 @@ import { useNearbyVessels, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 import {
   aisSilenceMessage,
+  cappedBoatsMessage,
   COLLISION_TIER_STYLE,
   collisionTier,
   formatRelativeAge,
@@ -135,11 +136,11 @@ type NearbyVesselsTileProps = {
   aisHeardAgeS?: number | null
   /** Boats near the anchor the feed left out during a watch because it is capped. */
   cappedCount?: number
+  /** The cap the backend applied, from the same payload. */
+  feedCap?: number | null
+  /** The boat has no trustworthy fix: with the feed not from SignalK, that is the likelier cause. */
+  gnssCriticalAlert?: boolean
 }
-
-// The most boats the backend sends during an anchor watch (nearbyFeedCap in
-// backend/nearby_vessels.go); the note about the cap names it.
-const FEED_CAP = 40
 
 function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   if (distanceUnits === 'imperial') {
@@ -148,12 +149,15 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   return `${Math.round(rangeMeters)} m`
 }
 
-export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null, source, aisHeardAgeS = null, cappedCount = 0 }: NearbyVesselsTileProps) {
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null, source, aisHeardAgeS = null, cappedCount = 0, feedCap = null, gnssCriticalAlert = false }: NearbyVesselsTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   // Why the list is empty when the feed is the reason: a silent receiver must
   // not read as an empty sea.
-  const emptyMessage = source !== undefined && source !== 'signalk'
-    ? 'AIS unavailable'
+  // A null source is unknown, not unavailable. The backend also reports
+  // backend-fallback when only the boat's own fix is missing, so the GNSS
+  // alert is checked first.
+  const emptyMessage = typeof source === 'string' && source !== 'signalk'
+    ? (gnssCriticalAlert ? 'Vessels need a GNSS fix' : 'AIS unavailable')
     : aisSilenceMessage(aisHeardAgeS)
       ?? (maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(maxRangeM, distanceUnits)}`)
   const sortedVessels = useMemo(() => sortByCollisionAlarm(vessels, aisCollisionAlarms), [vessels, aisCollisionAlarms])
@@ -166,7 +170,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
       staleLabel={formatDataAge(lastUpdateAgeS)}
       shrinkToContent
     >
-      <div className="mt-3 space-y-2">
+      <div className="@container mt-3 space-y-2">
         {sortedVessels.map((vessel) => {
           const tier = collisionTier(aisCollisionAlarms?.get(vessel.id))
           const tierStyle = tier ? COLLISION_TIER_STYLE[tier] : null
@@ -182,7 +186,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
               )}
             >
               <div className="min-w-0">
-                <p className="line-clamp-2 break-words font-display text-lg uppercase leading-tight text-foreground">{vessel.name}</p>
+                <p className="truncate font-display text-lg uppercase leading-tight text-foreground @max-[28rem]:line-clamp-2 @max-[28rem]:break-words">{vessel.name}</p>
                 {tierStyle ? (
                   <p className={cn('mt-1 text-[10px] font-semibold uppercase tracking-[0.16em]', tierStyle.text)}>{tierStyle.label}</p>
                 ) : null}
@@ -213,7 +217,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
 
         {cappedCount > 0 ? (
           <p data-testid="nearby-vessels-capped" className="text-xs text-muted-foreground">
-            Nearest {FEED_CAP} boats shown. {cappedCount} more near the anchor are not listed.
+            {cappedBoatsMessage(cappedCount, feedCap)}
           </p>
         ) : null}
 
@@ -227,8 +231,9 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
 
 /** The Nearby Vessels list: the contacts from their own stream, and the collision highlight on each row. */
 export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: Omit<ComponentProps<typeof NearbyVesselsTile>,
-  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM' | 'source' | 'aisHeardAgeS' | 'cappedCount'>) {
+  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM' | 'source' | 'aisHeardAgeS' | 'cappedCount' | 'feedCap' | 'gnssCriticalAlert'>) {
   const nearby = useNearbyVessels()
+  const gnssCriticalAlert = useVesselStateSelector((v) => v.gnssCriticalAlert)
   const aisCollisionAlarms = useAisCollisionAlarms()
-  return <NearbyVesselsTile {...props} {...nearby} aisCollisionAlarms={aisCollisionAlarms} />
+  return <NearbyVesselsTile {...props} {...nearby} gnssCriticalAlert={gnssCriticalAlert} aisCollisionAlarms={aisCollisionAlarms} />
 })

@@ -32,7 +32,7 @@ describe('nearby vessel feed status', () => {
     const { result } = renderHook(() => useNearbyVesselFeed())
     expect(result.current).toBeNull()
     emit({ vessels: [], source: 'signalk', max_range_m: 5000 })
-    expect(result.current).toEqual({ source: 'signalk', maxRangeM: 5000, aisHeardAgeS: null })
+    expect(result.current).toEqual({ source: 'signalk', maxRangeM: 5000, aisHeardAgeS: null, cappedCount: 0, feedCap: null })
   })
 
   it('carries the source, and reads a missing or malformed one as null', () => {
@@ -79,6 +79,13 @@ describe('AIS heartbeat and the cap', () => {
     emit({ vessels: [], source: 'signalk', max_range_m: 5000, ais_heard_age_s: 590 })
     emit({ vessels: [], source: 'signalk', max_range_m: 5000, ais_heard_age_s: 700 })
     expect(result.current?.aisHeardAgeS).toBe(700)
+  })
+
+  it('reads feed_cap and hands capped_count and feed_cap to the maps through the feed', () => {
+    const { result } = renderHook(() => useNearbyVesselFeed())
+    emit({ vessels: [], source: 'signalk', capped_count: 7, feed_cap: 40 })
+    expect(result.current?.cappedCount).toBe(7)
+    expect(result.current?.feedCap).toBe(40)
   })
 
   it('reads capped_count, and treats a missing or bad one as zero', () => {
