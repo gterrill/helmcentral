@@ -46,6 +46,12 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 	fileServer := http.FileServer(http.FS(distFS))
 
 	serve := func(c echo.Context) error {
+		if c.Request().Method == http.MethodHead {
+			if allow := headOwnedElsewhere(e, c.Request()); allow != "" {
+				c.Response().Header().Set(echo.HeaderAllow, allow)
+				return echo.NewHTTPError(http.StatusMethodNotAllowed)
+			}
+		}
 		reqPath := strings.TrimPrefix(c.Request().URL.Path, "/")
 		isShell := true
 		if reqPath != "" {
@@ -91,6 +97,42 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 	// Both routes are required. Echo's "/*" wildcard does not match the bare
 	// root path, so registering only the wildcard left "/" - the dashboard's
 	// own entry point - falling through to Echo's JSON 404.
-	e.GET("/", serve)
-	e.GET("/*", serve)
+	//
+	// HEAD shares GET's routes: a kiosk launcher that probes readiness with
+	// `wget --spider` got Echo's 404 for the dashboard otherwise.
+	// http.FileServer already answers HEAD with GET's status and headers
+	// and no body.
+	methods := []string{http.MethodGet, http.MethodHead}
+	e.Match(methods, staticRootRoute, serve)
+	e.Match(methods, staticCatchAllRoute, serve)
+}
+
+const (
+	staticRootRoute     = "/"
+	staticCatchAllRoute = "/*"
+)
+
+// headOwnedElsewhere reports the methods a request's path allows when GET on
+// it reaches a route other than the shell's - an API route, the OAuth
+// .well-known documents. Every such route is GET-only, so Echo hands a HEAD
+// on it to the catch-all, which would answer a JSON endpoint with a 200 HTML
+// page. The answer is the 405 Echo itself gives for a method a route lacks.
+// It returns "" when GET would reach the shell too.
+func headOwnedElsewhere(e *echo.Echo, req *http.Request) string {
+	probe := e.AcquireContext()
+	defer e.ReleaseContext(probe)
+	probe.Reset(req, nil)
+	e.Router().Find(http.MethodGet, echo.GetPath(req), probe)
+
+	route := probe.Path()
+	if route == staticRootRoute || route == staticCatchAllRoute {
+		return ""
+	}
+	allow := []string{http.MethodOptions}
+	for _, r := range e.Routes() {
+		if r.Path == route {
+			allow = append(allow, r.Method)
+		}
+	}
+	return strings.Join(allow, ", ")
 }
