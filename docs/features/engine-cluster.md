@@ -52,6 +52,46 @@ image. The fuel arcs sit on the outer edge and the readout cards sit on the
 side facing the other engine. That way a pair placed side by side reads
 symmetrically.
 
+## The settings dialog is the card
+
+In Layout mode, the tile's settings gear opens a dialog with a picture of the
+card in it. Every part of the picture is a button, so you click the part you
+want to change and its settings open beside the picture. In a narrow window the
+picture becomes a list of the same parts, and the settings open under the one
+you click.
+
+- **Across the top:** Choose the **Engine**, give the tile a **Title**, and
+  pick the **Engine side**. A blank title shows the engine's name. **Fill from
+  profile** replaces the ring, the hours, the two arcs, the readout cards and
+  the gearbox pressure with the profile's. Any readout you added or changed is
+  gone. The alternator, the starter battery, the exhaust and the fuel
+  rail stay as you set them, and it fills any alternator row that is still blank.
+- **The picture:** It shows the fuel rail, the ring with its hours, the two
+  arcs and the readout cards. Under them sit the starter battery, the
+  alternator and its five rows, the gearbox pressure and the exhaust. A
+  Starboard tile shows the picture mirrored, the same as the tile.
+- **Each part's outline:** A part that reads something has a plain outline. A
+  part that **Save** is waiting on has an amber outline and says what it's
+  missing. A part that shows nothing has a dashed outline and says **Not
+  shown**. Amber words on their own, such as **Not sending**, are a warning and
+  don't stop you saving.
+- **Where it opens:** The dialog opens on the first part that needs you, or on
+  the ring if nothing does. It stays on the part you choose, even after you fix
+  it.
+- **What you can set:** A part's settings show its **Reading**, its **Label**
+  and, for the ring, the arcs and the readout cards, the scale. The quantity and
+  unit are under **Units and quantity**, closed until you open them. They come
+  from the profile for a reading the profile covers. There's no **Display**
+  choice, because the tile draws each part its own way.
+- **Add readout:** Below the readout cards, **Add readout** puts up another card,
+  to a limit of four.
+- **Zone conflicts:** If a limit on the tile disagrees with the profile's, that
+  part gets an amber outline and the choice appears in its settings. You can't
+  save until you make it.
+
+If **Save** is greyed out, the line beside it names the part that's missing a
+reading, and that part has the amber outline.
+
 ## Colours and alarms
 
 Colour means state, nothing else. A reading is neutral inside its normal band.
@@ -82,12 +122,12 @@ See Staleness in [Tiles](../reference/tiles.md).
 
 The engine's own readings (revs, oil, boost, load, fuel flow, coolant, gearbox)
 come from the engine you pick. The starter battery, the alternator and the
-exhaust are separate equipment, so you choose each one on the tile's
-**Alternator & more** tab.
+exhaust are separate equipment, so you choose each one in its own part of the
+settings picture.
 
-The alternator is chosen once, at the top of that tab, and all five of its
-parts read from it: current, output power, temperature, charge stage and charge
-current limit. Here's how the choice behaves:
+The alternator is chosen once, in the **Alternator** part of the picture. All
+five rows beside it read from it: current, output power, temperature, charge
+stage and charge current limit. Here's how the choice behaves:
 
 - **Where it starts:** When you pick an engine, or open a tile that has no
   alternator yet, the alternator is the one you named under Roles in
@@ -101,8 +141,8 @@ current limit. Here's how the choice behaves:
   Helmcentral doesn't warn you about it.
 - **Which readings it fills:** Helmcentral looks at what the alternator is
   sending and fills in each part with the reading that part expects. A part the
-  alternator doesn't send stays blank and is left off the tile, and its row on
-  the tab says **Not sending**. The charge current limit has no expected reading,
+  alternator doesn't send stays blank and is left off the tile, and its row in
+  the picture says **Not sending**. The charge current limit has no expected reading,
   so it stays blank until you choose one, and its row says **Not shown**.
 - **If you swap alternators:** A part keeps its reading if the new alternator
   sends it. If it doesn't, the part goes back to the reading it expects, or goes
@@ -112,12 +152,12 @@ current limit. Here's how the choice behaves:
   source in Equipment. You can still save.
 - **If you clear it:** Clearing the alternator blanks all five parts.
 
-**Fill slots from profile** doesn't change the alternator. It fills any blank
+**Fill from profile** doesn't change the alternator. It fills any blank
 alternator part from the alternator you picked, and leaves readings you've
 already chosen alone.
 
 The starter battery and the exhaust each have their own equipment, picked on
-their own row. Helmcentral fills in the reading for them in the same way. Pick
+their own part. Helmcentral fills in the reading for them in the same way. Pick
 the starter battery and its voltage is set. If the equipment isn't sending the
 reading that part needs, the field says so and lists what it does send. You
 can't save a battery or exhaust part that has equipment but no reading. Pick a

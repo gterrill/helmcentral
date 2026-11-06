@@ -18,36 +18,41 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
    there. See below for mapping. Two items with the same name are told apart by
    where they are and their serial number.
 3. Leave **Title** blank to show the engine's name, or type your own.
-4. Choose **Fill slots from profile**. The ring, the hours, the four readout
-   cards, the coolant arc and the gearbox are filled from the engine's
-   profile. You can change any of them afterward on the tabs below.
-5. Check **Engine side**, Port or Starboard. Filling the slots sets it from the
-   engine's source, so change it after filling if it's wrong. Starboard
-   mirrors the card.
-6. Each tab covers one part of the card. On a tablet or a computer, the small
-   picture of the card at the top lights up the part you're editing:
-   - **Dial**: the ring, the hours in the centre and the two arcs at the foot
-     of the dial. The right arc is the gearbox oil temperature, filled from
-     the engine's profile like the coolant arc.
-   - **Readouts**: the four cards round the dial.
-   - **Alternator & more**: the alternator, the starter battery, the gearbox
-     oil pressure and the exhaust. Choose the alternator once, under
-     **Alternator** at the top. Its five rows below it, current, output power,
-     temperature, charge stage and charge current limit, only need a reading.
-     The alternator starts as the one you named for that side under **Roles**.
-     For the battery and the exhaust, open the row to choose its equipment and
-     the reading it shows. A row that isn't showing says **Not shown** and is
-     left off the card.
-   - **Fuel**: choose **Add fuel rail**, then choose a tank for each bar
+4. Choose **Fill from profile**. The ring, the hours, the four readout
+   cards, the two arcs and the gearbox pressure are replaced with the engine
+   profile's, so do this before you adjust them. Your alternator, battery,
+   exhaust and fuel rail stay. You can change any part afterward by clicking
+   it in the picture of the card.
+5. Check **Engine side**, Port or Starboard. Filling from the profile sets it
+   from the engine's source, so change it after filling if it's wrong.
+   Starboard mirrors the card.
+6. Click a part of the picture to change it. Its settings open beside the
+   picture, or under the part you click in a narrow window:
+   - **Ring** and **Centre**: the revs dial, and the hours in the middle of it.
+   - **Coolant** and **Gearbox**: the two arcs at the foot of the dial. The
+     gearbox arc is the gearbox oil temperature, filled from the engine's
+     profile like the coolant arc.
+   - **Readout cards**: the cards round the dial. **Add readout** puts up
+     another, to a limit of four.
+   - **Alternator**: choose the alternator once. The five rows in its box,
+     current, output power, temperature, charge stage and charge current limit,
+     only need a reading. The alternator starts as the one you named for that
+     side under **Roles**.
+   - **Starter battery**, **Transmission** and **Exhaust**: for the battery
+     and the exhaust, choose the equipment and the reading it shows.
+   - **Fuel rail**: choose **Add fuel rail**, then choose a tank for each bar
      (forward and aft). The arcs sit on the outer edge for the engine's side.
      A bar takes its colours from the tank's own alarm levels, so there's
      nothing to set on the bar. See [Change a tank's alarm
      levels](change-tank-alarm-levels.md).
+
+   A part that isn't showing has a dashed outline and says **Not shown**. It's
+   left off the card.
 7. Choose **Save**. If it's greyed out, the line beside it says what's
-   missing, and a tab with an empty slot shows an amber dot.
+   missing, and the part that's missing a reading has an amber outline.
 
 For the second engine, duplicate the tile, choose the other engine and press
-**Fill slots from profile** again.
+**Fill from profile** again.
 
 ## Add a gauge group for equipment
 

@@ -39,6 +39,11 @@ export interface EquipmentTileContext {
    * than claiming the item is silent.
    */
   reporting: ReadonlySet<string> | null
+  /**
+   * Whether the equipment list has answered, with items or none, or failed. Absent,
+   * a caller that builds a context by hand is taken to have loaded when it has items.
+   */
+  loaded?: boolean
 }
 
 
@@ -351,13 +356,19 @@ export interface TileZoneConflict extends TileZoneMove {
   profileText: string
 }
 
+/** A slot whose zones the tile keeps: its position in the flat list passed to planTileZones, and its name. */
+export interface TileZoneHeld {
+  index: number
+  label: string
+}
+
 export interface TileZonePlan {
   /** Zones that go onto the profile because it has none for the reading. */
   moves: TileZoneMove[]
   /** Readings where the operator must choose which set to keep. */
   conflicts: TileZoneConflict[]
-  /** Labels of readings whose zones stay on the tile (no profile, or no gauge for it). */
-  stays: string[]
+  /** Readings whose zones stay on the tile (no profile, or no gauge for it), by slot position and label. */
+  stays: TileZoneHeld[]
 }
 
 function bandText(bands: readonly GaugeZone[], min: number, unit: string): string {
@@ -386,7 +397,7 @@ export function planTileZones(profile: EngineProfile | undefined, slots: readonl
     const label = slot.label.trim() || suffix
     const gauge = profileGaugeFor(profile, suffix)
     if (!profile || !gauge || gauge.quantity !== slot.quantity) {
-      plan.stays.push(label)
+      plan.stays.push({ index, label })
       return
     }
     const tile = effectiveScale(slot.min, slot.max, undefined)
@@ -397,7 +408,7 @@ export function planTileZones(profile: EngineProfile | undefined, slots: readonl
     // A unit the conversion does not know cannot be carried onto the profile: the
     // zones stay on the tile in their own unit, and nothing is written.
     if (min === null || max === null || converted.some((b) => b.from === null || b.to === null)) {
-      plan.stays.push(label)
+      plan.stays.push({ index, label })
       return
     }
     const bands = converted as GaugeZone[]

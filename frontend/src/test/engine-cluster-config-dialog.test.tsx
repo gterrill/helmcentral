@@ -96,7 +96,7 @@ function open(cluster: EngineClusterConfig = blank) {
 async function fillAndSave(side: 'port' | 'starboard', roles?: unknown) {
   await setup(side, roles)
   const onSave = open()
-  fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+  fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
   fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
   return vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
 }
@@ -235,19 +235,16 @@ describe('the alternator belongs to the engine side', () => {
 })
 
 describe('the one alternator picker', () => {
-  const tab = () => fireEvent.click(screen.getByRole('tab', { name: /alternator & more/i }))
-
-  test('the tab is called Alternator & more, with the picker above the five rows', async () => {
+  test('the alternator is a slot of its own, with the five rows after it', async () => {
     await setup('port')
     open()
-    expect(screen.queryByRole('tab', { name: /^footer/i })).toBeNull()
-    tab()
+    fireEvent.click(screen.getByRole('button', { name: /^alternator, port alternator$/i }))
     expect(screen.getByLabelText('Alternator')).toBe(alternatorBox())
-    const order = Array.from(document.querySelectorAll('details')).map((d) => d.querySelector('summary span')?.textContent)
-    expect(order.slice(0, 5)).toEqual([
-      'Alternator current (also drawn as a one-hour trace)', 'Alternator output power', 'Alternator temperature',
-      'Charge stage (regulator state number)', 'Charge current limit',
-    ])
+    const order = ['Alternator', 'Alternator current', 'Alternator output power', 'Alternator temperature', 'Charge stage', 'Charge current limit']
+      .map((title) => screen.getByRole('button', { name: new RegExp(`^${title}, `) }))
+    order.slice(1).forEach((button, i) => {
+      expect(order[i].compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
     expect(screen.queryByText(/battery management system/i)).toBeNull()
   })
 
@@ -393,16 +390,16 @@ describe('the one alternator picker', () => {
     await setup('port', null)
     open()
     pickAlternator('alt-quiet')
-    const summary = (title: string) => (screen.getByText(title).closest('summary') as HTMLElement).textContent
+    const summary = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}, `) }).textContent
     expect(summary('Alternator output power')).toContain('Not sending')
     expect(summary('Charge current limit')).toContain('Not shown')
-    expect(summary('Alternator current (also drawn as a one-hour trace)')).not.toContain('Not sending')
+    expect(summary('Alternator current')).not.toContain('Not sending')
   })
 
   test('with no alternator chosen the rows say Not shown, not Not sending', async () => {
     await setup('port', null)
     open()
-    const summary = (title: string) => (screen.getByText(title).closest('summary') as HTMLElement).textContent
+    const summary = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}, `) }).textContent
     expect(summary('Alternator output power')).toContain('Not shown')
   })
 
@@ -483,13 +480,13 @@ describe('the one alternator picker', () => {
 })
 
 describe('a reading typed on an alternator row', () => {
-  test('blocks Save when the alternator does not send it, and names the reading and the tab', async () => {
+  test('blocks Save when the alternator does not send it, and names the alternator and the reading', async () => {
     await setup('port')
     const onSave = open()
     fireEvent.change(rowBox('altLimit'), { target: { value: 'foo' } })
     expect(saveButton()).toBeDisabled()
     expect(screen.getByRole('status').textContent).toBe(
-      "On the Alternator & more tab, Port alternator isn't sending foo. Pick a reading it sends, or clear it.",
+      "Port alternator isn't sending foo. Pick a reading it sends, or clear it.",
     )
     fireEvent.click(saveButton())
     expect(onSave).not.toHaveBeenCalled()
@@ -549,7 +546,7 @@ describe('a reading typed on an alternator row', () => {
     open()
     fireEvent.change(document.querySelector('#cluster-footer-battery-equipment') as HTMLSelectElement, { target: { value: 'batt-quiet' } })
     expect(saveButton()).toBeDisabled()
-    expect(screen.getByText(/On the Alternator & more tab, Starter battery voltage needs a reading/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Starter battery voltage needs a reading/i)).toBeInTheDocument()
   })
 })
 
@@ -629,7 +626,7 @@ describe('the default alternator when the card has no side', () => {
 
 describe('an alternator that is no longer in Equipment', () => {
   const gone: EngineClusterConfig = { ...blank, footer: { alternatorId: 'deleted', altAmps: { ...blankAmps, suffix: 'current' } } }
-  const summary = () => (screen.getByText('Alternator current (also drawn as a one-hour trace)').closest('summary') as HTMLElement).textContent
+  const summary = () => screen.getByRole('button', { name: /^Alternator current, / }).textContent
 
   test('is said under the picker, and the bound rows say Equipment missing', async () => {
     await setup('port')
@@ -770,9 +767,7 @@ describe('the slots no profile fills', () => {
   async function fillThen(edit: () => void) {
     await setup('port', null)
     const onSave = open()
-    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
-    // The battery and exhaust rows live on the Alternator & more tab.
-    fireEvent.click(screen.getByRole('tab', { name: /alternator & more/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
     edit()
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     return vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
@@ -918,7 +913,7 @@ describe('a footer slot reads what the picked item publishes', () => {
   test('filling from the profile leaves out an alternator row the alternator does not send', async () => {
     await setup('port', { port_alternator: 'alt-quiet', starboard_alternator: 'alt-quiet' })
     open()
-    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
     expect(suffixBox('altTemp').value).toBe('')
     expect((screen.getByRole('button', { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(false)
   })
@@ -927,7 +922,7 @@ describe('a footer slot reads what the picked item publishes', () => {
     state.extraPaths = ['electrical.alternator.99.current']
     await setup('port', { port_alternator: 'alt-quiet', starboard_alternator: 'alt-quiet' })
     const onSave = open()
-    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
     for (const k of ['altWatts', 'altTemp', 'altStage']) expect(suffixBox(k).value, k).toBe('')
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
@@ -946,7 +941,7 @@ describe('a footer slot reads what the picked item publishes', () => {
     pickAlternator('alt-quiet')
     for (const key of ['altWatts']) fireEvent.change(suffixBox(key), { target: { value: '' } })
     fireEvent.change(suffixBox('altAmps'), { target: { value: 'current' } })
-    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
     expect(alternatorBox().value).toBe('alt-quiet')
     expect(suffixBox('altAmps').value).toBe('current')
     expect(suffixBox('altWatts').value).toBe('power')
@@ -956,7 +951,7 @@ describe('a footer slot reads what the picked item publishes', () => {
     await setup('port')
     open()
     fireEvent.change(suffixBox('altAmps'), { target: { value: 'fieldDrive' } })
-    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fill from profile/i }))
     expect(suffixBox('altAmps').value).toBe('fieldDrive')
   })
 

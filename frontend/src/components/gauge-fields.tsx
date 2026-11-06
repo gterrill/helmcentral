@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -70,6 +70,19 @@ interface GaugeFieldsProps {
   /** Namespaces the input and datalist ids, so N copies coexist in one dialog. */
   idPrefix: string
   equipment?: GaugeEquipmentMode
+  /**
+   * A slot of an engine cluster. The card never reads a slot's display, so the
+   * form leaves out Display and the trend window, and folds Quantity and Unit
+   * away behind "Units and quantity".
+   */
+  variant?: 'cluster'
+  /**
+   * Whether the slot is drawn on a scale, which decides if the scale and zones
+   * are offered. Absent, the display decides (a dial, bar or trend has one).
+   */
+  scaled?: boolean
+  /** Offer the zone editor even where `scaled` is off (the scale fields stay hidden). */
+  zoned?: boolean
 }
 
 /** The slot with a profile gauge's label, display, units and scale filled in. */
@@ -90,7 +103,12 @@ export function slotFromProfileGauge(slot: GaugeWidgetConfig, gauge: EngineProfi
  * The per-gauge form, shared between the single-gauge dialog and each member
  * row of a gauge group (ADR 0049) so the two never drift apart.
  */
-export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: GaugeFieldsProps) {
+export function GaugeFields({ value, onChange, paths, idPrefix, equipment, variant, scaled, zoned }: GaugeFieldsProps) {
+  const cluster = variant === 'cluster'
+  const drawnOnScale = scaled ?? hasScale(value.display)
+  // A slot with no scale can still hold zones that raise alarms, and then the
+  // operator needs the editor to clear them.
+  const offersZones = drawnOnScale || zoned === true
   // On an equipment slot the profile's gauge decides the quantity and unit,
   // because its zone thresholds are in that unit.
   const profileGauge = equipment?.holdsOwnZones
@@ -161,6 +179,40 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
 
   const removeZone = (index: number) => setZones(zones.filter((_, i) => i !== index))
 
+  const displayField = (
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-display`}>Display</FieldLabel>
+      <select id={`${idPrefix}-display`} className={SELECT_CLASS}
+        value={value.display} onChange={(e) => set('display', e.target.value as GaugeDisplay)}>
+        {DISPLAYS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+      </select>
+    </Field>
+  )
+  const quantityField = (
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-quantity`}>Quantity</FieldLabel>
+      <select id={`${idPrefix}-quantity`} className={SELECT_CLASS}
+        disabled={profileGauge !== undefined}
+        value={shownQuantity}
+        onChange={(e) => {
+          const next = quantityById(e.target.value)
+          onChange({ ...value, quantity: next.id, unit: next.units[0].id })
+        }}>
+        {QUANTITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+      </select>
+    </Field>
+  )
+  const unitField = (
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-unit`}>Unit</FieldLabel>
+      <select id={`${idPrefix}-unit`} className={SELECT_CLASS}
+        disabled={profileGauge !== undefined}
+        value={shownUnit} onChange={(e) => set('unit', e.target.value)}>
+        {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label || u.id}</option>)}
+      </select>
+    </Field>
+  )
+
   return (
     <div className="grid gap-3">
       {equipment ? (
@@ -228,37 +280,20 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
         <Input id={`${idPrefix}-label`} value={value.label} onChange={(e) => set('label', e.target.value)} />
       </Field>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field>
-          <FieldLabel htmlFor={`${idPrefix}-display`}>Display</FieldLabel>
-          <select id={`${idPrefix}-display`} className={SELECT_CLASS}
-            value={value.display} onChange={(e) => set('display', e.target.value as GaugeDisplay)}>
-            {DISPLAYS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-          </select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${idPrefix}-quantity`}>Quantity</FieldLabel>
-          <select id={`${idPrefix}-quantity`} className={SELECT_CLASS}
-            disabled={profileGauge !== undefined}
-            value={shownQuantity}
-            onChange={(e) => {
-              const next = quantityById(e.target.value)
-              onChange({ ...value, quantity: next.id, unit: next.units[0].id })
-            }}>
-            {QUANTITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
-          </select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${idPrefix}-unit`}>Unit</FieldLabel>
-          <select id={`${idPrefix}-unit`} className={SELECT_CLASS}
-            disabled={profileGauge !== undefined}
-            value={shownUnit} onChange={(e) => set('unit', e.target.value)}>
-            {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label || u.id}</option>)}
-          </select>
-        </Field>
-      </div>
+      {cluster ? (
+        <details className="group rounded-md border border-border">
+          <summary className="cursor-pointer list-none p-2 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <ChevronRight aria-hidden className="mr-1 inline size-3.5 align-text-bottom transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+            Units and quantity
+            <span className="ml-2">{unitLabel || shownUnit}</span>
+          </summary>
+          <div className="grid gap-3 p-2 pt-0 sm:grid-cols-2">{quantityField}{unitField}</div>
+        </details>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3">{displayField}{quantityField}{unitField}</div>
+      )}
 
-      {value.display === 'trend' && (
+      {!cluster && value.display === 'trend' && (
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-window`}>History window</FieldLabel>
           <select id={`${idPrefix}-window`} className={SELECT_CLASS}
@@ -269,7 +304,7 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
         </Field>
       )}
 
-      {hasScale(value.display) && (
+      {drawnOnScale && (
         <div className="grid gap-3 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor={`${idPrefix}-min`}>Scale minimum</FieldLabel>
@@ -282,18 +317,20 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
               onChange={(e) => set('max', Number(e.target.value))} />
           </Field>
           <FieldDescription className="sm:col-span-2">
-            In the display unit above, not SignalK's SI unit.
+            {cluster
+              ? `In ${unitLabel || 'the display unit'}, not SignalK's SI unit.`
+              : "In the display unit above, not SignalK's SI unit."}
           </FieldDescription>
         </div>
       )}
 
-      {equipment && hasScale(value.display) && equipment.zones === undefined && (
+      {equipment && offersZones && equipment.zones === undefined && (
         <FieldDescription>
           This reading is not on the equipment's profile, so it has no zones. Add it to the profile to give it some.
         </FieldDescription>
       )}
 
-      {hasScale(value.display) && (!equipment || equipment.zones !== undefined) && (
+      {offersZones && (!equipment || equipment.zones !== undefined) && (
         <div className="grid gap-2 rounded-md border border-border p-3">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             Zones

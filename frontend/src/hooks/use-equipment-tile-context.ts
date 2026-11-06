@@ -20,7 +20,7 @@ import type { EquipmentTileContext } from '@/lib/equipment-tiles'
  * keying off never makes every equipment tile re-resolve.
  */
 export function useEquipmentTileContext(enabled = true): EquipmentTileContext {
-  const { items } = useEquipment(enabled ? {} : null)
+  const { items, loading: itemsLoading, error: itemsError } = useEquipment(enabled ? {} : null)
   const { profiles } = useEquipmentProfiles(enabled)
   const { discovery, loading, error } = useVesselDiscovery(enabled)
 
@@ -33,5 +33,8 @@ export function useEquipmentTileContext(enabled = true): EquipmentTileContext {
     return set
   }, [enabled, loading, error, discovery])
 
-  return useMemo(() => ({ items, profiles, reporting }), [items, profiles, reporting])
+  // An empty list that has answered is a boat with no equipment, and a failed
+  // one is not going to fill: neither is "still loading".
+  const loaded = !itemsLoading || itemsError !== null
+  return useMemo(() => ({ items, profiles, reporting, loaded }), [items, profiles, reporting, loaded])
 }

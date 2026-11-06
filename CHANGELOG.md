@@ -33,6 +33,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Engine Cluster settings now work from a picture of the card.** Click the
+  ring, an arc, a readout card, the alternator, the battery, the exhaust or the
+  fuel rail, and only that part's settings open beside it. The four tabs and the
+  long forms are gone. A part that needs a reading has an amber outline, a part
+  that shows nothing has a dashed one, and the dialog opens on the first part
+  that needs you. The quantity and unit are folded away under **Units and
+  quantity**, and the **Display** choice is gone because the tile never used it.
+  **Fill slots from profile** is now **Fill from profile**, and the exhaust
+  picker says what to pick. Nothing you saved changes.
 - **AIS trails on the anchor map are now recorded by Helmcentral, newest
   brightest.** While a watch is set, it records every AIS boat that comes within
   500 m of your anchor, at most one point every 30 seconds for each boat unless
