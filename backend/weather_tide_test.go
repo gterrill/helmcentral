@@ -513,15 +513,367 @@ func TestSummarizeHourlyForecast_IncludesTypicalWindAndGust(t *testing.T) {
 	}
 }
 
+// nov9WindFixture is the real 9 November hourly forecast: north-westerly
+// overnight, calm at 4 AM, a south-easterly change at 5 AM, then easterly
+// building through the evening.
+func nov9WindFixture() []weatherHourlyWindData {
+	rows := []struct {
+		label string
+		hour  int
+		speed float64
+		gust  float64
+		dir   string
+		deg   float64
+	}{
+		{"12 AM", 0, 4.74, 10.50, "NNW", 337}, {"1 AM", 1, 4.65, 8.75, "NNW", 334},
+		{"2 AM", 2, 5.00, 9.33, "NW", 323}, {"3 AM", 3, 3.23, 9.14, "NW", 314},
+		{"4 AM", 4, 0.43, 5.05, "WSW", 243}, {"5 AM", 5, 3.17, 5.44, "SSE", 157},
+		{"6 AM", 6, 4.37, 9.72, "SSE", 163}, {"7 AM", 7, 5.19, 11.86, "SSE", 157},
+		{"8 AM", 8, 3.52, 12.44, "SE", 141}, {"9 AM", 9, 3.05, 11.08, "E", 99},
+		{"10 AM", 10, 4.84, 14.00, "ENE", 75}, {"11 AM", 11, 5.62, 15.16, "E", 80},
+		{"12 PM", 12, 5.66, 16.52, "E", 94}, {"1 PM", 13, 6.03, 16.33, "E", 93},
+		{"2 PM", 14, 6.82, 17.88, "E", 86}, {"3 PM", 15, 6.75, 18.08, "ESE", 102},
+		{"4 PM", 16, 7.13, 17.30, "ESE", 105}, {"5 PM", 17, 8.30, 19.63, "ESE", 108},
+		{"6 PM", 18, 6.40, 19.24, "ESE", 118}, {"7 PM", 19, 5.42, 12.83, "ESE", 111},
+		{"8 PM", 20, 5.62, 11.08, "ESE", 108}, {"9 PM", 21, 5.99, 12.44, "E", 97},
+		{"10 PM", 22, 5.77, 11.66, "E", 96}, {"11 PM", 23, 5.25, 11.47, "E", 88},
+	}
+	out := make([]weatherHourlyWindData, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, weatherHourlyWindData{Label: r.label, HourOfDay: r.hour, WindSpeedKts: r.speed, WindGustKts: r.gust, WindDirection: r.dir, WindDirectionDeg: r.deg})
+	}
+	return out
+}
+
+func windHours(label0 int, deg float64, speeds ...float64) []weatherHourlyWindData {
+	out := make([]weatherHourlyWindData, 0, len(speeds))
+	for i, s := range speeds {
+		out = append(out, weatherHourlyWindData{
+			Label: windLabel(label0 + i), HourOfDay: label0 + i,
+			WindSpeedKts: s, WindGustKts: s, WindDirection: degreesToDirection(deg), WindDirectionDeg: deg,
+		})
+	}
+	return out
+}
+
+func TestBuildWindSummary_Nov9NamesTheSoutheasterlyChange(t *testing.T) {
+	summary := buildWindSummary(nov9WindFixture())
+	for _, want := range []string{"NNW to NW 3 to 5 kts", "going light around 4 AM", "turning SSE around 5 AM and settling E 3 to 8 kts", "Gusts to 20 kts around 5 PM."} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("expected %q in %q", want, summary)
+		}
+	}
+	for _, bad := range []string{"0 to", "backing", "veering", "NNW-E"} {
+		if strings.Contains(summary, bad) {
+			t.Fatalf("did not expect %q in %q", bad, summary)
+		}
+	}
+	if sentences := strings.Count(summary, ". "); sentences > 1 {
+		t.Fatalf("expected at most two sentences, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_WrapAroundIsNotAChange(t *testing.T) {
+	hourly := append(windHours(0, 350, 8, 9), windHours(2, 10, 9, 8)...)
+	summary := buildWindSummary(hourly)
+	if strings.Contains(summary, "turning") {
+		t.Fatalf("350 to 10 degrees is a 20 degree shift, got %q", summary)
+	}
+	if !strings.HasPrefix(summary, "Winds 8 to 9 kts from the N") || strings.Count(summary, ".") != 1 {
+		t.Fatalf("expected one short steady sentence, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_TurnWithoutCalmNamesTheTime(t *testing.T) {
+	hourly := append(windHours(0, 270, 10, 10, 11), windHours(3, 0, 12, 13, 12)...)
+	summary := buildWindSummary(hourly)
+	for _, want := range []string{"W 10 to 11 kts", "turning N 12 to 13 kts around 3 AM"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("expected %q in %q", want, summary)
+		}
+	}
+	if strings.Contains(summary, "going light") {
+		t.Fatalf("no calm in this day, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_SingleHourBlipIsFoldedButSharpTurnIsKept(t *testing.T) {
+	blip := append(append(windHours(0, 90, 8, 8), windHours(2, 140, 8)...), windHours(3, 90, 8, 8)...)
+	if summary := buildWindSummary(blip); strings.Contains(summary, "turning") {
+		t.Fatalf("a 45 degree one-hour wobble should fold away, got %q", summary)
+	}
+	shift := append(append(windHours(0, 90, 8, 8), windHours(2, 270, 8)...), windHours(3, 90, 8, 8)...)
+	summary := buildWindSummary(shift)
+	if strings.Contains(summary, "turning") || !strings.Contains(summary, "variable around 2 AM") {
+		t.Fatalf("a one-hour swing with the wind back after it is a variable hour, not a change, got %q", summary)
+	}
+	startSwing := append(windHours(0, 270, 8), windHours(1, 90, 8, 8, 8)...)
+	if summary := buildWindSummary(startSwing); !strings.Contains(summary, "turning E") {
+		t.Fatalf("a swing at the very start of the day may be a change, got %q", summary)
+	}
+}
+
+func windLabel(hour int) string {
+	return boatAxisClock(time.Date(2026, 11, 9, hour, 0, 0, 0, time.UTC), time.UTC)
+}
+
+func TestWindDirectionsThatCancelHaveNoMean(t *testing.T) {
+	if _, ok := meanOfDegs(90, 270); ok {
+		t.Fatal("opposed directions have no mean")
+	}
+	if deg, ok := meanOfDegs(350, 10); !ok || (deg > 1 && deg < 359) {
+		t.Fatalf("350 and 10 average to north, got %v %v", deg, ok)
+	}
+	if _, _, ok := windSpanDegs([]windDir{{0, 90}, {1, 270}, {2, 90}, {3, 270}}); ok {
+		t.Fatal("a span whose ends cancel has no direction")
+	}
+	p := &windPeriod{}
+	p.add(0, 90, true)
+	p.add(1, 270, true)
+	if p.hasDir() {
+		t.Fatal("a period whose directions cancel has no usable direction")
+	}
+}
+
+// nov8WindFixture is a north-westerly day whose last evening hours wobble: a
+// single south-easterly hour at 9 PM, then two north-easterly ones.
+func nov8WindFixture() []weatherHourlyWindData {
+	early := []float64{6, 7, 5, 6, 7, 8, 9, 8, 7, 8, 9, 8, 9, 8, 7, 6, 6, 5}
+	earlyDeg := []float64{345, 350, 340, 355, 348, 342, 350, 356, 345, 352, 347, 341, 350, 346, 344, 350, 348, 352}
+	var out []weatherHourlyWindData
+	for h, s := range early {
+		gust := s + 8
+		if h == 13 {
+			gust = 22
+		}
+		out = append(out, weatherHourlyWindData{Label: windLabel(h), HourOfDay: h, WindSpeedKts: s, WindGustKts: gust, WindDirection: degreesToDirection(earlyDeg[h]), WindDirectionDeg: earlyDeg[h]})
+	}
+	late := []struct{ speed, deg float64 }{{4.4, 348}, {4.1, 342}, {3.4, 348}, {4.0, 133}, {2.0, 39}, {5.4, 8}}
+	for i, r := range late {
+		h := 18 + i
+		out = append(out, weatherHourlyWindData{Label: windLabel(h), HourOfDay: h, WindSpeedKts: r.speed, WindGustKts: r.speed + 6, WindDirection: degreesToDirection(r.deg), WindDirectionDeg: r.deg})
+	}
+	return out
+}
+
+// nov13WindFixture is a day that backs through south-west to south-east and
+// ends easterly. Its 24 kt gust first reaches 24 at 3 PM, and a raw 24.4 at
+// 5 PM must not take the time.
+func nov13WindFixture() []weatherHourlyWindData {
+	rows := []struct{ speed, deg float64 }{
+		{5.8, 325}, {4.1, 313}, {2.7, 289}, {2.2, 247}, {2.5, 212}, {3.0, 187},
+		{3.6, 167}, {4.4, 151}, {5.4, 139}, {6.3, 132}, {7.1, 126}, {7.8, 122},
+		{8.4, 118}, {9.0, 114}, {9.3, 111}, {9.6, 107}, {9.5, 104}, {9.1, 99},
+		{8.4, 93}, {7.6, 85}, {6.9, 76}, {6.4, 68}, {6.2, 63}, {6.0, 64},
+	}
+	var out []weatherHourlyWindData
+	for h, r := range rows {
+		gust := 17.0 + float64(h%4)
+		if h == 15 {
+			gust = 24.2
+		}
+		if h == 17 {
+			gust = 24.4
+		}
+		out = append(out, weatherHourlyWindData{Label: windLabel(h), HourOfDay: h, WindSpeedKts: r.speed, WindGustKts: gust, WindDirection: degreesToDirection(r.deg), WindDirectionDeg: r.deg})
+	}
+	return out
+}
+
+func TestBuildWindSummary_Nov8OneEveningHourIsVariableNotAChange(t *testing.T) {
+	summary := buildWindSummary(nov8WindFixture())
+	if strings.Contains(summary, "turning") {
+		t.Fatalf("a single hour of south-easterly is not a change, got %q", summary)
+	}
+	for _, want := range []string{"NNW to NNE 2 to 9 kts", "variable around 9 PM", "Gusts to 22 kts around 1 PM."} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("expected %q in %q", want, summary)
+		}
+	}
+}
+
+func TestBuildWindSummary_Nov13ChangeKeepsWholeGroupSpeedAndPeakTime(t *testing.T) {
+	summary := buildWindSummary(nov13WindFixture())
+	for _, want := range []string{"NW to WNW 3 to 6 kts", "turning WSW around 3 AM and settling S 2 to 3 kts", "turning SSE around 6 AM and settling ENE 4 to 10 kts", "Gusts to 24 kts around 3 PM."} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("expected %q in %q", want, summary)
+		}
+	}
+	// SSE drifting to ENE over fifteen hours is one group, not a second turn.
+	if strings.Contains(summary, "from 9 PM") {
+		t.Fatalf("slow drift split into its own clause in %q", summary)
+	}
+	if strings.Contains(summary, "around 6 kts") || strings.Contains(summary, "E to SE") {
+		t.Fatalf("doubled around or backwards span in %q", summary)
+	}
+}
+
+func TestBuildWindSummary_PeriodClauseDropsAroundWhenSpeedsMatch(t *testing.T) {
+	hourly := append(windHours(0, 270, 10, 10, 10), windHours(3, 0, 6, 6.2, 6)...)
+	summary := buildWindSummary(hourly)
+	if !strings.Contains(summary, "turning N 6 kts around 3 AM") || strings.Contains(summary, "around 6 kts") {
+		t.Fatalf("got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_StepwiseVeerNamesTheTurn(t *testing.T) {
+	var hourly []weatherHourlyWindData
+	for i, deg := range []float64{20, 65, 110, 155, 200} {
+		hourly = append(hourly, windHours(i*3, deg, 10, 10, 10)...)
+	}
+	summary := buildWindSummary(hourly)
+	if !strings.Contains(summary, "turning ESE around 6 AM and settling SSW") {
+		t.Fatalf("a 90 degree turn within three hours must be named with its time, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_CalmInTheMiddleEndsTheGroup(t *testing.T) {
+	hourly := append(windHours(0, 45, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10), windHours(12, 45, 0.5, 0.5)...)
+	hourly = append(hourly, windHours(14, 45, 15, 15, 15)...)
+	summary := buildWindSummary(hourly)
+	want := "NE 10 kts, going light around 12 PM, then NE 15 kts again from 2 PM."
+	if summary != want {
+		t.Fatalf("expected %q, got %q", want, summary)
+	}
+}
+
+func TestBuildWindSummary_SwingBesideACalmIsLightAndVariable(t *testing.T) {
+	hourly := append(windHours(0, 340, 8, 8, 8), windHours(3, 340, 0.5)...)
+	hourly = append(hourly, windHours(4, 135, 4)...)
+	hourly = append(hourly, windHours(5, 340, 0.5)...)
+	hourly = append(hourly, windHours(6, 340, 8, 8, 8)...)
+	summary := buildWindSummary(hourly)
+	if !strings.Contains(summary, "light and variable around 3 AM") || strings.Contains(summary, "turning") || strings.Contains(summary, "going light") {
+		t.Fatalf("got %q", summary)
+	}
+	// A swing on the very first or last hour is still a change.
+	last := append(windHours(0, 340, 8, 8, 8), windHours(3, 340, 0.5)...)
+	last = append(last, windHours(4, 135, 5)...)
+	if summary := buildWindSummary(last); !strings.Contains(summary, "turning SE") {
+		t.Fatalf("a swing on the last hour may be a change, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_StrongSwingBesideACalmIsNotLight(t *testing.T) {
+	hourly := append(windHours(0, 340, 10, 10, 10, 10), windHours(4, 340, 1)...)
+	hourly = append(hourly, windHours(5, 135, 25)...)
+	hourly = append(hourly, windHours(6, 340, 1)...)
+	hourly = append(hourly, windHours(7, 340, 10)...)
+	summary := buildWindSummary(hourly)
+	want := "NNW 10 to 25 kts, variable around 5 AM, then NNW 10 kts again from 7 AM."
+	if summary != want {
+		t.Fatalf("expected %q, got %q", want, summary)
+	}
+}
+
+func TestBuildWindSummary_BackToBackOddHoursAreOneVariableStretch(t *testing.T) {
+	hourly := append(windHours(0, 90, 8, 8, 8, 8), windHours(4, 270, 8)...)
+	hourly = append(hourly, windHours(5, 0, 8)...)
+	hourly = append(hourly, windHours(6, 90, 8, 8, 8, 8)...)
+	summary := buildWindSummary(hourly)
+	want := "E 8 kts, briefly variable around 4 AM."
+	if summary != want {
+		t.Fatalf("expected %q, got %q", want, summary)
+	}
+	// Two coherent hours are a period, not a stretch of odd hours.
+	two := append(windHours(0, 90, 8, 8, 8, 8), windHours(4, 270, 8, 8)...)
+	two = append(two, windHours(6, 90, 8, 8, 8, 8)...)
+	if got := buildWindSummary(two); !strings.Contains(got, "turning W") {
+		t.Fatalf("a two-hour turn is a period, got %q", got)
+	}
+}
+
+func TestBuildWindSummary_VariableHourMidGroupIsBrieflyVariable(t *testing.T) {
+	summary := buildWindSummary(nov8WindFixture())
+	if !strings.Contains(summary, "NNW to NNE 2 to 9 kts, briefly variable around 9 PM.") {
+		t.Fatalf("got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_AgainOnlyWhenTheDirectionIsBack(t *testing.T) {
+	hourly := append(windHours(0, 45, 10, 10, 10), windHours(3, 45, 0.5)...)
+	hourly = append(hourly, windHours(4, 100, 15, 15, 15)...)
+	summary := buildWindSummary(hourly)
+	want := "NE 10 kts, going light around 3 AM, then E 15 kts from 4 AM."
+	if summary != want {
+		t.Fatalf("expected %q, got %q", want, summary)
+	}
+}
+
+// threeHourly builds entries three hours apart, as a coarse provider sends.
+func threeHourly(startHour int, deg float64, speeds ...float64) []weatherHourlyWindData {
+	out := make([]weatherHourlyWindData, 0, len(speeds))
+	for i, s := range speeds {
+		h := startHour + 3*i
+		out = append(out, weatherHourlyWindData{Label: windLabel(h), HourOfDay: h, WindSpeedKts: s, WindGustKts: s, WindDirection: degreesToDirection(deg), WindDirectionDeg: deg})
+	}
+	return out
+}
+
+func TestBuildWindSummary_CoarseEntriesCountHoursNotSlots(t *testing.T) {
+	// A calm entry at 6 AM, then wind from the south-east at 12 PM: nine hours
+	// after the last north-westerly entry, so not a change.
+	hourly := append(threeHourly(0, 315, 8, 8), threeHourly(6, 315, 0.5)...)
+	hourly = append(hourly, threeHourly(12, 135, 8, 8)...)
+	summary := buildWindSummary(hourly)
+	if strings.Contains(summary, "turning") || !strings.Contains(summary, "then SE 8 kts from 12 PM") {
+		t.Fatalf("a nine hour gap is a later turn, got %q", summary)
+	}
+	// One three-hour entry is not a one-hour swing.
+	hourly = append(threeHourly(0, 90, 8, 8, 8), threeHourly(9, 270, 8)...)
+	hourly = append(hourly, threeHourly(12, 90, 8, 8, 8)...)
+	summary = buildWindSummary(hourly)
+	if strings.Contains(summary, "variable") || !strings.Contains(summary, "turning W 8 kts around 9 AM") {
+		t.Fatalf("a single 3-hour entry must not read as variable, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_ShortSpanUsesFirstAndLastHour(t *testing.T) {
+	hourly := []weatherHourlyWindData{
+		{Label: "1 AM", WindSpeedKts: 6, WindGustKts: 6, WindDirection: "SE", WindDirectionDeg: 135},
+		{Label: "2 AM", WindSpeedKts: 6, WindGustKts: 6, WindDirection: "E", WindDirectionDeg: 90},
+	}
+	if got := buildWindSummary(hourly); got != "Winds around 6 kts from the SE to E." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBuildWindSummary_SpanNamesStartThenEnd(t *testing.T) {
+	hourly := append(windHours(0, 135, 6, 6, 6), windHours(3, 90, 6, 6, 6)...)
+	summary := buildWindSummary(hourly)
+	if !strings.Contains(summary, "from the SE to E") || strings.Contains(summary, "E to SE") {
+		t.Fatalf("a wind that went SE then E must read SE to E, got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_AllCalmDay(t *testing.T) {
+	summary := buildWindSummary(windHours(0, 180, 0.4, 1.2, 0.8, 1.9))
+	if summary != "Light winds all day." {
+		t.Fatalf("got %q", summary)
+	}
+}
+
+func TestBuildWindSummary_GustTimeUsesFirstOfTies(t *testing.T) {
+	hourly := windHours(0, 180, 5, 5, 5)
+	hourly[1].WindGustKts = 15
+	hourly[2].WindGustKts = 15
+	hourly = append(hourly, windHours(3, 0, 5)...)
+	hourly[3].WindGustKts = 6
+	summary := buildWindSummary(hourly)
+	if !strings.Contains(summary, "Gusts to 15 kts around 1 AM.") {
+		t.Fatalf("expected the first tied hour, got %q", summary)
+	}
+}
+
 func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
 	hourly := []weatherHourlyWindData{
-		{WindSpeedKts: 19.0, WindGustKts: 24.0, WindDirection: "S"},
-		{WindSpeedKts: 22.0, WindGustKts: 29.4, WindDirection: "SSE"},
-		{WindSpeedKts: 20.0, WindGustKts: 25.0, WindDirection: "SE"},
+		{Label: "1 PM", WindSpeedKts: 19.0, WindGustKts: 24.0, WindDirection: "S", WindDirectionDeg: 180},
+		{Label: "2 PM", WindSpeedKts: 22.0, WindGustKts: 29.4, WindDirection: "SSE", WindDirectionDeg: 157},
+		{Label: "3 PM", WindSpeedKts: 20.0, WindGustKts: 25.0, WindDirection: "SE", WindDirectionDeg: 135},
 	}
 
 	summary := buildWindSummary(hourly)
-	expected := "Winds 19 to 22 kts from the S-SE, gusting to 29 kts."
+	expected := "Winds 19 to 22 kts from the S to SE, gusting to 29 kts around 2 PM."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -529,8 +881,8 @@ func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
 
 func TestBuildWindSummary_OmitsGustWhenNotAboveSustained(t *testing.T) {
 	hourly := []weatherHourlyWindData{
-		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE"},
-		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE"},
+		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE", WindDirectionDeg: 45},
+		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE", WindDirectionDeg: 45},
 	}
 
 	summary := buildWindSummary(hourly)
@@ -551,19 +903,13 @@ func TestBuildWindSummary_EmptyWhenNoHourlyData(t *testing.T) {
 	}
 }
 
-func TestWindDirectionRange_SingleAndRangeAndMissing(t *testing.T) {
-	single := windDirectionRange([]weatherHourlyWindData{{WindDirection: "NE"}, {WindDirection: "NE"}})
-	if single != "NE" {
-		t.Fatalf("expected NE, got %q", single)
+func TestBuildWindSummary_MissingDirectionOmitsTheDirectionPhrase(t *testing.T) {
+	hourly := []weatherHourlyWindData{
+		{WindSpeedKts: 6, WindGustKts: 6, WindDirection: "—", WindDirectionDeg: -1},
+		{WindSpeedKts: 8, WindGustKts: 8, WindDirection: "—", WindDirectionDeg: -1},
 	}
-
-	rangeResult := windDirectionRange([]weatherHourlyWindData{{WindDirection: "S"}, {WindDirection: "SSE"}, {WindDirection: "SE"}})
-	if rangeResult != "S-SE" {
-		t.Fatalf("expected S-SE, got %q", rangeResult)
-	}
-
-	if empty := windDirectionRange([]weatherHourlyWindData{{WindDirection: "—"}}); empty != "" {
-		t.Fatalf("expected empty, got %q", empty)
+	if summary := buildWindSummary(hourly); summary != "Winds 6 to 8 kts." {
+		t.Fatalf("got %q", summary)
 	}
 }
 
