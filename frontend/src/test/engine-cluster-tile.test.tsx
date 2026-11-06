@@ -583,6 +583,7 @@ describe('instrument skin token coverage', () => {
       ['font-sans', 'not colour, correct as inherited'],
       ['chart-wind', 'unread on the bento grid'],
       ['chart-gust', 'unread on the bento grid'],
+      ['coverage-requested', 'read only by the Offline coastline settings map, never inside a skinned tile'],
       ['chart-wave', 'unread on the bento grid'],
       ['chart-swell', 'unread on the bento grid'],
       ['chart-temp', 'unread on the bento grid'],

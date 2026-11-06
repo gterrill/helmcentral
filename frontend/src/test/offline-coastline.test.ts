@@ -6,15 +6,27 @@ import {
   coastlineStatusLine,
   coverageRingGeoJSON,
   coverageSquaresGeoJSON,
+  downloadConfirmText,
   editCheckPauseLine,
+  gridSquares,
   inlandSkippedLine,
+  removeConfirmText,
+  requestedLine,
+  selectionAllowedAt,
+  squareKey,
   squareLabel,
+  squareSelectable,
+  squaresInBox,
+  summariseSelection,
   type OfflineCoastlineStatus,
 } from '@/lib/offline-coastline'
+
+const SELECTABLE = { lat_min: -89, lat_max: 88, lon_min: -180, lon_max: 179 }
 
 function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastlineStatus {
   return {
     enabled: true,
+    selectable: SELECTABLE,
     state: 'idle',
     has_fix: true,
     position: { lat: -20.1, lon: 148.9 },
@@ -209,5 +221,78 @@ describe('editCheckPauseLine', () => {
   it('is silent when nothing is on hold or the switch is off', () => {
     expect(editCheckPauseLine(status())).toBeNull()
     expect(editCheckPauseLine(status({ state: 'off', check_pause_reason: 'x' }))).toBeNull()
+  })
+})
+
+describe('selecting squares', () => {
+  const squares = [
+    { lat: -21, lon: 148, state: 'ready' as const, in_range: true, edits_since: 0 },
+    { lat: -21, lon: 100, state: 'ready' as const, in_range: false, edits_since: 0 },
+    { lat: -22, lon: 148, state: 'pending' as const, in_range: true, edits_since: 0, requested: true },
+  ]
+
+  it('refuses squares at the poles and across the 180 meridian', () => {
+    expect(squareSelectable(SELECTABLE, -21, 148)).toBe(true)
+    expect(squareSelectable(SELECTABLE, 89, 0)).toBe(false)
+    expect(squareSelectable(SELECTABLE, -90, 0)).toBe(false)
+    expect(squareSelectable(SELECTABLE, 0, 180)).toBe(false)
+    expect(squareSelectable(SELECTABLE, 0, -181)).toBe(false)
+    expect(squareSelectable(SELECTABLE, 0.5, 3)).toBe(false)
+  })
+
+  it('selects the block between two squares, either corner first', () => {
+    expect(squaresInBox({ lat: -21, lon: 148 }, { lat: -22, lon: 149 }, SELECTABLE).sort()).toEqual(
+      ['-21,148', '-21,149', '-22,148', '-22,149'],
+    )
+    expect(squaresInBox({ lat: -22, lon: 149 }, { lat: -21, lon: 148 }, SELECTABLE)).toHaveLength(4)
+    expect(squaresInBox({ lat: 87, lon: 10 }, { lat: 90, lon: 10 }, SELECTABLE)).toEqual(['87,10', '88,10'])
+  })
+
+  it('allows selection only at about 30 degrees or less', () => {
+    expect(selectionAllowedAt({ west: 140, south: -30, east: 170, north: -10 })).toBe(true)
+    expect(selectionAllowedAt({ west: 100, south: -30, east: 170, north: -10 })).toBe(false)
+  })
+
+  it('draws a grid of the squares in view that are not held', () => {
+    const grid = gridSquares({ west: 148, south: -22, east: 150, north: -20 }, new Set(['-21,148']), SELECTABLE)
+    expect(grid.map((q) => squareKey(q.lat, q.lon)).sort()).toEqual(['-21,149', '-22,148', '-22,149'])
+  })
+
+  it('splits a mixed selection into download and remove, a waiting request counting as a remove', () => {
+    const sum = summariseSelection(new Set(['-21,148', '-21,100', '-22,148', '-30,160']), status({ squares }))
+    expect(sum.download).toEqual(['-30,160'])
+    expect(sum.remove).toEqual(['-21,148', '-21,100', '-22,148'])
+    expect(sum.removeInRange).toBe(1)
+    expect(sum.removeRequested).toBe(1)
+  })
+
+  it('says how many are waiting and failed, with the reason', () => {
+    const s = status({
+      requested_waiting: 9, requested_failed: 1,
+      squares: [{ lat: -22, lon: 148, state: 'failed', in_range: false, edits_since: 0, requested: true, error: 'overpass rate limited' }],
+    })
+    expect(requestedLine(s)).toBe('Requested: 9 waiting, 1 failed (overpass rate limited)')
+    expect(requestedLine({ ...s, enabled: false, state: 'off' })).toBe(
+      'Requested: 9 waiting, 1 failed (overpass rate limited) (offline coastline is off)',
+    )
+    expect(requestedLine(status({ requested_waiting: 3 }))).toBe('Requested: 3 waiting')
+    expect(requestedLine(status())).toBeNull()
+  })
+
+  it('states the counts in the confirms', () => {
+    expect(downloadConfirmText({ requested: 12, already_requested: 0, held: 0, inland_skipped: 3 })).toContain('3 all-land squares skipped')
+    expect(downloadConfirmText({ requested: 1, already_requested: 0, held: 0, inland_skipped: 0 })).not.toContain('skipped')
+    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 1, removeRequested: 0 })).toContain(
+      '1 square is within 200 nm of the boat and will download again',
+    )
+    expect(removeConfirmText({ download: [], remove: ['a'], removeInRange: 0, removeRequested: 0 })).not.toContain('again')
+    expect(removeConfirmText({ download: [], remove: ['a', 'b'], removeInRange: 0, removeRequested: 2 })).toBe(
+      '2 squares you asked for will no longer be downloaded.',
+    )
+  })
+
+  it('marks requested squares for the map and not held ones', () => {
+    const fc = coverageSquaresGeoJSON(status({ squares }), new Date('2026-10-05T00:00:00Z'))
+    expect(fc.features.map((f) => f.properties.requested)).toEqual([false, false, true])
   })
 })

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -98,6 +100,89 @@ func clearOfflineCoastlineHandler(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// coastlineSquaresBody is the body of a request or remove call: squares named
+// "lat,lon" by their south-west corner, in the order selected.
+type coastlineSquaresBody struct {
+	Squares []string `json:"squares"`
+	// DryRun asks what a request would do (counts only) and stores nothing.
+	DryRun bool `json:"dry_run,omitempty"`
+}
+
+// coastlineMaxBodyBytes bounds a request body: coastlineMaxRequestInput ids of
+// a few bytes each, with room to spare.
+const coastlineMaxBodyBytes = 64 << 10
+
+// badCoastlineBody is a 400 whose body is {"error": msg}, the shape the page
+// reads.
+func badCoastlineBody(msg string) *echo.HTTPError {
+	return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"error": msg})
+}
+
+// bindCoastlineSquares reads the body. A body it cannot use comes back as a
+// 400 for the handler to return.
+func bindCoastlineSquares(c echo.Context) (coastlineSquaresBody, []coverageSquare, error) {
+	var body coastlineSquaresBody
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, coastlineMaxBodyBytes)
+	if err := c.Bind(&body); err != nil {
+		return body, nil, badCoastlineBody("body must be {\"squares\": [\"lat,lon\", ...]}")
+	}
+	if len(body.Squares) > coastlineMaxRequestInput {
+		return body, nil, badCoastlineBody(fmt.Sprintf("%d squares are selected, and one call can name at most %d. Select fewer.", len(body.Squares), coastlineMaxRequestInput))
+	}
+	out := make([]coverageSquare, 0, len(body.Squares))
+	for _, id := range body.Squares {
+		sq, err := parseCoverageSquareID(id)
+		if err != nil {
+			return body, nil, badCoastlineBody(err.Error())
+		}
+		out = append(out, sq)
+	}
+	return body, out, nil
+}
+
+// coastlineFailure maps a manager error to its status: what the operator named
+// is 400, the switch being off is 409, anything else is the server's.
+func coastlineFailure(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, errCoastlineBadRequest):
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, errCoastlineOff):
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	default:
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+}
+
+func requestOfflineCoastlineHandler(c echo.Context) error {
+	if globalCoastlineManager == nil {
+		return coastlineUnavailable(c)
+	}
+	body, squares, err := bindCoastlineSquares(c)
+	if err != nil {
+		return err
+	}
+	res, err := globalCoastlineManager.Request(squares, body.DryRun)
+	if err != nil {
+		return coastlineFailure(c, err)
+	}
+	return c.JSON(http.StatusAccepted, res)
+}
+
+func removeOfflineCoastlineSquaresHandler(c echo.Context) error {
+	if globalCoastlineManager == nil {
+		return coastlineUnavailable(c)
+	}
+	_, squares, err := bindCoastlineSquares(c)
+	if err != nil {
+		return err
+	}
+	n, err := globalCoastlineManager.Remove(squares)
+	if err != nil {
+		return coastlineFailure(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]int{"removed": n})
+}
+
 // coastlineRoutes returns the /api routes for the offline coastline. Status
 // is readable by any signed-in role; changing it is a settings action.
 // Each row carries its own auth tier (docs/adr/0177).
@@ -105,6 +190,8 @@ func coastlineRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/offline-coastline", tierRead, getOfflineCoastlineHandler},
 		{http.MethodPost, "/api/offline-coastline/update", tierAdmin, updateOfflineCoastlineHandler},
+		{http.MethodPost, "/api/offline-coastline/request", tierAdmin, requestOfflineCoastlineHandler},
+		{http.MethodPost, "/api/offline-coastline/remove", tierAdmin, removeOfflineCoastlineSquaresHandler},
 		{http.MethodDelete, "/api/offline-coastline/coverage", tierAdmin, clearOfflineCoastlineHandler},
 	}
 }

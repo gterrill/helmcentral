@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 
 import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
-import type { OfflineCoastlineStatus } from '@/lib/offline-coastline'
+import type { OfflineCoastlineStatus, RequestPreview } from '@/lib/offline-coastline'
 
 const PATH = '/api/offline-coastline'
 
@@ -29,5 +29,32 @@ export function useOfflineCoastline() {
     await invalidateQueries([PATH])
   }, [])
 
-  return { status: data, loading: isLoading, error: error?.message ?? null, update, clearCoverage }
+  // What a download request would do, counted by the server and stored
+  // nowhere, so the confirm can say how many all-land squares it skips.
+  const previewRequest = useCallback(
+    (squares: string[]) => apiRequest<RequestPreview>(`${PATH}/request`, { method: 'POST', json: { squares, dry_run: true } }),
+    [],
+  )
+
+  const requestSquares = useCallback(async (squares: string[]) => {
+    const result = await apiRequest<RequestPreview>(`${PATH}/request`, { method: 'POST', json: { squares } })
+    await invalidateQueries([PATH])
+    return result
+  }, [])
+
+  const removeSquares = useCallback(async (squares: string[]) => {
+    await apiRequest(`${PATH}/remove`, { method: 'POST', json: { squares } })
+    await invalidateQueries([PATH])
+  }, [])
+
+  return {
+    status: data,
+    loading: isLoading,
+    error: error?.message ?? null,
+    update,
+    clearCoverage,
+    previewRequest,
+    requestSquares,
+    removeSquares,
+  }
 }

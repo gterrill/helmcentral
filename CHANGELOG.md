@@ -31,6 +31,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `/api/anchor-watch/trails/ais/:id` is gone, and `/api/anchor-watch/trails/ais`
   now answers in a new shape, so read it again from the start.
 
+### Added
+
+- **You can ask for offline coastline squares ahead of the boat.** In Settings →
+  Offline coastline, zoom the coverage map in, choose **Select squares**, pick
+  squares by tapping or dragging, and choose **Download**. Squares you ask for
+  download before the ones around the boat and show in amber while they wait.
+  **Remove** deletes held squares and cancels ones still waiting. The
+  offline coastline has to be on, and one request takes up to 100 squares.
+
 ### Changed
 
 - **The Engine Cluster settings now work from a picture of the card.** Click the

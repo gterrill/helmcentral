@@ -26,6 +26,9 @@ const hook = vi.hoisted(() => ({
   error: null as string | null,
   update: vi.fn(),
   clearCoverage: vi.fn(),
+  previewRequest: vi.fn(),
+  requestSquares: vi.fn(),
+  removeSquares: vi.fn(),
 }))
 
 vi.mock('@/hooks/use-offline-coastline', () => ({
@@ -34,8 +37,19 @@ vi.mock('@/hooks/use-offline-coastline', () => ({
 
 // The map is MapLibre; its own file is not under test here.
 vi.mock('@/components/offline-coastline-map', () => ({
-  OfflineCoastlineMap: ({ status }: { status: OfflineCoastlineStatus }) => (
-    <div data-testid="map-stub">{status.squares.length} squares</div>
+  OfflineCoastlineMap: ({
+    status,
+    selecting,
+    onSelectedChange,
+  }: {
+    status: OfflineCoastlineStatus
+    selecting?: boolean
+    onSelectedChange?: (next: Set<string>) => void
+  }) => (
+    <div data-testid="map-stub" data-selecting={selecting ? 'yes' : 'no'}>
+      {status.squares.length} squares
+      <button type="button" onClick={() => onSelectedChange?.(new Set(['-21,148', '-30,160', '-31,160']))}>stub-select</button>
+    </div>
   ),
 }))
 
@@ -44,6 +58,7 @@ const NOON = (iso: string) => `${iso}T12:00:00Z`
 function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastlineStatus {
   return {
     enabled: true,
+    selectable: { lat_min: -89, lat_max: 88, lon_min: -180, lon_max: 179 },
     state: 'idle',
     has_fix: true,
     position: { lat: -20.1, lon: 148.9 },
@@ -89,6 +104,9 @@ beforeEach(() => {
   hook.error = null
   hook.update = vi.fn().mockResolvedValue(undefined)
   hook.clearCoverage = vi.fn().mockResolvedValue(undefined)
+  hook.previewRequest = vi.fn().mockResolvedValue({ requested: 2, already_requested: 0, held: 1, inland_skipped: 3 })
+  hook.requestSquares = vi.fn().mockResolvedValue({ requested: 2, already_requested: 0, held: 1, inland_skipped: 3 })
+  hook.removeSquares = vi.fn().mockResolvedValue(undefined)
 })
 
 describe('OfflineCoastlineSection Overpass link', () => {
@@ -300,5 +318,143 @@ describe('Offline coastline section wiring', () => {
       panel: 'settings', route: { view: 'section', section: 'offline-coastline' },
     })
     expect(SETTINGS_HELP_TARGETS['offline-coastline']).toEqual({ page: 'features/offline-coastline' })
+  })
+})
+
+describe('OfflineCoastlineSection select squares', () => {
+  const held = { lat: -21, lon: 148, state: 'ready' as const, in_range: true, edits_since: 0, downloaded_at: NOON('2026-10-03') }
+
+  it('is disabled with a reason while the switch is off', () => {
+    hook.status = status({ enabled: false, state: 'off', squares: [held], held: 1 })
+    renderSection()
+    expect(screen.getByRole('button', { name: 'Select squares' })).toBeDisabled()
+    expect(screen.getByText('Turn on the offline coastline to download squares')).toBeInTheDocument()
+  })
+
+  it('enters select mode and leaves it with Done', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'yes')
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.getByTestId('map-stub')).toHaveAttribute('data-selecting', 'no')
+  })
+
+  it('offers Download N and Remove M for a mixed selection', () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    expect(screen.getByRole('button', { name: 'Download 2' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove 1' })).toBeInTheDocument()
+  })
+
+  it('confirms a download with the all-land count, then requests only the missing squares', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(hook.previewRequest).toHaveBeenCalledWith(['-30,160', '-31,160'])
+    expect(await within(dialog).findByText(/3 all-land squares skipped/)).toBeInTheDocument()
+    expect(hook.requestSquares).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(hook.requestSquares).toHaveBeenCalledWith(['-30,160', '-31,160']))
+  })
+
+  it('leaves the cap to the server: the button stays enabled and the server refusal shows in the confirm', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    hook.previewRequest = vi.fn().mockRejectedValue(new Error('bad coastline request: 101 squares to download, at most 100 in one request'))
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    expect(screen.getByRole('button', { name: 'Download 2' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(await within(dialog).findByText(/at most 100 in one request/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Download' })).toBeDisabled()
+  })
+
+  it('ignores a slow count for an earlier open of the dialog', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    let resolveFirst: (v: unknown) => void = () => {}
+    hook.previewRequest = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ requested: 2, already_requested: 0, held: 0, inland_skipped: 0 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const first = await screen.findByRole('alertdialog')
+    fireEvent.click(within(first).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const second = await screen.findByRole('alertdialog')
+    expect(await within(second).findByText('Download 2 squares?')).toBeInTheDocument()
+    resolveFirst({ requested: 7, already_requested: 0, held: 0, inland_skipped: 0 })
+    await Promise.resolve()
+    expect(within(second).getByText('Download 2 squares?')).toBeInTheDocument()
+  })
+
+  it('removes a waiting request along with held squares and says so', async () => {
+    hook.status = status({
+      squares: [held, { lat: -30, lon: 160, state: 'pending', in_range: false, edits_since: 0, requested: true }],
+      held: 1,
+      requested_waiting: 1,
+    })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('1 square you asked for will no longer be downloaded')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(hook.removeSquares).toHaveBeenCalledWith(['-21,148', '-30,160']))
+  })
+
+  it('titles the confirm with the number the server will download', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    hook.previewRequest = vi.fn().mockResolvedValue({ requested: 1, already_requested: 0, held: 0, inland_skipped: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(await within(dialog).findByText('Download 1 square?')).toBeInTheDocument()
+  })
+
+  it('confirms a removal and says squares within range download again', async () => {
+    hook.status = status({ squares: [held], held: 1 })
+    renderSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Select squares' }))
+    fireEvent.click(screen.getByRole('button', { name: 'stub-select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 1' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('1 square is within 200 nm of the boat and will download again')
+    expect(hook.removeSquares).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(hook.removeSquares).toHaveBeenCalledWith(['-21,148']))
+  })
+
+  it('shows the requested line, also while the switch is off', () => {
+    hook.status = status({
+      enabled: false, state: 'off', requested_waiting: 9, requested_failed: 1,
+      squares: [{ lat: -22, lon: 148, state: 'failed', in_range: false, edits_since: 0, requested: true, error: 'overpass rate limited' }],
+    })
+    renderSection()
+    expect(screen.getByTestId('offline-coastline-requested')).toHaveTextContent(
+      'Requested: 9 waiting, 1 failed (overpass rate limited) (offline coastline is off)',
+    )
+  })
+
+  it('says in the Clear confirm that waiting requests are cancelled', async () => {
+    hook.status = status({
+      requested_waiting: 2, squares: [{ lat: -30, lon: 160, state: 'pending', in_range: false, edits_since: 0, requested: true }],
+    })
+    renderSection({ offlineCoastlineEnabled: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear coverage' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('cancels the 2 squares you asked to download')
   })
 })

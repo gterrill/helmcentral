@@ -97,8 +97,8 @@ func (l *coastlineLoader) inBox(south, west, north, east float64) ([]shorelineLi
 		}
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("the route needs Offline coastline squares that are not held: %s. Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier",
-			strings.Join(missing, ", "), coastlineCoverageRadiusNm)
+		return nil, fmt.Errorf("the route needs Offline coastline squares that are not held: %s. Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier. %s",
+			strings.Join(missing, ", "), coastlineCoverageRadiusNm, coastlineDownloadHint)
 	}
 	var out []shorelineLine
 	for _, sq := range needed {
