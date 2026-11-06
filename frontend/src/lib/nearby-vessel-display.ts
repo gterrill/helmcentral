@@ -1,4 +1,5 @@
 import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
+import { formatDataAge } from '@/lib/staleness'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { DistanceUnits } from '@/config/app-config'
 import { METRES_PER_NM } from '@/lib/geo'
@@ -27,6 +28,30 @@ export function formatRelativeDuration(seconds: number): string {
   if (hours < 24) return `${hours}h`
 
   return `${Math.floor(hours / 24)}d`
+}
+
+/**
+ * AIS is called silent once no vessel has reported for this long. Ten minutes
+ * matches how long the backend keeps a contact on the list, so a list that is
+ * empty after that long may be empty because the receiver stopped.
+ */
+export const AIS_SILENT_AFTER_S = 600
+
+/**
+ * What to say in place of "No vessels" when the AIS feed itself has gone quiet,
+ * or null when it is working (or the backend has not said). `aisHeardAgeS` is
+ * the age of the latest report from any vessel; -1 means none is held.
+ */
+export function aisSilenceMessage(aisHeardAgeS: number | null | undefined): string | null {
+  if (aisHeardAgeS === null || aisHeardAgeS === undefined || !Number.isFinite(aisHeardAgeS)) return null
+  if (aisHeardAgeS < 0) return 'No AIS reports heard'
+  if (aisHeardAgeS > AIS_SILENT_AFTER_S) return `AIS silent for ${formatDataAge(aisHeardAgeS)}`
+  return null
+}
+
+/** What `aisSilenceMessage` shows, as a key: two ages with one key look the same on screen. */
+export function aisSilenceKey(aisHeardAgeS: number | null): string {
+  return aisSilenceMessage(aisHeardAgeS) ?? (aisHeardAgeS === null ? 'unknown' : 'heard')
 }
 
 export function formatRelativeAge(seconds: number): string {

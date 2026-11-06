@@ -11,6 +11,7 @@ import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sigh
 import { useNearbyVessels, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 import {
+  aisSilenceMessage,
   COLLISION_TIER_STYLE,
   collisionTier,
   formatRelativeAge,
@@ -124,7 +125,21 @@ type NearbyVesselsTileProps = {
    * the day the backend's limit moved.
    */
   maxRangeM?: number | null
+  /**
+   * Where the backend got the list. "signalk" is the live AIS feed; anything
+   * else means it could not read it. Left undefined by callers that have no
+   * feed to ask, which skips the check.
+   */
+  source?: string | null
+  /** Seconds since any vessel last reported (-1: none held), from the same payload. */
+  aisHeardAgeS?: number | null
+  /** Boats near the anchor the feed left out during a watch because it is capped. */
+  cappedCount?: number
 }
+
+// The most boats the backend sends during an anchor watch (nearbyFeedCap in
+// backend/nearby_vessels.go); the note about the cap names it.
+const FEED_CAP = 40
 
 function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   if (distanceUnits === 'imperial') {
@@ -133,8 +148,14 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   return `${Math.round(rangeMeters)} m`
 }
 
-export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null }: NearbyVesselsTileProps) {
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null, source, aisHeardAgeS = null, cappedCount = 0 }: NearbyVesselsTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
+  // Why the list is empty when the feed is the reason: a silent receiver must
+  // not read as an empty sea.
+  const emptyMessage = source !== undefined && source !== 'signalk'
+    ? 'AIS unavailable'
+    : aisSilenceMessage(aisHeardAgeS)
+      ?? (maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(maxRangeM, distanceUnits)}`)
   const sortedVessels = useMemo(() => sortByCollisionAlarm(vessels, aisCollisionAlarms), [vessels, aisCollisionAlarms])
 
   return (
@@ -161,7 +182,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
               )}
             >
               <div className="min-w-0">
-                <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
+                <p className="line-clamp-2 break-words font-display text-lg uppercase leading-tight text-foreground">{vessel.name}</p>
                 {tierStyle ? (
                   <p className={cn('mt-1 text-[10px] font-semibold uppercase tracking-[0.16em]', tierStyle.text)}>{tierStyle.label}</p>
                 ) : null}
@@ -186,8 +207,14 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
 
         {!loading && vessels.length === 0 ? (
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">
-            {maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(maxRangeM, distanceUnits)}`}
+            {emptyMessage}
           </div>
+        ) : null}
+
+        {cappedCount > 0 ? (
+          <p data-testid="nearby-vessels-capped" className="text-xs text-muted-foreground">
+            Nearest {FEED_CAP} boats shown. {cappedCount} more near the anchor are not listed.
+          </p>
         ) : null}
 
         {loading ? (
@@ -200,7 +227,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
 
 /** The Nearby Vessels list: the contacts from their own stream, and the collision highlight on each row. */
 export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: Omit<ComponentProps<typeof NearbyVesselsTile>,
-  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM'>) {
+  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM' | 'source' | 'aisHeardAgeS' | 'cappedCount'>) {
   const nearby = useNearbyVessels()
   const aisCollisionAlarms = useAisCollisionAlarms()
   return <NearbyVesselsTile {...props} {...nearby} aisCollisionAlarms={aisCollisionAlarms} />

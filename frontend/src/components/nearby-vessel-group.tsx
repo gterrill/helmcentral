@@ -5,6 +5,7 @@ import { type AlarmState } from '@/hooks/use-alarms'
 import { type NearbyVessel, type NearbyVesselFeed } from '@/hooks/use-nearby-vessels'
 import { bearingDeg } from '@/lib/geo'
 import {
+  aisSilenceMessage,
   COLLISION_TIER_STYLE,
   collisionTier,
   formatRelativeDuration,
@@ -54,6 +55,9 @@ export function vesselGroupMessage({
   // Under the -1,-1 position sentinel every contact's range is wrong.
   if (gnssCriticalAlert) return 'Vessels need a GNSS fix'
   if (vessels.length === 0) {
+    // An empty list after a quiet receiver is not an empty sea.
+    const silent = aisSilenceMessage(feed.aisHeardAgeS)
+    if (silent !== null) return silent
     return feed.maxRangeM === null ? 'No vessels in range' : `No vessels within ${formatSearchRange(limitM, distanceUnits)}`
   }
   return null
@@ -122,6 +126,7 @@ export function VesselGroup({
             ownLat={ownLat}
             ownLon={ownLon}
             distanceUnits={distanceUnits}
+            stacked={stacked}
             alarmState={aisCollisionAlarms?.get(vessel.id)}
           />
         ))
@@ -135,12 +140,15 @@ function VesselListRow({
   ownLat,
   ownLon,
   distanceUnits,
+  stacked,
   alarmState,
 }: {
   vessel: NearbyVessel
   ownLat: number | null
   ownLon: number | null
   distanceUnits: DistanceUnits
+  /** Stacked panes are tall and have the width: a long name may take a second line. Side by side it stays on one. */
+  stacked: boolean
   alarmState: AlarmState | undefined
 }) {
   const tier = collisionTier(alarmState)
@@ -165,7 +173,7 @@ function VesselListRow({
       <Ship className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', tierStyle ? tierStyle.text : 'text-muted-foreground')} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-1">
-          <span className="truncate text-sm font-semibold text-foreground">{vessel.name}</span>
+          <span className={cn('min-w-0 text-sm font-semibold text-foreground', stacked ? 'line-clamp-2 break-words' : 'truncate')}>{vessel.name}</span>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {formatVesselRange(vessel.range_m, distanceUnits)}{bearing ? ` ${bearing}` : ''}
           </span>

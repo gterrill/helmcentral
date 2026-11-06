@@ -1106,6 +1106,34 @@ func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
 	return s.pathSeen[context+"|"+path]
 }
 
+// lastOtherVesselPositionSeen is when any vessel other than this one last sent
+// a position, in range or not, or the zero time if none has. A vessel whose
+// name is in excludedNames is this one and does not count. It is the AIS
+// feed's heartbeat: the nearby list can be empty because the sea is empty or
+// because the receiver has stopped, and only this tells the two apart.
+func (s *signalKSnapshot) lastOtherVesselPositionSeen(excludedNames []string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest time.Time
+	for key, seen := range s.pathSeen {
+		context, path, ok := strings.Cut(key, "|")
+		if !ok || path != "navigation.position" || !strings.HasPrefix(context, vesselContextPrefix) ||
+			context == s.selfCtx || context == vesselContextPrefix+"self" {
+			continue
+		}
+		if !seen.After(latest) {
+			continue
+		}
+		// SignalK may publish this vessel under a second context. Its reports
+		// would keep the heartbeat alive however silent the receiver is.
+		if name := lookupString(s.contexts[context], "name"); matchesExcludedName(name, excludedNames) {
+			continue
+		}
+		latest = seen
+	}
+	return latest
+}
+
 // lastSentenceSeen reports when an NMEA 0183 sentence type was last observed
 // carrying real vessel data over the delta stream (receive time, with
 // cached-value replays skipped), and whether it

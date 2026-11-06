@@ -94,16 +94,108 @@ func TestNearbyFeedVesselsIsAPureSelection(t *testing.T) {
 		all = append(all, nearbyVessel{Name: fmt.Sprintf("V%d", i), RangeM: float64(i), Lat: -19.9, Lon: aisTestAnchorLon})
 	}
 	all[11].Lat = aisInsideLat // within 500 m of the anchor, 12th by range
-	if got := nearbyFeedVessels(all, nil); len(got) != nearbyVesselsDefaultLimit {
+	if got, _ := nearbyFeedVessels(all, nil); len(got) != nearbyVesselsDefaultLimit {
 		t.Fatalf("no watch: want the first 10, got %d", len(got))
 	}
 	watch := &anchorWatchData{Lat: aisTestAnchorLat, Lon: aisTestAnchorLon}
-	got := nearbyFeedVessels(all, watch)
+	got, _ := nearbyFeedVessels(all, watch)
 	if len(got) != 11 || got[10].Name != "V11" {
 		t.Fatalf("watch: want the first 10 plus V11, got %+v", got)
 	}
 	short := all[:4]
-	if got := nearbyFeedVessels(short, watch); len(got) != 4 {
+	if got, _ := nearbyFeedVessels(short, watch); len(got) != 4 {
 		t.Fatalf("a short list is returned whole, got %d", len(got))
+	}
+}
+
+// A crowded anchorage: 45 boats within 500 m of the anchor, all further from
+// the boat than the ten decoys. The feed holds the nearest nearbyFeedCap of
+// them and says how many it left out.
+func TestNearbyFeedCapsTheBoatsNearTheAnchorAndSaysHowManyWereLeftOut(t *testing.T) {
+	anchorTrailEnv(t)
+	dropWatch(t)
+	seedFeedScene(t)
+	now := time.Now().UTC()
+	for i := 0; i < 45; i++ {
+		id := fmt.Sprintf("urn:mrn:imo:mmsi:4000000%02d", i)
+		globalSignalKSnapshot.contexts[vesselContextPrefix+id] = map[string]any{
+			"name": fmt.Sprintf("CROWD %02d", i), "mmsi": fmt.Sprintf("4000000%02d", i),
+			"navigation": map[string]any{"position": map[string]any{"value": map[string]any{"latitude": -19.9965 - float64(i)*0.00005, "longitude": aisTestAnchorLon}}},
+		}
+		globalSignalKSnapshot.pathSeen[vesselContextPrefix+id+"|navigation.position"] = now
+	}
+	payload := buildNearbyVesselsPayload()
+	vessels := payload["vessels"].([]nearbyVessel)
+	if len(vessels) != nearbyFeedCap {
+		t.Fatalf("the feed holds at most %d boats, got %d", nearbyFeedCap, len(vessels))
+	}
+	// 10 decoys + NEAR + 45 crowd = 56 qualify; FAR is outside 500 m.
+	if got := payload["capped_count"]; got != 56-nearbyFeedCap {
+		t.Fatalf("capped_count = %v, want %d", got, 56-nearbyFeedCap)
+	}
+	for i := 1; i < len(vessels); i++ {
+		if vessels[i].RangeM < vessels[i-1].RangeM {
+			t.Fatalf("the capped feed must stay nearest first")
+		}
+	}
+}
+
+func TestNearbyFeedReportsNothingCappedWhenEveryoneFits(t *testing.T) {
+	seedFeedScene(t)
+	if got := buildNearbyVesselsPayload()["capped_count"]; got != 0 {
+		t.Fatalf("capped_count = %v, want 0", got)
+	}
+}
+
+func TestNearbyFeedSelectionCapsOnlyTheWatchExtras(t *testing.T) {
+	all := make([]nearbyVessel, 0, 100)
+	for i := 0; i < 100; i++ {
+		all = append(all, nearbyVessel{Name: fmt.Sprintf("V%d", i), RangeM: float64(i), Lat: aisInsideLat, Lon: aisTestAnchorLon})
+	}
+	watch := &anchorWatchData{Lat: aisTestAnchorLat, Lon: aisTestAnchorLon}
+	feed, capped := nearbyFeedVessels(all, watch)
+	if len(feed) != nearbyFeedCap || capped != 100-nearbyFeedCap || feed[nearbyFeedCap-1].Name != fmt.Sprintf("V%d", nearbyFeedCap-1) {
+		t.Fatalf("want the nearest %d and %d capped, got %d and %d", nearbyFeedCap, 100-nearbyFeedCap, len(feed), capped)
+	}
+	if feed, capped = nearbyFeedVessels(all, nil); len(feed) != nearbyVesselsDefaultLimit || capped != 0 {
+		t.Fatalf("with no watch the feed is the 10 nearest and nothing counts as capped, got %d and %d", len(feed), capped)
+	}
+}
+
+// ais_heard_age_s is the feed-health signal: how long since ANY other vessel
+// reported a position, in range or not, so a silent receiver is told apart from
+// an empty sea.
+func TestNearbyPayloadReportsHowLongSinceAnyAISPositionWasHeard(t *testing.T) {
+	seedFeedScene(t)
+	// A boat 100 km away is out of range and not in the list, but it was heard.
+	id := "urn:mrn:imo:mmsi:500000001"
+	globalSignalKSnapshot.contexts[vesselContextPrefix+id] = map[string]any{"name": "FARAWAY"}
+	globalSignalKSnapshot.pathSeen[vesselContextPrefix+id+"|navigation.position"] = time.Now().UTC().Add(-90 * time.Second)
+	for k := range globalSignalKSnapshot.pathSeen {
+		if k != vesselContextPrefix+id+"|navigation.position" {
+			delete(globalSignalKSnapshot.pathSeen, k)
+		}
+	}
+	age, ok := buildNearbyVesselsPayload()["ais_heard_age_s"].(float64)
+	if !ok || age < 89 || age > 95 {
+		t.Fatalf("ais_heard_age_s = %v, want about 90", buildNearbyVesselsPayload()["ais_heard_age_s"])
+	}
+}
+
+func TestNearbyPayloadSaysNoAISHeardWithMinusOne(t *testing.T) {
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	if got := buildNearbyVesselsPayload()["ais_heard_age_s"]; got != -1.0 {
+		t.Fatalf("ais_heard_age_s = %v, want -1", got)
+	}
+}
+
+// SignalK can publish this boat under a second context. Its reports are not
+// AIS, so they must not keep the heartbeat alive.
+func TestNearbyPayloadHeartbeatIgnoresThisBoatsOwnSecondContext(t *testing.T) {
+	seedSelfTree(t, trustedSignalKPayload(feedBoatLat, aisTestAnchorLon))
+	globalSignalKSnapshot.contexts[vesselContextPrefix+"urn:mrn:imo:mmsi:111"] = map[string]any{"name": "OWN BOAT"}
+	globalSignalKSnapshot.pathSeen[vesselContextPrefix+"urn:mrn:imo:mmsi:111|navigation.position"] = time.Now().UTC()
+	if got := aisHeardAge(time.Now().UTC(), []string{"own boat"}); got != -1 {
+		t.Fatalf("aisHeardAge = %v, want -1: the only reports are this boat's own", got)
 	}
 }

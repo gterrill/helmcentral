@@ -266,6 +266,21 @@ describe('Vessels group states', () => {
     expect(state()).toBe('AIS unavailable')
   })
 
+  it('says the receiver is silent when nothing has been heard for over ten minutes, never "No vessels"', async () => {
+    await renderTile({ nearbyVesselFeed: { source: 'signalk', maxRangeM: 5000, aisHeardAgeS: 1500 } })
+    expect(state()).toBe('AIS silent for 25m')
+  })
+
+  it('says no AIS has been heard when the backend holds no report', async () => {
+    await renderTile({ nearbyVesselFeed: { source: 'signalk', maxRangeM: 5000, aisHeardAgeS: -1 } })
+    expect(state()).toBe('No AIS reports heard')
+  })
+
+  it('still lists vessels that are in the feed whatever the heartbeat says', async () => {
+    await renderTile({ nearbyVesselFeed: { source: 'signalk', maxRangeM: 5000, aisHeardAgeS: 1500 }, nearbyVessels: [ves('a', 100)] })
+    expect(screen.getAllByTestId('poi-vessel-row')).toHaveLength(1)
+  })
+
   it('names the smaller range when nothing is in range', async () => {
     const { rerender } = await renderTile()
     expect(state()).toBe('No vessels within 5 km')
@@ -276,6 +291,25 @@ describe('Vessels group states', () => {
   it('names no range when the feed has not said how far it looks', async () => {
     await renderTile({ nearbyVesselFeed: { source: 'signalk', maxRangeM: null } })
     expect(state()).toBe('No vessels in range')
+  })
+})
+
+describe('Vessel names on a narrow pane', () => {
+  beforeEach(() => { usePoiMock.mockReturnValue(poiResult([feature('p1', 'Cid Harbour', 1200)])) })
+
+  it('wraps a name over two lines when the group is stacked', async () => {
+    listPaneHeight = 600
+    await renderTile({ nearbyVessels: [ves('a', 100)] })
+    const name = screen.getByTestId('poi-vessel-row').querySelector('span.font-semibold')
+    expect(name?.className).toContain('line-clamp-2')
+    expect(name?.className).not.toContain('truncate')
+  })
+
+  it('keeps a single truncated line when the groups sit side by side, so the short wall tile cannot overflow', async () => {
+    listPaneHeight = 225
+    await renderTile({ nearbyVessels: [ves('a', 100)] })
+    const name = screen.getByTestId('poi-vessel-row').querySelector('span.font-semibold')
+    expect(name?.className).toContain('truncate')
   })
 })
 

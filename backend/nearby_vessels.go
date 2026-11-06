@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net/http"
 	"time"
 
@@ -51,25 +52,39 @@ type nearbyVessel struct {
 	PositionSeen time.Time `json:"-"`
 }
 
+// nearbyFeedCap is the most boats the feed carries during an anchor watch: the
+// 10 nearest plus the boats near the anchor, nearest the boat first. A crowded
+// anchorage could otherwise send hundreds of markers and rows to a phone or the
+// wall display. With no watch the feed stays at the 10 nearest.
+const nearbyFeedCap = 40
+
 // nearbyFeedVessels picks what the feed carries from the full list, sorted by
 // range from the boat: the 10 nearest, and during an anchor watch (watch is
 // not nil) also every vessel within aisAnchorRecordRadiusM of the anchor, so
 // every boat whose track is recorded has a marker however crowded the
-// anchorage is (ADR 0263). It stays in range order.
-func nearbyFeedVessels(all []nearbyVessel, watch *anchorWatchData) []nearbyVessel {
+// anchorage is (ADR 0263), up to nearbyFeedCap boats in all. It stays in range
+// order. The second result counts the boats near the anchor the cap left out;
+// it is always zero with no watch, where the 10-boat limit is the design.
+func nearbyFeedVessels(all []nearbyVessel, watch *anchorWatchData) ([]nearbyVessel, int) {
 	if len(all) <= nearbyVesselsDefaultLimit {
-		return all
+		return all, 0
 	}
 	feed := append([]nearbyVessel(nil), all[:nearbyVesselsDefaultLimit]...)
 	if watch == nil {
-		return feed
+		return feed, 0
 	}
+	capped := 0
 	for _, v := range all[nearbyVesselsDefaultLimit:] {
-		if withinAISAnchorRecordRadius(*watch, v.Lat, v.Lon) {
-			feed = append(feed, v)
+		if !withinAISAnchorRecordRadius(*watch, v.Lat, v.Lon) {
+			continue
 		}
+		if len(feed) >= nearbyFeedCap {
+			capped++
+			continue
+		}
+		feed = append(feed, v)
 	}
-	return feed
+	return feed, capped
 }
 
 // buildNearbyVesselsPayload produces the /api response body. Split from the handler so
@@ -78,6 +93,8 @@ func buildNearbyVesselsPayload() map[string]any {
 	source := "backend-fallback"
 	now := time.Now().UTC()
 	vessels := []nearbyVessel{}
+	cappedCount := 0
+	var excludedNames []string
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
@@ -90,7 +107,7 @@ func buildNearbyVesselsPayload() map[string]any {
 
 	if signalkURL != "" {
 		signalkSelfName := fetchSignalKSelfName()
-		excludedNames := []string{signalkSelfName}
+		excludedNames = []string{signalkSelfName}
 
 		state, selfErr := fetchSignalKVesselState()
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
@@ -102,12 +119,13 @@ func buildNearbyVesselsPayload() map[string]any {
 				if watch, active, _ := currentAnchorWatch(); active {
 					watchPtr = &watch
 				}
-				nearby := nearbyFeedVessels(all, watchPtr)
+				nearby, capped := nearbyFeedVessels(all, watchPtr)
 				if globalNearbyContactStore != nil {
 					enrichNearbyVesselsWithContactHistory(globalNearbyContactStore, nearby)
 				}
 
 				vessels = nearby
+				cappedCount = capped
 				source = "signalk"
 			}
 		}
@@ -126,6 +144,15 @@ func buildNearbyVesselsPayload() map[string]any {
 		// far it looked rather than the client repeating a number it was
 		// never told.
 		"max_range_m": nearbyMaxRangeMeters,
+		// How many boats near the anchor the feed left out during a watch
+		// because it is capped at nearbyFeedCap. Zero when nothing was left out.
+		"capped_count": cappedCount,
+		// Seconds since any other vessel last reported a position, in range or
+		// not; -1 when none has been heard (or none in the last hour, when
+		// the snapshot drops a silent vessel). Unlike last_update_age_s it
+		// still ages when the list is empty, so a silent receiver reads as
+		// silent and an empty sea does not.
+		"ais_heard_age_s": aisHeardAge(now, excludedNames),
 	}
 }
 
@@ -140,4 +167,18 @@ func nearbyVesselRoutes() []apiRoute {
 		{http.MethodGet, "/api/nearby-vessels", tierRead, nearbyVessels},
 		{http.MethodGet, "/api/nearby-vessels/:key/sightings", tierRead, getNearbyVesselSightingsHandler(globalNearbyContactStore)},
 	}
+}
+
+// aisHeardAge is how long ago the snapshot last received a position from any
+// vessel other than this one (named in excludedNames), or -1 when it holds none.
+func aisHeardAge(now time.Time, excludedNames []string) float64 {
+	seen := globalSignalKSnapshot.lastOtherVesselPositionSeen(excludedNames)
+	if seen.IsZero() {
+		return -1
+	}
+	age := now.Sub(seen).Seconds()
+	if age < 0 {
+		age = 0
+	}
+	return math.Round(age)
 }

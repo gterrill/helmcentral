@@ -87,13 +87,29 @@ in this order:
    every contact's range is wrong.
 4. "No vessels within X", X being the smaller range.
 
-## Known limit
+## Update (2026-11-07): a quiet receiver is told apart from an empty sea
 
-A silent AIS receiver with SignalK still running is indistinguishable from an
-empty sea. The backend reports `signalk` as the source and an empty list, and the
-feed's age is unknown with no contacts (ADR 0068), so the group reads "No
-vessels within X". The help pages say so. Closing the gap needs the receiver's
-own heartbeat, which this change does not add.
+The known limit here was that a silent AIS receiver and an empty sea both gave
+an empty list. The feed now carries `ais_heard_age_s`, the age of the latest
+position from any vessel other than this one, in range or not. The snapshot
+already stamps every position on receipt, so no receiver heartbeat is needed.
+It reads -1 when the snapshot holds none. The snapshot drops a vessel after an
+hour of silence, so -1 also covers a receiver quiet for longer than that.
+
+With an empty list, the Vessels group and the Nearby Vessels tile say "AIS
+silent for 25m" once the age passes ten minutes, the window after which the
+feed stops listing a contact, and "No AIS reports heard" at -1. Otherwise they
+say "No vessels within X". The Nearby Vessels tile also honours `source` now:
+"AIS unavailable" when it is not `signalk`. The tile stores the heartbeat only
+as far as it reads on screen, so the five-second tick does not wake the map.
+
+A remote anchorage with no traffic reads "AIS silent" after ten minutes. The
+tile cannot tell that from a dead receiver and says what it knows, how long
+nothing has been heard.
+
+During an anchor watch the feed is capped at 40 boats, nearest first, and
+reports `capped_count`, the boats near the anchor it left out. Without a watch
+the 10-boat limit stands and `capped_count` is zero.
 
 ## Alternatives rejected
 
