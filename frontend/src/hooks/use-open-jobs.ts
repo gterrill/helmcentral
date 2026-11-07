@@ -51,6 +51,28 @@ export interface OpenJobInput {
   source_label?: string
 }
 
+/** What "Add to jobs" starts a new job from: the words, the item if known, and
+ * where it came from with a link back to it. */
+export interface OpenJobDraft {
+  title: string
+  notes?: string
+  equipment_id?: string | null
+  source: OpenJobSource
+  /** An in-app path (the server refuses anything else). */
+  source_link?: string
+  source_label?: string
+}
+
+/** The longest a title may be, in characters; the server refuses longer. */
+export const OPEN_JOB_TITLE_MAX = 200
+
+/** A title that fits, and the notes that keep the whole text when it did not. */
+export function fitJobTitle(text: string, notes = ''): { title: string; notes: string } {
+  const chars = Array.from(text.trim())
+  if (chars.length <= OPEN_JOB_TITLE_MAX) return { title: chars.join(''), notes }
+  return { title: `${chars.slice(0, OPEN_JOB_TITLE_MAX - 1).join('').trimEnd()}…`, notes: notes || text.trim() }
+}
+
 export interface OpenJobFilter {
   equipment?: string
   system?: string

@@ -120,6 +120,19 @@ only in your head.
 - **Closed jobs:** A closed job leaves the group. **Show closed** lists it again
   with how it ended.
 
+You can start a job from where you spot the problem. Three places have an
+**Add to jobs** button, which opens the Add job form already filled in:
+
+- **A watch report:** Each finding that needs a look has one. The job links back
+  to that report.
+- **An alarm card:** The job takes the alarm's name as its title and the alarm's
+  own words as its notes, and links to the Alarms page.
+- **A checklist line:** While you're running a checklist, each line has one, so
+  you can note a fault without losing your place. The job links back to the
+  checklist.
+
+Nothing is saved until you tap **Save**, and you choose the item yourself.
+
 See [Keep track of an open job](../how-to/keep-track-of-an-open-job.md).
 
 ## Acknowledging a job you can't do yet

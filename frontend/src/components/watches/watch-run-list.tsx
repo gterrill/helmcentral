@@ -1,3 +1,5 @@
+import { AddToJobsButton } from '@/components/inventory/add-to-jobs-button'
+import { formatAppLocation } from '@/lib/app-location'
 import { Fragment, memo, useCallback, useState, type CSSProperties } from 'react'
 import { Sparkles, Trash2 } from 'lucide-react'
 
@@ -349,7 +351,19 @@ const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: Ru
                   data-testid="watch-finding-group"
                   className={`flex min-w-0 flex-col gap-1.5 text-foreground ${gi > 0 ? 'mt-3 border-t border-border pt-3' : ''}`}
                 >
-                  <FindingLine finding={g.finding} nested={false} />
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <FindingLine finding={g.finding} nested={false} />
+                    <AddToJobsButton
+                      what={g.finding.text}
+                      className="shrink-0"
+                      draft={{
+                        title: g.finding.text,
+                        source: 'watch_finding',
+                        source_link: formatAppLocation({ panel: 'watches', route: { view: 'details', id: run.watch_id, run: run.id } }, { firstPageId: null }),
+                        source_label: `Watch report, ${runTimeLabel(run)}`,
+                      }}
+                    />
+                  </div>
                   {g.adds.length > 0 && (
                     <div className="flex min-w-0 flex-col gap-1.5 pl-4">
                       {g.adds.map((a) => <FindingLine key={a.index} finding={a.finding} nested />)}

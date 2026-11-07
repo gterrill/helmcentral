@@ -22,6 +22,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Add to jobs on a watch finding, an alarm and a checklist line.** Spot a
+  problem in a watch report, on an alarm card or partway through a checklist and
+  tap **Add to jobs**. The Add job form opens with the text filled in, and the
+  job keeps a link back to where you saw it. Nothing is saved until you tap
+  **Save**.
 - **Open jobs: a list of problems you know about and haven't fixed.** "Shower
   pump leaks at the outlet" now has somewhere to go. The **Open jobs** group
   sits at the top of Inventory → Maintenance, above Overdue, and on the page of
