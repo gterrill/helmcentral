@@ -19,7 +19,8 @@ import { useApiQuerySelector } from '@/lib/api-query'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
 import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
-import { useMapContacts, usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
+import { usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
+import { useNearbyVesselList } from '@/hooks/use-nearby-vessels'
 
 /*
  * The wrappers for the pages AppShell opens as lazy chunks (ADR 0215): Alarms,
@@ -111,7 +112,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
   | 'aisVessels' | 'tide' | 'onDropAnchor'>) {
   const watch = useAnchorWatch()
-  const contacts = useMapContacts()
+  const aisVessels = useNearbyVesselList()
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   // Read at the tap, not subscribed: the fix and depth come from the store as
@@ -135,7 +136,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
     <AnchorWatchDrawer
       {...props}
       {...pins}
-      {...contacts}
+      aisVessels={aisVessels}
       tide={tide}
       onDropAnchor={onDropAnchor}
       anchorLat={watch.anchorLat}

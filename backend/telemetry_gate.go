@@ -72,16 +72,11 @@ func bandAge(ageSeconds float64) float64 {
 // buildAndBroadcast keeps that as the real payload regardless of what this
 // returns.
 //
-// bandAgeSeconds controls whether a bare "age_seconds" key (as opposed to
-// one already caught by the "_age_s" suffix rule below) gets banded:
-// nearby-vessels' per-vessel age_seconds is rendered on every row ("12s ago",
-// nearby-vessels-tile.tsx) and must stay exact, so that event passes false.
-//
 // extraDropKeys names additional top-level fields to drop beyond the
 // "datetime" every gated event drops automatically — used by solar-state for
 // trend_24h_total, whose last bucket's time is not a value the frontend
 // reads at all (see solarStateGateKey).
-func telemetryGateKeyFor(encoded []byte, bandAgeSeconds bool, extraDropKeys ...string) string {
+func telemetryGateKeyFor(encoded []byte, extraDropKeys ...string) string {
 	var generic any
 	if err := json.Unmarshal(encoded, &generic); err != nil {
 		// A payload the hub cannot even decode back for comparison is not
@@ -98,7 +93,7 @@ func telemetryGateKeyFor(encoded []byte, bandAgeSeconds bool, extraDropKeys ...s
 		drop[key] = true
 	}
 
-	normalized := normalizeTelemetryAges(generic, drop, bandAgeSeconds)
+	normalized := normalizeTelemetryAges(generic, drop)
 	out, err := json.Marshal(normalized)
 	if err != nil {
 		log.Printf("telemetry hub: gate key encode failed, forcing a send: %v", err)
@@ -114,14 +109,15 @@ func telemetryGateKeyFor(encoded []byte, bandAgeSeconds bool, extraDropKeys ...s
 //   - any map key ending in "_age_s" (last_update_age_s,
 //     depth_last_update_age_s, fuel_volume_age_s, and so on, at any depth),
 //   - every value of a map keyed "ages" (gauge-values' per-path age map,
-//     whose keys are SignalK paths, not field names ending in "_age_s"),
-//   - "age_seconds", but only when bandAgeSeconds says to (see
-//     telemetryGateKeyFor's doc comment).
+//     whose keys are SignalK paths, not field names ending in "_age_s").
+//
+// A bare "age_seconds" is never banded: nearby-vessels shows each vessel's
+// on every row ("12s ago", nearby-vessels-tile.tsx), so it must stay exact.
 //
 // Live instrument values (position, wind, depth, gust, and so on) are never
 // touched here: they pass through byte-for-byte, so a real change to any of
 // them still changes the key.
-func normalizeTelemetryAges(node any, drop map[string]bool, bandAgeSeconds bool) any {
+func normalizeTelemetryAges(node any, drop map[string]bool) any {
 	switch v := node.(type) {
 	case map[string]any:
 		result := make(map[string]any, len(v))
@@ -141,19 +137,13 @@ func normalizeTelemetryAges(node any, drop map[string]bool, bandAgeSeconds bool)
 					continue
 				}
 			}
-			if key == "age_seconds" && bandAgeSeconds {
-				if age, ok := value.(float64); ok {
-					result[key] = bandAge(age)
-					continue
-				}
-			}
-			result[key] = normalizeTelemetryAges(value, drop, bandAgeSeconds)
+			result[key] = normalizeTelemetryAges(value, drop)
 		}
 		return result
 	case []any:
 		result := make([]any, len(v))
 		for i, item := range v {
-			result[i] = normalizeTelemetryAges(item, drop, bandAgeSeconds)
+			result[i] = normalizeTelemetryAges(item, drop)
 		}
 		return result
 	default:
@@ -185,7 +175,7 @@ func bandAgeMap(ages map[string]any) map[string]any {
 // vesselStateGateKey covers vessel_state.go's buildVesselStatePayload: datetime, plus
 // depth/position/wind's own last_update_age_s fields.
 func vesselStateGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false)
+	return telemetryGateKeyFor(encoded)
 }
 
 // gaugeValuesGateKey covers signalk_paths.go's buildGaugeValuesPayload: no
@@ -193,13 +183,13 @@ func vesselStateGateKey(encoded []byte) string {
 // the special case in normalizeTelemetryAges catches by the map's own key
 // rather than by suffix.
 func gaugeValuesGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false)
+	return telemetryGateKeyFor(encoded)
 }
 
 // electricalStateGateKey covers electrical_state.go's buildElectricalStatePayload:
 // datetime and the feed-level last_update_age_s.
 func electricalStateGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false)
+	return telemetryGateKeyFor(encoded)
 }
 
 // tanksStateGateKey covers tanks_state.go's buildTanksStatePayload: datetime, the
@@ -207,16 +197,14 @@ func electricalStateGateKey(encoded []byte) string {
 // — via the generic "_age_s" suffix rule, not a special case here — each
 // tank's own last_update_age_s nested inside the "tanks" array.
 func tanksStateGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false)
+	return telemetryGateKeyFor(encoded)
 }
 
 // nearbyVesselsGateKey covers nearby_vessels.go's buildNearbyVesselsPayload: datetime
-// and the feed-level last_update_age_s. bandAgeSeconds is false because each
-// vessel's own age_seconds is displayed on every row ("12s ago",
-// nearby-vessels-tile.tsx) and must stay exact so a row that actually ticks
-// over still sends.
+// and the feed-level last_update_age_s. Each vessel's own age_seconds is left
+// exact (see normalizeTelemetryAges) so a row that ticks over still sends.
 func nearbyVesselsGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false)
+	return telemetryGateKeyFor(encoded)
 }
 
 // solarStateGateKey covers solar_state.go's buildSolarStatePayload: datetime, the
@@ -233,5 +221,5 @@ func nearbyVesselsGateKey(encoded []byte) string {
 // so rather than teach the gate key about Influx's windowing behaviour, this
 // drops the whole field, the same way "datetime" is dropped.
 func solarStateGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, false, "trend_24h_total")
+	return telemetryGateKeyFor(encoded, "trend_24h_total")
 }
