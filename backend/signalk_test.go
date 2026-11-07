@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -483,7 +484,10 @@ func TestUpdateSettingsHandler_SaveDoesNotWaitForTheReadySweep(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan struct{})
 	prev := documentIndexerSweepIfReady
-	documentIndexerSweepIfReady = func() { <-release; close(done) }
+	// Another test's late `go sweepDocumentsIfReady()` can call the hook
+	// again, so closing done must happen once.
+	var closeDone sync.Once
+	documentIndexerSweepIfReady = func() { <-release; closeDone.Do(func() { close(done) }) }
 	t.Cleanup(func() { documentIndexerSweepIfReady = prev })
 
 	returned := make(chan int, 1)

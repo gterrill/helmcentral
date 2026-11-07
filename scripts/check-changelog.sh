@@ -22,21 +22,23 @@
 # fails this check.
 set -eu
 
-file=CHANGELOG.md
+# Run against this script's own checkout, wherever it was started.
+root=$(cd "$(dirname "$0")/.." && pwd)
+file=$root/CHANGELOG.md
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-tag=$(git tag --list 'v*' --sort=-v:refname | head -1)
+tag=$(git -C "$root" tag --list 'v*' --sort=-v:refname | head -1)
 if [ -z "$tag" ]; then
   echo "check-changelog: no release tag found; fetch the tags" >&2
   exit 1
 fi
 
-git show "$tag:$file" >"$tmp/tagged"
+git -C "$root" show "$tag:CHANGELOG.md" >"$tmp/tagged"
 
 heading=$(grep -m1 '^## \[[0-9]' "$tmp/tagged") || {
-  echo "check-changelog: $file at $tag has no released section" >&2
+  echo "check-changelog: CHANGELOG.md at $tag has no released section" >&2
   exit 1
 }
 

@@ -35,7 +35,8 @@ if [ -z "$action" ] || [ -z "$name" ]; then
   exit 2
 fi
 
-main="$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+main="$(git -C "$root" worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
 wt="$(dirname "$main")/$(basename "$main")-$name"
 tmp="${TMPDIR:-/tmp}"
 state="${tmp%/}/helmcentral-preview-$name"

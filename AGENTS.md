@@ -25,8 +25,8 @@
 
 - Every batch of changes passes `/code-review medium` before its commit and
   `/security-review` before it merges, with or without the `ship` skill, which
-  holds the full steps. Check each finding against the code. A
-  `/security-review` report on an empty diff checked nothing.
+  holds the full steps. Check each finding against the code. From a worktree,
+  run the security review with `sh scripts/security-review.sh <worktree>`.
 - Tags are SemVer only, such as `v0.3.5`. Every release goes through the
   `release` skill.
 
