@@ -23,9 +23,11 @@ import {
   createOpenJob,
   deleteOpenJobPhoto,
   dropOpenJob,
+  fitJobTitle,
   updateOpenJob,
   uploadOpenJobPhoto,
   type OpenJob,
+  type OpenJobDraft,
   type OpenJobInput,
 } from '@/hooks/use-open-jobs'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
@@ -53,7 +55,11 @@ interface OpenJobFormState {
   beforeOn: string
 }
 
-function formFor(job: OpenJob | null, presetEquipmentId: string | undefined): OpenJobFormState {
+function formFor(job: OpenJob | null, presetEquipmentId: string | undefined, draft?: OpenJobDraft): OpenJobFormState {
+  if (!job && draft) {
+    const { title, notes } = fitJobTitle(draft.title, draft.notes)
+    return { equipmentId: draft.equipment_id ?? presetEquipmentId ?? '', title, notes, beforeOn: '' }
+  }
   return {
     equipmentId: job ? (job.equipment_id ?? '') : (presetEquipmentId ?? ''),
     title: job?.title ?? '',
@@ -68,11 +74,14 @@ interface OpenJobDialogProps {
   job: OpenJob | null | undefined
   /** The item a new job starts on (an item's own page). */
   presetEquipmentId?: string
+  /** A new job started from somewhere else ("Add to jobs"): the form opens
+   * filled in, and the job keeps where it came from. */
+  draft?: OpenJobDraft
   onClose: () => void
 }
 
-export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJobDialogProps) {
-  const [form, setForm] = useState<OpenJobFormState>(() => formFor(job ?? null, presetEquipmentId))
+export function OpenJobDialog({ open, job, presetEquipmentId, draft, onClose }: OpenJobDialogProps) {
+  const [form, setForm] = useState<OpenJobFormState>(() => formFor(job ?? null, presetEquipmentId, draft))
   const [saved, setSaved] = useState<OpenJob | null>(job ?? null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -83,7 +92,7 @@ export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJob
 
   useEffect(() => {
     if (open) {
-      setForm(formFor(job ?? null, presetEquipmentId))
+      setForm(formFor(job ?? null, presetEquipmentId, draft))
       setSaved(job ?? null)
       setDirty(false)
       setError(null)
@@ -105,6 +114,7 @@ export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJob
         title: form.title.trim(),
         notes: form.notes.trim(),
         before_on: form.beforeOn,
+        ...(!saved && draft ? { source: draft.source, source_link: draft.source_link ?? '', source_label: draft.source_label ?? '' } : {}),
       }
       // A second Save on the same open dialog edits the job the first made.
       setSaved(saved ? await updateOpenJob(saved.id, input) : await createOpenJob(input))

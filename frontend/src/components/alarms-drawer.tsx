@@ -6,6 +6,7 @@ import { ChoiceCheckbox } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { AddToJobsButton } from '@/components/inventory/add-to-jobs-button'
 import { StopShowingAlarm } from '@/components/stop-showing-alarm'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { alarmConditionSentence, alarmFooterText, alarmUnitForPath, formatAlarmReading, TANK_ALARM_RULE_PREFIX, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
@@ -392,6 +393,17 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                             <span className="hidden sm:inline">Ask Mate</span>
                           </Button>
                         )}
+                        <AddToJobsButton
+                          showLabel
+                          what={alarm.label}
+                          draft={{
+                            title: alarm.label,
+                            notes: alarm.message,
+                            source: 'alarm',
+                            source_link: formatAppLocation({ panel: 'alarms' }, { firstPageId: null }),
+                            source_label: alarm.label,
+                          }}
+                        />
                         {alarm.can_silence && (
                           <Button size="sm" variant="ghost" onClick={() => void silence(alarm.rule_id)}>
                             Silence
