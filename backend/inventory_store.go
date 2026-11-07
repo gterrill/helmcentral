@@ -906,8 +906,11 @@ const documentDeletableAsOrphanPhotoClause = `d.folder_id IS NULL AND d.kind = '
 // predicate, shared, rather than three copies of the same subquery
 // (exclusivePhotoIDsForEquipmentID and DocumentDeletableAsOrphanPhoto here,
 // MaintenanceLogPhotoDeletableAsOrphan's own equipment_documents check in
-// maintenance_store.go is this same shape from the other side).
-const documentHasNoMaintenanceLogPhotoLinkClause = `NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)`
+// maintenance_store.go is this same shape from the other side). An open
+// job's photos count here too (ADR 0269): Done shares them with its log line,
+// and a document either one shows is not safe to delete.
+const documentHasNoMaintenanceLogPhotoLinkClause = `NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)
+		AND NOT EXISTS (SELECT 1 FROM open_job_photos ojp WHERE ojp.document_id = d.id)`
 
 // documentHasNoEquipmentPhotoLinkClause is documentHasNoMaintenanceLogPhotoLinkClause's
 // mirror image, used from the log-entry side (MaintenanceLogPhotoDeletableAsOrphan,

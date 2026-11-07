@@ -816,6 +816,43 @@ var documentStoreSchema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS maintenance_log_photos_document_id ON maintenance_log_photos (document_id)`,
 
+	// open_jobs (ADR 0269): a known problem that is not fixed yet. Not a
+	// maintenance rule (those repeat) and not an alarm (nothing is raised);
+	// a one-off record with a done column. equipment_id CASCADEs like
+	// maintenance_rules: a job about an item has no meaning once the item is
+	// gone. log_entry_id is the service log line Done wrote, SET NULL so
+	// deleting that line does not delete the job's history. source_link is an
+	// in-app path (validated to start with a single "/").
+	`CREATE TABLE IF NOT EXISTS open_jobs (
+		id           TEXT PRIMARY KEY,
+		equipment_id TEXT REFERENCES equipment(id) ON DELETE CASCADE,
+		title        TEXT NOT NULL,
+		notes        TEXT NOT NULL DEFAULT '',
+		opened_on    TEXT NOT NULL,
+		before_on    TEXT NOT NULL DEFAULT '',
+		status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','dropped')),
+		closed_on    TEXT NOT NULL DEFAULT '',
+		drop_reason  TEXT NOT NULL DEFAULT '',
+		log_entry_id TEXT REFERENCES maintenance_log_entries(id) ON DELETE SET NULL,
+		source       TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','mate','watch_finding','alarm','checklist_line')),
+		source_link  TEXT NOT NULL DEFAULT '',
+		source_label TEXT NOT NULL DEFAULT '',
+		created_at   INTEGER NOT NULL,
+		updated_at   INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS open_jobs_equipment_id ON open_jobs (equipment_id)`,
+	`CREATE INDEX IF NOT EXISTS open_jobs_status ON open_jobs (status, opened_on)`,
+
+	// open_job_photos mirrors maintenance_log_photos for a job's photos.
+	`CREATE TABLE IF NOT EXISTS open_job_photos (
+		job_id      TEXT NOT NULL REFERENCES open_jobs(id) ON DELETE CASCADE,
+		document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		sort_index  INTEGER NOT NULL DEFAULT 0,
+		created_at  INTEGER NOT NULL,
+		PRIMARY KEY (job_id, document_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS open_job_photos_document_id ON open_job_photos (document_id)`,
+
 	// hour_meter_resets: one row per meter replacement an operator records
 	// (spec §2 - old reading, new reading, date), CASCADE with the item
 	// since an offset history has no meaning once the item it corrects for

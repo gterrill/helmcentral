@@ -48,7 +48,8 @@ Helmcentral suits your boat.
   record per system aboard, its documents, where it's stowed, and the profile
   it follows.
 - [Maintenance](features/maintenance.md): jobs that fall due on running hours,
-  on the calendar, or both, and the service log you sign them off in.
+  on the calendar, or both, the service log you sign them off in, and the open
+  jobs you haven't fixed yet.
 - [Outside assistants](features/outside-assistants.md): let Claude or ChatGPT
   read the boat's status, alarms and logs. It can only read, and only on your
   network or through one Tailscale Funnel address.
@@ -124,6 +125,8 @@ Step-by-step instructions for specific jobs.
   ask Mate for a schedule and apply what it suggests.
 - [Log a service](how-to/log-a-service.md): complete a scheduled job, or record
   a repair or improvement.
+- [Keep track of an open job](how-to/keep-track-of-an-open-job.md): write down
+  a problem you haven't fixed yet, then mark it done or drop it.
 - [Import GPX tracks](how-to/import-gpx-tracks.md): add trips Helmcentral
   didn't record.
 - [Edit a passage](how-to/edit-passages.md): split, trim, merge and hide

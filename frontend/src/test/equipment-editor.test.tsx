@@ -297,6 +297,7 @@ function stubFetch() {
     if (u.includes('/api/inventory/maintenance/rules')) {
       return Promise.resolve({ ok: true, json: async () => ({ rules: [] }) })
     }
+    if (u.includes('/api/inventory/open-jobs')) return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) })
     if (u.includes('/api/inventory/maintenance/log')) {
       return Promise.resolve({ ok: true, json: async () => ({ entries: [] }) })
     }
@@ -1298,6 +1299,7 @@ describe('EquipmentEditor', () => {
       if (u.includes('/api/inventory/maintenance/rules')) {
         return Promise.resolve({ ok: true, json: async () => ({ rules: [{ id: 'r1', description: 'Oil', status: 'ok', ...ITEM_RULE_PROVENANCE }, { id: 'r2', description: 'Belt', status: 'ok', ...ITEM_RULE_PROVENANCE }] }) })
       }
+      if (u.includes('/api/inventory/open-jobs')) return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) })
       if (u.includes('/api/inventory/maintenance/log')) {
         return Promise.resolve({ ok: true, json: async () => ({ entries: [{ id: 'e1' }] }) })
       }

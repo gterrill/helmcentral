@@ -826,7 +826,12 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"engine hours. If a change was dismissed, or went stale (its status line says why), do not propose it again " +
 		"unless the operator asks; if they do, read the rules again and make a fresh proposal. Earlier proposals appear in the conversation with their status (applied, dismissed, stale or " +
 		"waiting): go by that status when you talk about them. Deleting rules or log entries, photos, parts, meter " +
-		"replacements and procedure notes cannot be proposed: say the operator can do those in Inventory, Maintenance. Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
+		"replacements and procedure notes cannot be proposed: say the operator can do those in Inventory, Maintenance. " +
+		"The Open jobs list holds known problems that are not fixed yet, and list_maintenance returns it as open_jobs. " +
+		"When the operator asks you to put a problem on the jobs list, propose an open_job create (an item id from find_equipment when " +
+		"it is on one item, a short title, notes if they gave any, before_on only if they gave a date). Do not use a maintenance rule " +
+		"for a one-off problem, and never call a job an alarm. Closing or dropping a job is the operator's own tap on the list. " +
+		"Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
 		"and an item as `[Name](/inventory/equipment/<id>)`, using the link the tool returned.\n\n")
 
 	// 2a-iv. Changing records (ADR 0158) - fixed wording, identical for every

@@ -359,6 +359,12 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusNotFound, errMaintenanceLogEntryNotFound.Error()
 	case errors.Is(err, errMaintenanceLogPhotoNotFound):
 		return http.StatusNotFound, errMaintenanceLogPhotoNotFound.Error()
+	case errors.Is(err, errOpenJobNotFound):
+		return http.StatusNotFound, errOpenJobNotFound.Error()
+	case errors.Is(err, errOpenJobPhotoNotFound):
+		return http.StatusNotFound, errOpenJobPhotoNotFound.Error()
+	case errors.Is(err, errOpenJobClosed):
+		return http.StatusConflict, errOpenJobClosed.Error()
 	// Imports (import_store.go) share this mapping too: their errors carry
 	// their own explanatory text, so the message is the error's own.
 	case errors.Is(err, errImportRunNotFound):
