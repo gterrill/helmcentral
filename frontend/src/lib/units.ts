@@ -24,3 +24,13 @@ export function feetToMeters(feet: number): number {
 export function depthValueText(meters: number, imperial: boolean): string {
   return (imperial ? metersToFeet(meters) : meters).toFixed(1)
 }
+
+/** A distance in the unit the operator reads, unrounded. */
+export function toDisplayDistance(meters: number, imperial: boolean): number {
+  return imperial ? metersToFeet(meters) : meters
+}
+
+/** The inverse of toDisplayDistance: a figure in the operator's unit, in metres. */
+export function fromDisplayDistance(value: number, imperial: boolean): number {
+  return imperial ? feetToMeters(value) : value
+}

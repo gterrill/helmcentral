@@ -80,8 +80,8 @@ describe('calculateCatenary (characterization)', () => {
       hullType: 'power_mono',
     })
     expect(result).not.toBeNull()
-    expect(result!.recommendedRodeM).toBeCloseTo(30.062226808928283, 6)
-    expect(result!.minScopeRatio).toBeCloseTo(5.010371134821381, 6)
+    expect(result!.recommendedRodeM).toBeCloseTo(30.655137917018845, 6)
+    expect(result!.minScopeRatio).toBeCloseTo(5.109189652836474, 6)
     expect(result!.horizontalLoadN).toBeCloseTo(1478.3495863536964, 6)
   })
 
@@ -97,8 +97,8 @@ describe('calculateCatenary (characterization)', () => {
       hullType: 'power_cat',
     })
     expect(result).not.toBeNull()
-    expect(result!.recommendedRodeM).toBeCloseTo(134.21760925594984, 6)
-    expect(result!.minScopeRatio).toBeCloseTo(11.671096457039116, 6)
+    expect(result!.recommendedRodeM).toBeCloseTo(134.7093784202972, 6)
+    expect(result!.minScopeRatio).toBeCloseTo(11.713858993069323, 6)
     expect(result!.horizontalLoadN).toBeCloseTo(22059.383009467023, 6)
   })
 
@@ -114,9 +114,45 @@ describe('calculateCatenary (characterization)', () => {
       hullType: 'sail_mono',
     })
     expect(result).not.toBeNull()
-    expect(result!.recommendedRodeM).toBeCloseTo(19.334932895570244, 6)
-    expect(result!.minScopeRatio).toBeCloseTo(5.524266541591499, 6)
+    expect(result!.recommendedRodeM).toBeCloseTo(19.649163597369846, 6)
+    expect(result!.minScopeRatio).toBeCloseTo(5.61404674210567, 6)
     expect(result!.horizontalLoadN).toBeCloseTo(638.1218181622763, 6)
+  })
+
+  it('recommends the suspended length that just touches at the anchor: sqrt(h² + 2ah)', () => {
+    const input = {
+      depthM: 5,
+      bowRollerHeightM: 1,
+      windKts: 20,
+      seaState: 'calm' as const,
+      seabedType: 'sand' as const,
+      chainSizeMm: 10,
+      windageAreaM2: 20,
+      hullType: 'power_mono' as const,
+    }
+    const result = calculateCatenary(input)!
+    const h = 6
+    // 10 mm chain: 2.3 kg/m dry, 0.87 of that submerged.
+    const a = result.horizontalLoadN / (2.3 * 0.87 * 9.81)
+    expect(result.catenaryParameterM).toBeCloseTo(a, 9)
+    expect(result.recommendedRodeM).toBeCloseTo(Math.sqrt(h * h + 2 * a * h), 9)
+    // The chain that long reaches the anchor with its tangent flat: enough to
+    // reach the bottom, never shorter than the water is deep.
+    expect(result.recommendedRodeM).toBeGreaterThan(h)
+  })
+
+  it('never recommends less than the depth to the hawse, however light the wind', () => {
+    const result = calculateCatenary({
+      depthM: 5,
+      bowRollerHeightM: 1,
+      windKts: 0.1,
+      seaState: 'calm',
+      seabedType: 'sand',
+      chainSizeMm: 10,
+      windageAreaM2: 20,
+      hullType: 'power_mono',
+    })!
+    expect(result.minScopeRatio).toBeGreaterThan(1)
   })
 
   it('returns null for zero depth', () => {
@@ -456,8 +492,10 @@ describe('buildRodePlan', () => {
     expect(plan!.tideCorrected).toBe(false)
     expect(plan!.planningDepthM).toBe(5)
     expect(plan!.depthFromHawseM).toBe(6)
-    expect(plan!.recommendedRodeM).toBeCloseTo(30.062226808928283, 6)
-    expect(plan!.recommendedScope).toBeCloseTo(5.010371134821381, 6)
+    expect(plan!.recommendedRodeM).toBeCloseTo(30.655137917018845, 6)
+    expect(plan!.recommendedScope).toBeCloseTo(5.109189652836474, 6)
+    // The parameter the recommendation used, handed on for drawing the rode.
+    expect(plan!.catenaryParameterM).toBeCloseTo(1478.3495863536964 / (2.3 * 0.87 * 9.81), 6)
   })
 
   it('uses the tide-corrected depth and reports tideCorrected true when the datum carries a tide stamp', () => {
@@ -475,7 +513,7 @@ describe('buildRodePlan', () => {
     const plan = buildRodePlan({ ...baseInput, chainOnboardM: 10 })
     expect(plan).not.toBeNull()
     expect(plan!.exceedsChainOnboard).toBe(true)
-    expect(plan!.chainRemainingM).toBeCloseTo(10 - 30.062226808928283, 6)
+    expect(plan!.chainRemainingM).toBeCloseTo(10 - 30.655137917018845, 6)
   })
 
   it('does not flag exceedsChainOnboard when there is enough chain aboard', () => {
@@ -499,9 +537,9 @@ describe('buildRodePlan', () => {
 
 // ---------------------------------------------------------------------------
 // buildRodePlan — MIN_SCOPE_RATIO floor. A calm-night, 3kt-wind input fed the
-// raw catenary model down to ~0.6:1: mathematically correct, nautically
-// absurd — below ~3:1 the anchor pulls upward regardless of what the
-// catenary math says is holding. The floor is composition policy, applied
+// raw catenary model down to a little over 1:1: mathematically correct (the chain just
+// reaches the anchor with a flat tangent), nautically absurd — below ~3:1 the
+// anchor pulls upward regardless of what the catenary math says is holding. The floor is composition policy, applied
 // here rather than in catenary.ts, so the physics stays pinned and
 // policy-free.
 // ---------------------------------------------------------------------------
@@ -520,8 +558,8 @@ describe('buildRodePlan — MIN_SCOPE_RATIO floor', () => {
     const plan = buildRodePlan({ ...baseInput, windKts: 20 })
     expect(plan).not.toBeNull()
     expect(plan!.scopeFloorApplied).toBe(false)
-    expect(plan!.recommendedRodeM).toBeCloseTo(30.062226808928283, 6)
-    expect(plan!.recommendedScope).toBeCloseTo(5.010371134821381, 6)
+    expect(plan!.recommendedRodeM).toBeCloseTo(30.655137917018845, 6)
+    expect(plan!.recommendedScope).toBeCloseTo(5.109189652836474, 6)
   })
 
   it('leaves a raw ratio just above the floor alone (boundary sanity)', () => {
@@ -570,7 +608,7 @@ describe('catenaryMethod', () => {
     expect(result).not.toBeNull()
     expect(result!.id).toBe('catenary')
     expect(result!.unavailableReason).toBeUndefined()
-    expect(result!.recommendedRodeM).toBeCloseTo(30.062226808928283, 6)
+    expect(result!.recommendedRodeM).toBeCloseTo(30.655137917018845, 6)
   })
 
   it('names the missing input in unavailableReason rather than rendering a dash', () => {
@@ -928,5 +966,71 @@ describe('swingBreakdownText', () => {
   it('works in feet', () => {
     // 10 m = 33 ft, 2 m = 7 ft, 24 m total = 79 ft
     expect(swingBreakdownText(10, 2, 12, true)).toBe('33 ft rode + 7 ft GPS to bow + 39 ft boat')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Both methods hand on the height and tide status they planned against, so a
+// drawing of the rode uses exactly that figure.
+// ---------------------------------------------------------------------------
+describe('rode methods report the height they planned against', () => {
+  const tided = {
+    ...baseInput,
+    depth: { depthM: 5, tideHeightFt: 2 },
+    tide: makeTide({ current_tide_height_ft: 2, high_tide_height_ft: 5 }),
+  }
+
+  it('the catenary method reports the plan depth from the hawse and tideCorrected', () => {
+    const plan = buildRodePlan(tided)!
+    const result = catenaryMethod(tided)!
+    expect(result.depthFromHawseM).toBeCloseTo(plan.depthFromHawseM, 9)
+    expect(result.tideCorrected).toBe(true)
+    expect(catenaryMethod(baseInput)!.tideCorrected).toBe(false)
+    expect(catenaryMethod(baseInput)!.depthFromHawseM).toBe(6)
+  })
+
+  it('the ratio method reports the same height and status as the catenary method', () => {
+    const ratio = ratioMethod(tided)!
+    expect(ratio.depthFromHawseM).toBeCloseTo(catenaryMethod(tided)!.depthFromHawseM!, 9)
+    expect(ratio.tideCorrected).toBe(true)
+  })
+
+  it('a ratio method with no catenary plan still reports its height', () => {
+    const noChain = { ...baseInput, chainSizeMm: 0 }
+    expect(buildRodePlan(noChain)).toBeNull()
+    expect(ratioMethod(noChain)!.depthFromHawseM).toBe(6)
+  })
+
+  it('an unavailable method reports no height', () => {
+    expect(catenaryMethod({ ...baseInput, depth: null })!.depthFromHawseM).toBeUndefined()
+    expect(ratioMethod({ ...baseInput, depth: null })!.depthFromHawseM).toBeUndefined()
+  })
+})
+
+describe('the method results carry their load and lift warning', () => {
+  it('both methods carry the catenary parameter of the plan', () => {
+    const plan = buildRodePlan(baseInput)!
+    expect(catenaryMethod(baseInput)!.catenaryParameterM).toBeCloseTo(plan.catenaryParameterM, 9)
+    expect(ratioMethod(baseInput)!.catenaryParameterM).toBeCloseTo(plan.catenaryParameterM, 9)
+  })
+
+  it('the Ratio Method has no parameter when there is no catenary plan, and unavailable results have none', () => {
+    expect(ratioMethod({ ...baseInput, chainSizeMm: 0 })!.catenaryParameterM).toBeNull()
+    expect(catenaryMethod({ ...baseInput, depth: null })!.catenaryParameterM).toBeNull()
+  })
+
+  it('the Catenary Method has no lift warning, since its rode is never short of the suspended length', () => {
+    expect(catenaryMethod(baseInput)!.liftWarning).toBeNull()
+  })
+
+  it('words the Ratio lift warning, and an unavailable result has none', () => {
+    expect(ratioMethod(baseInput)!.liftWarning).toBe('The ratio rule is too short for the planned conditions: the anchor would be lifted off the bottom.')
+    expect(ratioMethod({ ...baseInput, depth: null })!.liftWarning).toBeNull()
+  })
+
+  it('takes the plan it is given rather than building its own', () => {
+    const plan = buildRodePlan(baseInput)!
+    expect(ratioMethod(baseInput, { ...plan, catenaryParameterM: 123 })!.catenaryParameterM).toBe(123)
+    expect(ratioMethod(baseInput, null)!.catenaryParameterM).toBeNull()
   })
 })

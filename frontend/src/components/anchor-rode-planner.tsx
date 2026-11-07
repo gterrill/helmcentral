@@ -27,6 +27,9 @@ import {
   type ScopeStatus,
 } from '@/lib/rode-plan'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
+import { fromDisplayDistance, toDisplayDistance } from '@/lib/units'
+import { RodeProfileDiagram } from '@/components/rode-profile-diagram'
+import { WarningNote } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -41,7 +44,6 @@ import { SidebarPaneHeader, SidebarPaneRail } from '@/components/patterns/sideba
 
 const RODE_PLANNER_OPEN_KEY = 'anchorWatch.rodePlanner.open'
 const RODE_PLANNER_CONTENT_ID = 'rode-planner-content'
-const METERS_TO_FEET = 3.28084
 
 export interface AnchorRodePlannerProps {
   /** The save-depth line, shown at the foot of the expanded planner and not while it is collapsed. */
@@ -86,10 +88,6 @@ export interface AnchorRodePlannerProps {
   onApplyAlarmRadius: (radiusMeters: number) => Promise<void>
   /** Set while something else owns the radius (Anchor Watch's Adjust mode): Apply is disabled and this is shown as the reason. Adjust saves its own draft, which would silently overwrite a radius applied here mid-session. */
   applyLockedReason?: string | null
-}
-
-function toDisplayDistance(meters: number, isImperial: boolean): number {
-  return isImperial ? meters * METERS_TO_FEET : meters
 }
 
 function scopeBadgeClass(status: ScopeStatus): string {
@@ -224,8 +222,9 @@ export function AnchorRodePlanner({
     hullType: anchorConfig.hullType,
   }), [resolvedDepth, isAnchored, tide, windKts, pendingSeaState, pendingSeabedType, anchorConfig])
 
-  const methodResults = useMemo(() => rodeMethods.map((method) => method(planInput)), [planInput])
   const plan = useMemo(() => buildRodePlan(planInput), [planInput])
+  // The plan is built once and handed to every method, so they share one load.
+  const methodResults = useMemo(() => rodeMethods.map((method) => method(planInput, plan)), [planInput, plan])
 
   // The configured method leads the tab strip. It is the one "Apply as alarm
   // radius" uses (ADR 0059 §4), so it is the one the planner should open on —
@@ -332,7 +331,7 @@ export function AnchorRodePlanner({
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       const normalizedDisplay = Number.isFinite(rodeDisplay) ? Math.max(0, rodeDisplay) : 0
-      const rodeMeters = isImperial ? normalizedDisplay / METERS_TO_FEET : normalizedDisplay
+      const rodeMeters = fromDisplayDistance(normalizedDisplay, isImperial)
       // The server truth right before this write is issued — this attempt's
       // own baseline, fixed for the life of this edit (including any
       // Retry of it) regardless of what else saves in the meantime.
@@ -473,7 +472,7 @@ export function AnchorRodePlanner({
       setDepthOverrideBelowMinimum(true)
       return
     }
-    const figureM = isImperial ? parsed / METERS_TO_FEET : parsed
+    const figureM = fromDisplayDistance(parsed, isImperial)
     // The typed value is the corrected figure (depth at high tide + bow
     // height), never the raw reading — invert it back to raw before
     // persisting, stamped with the tide right now (the same tide
@@ -669,6 +668,17 @@ export function AnchorRodePlanner({
                             {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))}
                             <span className="ml-1 text-base text-muted-foreground">{unit}</span>
                           </p>
+                          {result.depthFromHawseM !== undefined && (
+                            <RodeProfileDiagram
+                              rodeM={result.recommendedRodeM}
+                              depthFromHawseM={result.depthFromHawseM}
+                              bowRollerHeightM={bowRollerHeightM}
+                              tideCorrected={result.tideCorrected === true}
+                              liftWarning={result.liftWarning}
+                              catenaryParameterM={result.catenaryParameterM}
+                              isImperial={isImperial}
+                            />
+                          )}
                           <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                             <span>Scope {result.scopeRatio.toFixed(1)}:1</span>
                             {methodSwingRadiusM !== null && (
@@ -681,9 +691,9 @@ export function AnchorRodePlanner({
                             </p>
                           )}
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (
-                            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
+                            <WarningNote className="mt-2">
                               Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
-                            </p>
+                            </WarningNote>
                           )}
                           <p className="mt-2 text-xs text-muted-foreground">{result.note}</p>
                         </div>
@@ -736,9 +746,7 @@ export function AnchorRodePlanner({
             </p>
           )}
           {!loaConfigured && (
-            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
-              Set boat length (LOA) in Settings → Anchor to get a swing radius.
-            </p>
+            <WarningNote className="mt-2">Set boat length (LOA) in Settings → Anchor to get a swing radius.</WarningNote>
           )}
           {/* Names which method's figure Apply will use, or why it can't yet
               (ADR 0047, ADR 0059 §4) — the operator should never have to

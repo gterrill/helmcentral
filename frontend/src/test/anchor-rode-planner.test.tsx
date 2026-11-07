@@ -1050,3 +1050,70 @@ describe('AnchorRodePlanner — Depth cell', () => {
     expect(onApplyAlarmRadius).not.toHaveBeenCalled()
   })
 })
+
+describe('AnchorRodePlanner — side-view rode diagram', () => {
+  it('draws the diagram in the method panel with the recommended rode', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const expected = ratioMethod(expectedPlanInput)!
+    const svg = within(methodPanel()).getByRole('img')
+    expect(svg.getAttribute('aria-label')).toContain(`${Math.round(expected.recommendedRodeM)} m of rode`)
+  })
+
+  it('draws no rode on the Ratio tab, and says why, when the chain size is not set so there is no load', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, chainSizeMm: 0 } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).getByText('No wind load to draw the rode against.')).toBeInTheDocument()
+    expect(within(methodPanel()).queryByRole('img')).toBeNull()
+  })
+
+  it('draws nothing where the method is unavailable', () => {
+    renderPlanner({ anchorState: 'none', depthM: null })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).getByText(/Unavailable/)).toBeInTheDocument()
+    expect(within(methodPanel()).queryByRole('img')).toBeNull()
+  })
+})
+
+describe('AnchorRodePlanner — catenary recommendation vs its own diagram', () => {
+  it('does not warn that the anchor would lift for the rode the Catenary tab recommends', () => {
+    const props = baseProps()
+    // A 30 to 40 kt band plans at 40 kts: the raw catenary scope is well over
+    // 3:1, so the 3:1 floor is not what makes the rode long enough.
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' },
+      maxGustKts: { '10m': null, '30m': null, '1h': 35, '24h': null },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const scope = within(methodPanel()).getByText(/^Scope [\d.]+:1$/)
+    expect(Number.parseFloat(scope.textContent!.replace('Scope ', ''))).toBeGreaterThan(3.5)
+    expect(within(methodPanel()).queryByText(/3:1 minimum/)).toBeNull()
+    expect(within(methodPanel()).getByRole('img')).toBeInTheDocument()
+    expect(within(methodPanel()).queryByText(/anchor would be lifted/i)).toBeNull()
+  })
+})
+
+describe('AnchorRodePlanner — Ratio rule checked against the planned load', () => {
+  it('warns on the Ratio tab when the ratio rode is shorter than the forecast load needs', () => {
+    // 40 to 50 kts plans at 50 kts: 7:1 of a 6 m hawse height is 42 m, well
+    // under the length at which the catenary load lets the chain lie down.
+    renderPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 45, '24h': null } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio Method')
+    expect(within(methodPanel()).getByText(/ratio rule is too short for the planned conditions/i)).toBeInTheDocument()
+  })
+
+  it('does not warn on the Ratio tab in light wind', () => {
+    renderPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 6, '24h': null } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).getByRole('img')).toBeInTheDocument()
+    expect(within(methodPanel()).queryByText(/anchor would be lifted/i)).toBeNull()
+  })
+})
