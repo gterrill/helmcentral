@@ -7,7 +7,7 @@
 
 import { hexAlpha } from '@/lib/hex-mix'
 
-/** How long AIS tracks are kept and drawn: the server serves 24 hours, and the bands span the same. */
+/** How long AIS tracks are kept and drawn: the server serves 24 hours, and the bands never span more. */
 export const AIS_TRACK_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** How many age bands a trail is split into. */
@@ -49,6 +49,29 @@ export function msToNextBandClock(nowMs: number): number {
   return bandClock(nowMs) + BAND_CLOCK_MS - nowMs
 }
 
+/**
+ * The shortest AIS window. A boat seen for minutes would otherwise fade its
+ * first minutes to clear, and against the five minute band clock its bands
+ * would jump a large share of the track at every mark.
+ */
+export const AIS_TRAIL_MIN_WINDOW_MS = 60 * 60 * 1000
+
+/**
+ * The age that fills all the bands for a trail: its own span, oldest point to
+ * `nowMs`, so a short history still fades from dim to bright. `maxMs` stops a
+ * long one at the longest age worth drawing, `minMs` keeps a very short one
+ * from spreading minutes over every band. At least 1 ms, so a lone or
+ * future-stamped point never gives a zero-width band.
+ */
+export function trailWindowMs(
+  points: readonly AgedPoint[],
+  nowMs: number,
+  { minMs = 1, maxMs = Infinity }: { minMs?: number; maxMs?: number } = {},
+): number {
+  const span = nowMs - (points[0]?.timestampMs ?? nowMs)
+  return Math.max(Math.min(span, maxMs), minMs, 1)
+}
+
 // How many band-widths old an age is: 0 for the newest band. A point stamped
 // slightly ahead of the clock counts as the newest.
 function bucketForAge(ageMs: number, windowMs: number): number {
@@ -62,10 +85,10 @@ export function bandForAge(ageMs: number, windowMs: number): number {
 
 /**
  * Splits a time-ordered trail into lines, one per run of one band within one
- * segment. `windowMs` is the age that fills all the bands: 24 h for AIS, the
- * length of the stay for the own trail. A stretch ending older than the window
- * is left out. Each line is banded by its newer end and begins at the point
- * before it, so neighbouring bands meet. One pass over the points.
+ * segment. `windowMs` is the age that fills all the bands (see `trailWindowMs`).
+ * A stretch ending older than the window is left out. Each line is banded by
+ * its newer end and begins at the point before it, so neighbouring bands meet.
+ * One pass over the points.
  */
 export function groupLinesByAge(
   points: readonly AgedPoint[],

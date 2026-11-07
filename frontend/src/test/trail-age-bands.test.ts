@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   AIS_BAND_COLORS,
+  AIS_TRACK_WINDOW_MS,
+  AIS_TRAIL_MIN_WINDOW_MS,
   BAND_CLOCK_MS,
   SELF_BAND_COLORS,
   TRAIL_BANDS,
@@ -8,6 +10,7 @@ import {
   bandForAge,
   groupLinesByAge,
   msToNextBandClock,
+  trailWindowMs,
   type AgedPoint,
 } from '@/lib/trail-age-bands'
 
@@ -35,6 +38,36 @@ describe('bandForAge', () => {
 
   it('treats a point stamped slightly in the future as the newest', () => {
     expect(bandForAge(-5000, 24 * HOUR)).toBe(TRAIL_BANDS - 1)
+  })
+})
+
+describe('trailWindowMs', () => {
+  it('spans from the oldest point to now', () => {
+    expect(trailWindowMs([pt(8 * HOUR), pt(HOUR)], NOW)).toBe(8 * HOUR)
+  })
+
+  it('stops at the cap when the oldest point is older', () => {
+    expect(trailWindowMs([pt(30 * HOUR), pt(HOUR)], NOW, { maxMs: AIS_TRACK_WINDOW_MS })).toBe(24 * HOUR)
+    expect(trailWindowMs([pt(30 * HOUR)], NOW)).toBe(30 * HOUR)
+  })
+
+  it('is at least 1 ms, for no points or a point at or ahead of the clock', () => {
+    expect(trailWindowMs([], NOW)).toBe(1)
+    expect(trailWindowMs([pt(-5000)], NOW)).toBe(1)
+  })
+
+  it('is never shorter than the floor, so a track minutes old, or stamped past a band-clock mark, keeps steady bands', () => {
+    expect(trailWindowMs([pt(20 * 60 * 1000)], NOW, { minMs: AIS_TRAIL_MIN_WINDOW_MS })).toBe(HOUR)
+    expect(trailWindowMs([pt(-3 * 60 * 1000)], NOW, { minMs: AIS_TRAIL_MIN_WINDOW_MS })).toBe(HOUR)
+    expect(trailWindowMs([pt(8 * HOUR)], NOW, { minMs: AIS_TRAIL_MIN_WINDOW_MS })).toBe(8 * HOUR)
+  })
+
+  it('spreads a short track over every band, newest in the newest', () => {
+    const points = [8 * HOUR, 6.5 * HOUR, 5 * HOUR, 4 * HOUR, 2.5 * HOUR, 1000].map((age, i) => pt(age, i))
+    const lines = groupLinesByAge(points, { nowMs: NOW, windowMs: trailWindowMs(points, NOW, { maxMs: AIS_TRACK_WINDOW_MS }) })
+    const bands = lines.map(l => l.band)
+    expect(Math.max(...bands)).toBe(TRAIL_BANDS - 1)
+    expect(Math.min(...bands)).toBe(0)
   })
 })
 

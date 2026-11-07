@@ -15,10 +15,12 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import {
   AIS_BAND_COLORS,
   AIS_TRACK_WINDOW_MS,
+  AIS_TRAIL_MIN_WINDOW_MS,
   SELF_BAND_COLORS,
   bandClock,
   groupLinesByAge,
   msToNextBandClock,
+  trailWindowMs,
   type AgeBandedLine,
 } from '@/lib/trail-age-bands'
 import { serverNow, subscribeTrailClock } from '@/lib/trail-clock'
@@ -193,7 +195,8 @@ const aisLinesCache = new WeakMap<AisTrailPoint[], { clockMs: number; lines: Age
 function aisLinesFor(points: AisTrailPoint[], bandNowMs: number): AgeBandedLine[] {
   const held = aisLinesCache.get(points)
   if (held && held.clockMs === bandNowMs) return held.lines
-  const lines = groupLinesByAge(points, { nowMs: bandNowMs, windowMs: AIS_TRACK_WINDOW_MS })
+  const windowMs = trailWindowMs(points, bandNowMs, { minMs: AIS_TRAIL_MIN_WINDOW_MS, maxMs: AIS_TRACK_WINDOW_MS })
+  const lines = groupLinesByAge(points, { nowMs: bandNowMs, windowMs })
   aisLinesCache.set(points, { clockMs: bandNowMs, lines })
   return lines
 }
@@ -773,19 +776,20 @@ export function AnchorWatchMap({
   )
   const postAnchorTrailGeoJSON = useMemo(() => {
     const nowMs = serverNow()
-    const windowMs = Math.max(nowMs - (vesselTrail[0]?.timestampMs ?? nowMs), 1)
+    const windowMs = trailWindowMs(vesselTrail, nowMs)
     return bandedLinesToGeoJSON(groupLinesByAge(vesselTrail, { nowMs, windowMs }))
     // clockEpoch is not read: it re-runs the memo when the server clock's offset moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vesselTrail, clockEpoch])
 
-  // AIS tracks are banded by age across their 24 hours, against a clock that
-  // moves in five minute steps: they are recomputed when a track changes, when
-  // the set of targets on the map changes (keyed on MMSI, not the array: the
-  // array is new on every AIS delta), and at each mark of that clock. One
-  // timeout to the next mark wakes the map, not a timer polling for it. The
-  // timeout reschedules itself every time it fires, so a wake that lands in the
-  // same step (a clock stepped back, an early timer) does not stop the clock.
+  // AIS tracks are banded by age across their own span, one to 24 hours,
+  // against a clock that moves in five minute steps: they are recomputed when
+  // a track changes, when the set of targets on the map changes (keyed on MMSI,
+  // not the array: the array is new on every AIS delta), and at each mark of
+  // that clock. One timeout to the next mark wakes the map, not a timer polling
+  // for it. The timeout reschedules itself every time it fires, so a wake that
+  // lands in the same step (a clock stepped back, an early timer) does not stop
+  // the clock.
   // Trimmed, as the server stores the track's MMSI.
   const activeAisMmsis = aisVessels.map(v => v.mmsi?.trim()).filter((m): m is string => !!m).sort().join('\n')
   // The clock is the server's: the points carry its times. The timeout's length
