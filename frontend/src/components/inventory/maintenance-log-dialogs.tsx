@@ -436,7 +436,7 @@ interface MaintenanceLogEntryDialogProps {
   onDelete?: (id: string) => Promise<void>
 }
 
-const KIND_LABELS: Record<MaintenanceLogKind, string> = {
+export const KIND_LABELS: Record<MaintenanceLogKind, string> = {
   maintenance: 'Maintenance',
   repair: 'Repair',
   improvement: 'Improvement',

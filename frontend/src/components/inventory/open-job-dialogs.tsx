@@ -13,7 +13,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { PartsEditor } from '@/components/inventory/maintenance-log-dialogs'
+import { KIND_LABELS, PartsEditor } from '@/components/inventory/maintenance-log-dialogs'
 import { PhotoStripEditor } from '@/components/inventory/photo-strip-editor'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipment } from '@/hooks/use-inventory'
@@ -39,12 +39,6 @@ import { todayISO } from '@/lib/local-date'
 // optional reason.
 
 const NO_ITEM = '__none__'
-
-const KIND_LABELS: Record<MaintenanceLogKind, string> = {
-  repair: 'Repair',
-  improvement: 'Improvement',
-  maintenance: 'Maintenance',
-}
 
 function photoUrl(id: string): string {
   return `${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/content`
@@ -134,11 +128,11 @@ export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJob
     }
   }
 
-  const handleRemovePhoto = async (documentId: string) => {
+  const handleRemovePhoto = async (documentId: string, deletePhoto: boolean) => {
     if (!saved) return
     setError(null)
     try {
-      setSaved(await deleteOpenJobPhoto(saved.id, documentId))
+      setSaved(await deleteOpenJobPhoto(saved.id, documentId, deletePhoto))
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -199,7 +193,7 @@ export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJob
                 photos={saved.photo_ids.map((id) => ({ id, previewUrl: photoUrl(id), isCover: false }))}
                 onFilesPicked={(files) => { void handleFilesPicked(files) }}
                 onMakeCover={() => {}}
-                onRemove={(id) => { void handleRemovePhoto(id) }}
+                onRemove={(id, del) => { void handleRemovePhoto(id, del) }}
               />
             </Field>
           )}
@@ -422,7 +416,7 @@ export function OpenJobDropDialog({ job, onClose }: OpenJobDropDialogProps) {
             id="open-job-drop-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void handleDrop() }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !saving) void handleDrop() }}
             placeholder="Optional"
             autoFocus
           />
