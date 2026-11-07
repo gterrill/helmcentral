@@ -8,6 +8,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { MaintenanceAckDialog, MaintenanceLastDoneDialog } from '@/components/inventory/maintenance-quick-dialogs'
+import { HandHoursDialog } from '@/components/inventory/maintenance-hand-hours-dialog'
 import { MaintenanceCompleteDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
@@ -18,8 +19,10 @@ import {
   completeMaintenanceRule,
   createMaintenanceRule,
   deleteMaintenanceRule,
-  hoursAsOfLabel,
+  canLogHandReading,
+  hoursAgeLabel,
   maintenanceLogExportURL,
+  recordHandHourReading,
   setMaintenanceRuleLastDone,
   updateMaintenanceRule,
   useMaintenanceRules,
@@ -66,6 +69,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
   const [completingRule, setCompletingRule] = useState<MaintenanceRule | null>(null)
   const [acknowledgingRule, setAcknowledgingRule] = useState<MaintenanceRule | null>(null)
   const [settingLastDoneRule, setSettingLastDoneRule] = useState<MaintenanceRule | null>(null)
+  const [loggingReadingRule, setLoggingReadingRule] = useState<MaintenanceRule | null>(null)
 
   // Grouped by status in the spec's own display order, acknowledged rules
   // sorted after unacknowledged ones within each group, otherwise stable
@@ -213,7 +217,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                           </div>
                           {rule.hours_unknown && (
                             <span className="truncate text-xs text-muted-foreground">
-                              {rule.has_hour_meter_path ? 'Hours unknown' : 'No hour meter bound'}
+                              {rule.has_hour_meter_path ? 'Hours unknown' : 'No hour meter and no reading logged'}
                             </span>
                           )}
                           {/* Only for a rule whose own status actually reads
@@ -224,9 +228,9 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                               never a staleness warning - a live reading
                               never goes stale (an hour meter only has a
                               reading while its engine runs). */}
-                          {!rule.hours_unknown && rule.interval_hours != null && hoursAsOfLabel(rule.hours_as_of) && (
+                          {!rule.hours_unknown && rule.interval_hours != null && hoursAgeLabel(rule) && (
                             <span className="truncate text-xs text-muted-foreground">
-                              {hoursAsOfLabel(rule.hours_as_of)}
+                              {hoursAgeLabel(rule)}
                             </span>
                           )}
                         </div>
@@ -254,6 +258,11 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                       <TableCell className="text-right">
                         {canWrite && !rule.not_applicable && (
                           <div className="flex justify-end gap-1">
+                            {rule.interval_hours !== null && canLogHandReading(rule) && (
+                              <Button type="button" variant="ghost" size="sm" onClick={() => setLoggingReadingRule(rule)}>
+                                Log a reading
+                              </Button>
+                            )}
                             {rule.status === 'never_recorded' && (
                               <Button type="button" variant="outline" size="sm" onClick={() => setSettingLastDoneRule(rule)}>
                                 Set last done
@@ -310,6 +319,16 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
         onConfirm={async (reason) => {
           await acknowledgeMaintenanceRule(acknowledgingRule!.id, reason)
           setAcknowledgingRule(null)
+        }}
+      />
+
+      <HandHoursDialog
+        equipmentName={loggingReadingRule?.equipment_name ?? ''}
+        open={loggingReadingRule !== null}
+        onCancel={() => setLoggingReadingRule(null)}
+        onSave={async (input) => {
+          await recordHandHourReading(loggingReadingRule!.equipment_id!, input)
+          setLoggingReadingRule(null)
         }}
       />
 

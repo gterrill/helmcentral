@@ -125,7 +125,10 @@ func cmdSetMaintenanceRuleLastDone(tx *sql.Tx, now, today time.Time, id string, 
 	if err != nil {
 		return maintenanceRule{}, err
 	}
+	var typedGauge *float64
 	if req.LastDoneHours != nil {
+		typed := *req.LastDoneHours
+		typedGauge = &typed
 		if existingRule.EquipmentID != nil {
 			atDate := today
 			if req.LastDoneAt != nil && *req.LastDoneAt != "" {
@@ -145,7 +148,18 @@ func cmdSetMaintenanceRuleLastDone(tx *sql.Tx, now, today time.Time, id string, 
 		}
 	}
 
-	return setMaintenanceRuleLastDoneTx(tx, now, id, req.LastDoneAt, req.LastDoneHours)
+	rule, err := setMaintenanceRuleLastDoneTx(tx, now, id, req.LastDoneAt, req.LastDoneHours)
+	if err != nil {
+		return maintenanceRule{}, err
+	}
+	// The hours typed here are also the latest figure read from the gauge: for
+	// an item with no hour meter they are its current hours (ADR 0268).
+	if typedGauge != nil && rule.EquipmentID != nil {
+		if err := recordLastDoneHandReadingTx(tx, now, today, *rule.EquipmentID, req.LastDoneAt, *typedGauge, *req.LastDoneHours); err != nil {
+			return maintenanceRule{}, err
+		}
+	}
+	return rule, nil
 }
 
 // checkMaintenancePartsExistTx is checkMaintenancePartsExist over an open
