@@ -2,8 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { stubApi } from '@/test/helpers/stub-api'
 
+import { completeOpenJob } from '@/hooks/use-open-jobs'
 import {
+  createMaintenanceLogEntry,
+  deleteMaintenanceLogEntry,
   maintenanceLogExportURL,
+  setMaintenanceRuleLastDone,
+  updateMaintenanceLogEntry,
+  useHandHourReadings,
   previewProfileChange,
   resetMaintenanceRuleOverride,
   setMaintenanceRuleOverrides,
@@ -133,5 +139,41 @@ describe('profile job writes', () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain('/equipment/eq-1/maintenance/profile-change-preview?profile_id=new-profile')
     expect(preview).toEqual({ kept: [{ service_id: 'a', description: 'A' }], leaving: [], new: [] })
+  })
+})
+
+// Hand-read hours (ADR 0268) come from service log entries and the readings
+// Set last done keeps, so every write to either must refresh what shows them.
+describe('hand-hour cache invalidation', () => {
+  const RULES_GET = 'GET /api/inventory/maintenance/rules'
+  const entry = { id: 'l1' }
+  const input = { equipment_id: 'eq-1' } as never
+
+  const writers: Array<[string, Record<string, unknown>, () => Promise<unknown>]> = [
+    ['createMaintenanceLogEntry', { 'POST /api/inventory/maintenance/log': { entry } }, () => createMaintenanceLogEntry(input)],
+    ['updateMaintenanceLogEntry', { 'PUT /api/inventory/maintenance/log/l1': { entry } }, () => updateMaintenanceLogEntry('l1', input)],
+    ['deleteMaintenanceLogEntry', { 'DELETE /api/inventory/maintenance/log/l1': new Response(null, { status: 204 }) }, () => deleteMaintenanceLogEntry('l1')],
+    ['completeOpenJob', { 'POST /api/inventory/open-jobs/j1/done': { job: { id: 'j1' }, entry } }, () => completeOpenJob('j1', {} as never)],
+    ['setMaintenanceRuleLastDone', { 'POST /api/inventory/maintenance/rules/r1/last-done': { rule: { id: 'r1', equipment_id: 'eq-1' } } }, () => setMaintenanceRuleLastDone('r1', '2026-11-01', 150)],
+  ]
+
+  it.each(writers)('%s refreshes the rules list', async (_name, routes, write) => {
+    const fetchMock = stubApi({ [RULES_GET]: { rules: [] }, ...routes })
+    renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await write()
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/maintenance/rules?'))).toHaveLength(2))
+  })
+
+  it('setMaintenanceRuleLastDone refreshes the item\'s hand readings', async () => {
+    const readings = '/api/inventory/equipment/eq-1/maintenance/hour-readings'
+    const fetchMock = stubApi({
+      [`GET ${readings}`]: { readings: [] },
+      'POST /api/inventory/maintenance/rules/r1/last-done': { rule: { id: 'r1', equipment_id: 'eq-1' } },
+    })
+    renderHook(() => useHandHourReadings('eq-1'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await setMaintenanceRuleLastDone('r1', '2026-11-01', 150)
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/hour-readings'))).toHaveLength(2))
   })
 })

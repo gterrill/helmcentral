@@ -488,7 +488,7 @@ func TestTankLevelPercent(t *testing.T) {
 		ok   bool
 	}{
 		{0, 0, true}, {0.005, 0.5, true}, {0.01, 1, true}, {0.45, 45, true}, {1, 100, true},
-		{1.5, 0, false}, {45, 0, false}, {-0.1, 0, false}, {math.NaN(), 0, false}, {math.Inf(1), 0, false},
+		{1.0000001, 100, true}, {1 + 1e-6, 100, true}, {1.00001, 0, false}, {1.5, 0, false}, {45, 0, false}, {-0.1, 0, false}, {math.NaN(), 0, false}, {math.Inf(1), 0, false},
 	}
 	for _, c := range cases {
 		got, ok := tankLevelPercent(c.raw)

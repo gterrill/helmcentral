@@ -167,12 +167,12 @@ func newAnchorPositionWatcher() *anchorPositionWatcher {
 
 func (w *anchorPositionWatcher) check(now time.Time) (alarmEvent, bool) {
 	if w.anchor() == nil {
-		return w.settle(now)
+		return w.settle(now, "Anchor watch cancelled")
 	}
 
 	_, _, gnssCritical, ok := w.position()
 	if ok && !gnssCritical {
-		return w.settle(now)
+		return w.settle(now, "Position restored")
 	}
 
 	if w.lostSince.IsZero() {
@@ -199,8 +199,9 @@ func (w *anchorPositionWatcher) check(now time.Time) (alarmEvent, bool) {
 	}, true
 }
 
-// settle ends an outage: the timer restarts, and a raised alarm clears.
-func (w *anchorPositionWatcher) settle(now time.Time) (alarmEvent, bool) {
+// settle ends an outage: the timer restarts, and a raised alarm clears with
+// message, which says why: a returned fix, or a watch cancelled with no fix.
+func (w *anchorPositionWatcher) settle(now time.Time, message string) (alarmEvent, bool) {
 	w.lostSince = time.Time{}
 	if !w.raised {
 		return alarmEvent{}, false
@@ -217,7 +218,7 @@ func (w *anchorPositionWatcher) settle(now time.Time) (alarmEvent, bool) {
 			Path:    rule.Path,
 			Phase:   alarmPhaseNormal,
 			State:   alarmStateNormal,
-			Message: "Position restored",
+			Message: message,
 		},
 	}, true
 }
