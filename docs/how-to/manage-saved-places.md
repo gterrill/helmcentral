@@ -44,7 +44,10 @@ turn the reading into the depth at chart datum.
    the planner, below **Apply as alarm radius**.
 2. Read the line, for example "4.2 m at datum, from the sounder". That's the
    figure Helmcentral will save. If it shows a sentence instead of a **Save…**
-   link, the sentence says what's missing.
+   link, the sentence says what's missing. If it says "Already saved at", a place
+   name and "for this stay", that place holds this depth, sounded on the day the anchor
+   went down, and there's nothing to do. A place with the same figure from a
+   chart, or from an earlier day, still shows **Save…**, so you can replace it.
 3. Tap **Save…**. The figure goes to the nearest place within 0.1 nautical mile
    of the anchor that already has a depth, which is the one Mate reads. If none
    of them has a depth, it goes to the nearest place in range. If there's none

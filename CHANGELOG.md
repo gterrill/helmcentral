@@ -32,6 +32,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The rode planner's Swing now includes the GPS to bow distance before you
+  drop, after a Drop with no heading, and after you place the anchor by hand.**
+  In those three cases Swing left the distance out, so **Apply as alarm radius**
+  set a circle smaller than it should have. It now counts the distance you set
+  in Settings → Anchor Watch. After a Drop with no heading, or one made before
+  you set the distance, the anchor mark sits at the GPS, one distance short of
+  the real anchor. Swing counts the distance twice there, and the line under it
+  says so, for example "2 × 10 m GPS to bow".
+- **The Anchor Watch page no longer scrolls on a wide screen when the rode
+  planner is open.** Where the planner sits beside the map, the page now fits the
+  window and the planner scrolls inside its own panel, so the map stays in view.
+- **Save depth no longer offers to replace a saved depth with the same sounded
+  figure.** When the saved place already holds the depth shown, sounded on the
+  day the anchor went down, the page says "Already saved at" that place and
+  "today", and doesn't show the Save link. A place with the same figure from a
+  chart, or from an earlier day, still shows it, so you can replace the chart
+  figure or give the sounding a new date.
 - **The SignalK stream alarm now fires when your own instruments go quiet.**
   Other boats' AIS traffic used to keep the watchdog satisfied, so a dead
   instrument feed in a busy anchorage raised nothing. The alarm now also fires

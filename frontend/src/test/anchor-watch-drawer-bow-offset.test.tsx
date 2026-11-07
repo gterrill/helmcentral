@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 
 vi.mock('react-map-gl/maplibre', async () => {
@@ -84,6 +84,64 @@ const baseProps = {
 // there was no heading at Drop, sits in the readings.
 const NO_HEADING_CARD = 'Anchor mark is at the GPS, not the bow. There was no heading at Drop.'
 const NO_HEADING = `${NO_HEADING_CARD} Move it with Adjust.`
+
+// The rode planner's Swing is rode + GPS-to-bow + boat. The server reports a
+// bow offset of 0 before Drop, after a Drop with no heading, and after the
+// mark is placed by hand, but the GPS still sits that far from the bow, so the
+// configured offset must still count.
+describe('AnchorWatchDrawer swing includes the GPS to bow offset', () => {
+  const wind = {
+    windSpeedApparentKts: 12,
+    maxGustKts: { '10m': null, '30m': null, '1h': 20, '24h': null },
+    planningDepthM: 5,
+    planningTideHeightFt: 2,
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  function swingLine(): string {
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /ratio/i }))
+    return within(screen.getByRole('tabpanel')).getByText(/ rode/).textContent ?? ''
+  }
+
+  it.each([
+    ['before Drop', { anchorState: 'none' as const, bowOffsetReason: '' }],
+    ['after the mark is placed by hand', { bowOffsetReason: 'placed by hand in Adjust' }],
+  ])('uses the configured offset once %s', (_name, extra) => {
+    render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied={false} bowOffsetM={0} {...extra} />)
+
+    expect(swingLine()).toMatch(/ rode \+ 2 m GPS to bow \+ 10 m boat$/)
+  })
+
+  it('uses the configured offset twice after a Drop with no heading, the mark being at the antenna', () => {
+    render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied={false} bowOffsetM={0} bowOffsetReason="heading unavailable" />)
+
+    expect(swingLine()).toMatch(/ rode \+ 2 × 2 m GPS to bow \+ 10 m boat$/)
+  })
+
+  it('uses the offset twice after a Drop made before the distance was set, once it is set later', () => {
+    render(
+      <AnchorWatchDrawer
+        {...baseProps}
+        {...wind}
+        bowOffsetApplied={false}
+        bowOffsetM={0}
+        bowOffsetReason="gps_from_bow_m not configured"
+      />,
+    )
+
+    expect(swingLine()).toMatch(/ rode \+ 2 × 2 m GPS to bow \+ 10 m boat$/)
+  })
+
+  it('keeps the offset the Drop applied', () => {
+    render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied bowOffsetM={8} bowOffsetReason="" />)
+
+    expect(swingLine()).toMatch(/ rode \+ 8 m GPS to bow \+ 10 m boat$/)
+  })
+})
 
 describe('AnchorWatchDrawer bow-offset readout', () => {
   it('has no corrected-forward banner when the offset was applied', () => {
