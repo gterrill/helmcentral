@@ -1,4 +1,6 @@
 .DS_Store
+# The repo root has no package.json; a stray `npm install` there leaves this.
+/package-lock.json
 *.log
 node_modules/
 dist/

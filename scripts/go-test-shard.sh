@@ -1,6 +1,6 @@
 #!/bin/sh
-# Runs one shard of the backend's tests: `go-test-shard.sh <shard> <total>`
-# from backend/, with shard counted from 1.
+# Runs one shard of the backend's tests: `go-test-shard.sh <shard> <total>`,
+# with shard counted from 1. It changes to backend/ itself.
 #
 # The backend is one package of ~5,000 tests that mostly run one after
 # another, so `go test` on one runner is bound by count, not by any slow test.
@@ -9,6 +9,9 @@
 # and runs exactly those. Every name lands in exactly one shard, so the shards
 # together run what `go test -short ./...` runs.
 set -eu
+
+# Run from backend/ of this script's own checkout, wherever this was started.
+cd "$(dirname "$0")/../backend"
 
 shard=$1
 total=$2

@@ -9,6 +9,9 @@
 # shape; bump it on purpose.
 set -eu
 
+# Run from backend/ of this script's own checkout, wherever this was started.
+cd "$(dirname "$0")/../backend"
+
 govulncheck=golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 # One advisory per line: the OSV id, then why it's excused. An excuse states
