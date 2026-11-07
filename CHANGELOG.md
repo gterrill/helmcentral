@@ -22,6 +22,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Hours you read by hand now count for gear with no hour meter.** A watermaker
+  filter change, or any rule on an item without an engine or generator meter,
+  used to show "Hours unknown" for ever. Tap **Log a reading** on the item's page
+  or on the rule, and type what the gauge shows. The hours you enter when you
+  complete a rule, log a service or set last done count too. The list, the
+  Complete form and Mate show the figure as "Read by hand" with its age, never
+  as a live reading. An item that has an hour meter takes no hand readings, so a
+  silent meter still shows "Hours unknown".
 - **Anchor Position Lost alarm.** With an anchor watch set, Helmcentral now
   raises an alarm when the GPS fix has been missing or untrustworthy for a full
   minute. Before, a dead or jammed GPS left the anchor watch quietly frozen,

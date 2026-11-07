@@ -87,8 +87,14 @@ type assistantEquipmentHit struct {
 	HoursKnown          bool     `json:"hours_known"`
 	CurrentMeterReading *float64 `json:"current_meter_reading,omitempty"`
 	HoursAsOf           string   `json:"hours_as_of,omitempty"`
-	RuleCount           int      `json:"rule_count"`
-	ProfileID           string   `json:"profile_id,omitempty"`
+	// HoursReadByHand is true when the figure is one the operator typed from
+	// the gauge (the item has no hour meter), not a live reading; HoursReadOn
+	// is the date they read it. It is then as old as that date, whatever the
+	// engine has done since.
+	HoursReadByHand bool   `json:"hours_read_by_hand,omitempty"`
+	HoursReadOn     string `json:"hours_read_on,omitempty"`
+	RuleCount       int    `json:"rule_count"`
+	ProfileID       string `json:"profile_id,omitempty"`
 	// Rules is the item's effective schedule from the resolver: the jobs its
 	// equipment profile supplies (live, with this item's overrides applied)
 	// plus the rules made by hand. Same field names as list_maintenance,
@@ -197,6 +203,7 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 			if hours.AsOf != nil {
 				hit.HoursAsOf = boat.DayClock(*hours.AsOf)
 			}
+			hit.HoursReadByHand, hit.HoursReadOn = hours.ByHand, hours.ReadOn
 		}
 		hit.RuleCount = len(hit.Rules)
 		if hit.Rules == nil {
@@ -281,6 +288,11 @@ type assistantMaintenanceRuleRow struct {
 	HoursUnknown        bool     `json:"hours_unknown,omitempty"`
 	HasHourMeterPath    bool     `json:"has_hour_meter_path"`
 	CurrentMeterReading *float64 `json:"current_meter_reading,omitempty"`
+	// HoursReadByHand is true when CurrentMeterReading is a gauge figure the
+	// operator typed on HoursReadOn (the item has no hour meter), not a live
+	// reading.
+	HoursReadByHand bool   `json:"hours_read_by_hand,omitempty"`
+	HoursReadOn     string `json:"hours_read_on,omitempty"`
 
 	Acknowledged     bool   `json:"acknowledged,omitempty"`
 	AckReason        string `json:"ack_reason,omitempty"`
@@ -376,7 +388,8 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 			RemainingHours: view.RemainingHours, RemainingDays: view.RemainingDays,
 			HoursUnknown: view.HoursUnknown, HasHourMeterPath: view.HasHourMeterPath,
 			CurrentMeterReading: view.CurrentHours,
-			Acknowledged:        view.Acknowledged, AckReason: view.AckReason,
+			HoursReadByHand:     view.HoursByHand, HoursReadOn: view.HoursReadOn,
+			Acknowledged: view.Acknowledged, AckReason: view.AckReason,
 			ProfileServiceID: view.ProfileServiceID,
 			Source:           view.Source, OverriddenFields: view.OverriddenFields,
 			Link: assistantMaintenanceLink,
@@ -581,7 +594,8 @@ var mateToolFindEquipment = mateTool{
 		Description: "Find items in the boat's equipment registry by name, manufacturer, model or " +
 			"alias, optionally within one system. Returns each item's id, system, whether its hour " +
 			"meter is bound and reading right now (current_meter_reading is what the meter shows and " +
-			"is absent when the reading is unknown - never assume 0), and its effective maintenance rules " +
+			"is absent when the reading is unknown - never assume 0; when hours_read_by_hand is true it is a " +
+			"figure the operator read off the gauge on hours_read_on, not a live reading: say so), and its effective maintenance rules " +
 			"(rules: id, description, intervals, source, overridden_fields, not_applicable) as the " +
 			"schedule resolves them - the linked profile's jobs are live, with this item's overrides " +
 			"applied - plus schedule_errors when its profile could not supply its jobs. Use it to get an equipment id for list_maintenance or " +
@@ -625,7 +639,10 @@ var mateToolListMaintenance = mateTool{
 			"operator's own date, plus intervals, last-done baseline, what is remaining, " +
 			"acknowledgement and any procedure note. Most urgent first. Use it for every due, overdue " +
 			"or schedule question; never work a status out yourself. A rule marked hours_unknown has an " +
-			"hours interval but its meter is not reading: say so, do not guess hours. When you tell the " +
+			"hours interval but its meter is not reading: say so, do not guess hours. When " +
+			"hours_read_by_hand is true, current_meter_reading is a figure the operator read off the " +
+			"gauge on hours_read_on, not a live reading: say it was read by hand and when, and never " +
+			"call it live or current. When you tell the " +
 			"operator when a job falls due, quote next_due_meter_reading (what their meter will read) " +
 			"with remaining_hours; last_done_engine_hours is cumulative engine hours, which equals the " +
 			"meter only if no meter replacement is recorded. Stored items are left out unless " +

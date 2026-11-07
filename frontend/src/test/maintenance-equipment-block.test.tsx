@@ -16,7 +16,7 @@ function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
     last_done_hours: null, profile_service_id: 'engine-oil', procedure_note_id: '',
     ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
     status: 'never_recorded', remaining_hours: null, remaining_days: null,
-    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
+    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null, hours_by_hand: false, hours_read_on: '',
     ...ITEM_RULE_PROVENANCE,
     ...overrides,
   }
@@ -140,7 +140,7 @@ describe('MaintenanceEquipmentBlock', () => {
       mockRules([makeRule({ interval_hours: 250, interval_months: null })])
       render(<MaintenanceEquipmentBlock equipmentId="eq-1" hourMeterSource="" />)
       const warning = await screen.findByRole('status')
-      expect(warning).toHaveTextContent("can't count hours until this item is assigned an engine or generator source")
+      expect(warning).toHaveTextContent("can't count hours until you log a gauge reading")
       expect(warning).toHaveClass('text-amber-700')
     })
 

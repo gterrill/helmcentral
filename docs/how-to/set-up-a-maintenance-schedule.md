@@ -75,6 +75,24 @@ that never happened in Helmcentral:
 3. Save. The rule now counts down from that baseline. No service log entry is
    written, since the job wasn't done through the app.
 
+## Log a reading for gear with no hour meter
+
+A rule on gear with no hour meter, such as a watermaker's filter change, counts
+from the gauge figures you type. Read the gauge, then:
+
+1. Open the item's own page, or find the rule in **Inventory → Maintenance**.
+2. Tap **Log a reading** (on the item's page it's in the **Hand-read hours**
+   section).
+3. Enter the figure on the gauge, the date you read it and, if you like, a
+   note.
+4. Save. The rule shows "Read by hand" with how long ago, and counts from that
+   figure. To remove a reading you typed wrongly, tap **Delete** beside it on
+   the item's page.
+
+Completing a rule or setting what was last done also counts as a reading when
+you enter hours there. Items with an hour meter don't offer **Log a reading**,
+because they take their hours from the meter.
+
 ## Link a procedure
 
 To attach the exact steps for a job on your own boat:

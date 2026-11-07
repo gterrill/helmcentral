@@ -38,6 +38,8 @@ function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
     has_hour_meter_path: true,
     hours_as_of: null,
     current_hours: 1234,
+    hours_by_hand: false,
+    hours_read_on: '',
     ...ITEM_RULE_PROVENANCE,
     ...overrides,
   }
