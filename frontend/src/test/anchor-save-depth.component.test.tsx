@@ -106,6 +106,40 @@ describe('AnchorSaveDepth', () => {
     expect(hook.change).toHaveBeenCalledWith('p1', { depth_m: 4.2, depth_source: 'sounded', depth_date: '2026-11-02' })
   })
 
+  it('offers no save, and says so, when the saved place already holds this depth at the shown precision', () => {
+    hook.places = [{ ...cove, depth_m: 4.2, depth_source: 'sounded', depth_date: '2026-11-02' }]
+    const { rerender } = render(<AnchorSaveDepth watch={{ ...watch, datumDepthM: 4.2 }} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByText('Already saved at Butterfly Cove for this stay')).toBeInTheDocument()
+    // 4.2 m and 4.24 m both read 4.2: nothing to replace.
+    hook.places = [{ ...cove, depth_m: 4.24, depth_source: 'sounded', depth_date: '2026-11-02' }]
+    rerender(<AnchorSaveDepth watch={{ ...watch, datumDepthM: 4.2 }} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByText(/Replaces/)).toBeNull()
+  })
+
+  it('still offers the save when the same sounded depth is from an earlier day, so it can be re-dated', () => {
+    hook.places = [{ ...cove, depth_m: 4.2, depth_source: 'sounded', depth_date: '2026-10-30' }]
+    render(<AnchorSaveDepth watch={{ ...watch, datumDepthM: 4.2 }} />)
+    expect(screen.queryByText(/Already saved/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save depth to Butterfly Cove' }))
+    expect(screen.getByText(/^Replaces 4\.2 m \(sounded 2026-10-30\)/)).toBeInTheDocument()
+  })
+
+  it('still offers the save when the same depth was charted, not sounded', () => {
+    hook.places = [{ ...cove, depth_m: 4.2, depth_source: 'charted' }]
+    render(<AnchorSaveDepth watch={{ ...watch, datumDepthM: 4.2 }} />)
+    expect(screen.queryByText(/Already saved/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save depth to Butterfly Cove' }))
+    expect(screen.getByText(/^Replaces 4\.2 m \(charted/)).toBeInTheDocument()
+  })
+
+  it('still offers the save when the depths differ at the shown precision', () => {
+    hook.places = [{ ...cove, depth_m: 4.6 }]
+    render(<AnchorSaveDepth watch={{ ...watch, datumDepthM: 4.2 }} />)
+    expect(screen.getByRole('button', { name: 'Save depth to Butterfly Cove' })).toBeInTheDocument()
+  })
+
   it('says where the depth came from', () => {
     const { rerender } = render(<AnchorSaveDepth watch={watch} />)
     expect(screen.getByText('4.2 m at datum, from the sounder')).toBeInTheDocument()

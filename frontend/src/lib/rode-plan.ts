@@ -421,9 +421,8 @@ export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number |
 
 /**
  * The swing circle a method's own recommended rode implies: rode + bow
- * offset + the hull's own length. Extracted from anchor-rode-planner.tsx —
- * the Adjust mode's "Planner swing" chip needs the identical figure, not a
- * second copy of the arithmetic. `loaM` null (unresolved — see resolveLoaM
+ * offset + the hull's own length. Callers pass the effective bow offset, with
+ * any doubling for a mark that sits at the GPS already applied. `loaM` null (unresolved — see resolveLoaM
  * above) returns null rather than silently computing a circle smaller than
  * the boat.
  */
@@ -437,13 +436,22 @@ export function computeSwingRadiusM(recommendedRodeM: number, bowOffsetM: number
  * boat term takes up the rounding, so the line always adds up to Swing. The GPS
  * to bow term is left out when it rounds to zero.
  */
-export function swingBreakdownText(rodeM: number, bowOffsetM: number, loaM: number, isImperial: boolean): string {
+export function swingBreakdownText(
+  rodeM: number,
+  bowOffsetM: number,
+  loaM: number,
+  isImperial: boolean,
+  bowOffsetCount: 1 | 2 = 1,
+): string {
   const unit = isImperial ? 'ft' : 'm'
   const total = radiusDisplayValue(rodeM + bowOffsetM + loaM, isImperial)
   const rodePart = radiusDisplayValue(rodeM, isImperial)
-  const bowPart = radiusDisplayValue(bowOffsetM, isImperial)
+  // bowOffsetM is the effective offset (every count included); show one share of it.
+  const bowOne = radiusDisplayValue(bowOffsetM / bowOffsetCount, isImperial)
+  const bowPart = bowOne * bowOffsetCount
   const boatPart = total - rodePart - bowPart
-  const bow = bowPart > 0 ? ` + ${bowPart} ${unit} GPS to bow` : ''
+  const bowLabel = bowOffsetCount === 2 ? `2 × ${bowOne}` : `${bowOne}`
+  const bow = bowPart > 0 ? ` + ${bowLabel} ${unit} GPS to bow` : ''
   return `${rodePart} ${unit} rode${bow} + ${boatPart} ${unit} boat`
 }
 

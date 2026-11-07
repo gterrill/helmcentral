@@ -148,6 +148,9 @@ interface AnchorWatchDrawerProps {
   onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
 }
 
+/** The reason the server stamps when a position change is made by hand in Adjust (backend/anchor.go). */
+const HAND_PLACED_REASON = 'placed by hand in Adjust'
+
 export function AnchorWatchDrawer({
   vesselLat,
   vesselLon,
@@ -456,7 +459,22 @@ export function AnchorWatchDrawer({
   const adjustRadiusAtMin = adjustDisplayRadiusM <= adjustBounds.minM
   const adjustRadiusAtMax = adjustDisplayRadiusM >= adjustBounds.maxM
 
+  // The server reports a bow offset of 0 before Drop, after a Drop with no
+  // heading and after the mark is placed by hand, but the GPS is still that
+  // far from the bow. Swing is a distance (rode + offset + boat), so it needs
+  // no heading: use the configured offset whenever the Drop did not apply one.
+  const swingBowOffsetM = bowOffsetApplied ? bowOffsetM : anchorConfig.gpsFromBowM
   const noHeadingAtDrop = !bowOffsetApplied && bowOffsetReason === 'heading unavailable'
+  // The mark sits at the GPS antenna, one GPS-to-bow distance behind the real
+  // anchor, when a Drop ran but the server did not move the mark forward: it
+  // gives a reason (no heading, or no distance configured then) and that
+  // reason is not a hand placement. The antenna can then reach the distance
+  // twice over: once back to the anchor, once more ahead of it. An empty
+  // reason (no watch, or a reposition through the API) and a hand placement
+  // both leave the mark where the operator meant the anchor to be.
+  // The server has no explicit "mark at GPS" flag, so this reads the reason.
+  const markAtAntenna = isAnchored && !bowOffsetApplied && bowOffsetReason !== '' && bowOffsetReason !== HAND_PLACED_REASON
+  const swingBowOffsetCount = markAtAntenna ? 2 : 1
   // The depth/tide/clearance readings as one presenter (ADR 0212): compact
   // inside the map's own panel when there is a map, a standalone card when
   // there isn't. Only the layout differs.
@@ -575,7 +593,7 @@ export function AnchorWatchDrawer({
               />
             </div>
           ) : (
-          <div data-testid="anchor-watch-map-container" className="relative min-h-0 flex-1 rounded-xl border bg-background/70">
+          <div data-testid="anchor-watch-map-container" className="relative min-h-0 flex-1 rounded-xl border bg-background/70 lg:min-h-80">
             {vesselLat !== null && vesselLon !== null ? (
               <AnchorWatchMap
                 vesselLat={vesselLat}
@@ -706,7 +724,8 @@ export function AnchorWatchDrawer({
           tide={tide}
           isImperial={isImperial}
           anchorConfig={anchorConfig}
-          bowOffsetM={bowOffsetM}
+          bowOffsetM={swingBowOffsetM}
+          bowOffsetCount={swingBowOffsetCount}
           vesselLengthOverallM={vesselLengthOverallM}
           windBandId={windBandId}
           onWindBandChange={onWindBandChange}

@@ -73,6 +73,8 @@ export interface AnchorRodePlannerProps {
   isImperial: boolean
   anchorConfig: AnchorConfig
   bowOffsetM: number
+  /** 2 when the anchor mark sits at the GPS (a Drop with no heading): the real anchor is one more GPS-to-bow distance ahead. */
+  bowOffsetCount?: 1 | 2
   // SignalK's design.length.overall (ADR 0047). Null when unpublished — this
   // is the LOA fallback source when settings.anchor.loa_m is unset (0).
   vesselLengthOverallM: number | null
@@ -131,6 +133,7 @@ export function AnchorRodePlanner({
   isImperial,
   anchorConfig,
   bowOffsetM,
+  bowOffsetCount = 1,
   vesselLengthOverallM,
   windBandId,
   onWindBandChange,
@@ -144,6 +147,10 @@ export function AnchorRodePlanner({
   useEffect(() => {
     globalThis.localStorage?.setItem(RODE_PLANNER_OPEN_KEY, String(open))
   }, [open])
+
+  // The one GPS-to-bow figure the swing uses, counted as many times as the
+  // anchor mark's position needs (see bowOffsetCount).
+  const effectiveBowOffsetM = bowOffsetM * bowOffsetCount
 
   const isInactive = anchorState === 'none'
   const isAnchored = !isInactive
@@ -259,7 +266,7 @@ export function AnchorRodePlanner({
   // typed to exactly those two ids, so this always finds a match.
   const configuredMethodResult = methodResults.find((result) => result !== null && result.id === anchorConfig.scopeMethod)!
   const configuredSwingRadiusM = !configuredMethodResult.unavailableReason
-    ? computeSwingRadiusM(configuredMethodResult.recommendedRodeM, bowOffsetM, resolvedLoaM)
+    ? computeSwingRadiusM(configuredMethodResult.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
     : null
 
   // The actual write, shared by the debounced call below and by a Retry
@@ -647,7 +654,7 @@ export function AnchorRodePlanner({
                   // a method, so they render once in SidebarFooter instead,
                   // directly above Apply, where they gate it (ADR 0059 §4).
                   const methodSwingRadiusM = !result.unavailableReason
-                    ? computeSwingRadiusM(result.recommendedRodeM, bowOffsetM, resolvedLoaM)
+                    ? computeSwingRadiusM(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
                     : null
                   return (
                     <TabsContent key={result.id} value={result.id}>
@@ -670,7 +677,7 @@ export function AnchorRodePlanner({
                           </div>
                           {methodSwingRadiusM !== null && resolvedLoaM !== null && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {swingBreakdownText(result.recommendedRodeM, bowOffsetM, resolvedLoaM, isImperial)}
+                              {swingBreakdownText(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM, isImperial, bowOffsetCount)}
                             </p>
                           )}
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (

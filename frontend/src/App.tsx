@@ -220,6 +220,13 @@ const PANEL_SETTINGS_SECTIONS: Partial<Record<PanelId, SettingsSectionId>> = {
   assistant: 'assistant',
 }
 
+// Panels that cap the inset at the viewport so something inside them can
+// scroll on its own. Every other panel lets the page grow and the window scroll.
+const INSET_HEIGHT_CLASS: Partial<Record<PanelId, string>> = {
+  assistant: 'h-svh',
+  'anchor-watch': 'lg:h-svh',
+}
+
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
 
@@ -1888,8 +1895,10 @@ function AppShell() {
       {/* The shell is min-h-svh, so panels normally grow the page and the
           window scrolls. Mate's thread scrolls inside its own viewport
           instead (ADR 0105), which only works if something above it has a
-          bounded height, so the Mate panel caps the inset at the viewport. */}
-      <SidebarInset className={activePanel === 'assistant' ? 'h-svh' : undefined}>
+          bounded height, so the panels in INSET_HEIGHT_CLASS cap the inset at
+          the viewport. Anchor Watch does it from lg up, where the Rode Planner
+          sits beside the map and scrolls inside itself. */}
+      <SidebarInset className={activePanel === null ? undefined : INSET_HEIGHT_CLASS[activePanel]}>
         {/* `min-w-0` on both halves is load-bearing, not cosmetic: without it a flex
             item refuses to shrink below its content width and the right-hand cluster
             gets pushed off a phone screen (CODING_STANDARDS.md — prevent viewport overflows).

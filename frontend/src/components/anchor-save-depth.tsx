@@ -52,7 +52,8 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
   const unit = depthUnitLabel(units)
   // One figure, to a centimetre: it is what the operator is shown and what is sent.
   const sendM = saveFigureM(depthM)
-  const shown = `${depthToText(sendM, units)} ${unit}`
+  const sendText = depthToText(sendM, units)
+  const shown = `${sendText} ${unit}`
   const figure = `${shown} (sounded ${day})`
   const nameBlank = target === null && name.trim() === ''
 
@@ -80,10 +81,19 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
     }
   }
 
+  // Same figure at the precision the operator reads, same source, same day:
+  // replacing "4.6 m sounded today" with itself changes nothing. A charted
+  // figure, or a sounded one from an earlier day, is still worth replacing.
+  const alreadySaved = target !== null && target.depth_m !== null
+    && target.depth_source === 'sounded' && target.depth_date === day && depthToText(target.depth_m, units) === sendText
+
   if (!confirming) {
     return (
       <div className="flex items-center justify-between gap-2" data-testid="anchor-save-depth">
         <p className="text-xs text-muted-foreground">{datumDepthLine(shown, watch.planningDepthSource)}</p>
+        {alreadySaved ? (
+          <p className="shrink-0 text-xs text-muted-foreground">Already saved at {target.name} for this stay</p>
+        ) : (
         <Button
           type="button"
           variant="ghost"
@@ -94,6 +104,7 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
         >
           Save…
         </Button>
+        )}
       </div>
     )
   }

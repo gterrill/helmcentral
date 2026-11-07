@@ -917,6 +917,14 @@ describe('swingBreakdownText', () => {
     expect(swingBreakdownText(54, 0, 15, false)).toBe('54 m rode + 15 m boat')
   })
 
+  it('shows the GPS to bow term twice when the mark sits at the antenna, and still adds up', () => {
+    // the offset passed in is the effective one: 2 × 10 m = 20 m
+    expect(swingBreakdownText(54, 20, 18, false, 2)).toBe('54 m rode + 2 × 10 m GPS to bow + 18 m boat')
+    // total 54.4 + 16.8 + 15.4 = 86.6 -> 87; the boat term takes up the rounding
+    expect(swingBreakdownText(54.4, 16.8, 15.4, false, 2)).toBe('54 m rode + 2 × 8 m GPS to bow + 17 m boat')
+    expect(swingBreakdownText(54, 0, 15, false, 2)).toBe('54 m rode + 15 m boat')
+  })
+
   it('works in feet', () => {
     // 10 m = 33 ft, 2 m = 7 ft, 24 m total = 79 ft
     expect(swingBreakdownText(10, 2, 12, true)).toBe('33 ft rode + 7 ft GPS to bow + 39 ft boat')

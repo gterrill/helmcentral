@@ -177,21 +177,24 @@ Wait for the fix to come back, then drop.
 Your GPS antenna sits back from the bow, and the anchor goes down at the bow.
 If you've set how far the antenna is from the bow in Settings → Anchor Watch,
 **Drop** puts the anchor mark ahead of the GPS by that distance, in the direction
-the boat is heading. Once Drop has done that, the rode planner's Swing figure
-includes the distance. That's because the antenna can swing out to the rode plus
+the boat is heading. The rode planner's Swing figure includes the distance
+whenever you've set it. That's because the antenna can swing out to the rode plus
 that distance from the anchor. Under the Swing figure the planner spells it out, for
 example "54 m rode + 8 m GPS to bow + 16 m boat".
 
-In three cases the distance isn't in Swing, and the line under it leaves it out.
-Allow for it yourself if you set the radius by hand.
+The distance is a length, not a direction, so Swing counts it even when the mark
+itself hasn't been moved forward:
 
-- **Before Drop:** there's no anchor mark yet.
-- **A Drop with no heading:** the mark can't be moved forward, so it stays at
-  the GPS. The readings say "Anchor mark is at the GPS, not the bow. There was no
-  heading at Drop." With a map on screen they add "Move it with Adjust", because
-  moving the mark with Adjust needs the map.
-- **A mark you've placed by hand in Adjust:** you put it where you want it, so
-  Helmcentral doesn't add the distance again.
+- **Before Drop:** the planner already includes the distance you've set.
+- **A Drop with no heading, or made before you set the distance:** the mark can't
+  be moved forward, so it stays at the GPS. With no heading, the readings say
+  "Anchor mark is at the GPS, not the bow. There was no heading at Drop." With a
+  map on screen they add "Move it with Adjust", because moving the mark with
+  Adjust needs the map. The anchor is really one distance ahead of that mark, so
+  Swing counts the distance twice, for example "84 m rode + 2 × 10 m GPS to bow +
+  18 m boat". If you set the distance in Settings after such a Drop, Swing uses it.
+- **A mark you've placed by hand in Adjust:** Helmcentral doesn't move the mark
+  again, but Swing still includes the distance.
 
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow offset
@@ -267,6 +270,13 @@ example "4.2 m at datum, from the sounder". It says whether the figure comes fro
 the sounder or from the depth you entered. Nothing is saved until you tap
 **Save…** and confirm, and the confirm step names the saved place it will write
 to. The line only shows while the planner is open.
+
+If that saved place already holds the same depth, sounded on the day the anchor
+went down, the **Save…** link gives way to "Already saved at" the place's name
+and "for this stay", because saving it again would change nothing. The figures are
+compared as shown, to a tenth. A place whose depth came from a chart, or from an
+earlier day's sounding, still gets the **Save…** link. That lets you replace a
+charted figure with the sounded one, or give the same figure a new date.
 
 A sounder reading is the water below the transducer. Helmcentral adds how far
 below the waterline the transducer sits, then takes off the tide at the drop, so
