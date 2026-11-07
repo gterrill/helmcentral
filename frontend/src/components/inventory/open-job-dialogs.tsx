@@ -13,11 +13,11 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { KIND_LABELS, PartsEditor } from '@/components/inventory/maintenance-log-dialogs'
+import { KIND_LABELS, PartsEditor, blankForm, toInput, type LogFormState } from '@/components/inventory/maintenance-log-dialogs'
 import { PhotoStripEditor } from '@/components/inventory/photo-strip-editor'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipment } from '@/hooks/use-inventory'
-import type { MaintenanceLogKind, MaintenanceLogPartInput } from '@/hooks/use-maintenance'
+import type { MaintenanceLogKind } from '@/hooks/use-maintenance'
 import {
   completeOpenJob,
   createOpenJob,
@@ -32,7 +32,6 @@ import {
 } from '@/hooks/use-open-jobs'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { errorMessage } from '@/lib/errors'
-import { todayISO } from '@/lib/local-date'
 
 // ADR 0269: the three dialogs behind the Open jobs list. Add/edit takes the
 // job's own fields and then its photos (a job needs an id before a photo can
@@ -129,13 +128,19 @@ export function OpenJobDialog({ open, job, presetEquipmentId, draft, onClose }: 
   const handleFilesPicked = async (files: File[]) => {
     if (!saved) return
     setError(null)
+    // Each upload answers with the job as it now stands, so a failure part-way
+    // keeps what was already linked on screen and names the file that failed.
+    let latest = saved
+    let current = ''
     try {
-      let latest = saved
-      for (const file of files) latest = await uploadOpenJobPhoto(saved.id, file, file.name)
-      setSaved(latest)
+      for (const file of files) {
+        current = file.name
+        latest = await uploadOpenJobPhoto(saved.id, file, file.name)
+      }
     } catch (err) {
-      setError(errorMessage(err))
+      setError(`${current} was not added: ${errorMessage(err)}`)
     }
+    setSaved(latest)
   }
 
   const handleRemovePhoto = async (documentId: string, deletePhoto: boolean) => {
@@ -227,19 +232,14 @@ export function OpenJobDialog({ open, job, presetEquipmentId, draft, onClose }: 
 
 // ── done ────────────────────────────────────────────────────────────────
 
-interface DoneFormState {
-  performedAt: string
+/** The shared service log form (maintenance-log-dialogs.tsx) and the kind a
+ * finished job picks; a job's Done form takes no new-due-date or rule. */
+interface DoneFormState extends LogFormState {
   kind: MaintenanceLogKind
-  hours: string
-  description: string
-  who: string
-  cost: string
-  currency: string
-  parts: MaintenanceLogPartInput[]
 }
 
 function blankDoneForm(): DoneFormState {
-  return { performedAt: todayISO(), kind: 'repair', hours: '', description: '', who: '', cost: '', currency: '', parts: [] }
+  return { ...blankForm(), kind: 'repair' }
 }
 
 interface OpenJobDoneDialogProps {
@@ -254,35 +254,32 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [logged, setLogged] = useState(false)
+  // Untouched, the form is a blank one and there is nothing to lose.
+  const [dirty, setDirty] = useState(false)
 
   const { items } = useEquipment(job !== null ? {} : null)
-  useUnsavedWorkReport('open-job-done', job !== null && !logged)
+  useUnsavedWorkReport('open-job-done', job !== null && !logged && dirty)
 
   useEffect(() => {
     if (job) {
       setForm(blankDoneForm())
       setError(null)
       setLogged(false)
+      setDirty(false)
     }
   }, [job])
 
-  const update = (patch: Partial<DoneFormState>) => setForm((prev) => ({ ...prev, ...patch }))
+  const update = (patch: Partial<DoneFormState>) => {
+    setForm((prev) => ({ ...prev, ...patch }))
+    setDirty(true)
+  }
 
   const handleSave = async () => {
     if (!job) return
     setSaving(true)
     setError(null)
     try {
-      await completeOpenJob(job.id, {
-        performed_at: form.performedAt,
-        kind: form.kind,
-        hours: form.hours.trim() === '' ? null : Number(form.hours),
-        description: form.description.trim(),
-        who: form.who.trim(),
-        cost: form.cost.trim() === '' ? null : Number(form.cost),
-        currency: form.currency.trim(),
-        parts: form.parts,
-      })
+      await completeOpenJob(job.id, { ...toInput(form), kind: form.kind })
       setLogged(true)
     } catch (err) {
       setError(errorMessage(err))

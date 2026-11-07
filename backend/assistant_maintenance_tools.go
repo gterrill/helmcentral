@@ -466,16 +466,17 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 	}
 
 	result := assistantListMaintenanceResult{Today: today.Format("2006-01-02"), Rules: rows, OpenJobs: openJobs, ScheduleErrors: sched.Errors, Total: len(rows)}
+	// Trim whichever list is longer, so a long list of open jobs cannot push
+	// every rule out of the answer, or the other way round. Rules are
+	// ordered most urgent first, so the tail is what goes.
 	shrink := func() bool {
-		if len(result.Rules) <= 1 {
-			if len(result.OpenJobs) <= 1 {
-				return false
-			}
+		if len(result.OpenJobs) > 1 && len(result.OpenJobs) >= len(result.Rules) {
 			result.OpenJobs = result.OpenJobs[:len(result.OpenJobs)-1]
-			result.Truncated = true
-			return true
+		} else if len(result.Rules) > 1 {
+			result.Rules = result.Rules[:len(result.Rules)-1]
+		} else {
+			return false
 		}
-		result.Rules = result.Rules[:len(result.Rules)-1]
 		result.Truncated = true
 		return true
 	}

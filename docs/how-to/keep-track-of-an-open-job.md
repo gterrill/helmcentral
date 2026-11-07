@@ -45,7 +45,9 @@ Tap the job's title to change its item, title, notes, Before date or photos.
 4. Tap **Mark done**. One line goes into the service log and the job closes. Its
    photos go onto that line.
 
-If you leave the notes blank, the line reads as the job's title.
+If you leave the notes blank, the line reads as the job's title. The date can
+be the day you opened the job, today, or any day between. It can't be a day
+that hasn't come yet.
 
 ## Drop a job
 
@@ -57,4 +59,7 @@ If you leave the notes blank, the line reads as the job's title.
 
 Tap **Show closed** in the Open jobs group. Each closed job shows whether it was
 done or dropped, the date, and the reason if you gave one. A job that was done
-is in the service log under the item.
+is in the service log under its item. A job with no item has no page to put the
+line on, so look for it in **Service log, not on an item**, near the bottom of
+**Inventory → Maintenance**. Tap a line there to change it, add photos or delete
+it, the same as on an item's page.

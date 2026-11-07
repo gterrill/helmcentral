@@ -906,11 +906,13 @@ const documentDeletableAsOrphanPhotoClause = `d.folder_id IS NULL AND d.kind = '
 // predicate, shared, rather than three copies of the same subquery
 // (exclusivePhotoIDsForEquipmentID and DocumentDeletableAsOrphanPhoto here,
 // MaintenanceLogPhotoDeletableAsOrphan's own equipment_documents check in
-// maintenance_store.go is this same shape from the other side). An open
-// job's photos count here too (ADR 0269): Done shares them with its log line,
-// and a document either one shows is not safe to delete.
+// maintenance_store.go is this same shape from the other side). A photo
+// an OPEN job shows counts here too (ADR 0269); once a job is done or
+// dropped its photo links no longer keep a document alive (Done shows the
+// photos on the log line, which counts through the first branch).
 const documentHasNoMaintenanceLogPhotoLinkClause = `NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)
-		AND NOT EXISTS (SELECT 1 FROM open_job_photos ojp WHERE ojp.document_id = d.id)`
+		AND NOT EXISTS (SELECT 1 FROM open_job_photos ojp JOIN open_jobs oj ON oj.id = ojp.job_id
+		WHERE ojp.document_id = d.id AND oj.status = 'open')`
 
 // documentHasNoEquipmentPhotoLinkClause is documentHasNoMaintenanceLogPhotoLinkClause's
 // mirror image, used from the log-entry side (MaintenanceLogPhotoDeletableAsOrphan,
@@ -1011,6 +1013,37 @@ func exclusivePhotoIDsForEquipmentID(q sqlQueryer, equipmentID string) ([]string
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("exclusive photo ids for equipment: %w", err)
+	}
+	rows.Close()
+
+	// Photos on the item's own open jobs go with the item (the jobs cascade),
+	// so they are offered too unless something else still shows them: an
+	// item's strip, a log line, or another open job.
+	jobRows, err := q.Query(`
+		SELECT DISTINCT ojp.document_id
+		FROM open_job_photos ojp
+		JOIN open_jobs j ON j.id = ojp.job_id
+		JOIN documents d ON d.id = ojp.document_id AND `+photoMIMEsClause+`
+		WHERE j.equipment_id = ?
+		AND `+documentDeletableAsOrphanPhotoClause+`
+		AND `+documentHasNoEquipmentPhotoLinkClause+`
+		AND NOT EXISTS (SELECT 1 FROM maintenance_log_photos mlp WHERE mlp.document_id = d.id)
+		AND NOT EXISTS (SELECT 1 FROM open_job_photos ojp2 JOIN open_jobs j2 ON j2.id = ojp2.job_id
+			WHERE ojp2.document_id = d.id AND j2.status = 'open' AND (j2.equipment_id IS NULL OR j2.equipment_id != ?))
+		ORDER BY ojp.document_id`, equipmentID, equipmentID)
+	if err != nil {
+		return nil, fmt.Errorf("exclusive photo ids for equipment: job photos: %w", err)
+	}
+	defer jobRows.Close()
+	for jobRows.Next() {
+		var documentID string
+		if err := jobRows.Scan(&documentID); err != nil {
+			return nil, fmt.Errorf("exclusive photo ids for equipment: job photos: scan: %w", err)
+		}
+		out = append(out, documentID)
+	}
+	if err := jobRows.Err(); err != nil {
+		return nil, fmt.Errorf("exclusive photo ids for equipment: job photos: %w", err)
 	}
 	return out, nil
 }

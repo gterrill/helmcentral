@@ -43,6 +43,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Complete form and Mate show the figure as "Read by hand" with its age, never
   as a live reading. An item that has an hour meter takes no hand readings, so a
   silent meter still shows "Hours unknown".
+  confirm with **Apply**. A job never raises an alarm. A job with no item
+  writes a line no item page shows, so Inventory → Maintenance also has a
+  **Service log, not on an item** list, where you can open, change or delete
+  those lines. It holds a calendar-only rule's completions too.
 - **Anchor Position Lost alarm.** With an anchor watch set, Helmcentral now
   raises an alarm when the GPS fix has been missing or untrustworthy for a full
   minute. Before, a dead or jammed GPS left the anchor watch quietly frozen,

@@ -396,7 +396,7 @@ func cmdDropOpenJob(tx *sql.Tx, now, today time.Time, id, reason string) (openJo
 // says otherwise, on the job's item, with the job's title when no notes are
 // given. Gauge hours are converted the way every log line's are. The job's
 // photos are shown on the line too. A refusal anywhere leaves the job open.
-func cmdCompleteOpenJob(tx *sql.Tx, now time.Time, id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
+func cmdCompleteOpenJob(tx *sql.Tx, now, today time.Time, id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
 	in, verr := validateMaintenanceLogEntryCore(req)
 	if verr != nil {
 		return openJob{}, maintenanceLogEntry{}, verr
@@ -411,6 +411,15 @@ func cmdCompleteOpenJob(tx *sql.Tx, now time.Time, id string, req maintenanceLog
 	job, err := openJobForClose(tx, id)
 	if err != nil {
 		return openJob{}, maintenanceLogEntry{}, err
+	}
+
+	// The line's date can be the day the job opened, today, or any day
+	// between; never before it was known, never a day that has not come.
+	if in.PerformedAt < job.OpenedOn {
+		return openJob{}, maintenanceLogEntry{}, &inventoryValidationError{Field: "performed_at", Message: "performed_at cannot be before the day the job was opened, " + job.OpenedOn}
+	}
+	if in.PerformedAt > today.Format("2006-01-02") {
+		return openJob{}, maintenanceLogEntry{}, &inventoryValidationError{Field: "performed_at", Message: "performed_at cannot be in the future"}
 	}
 
 	in.Kind = kind
@@ -484,9 +493,9 @@ type completedOpenJob struct {
 	entry maintenanceLogEntry
 }
 
-func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
+func (s *documentStore) CompleteOpenJobCmd(today time.Time, id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
 	done, err := runCmd(s, "complete open job", func(tx *sql.Tx, now time.Time) (completedOpenJob, error) {
-		job, entry, err := cmdCompleteOpenJob(tx, now, id, req)
+		job, entry, err := cmdCompleteOpenJob(tx, now, today, id, req)
 		return completedOpenJob{job, entry}, err
 	})
 	return done.job, done.entry, err

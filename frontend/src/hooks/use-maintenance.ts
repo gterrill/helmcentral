@@ -509,15 +509,22 @@ export function useHandHourReadings(equipmentId: string | null) {
 
 export interface MaintenanceLogFilter {
   equipment?: string
+  /** Only the lines with no item: a finished open job that was never on one,
+   * and a calendar-only rule's completions. */
+  noItem?: boolean
 }
 
 /** GET /api/inventory/maintenance/log?equipment= - the item's own recent
  * log entries (the equipment editor's Maintenance block) or, with no
- * filter, the whole log. */
+ * filter, the whole log. `noItem` lists the lines no item owns. */
 export function useMaintenanceLogEntries(filter: MaintenanceLogFilter | null) {
+  const params = new URLSearchParams()
+  if (filter?.equipment) params.set('equipment', filter.equipment)
+  else if (filter?.noItem) params.set('no_item', 'true')
+  const qs = params.toString()
   const { data, error, isLoading, refetch } = useApiQuery<MaintenanceLogEntry[]>({
-    queryKey: [LOG, { equipment: filter?.equipment ?? '' }],
-    path: `${LOG}${filter?.equipment ? `?equipment=${encodeURIComponent(filter.equipment)}` : ''}`,
+    queryKey: [LOG, { equipment: filter?.equipment ?? '', noItem: Boolean(filter?.noItem) }],
+    path: `${LOG}${qs ? `?${qs}` : ''}`,
     enabled: filter !== null,
     select: (raw: { entries?: MaintenanceLogEntry[] }) => raw.entries ?? [],
   })

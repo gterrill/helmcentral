@@ -460,6 +460,10 @@ func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest) (maintenanc
 	if performedAt == "" || !installDatePattern.MatchString(performedAt) {
 		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "performed_at", Message: "performed_at is required and must be YYYY-MM-DD"}
 	}
+	// The pattern lets 2026-02-31 through; later steps parse the date.
+	if _, err := time.Parse("2006-01-02", performedAt); err != nil {
+		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "performed_at", Message: "performed_at must be a real date, YYYY-MM-DD"}
+	}
 	if req.Hours != nil && *req.Hours < 0 {
 		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "hours", Message: "hours cannot be negative"}
 	}
@@ -1128,7 +1132,7 @@ func listHourMeterResetsHandler(c echo.Context) error {
 // ── service log ──────────────────────────────────────────────────────────
 
 func listMaintenanceLogEntriesHandler(c echo.Context) error {
-	entries, err := globalDocumentStore.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: c.QueryParam("equipment")})
+	entries, err := globalDocumentStore.ListMaintenanceLogEntries(maintenanceLogFilter{EquipmentID: c.QueryParam("equipment"), NoItem: c.QueryParam("no_item") == "true"})
 	if err != nil {
 		return writeDocumentError(c, err)
 	}

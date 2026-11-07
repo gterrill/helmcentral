@@ -1,6 +1,6 @@
 import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import { todayISO } from '@/lib/local-date'
-import type { MaintenanceLogEntry, MaintenanceLogEntryInput } from '@/hooks/use-maintenance'
+import { maintenanceLogRecordApplied, type MaintenanceLogEntry, type MaintenanceLogEntryInput } from '@/hooks/use-maintenance'
 
 // ADR 0269: Open jobs - a known problem that is not fixed yet. One-off, with
 // a done column, unlike a maintenance rule. Never called a "job" alone in
@@ -81,7 +81,6 @@ export interface OpenJobFilter {
 }
 
 const JOBS = '/api/inventory/open-jobs'
-const LOG = '/api/inventory/maintenance/log'
 const NO_JOBS: OpenJob[] = []
 
 function withToday(url: string): string {
@@ -121,16 +120,18 @@ export async function updateOpenJob(id: string, input: OpenJobInput): Promise<Op
 }
 
 /** POST /api/inventory/open-jobs/:id/done - the service log form. Writes one
- * log line and closes the job. */
+ * log line and closes the job. The server checks the line's date against the
+ * operator's today, so it is sent like every other dated write. */
 export async function completeOpenJob(
   id: string,
   input: Omit<MaintenanceLogEntryInput, 'equipment_id'>,
 ): Promise<{ job: OpenJob; entry: MaintenanceLogEntry }> {
   const data = await apiRequest<{ job: OpenJob; entry: MaintenanceLogEntry }>(
-    `${JOBS}/${encodeURIComponent(id)}/done`, { method: 'POST', json: input },
+    withToday(`${JOBS}/${encodeURIComponent(id)}/done`), { method: 'POST', json: input },
   )
   invalidateQueries([JOBS])
-  invalidateQueries([LOG])
+  // The new log line can move a rule (hand-read hours now come from log hours).
+  maintenanceLogRecordApplied()
   return data
 }
 

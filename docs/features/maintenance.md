@@ -146,7 +146,8 @@ only in your head.
 - **Done:** **Done** opens the same form as completing a rule: the date, the
   hours off the gauge, what you did, who did it, the cost and any parts. Saving
   writes one line to the service log, as a repair unless you choose improvement
-  or maintenance, and closes the job. The job's photos go onto that line.
+  or maintenance, and closes the job. The job's photos go onto that line. The
+  date can't be before the day the job opened or a day that hasn't come yet.
 - **Drop:** **Drop** closes a job without a log line, for something that fixed
   itself or isn't worth doing. You can say why, and you don't have to.
 - **Closed jobs:** A closed job leaves the group. **Show closed** lists it again
@@ -190,6 +191,16 @@ electrical side of the boat without scrolling past the rest. Each item's own
 page also shows its rules and recent service history, alongside where the hours
 come from. Jobs from the item's profile and jobs added for that item alone are
 listed separately.
+
+## Lines with no item
+
+Most service log lines belong to an item and show on its page. A few don't: a
+job you finished that was never on an item, and the completions of a rule that
+is tied to the calendar alone, such as a certificate renewal. They'd be lost
+with nowhere to look, so **Inventory → Maintenance** has a **Service log, not on
+an item** line near the bottom. It appears once there's at least one such line.
+Tap it to open the list, then tap a line to change it, add photos or delete it,
+the same as on an item's page.
 
 ## Exporting the service log
 

@@ -776,6 +776,10 @@ func (s *documentStore) GetMaintenanceLogEntry(id string) (maintenanceLogEntry, 
 // mode), matching equipmentFilter's own nil-means-unfiltered convention.
 type maintenanceLogFilter struct {
 	EquipmentID string
+	// NoItem lists only the lines with no item: a finished open job that was
+	// never on one, and a calendar-only rule's completions. EquipmentID wins
+	// when both are set.
+	NoItem bool
 }
 
 // ListMaintenanceLogEntries returns every entry matching filter, newest
@@ -790,6 +794,8 @@ func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) (
 	if filter.EquipmentID != "" {
 		query += ` AND equipment_id = ?`
 		args = append(args, filter.EquipmentID)
+	} else if filter.NoItem {
+		query += ` AND equipment_id IS NULL`
 	}
 	query += ` ORDER BY performed_at DESC, created_at DESC`
 

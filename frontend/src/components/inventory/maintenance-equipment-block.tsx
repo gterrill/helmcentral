@@ -10,6 +10,7 @@ import { MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-lo
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
 import { OpenJobsGroup } from '@/components/inventory/open-jobs-group'
+import { ServiceLogRows } from '@/components/inventory/service-log-list'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { formatAppLocation } from '@/lib/app-location'
@@ -379,22 +380,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
         {entries.length === 0 && !entriesLoading && (
           <p className="text-sm text-muted-foreground">No service log entries yet.</p>
         )}
-        {entries.slice(0, 10).map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            onClick={() => setEditingEntry(entry)}
-            className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-muted/40"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{entry.description || entry.kind}</p>
-              <p className="truncate text-xs text-muted-foreground">{entry.performed_at} - {entry.kind}</p>
-            </div>
-            {entry.cost != null && (
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{entry.cost} {entry.currency}</span>
-            )}
-          </button>
-        ))}
+        <ServiceLogRows entries={entries.slice(0, 10)} onOpen={setEditingEntry} />
       </div>
 
       <MaintenanceRuleDialog

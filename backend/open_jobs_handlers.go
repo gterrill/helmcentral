@@ -87,12 +87,16 @@ func updateOpenJobHandler(c echo.Context) error {
 // completeOpenJobHandler is POST /api/inventory/open-jobs/:id/done: the
 // service log form, answered with the closed job and the line it wrote.
 func completeOpenJobHandler(c echo.Context) error {
+	today, verr := requireTodayParam(c)
+	if verr != nil {
+		return writeInventoryValidationError(c, verr)
+	}
 	limitNoteRequestBody(c)
 	var req maintenanceLogEntryRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	job, entry, err := globalDocumentStore.CompleteOpenJobCmd(c.Param("id"), req)
+	job, entry, err := globalDocumentStore.CompleteOpenJobCmd(today, c.Param("id"), req)
 	if err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}

@@ -12,6 +12,7 @@ import { HandHoursDialog } from '@/components/inventory/maintenance-hand-hours-d
 import { MaintenanceCompleteDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { OpenJobsGroup } from '@/components/inventory/open-jobs-group'
+import { BoatServiceLog } from '@/components/inventory/service-log-list'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { EQUIPMENT_SYSTEMS, EQUIPMENT_SYSTEM_LABELS, type EquipmentSystem } from '@/hooks/use-inventory'
@@ -291,6 +292,8 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
           </Table>
         )}
       </div>
+
+      <BoatServiceLog canWrite={canWrite} />
 
       <MaintenanceRuleDialog
         rule={creatingRule ? undefined : editingRule}

@@ -121,7 +121,7 @@ export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
   )
 }
 
-interface LogFormState {
+export interface LogFormState {
   performedAt: string
   hours: string
   description: string
@@ -131,7 +131,7 @@ interface LogFormState {
   parts: MaintenanceLogPartInput[]
 }
 
-function blankForm(prefillHours?: number | null): LogFormState {
+export function blankForm(prefillHours?: number | null): LogFormState {
   return {
     performedAt: todayISO(),
     hours: prefillHours != null ? String(prefillHours) : '',
@@ -170,7 +170,7 @@ function orphanedParts(entry: MaintenanceLogEntry | null): MaintenanceLogEntry['
   return entry ? entry.parts.filter((p) => p.equipment_id === null) : []
 }
 
-function toInput(form: LogFormState): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
+export function toInput(form: LogFormState): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
   return {
     performed_at: form.performedAt,
     hours: form.hours.trim() === '' ? null : Number(form.hours),

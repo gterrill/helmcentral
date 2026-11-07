@@ -108,16 +108,13 @@ func createOpenJobRecord(env changeEnv, fields fieldSet) (createdRecord, error) 
 		Source:   openJobSourceMate,
 	}
 	if id := stringOf(fields["equipment_id"]); id != "" {
-		if _, err := equipmentNameOf(env.tx, id); err != nil {
-			if errors.Is(err, errEquipmentNotFound) {
-				return createdRecord{}, fieldErr("equipment_id", "no equipment with id %q (find it with find_equipment)", id)
-			}
-			return createdRecord{}, err
-		}
 		req.EquipmentID = &id
 	}
 	job, err := cmdCreateOpenJob(env.tx, env.now, env.today, req)
 	if err != nil {
+		if errors.Is(err, errEquipmentNotFound) {
+			return createdRecord{}, fieldErr("equipment_id", "no equipment with id %q (find it with find_equipment)", *req.EquipmentID)
+		}
 		return createdRecord{}, err
 	}
 	return createdRecord{ID: job.ID}, nil

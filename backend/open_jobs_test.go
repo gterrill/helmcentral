@@ -202,7 +202,7 @@ func TestCompleteOpenJob_WritesOneServiceLogLineAndClosesTheJob(t *testing.T) {
 	pump := mustCreateHandlerTestEquipment(t, "Shower pump")
 	job := mustOpenJob(t, store, "2026-11-07", openJobRequest{EquipmentID: &pump.ID, Title: "Leaks at the outlet"})
 
-	done, entry, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{
+	done, entry, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{
 		PerformedAt: "2026-11-10", Description: "New outlet fitting", Who: "Gavin", Kind: "improvement",
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestCompleteOpenJob_KindDefaultsToRepairAndNotesToTheTitle(t *testing.T) {
 	pump := mustCreateHandlerTestEquipment(t, "Shower pump")
 	job := mustOpenJob(t, store, "2026-11-07", openJobRequest{EquipmentID: &pump.ID, Title: "Leaks at the outlet"})
 
-	_, entry, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
+	_, entry, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
 	if err != nil {
 		t.Fatalf("CompleteOpenJobCmd: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestCompleteOpenJob_ConvertsGaugeHoursLikeAnyLogLine(t *testing.T) {
 	job := mustOpenJob(t, store, "2026-11-07", openJobRequest{EquipmentID: &engine.ID, Title: "Weeping hose"})
 
 	hours := 20.0
-	_, entry, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Hours: &hours})
+	_, entry, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Hours: &hours})
 	if err != nil {
 		t.Fatalf("CompleteOpenJobCmd: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestCompleteOpenJob_HoursNeedAnItem(t *testing.T) {
 	store := withTestDocumentStore(t)
 	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Renew flares"))
 	hours := 20.0
-	_, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Hours: &hours})
+	_, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Hours: &hours})
 	var verr *inventoryValidationError
 	if !errors.As(err, &verr) || verr.Field != "hours" {
 		t.Fatalf("expected an hours validation error, got %v", err)
@@ -267,7 +267,7 @@ func TestCompleteOpenJob_HoursNeedAnItem(t *testing.T) {
 func TestCompleteOpenJob_JobWithoutAnItemStillLogs(t *testing.T) {
 	store := withTestDocumentStore(t)
 	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Renew flares"))
-	done, entry, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
+	done, entry, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
 	if err != nil || done.Status != openJobDone || entry.EquipmentID != nil {
 		t.Fatalf("expected a done job and an item-less log line, got %+v, %+v, %v", done, entry, err)
 	}
@@ -276,7 +276,7 @@ func TestCompleteOpenJob_JobWithoutAnItemStillLogs(t *testing.T) {
 func TestCompleteOpenJob_BadKindIsRefusedAndWritesNothing(t *testing.T) {
 	store := withTestDocumentStore(t)
 	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Leaks"))
-	_, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Kind: "chore"})
+	_, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10", Kind: "chore"})
 	var verr *inventoryValidationError
 	if !errors.As(err, &verr) || verr.Field != "kind" {
 		t.Fatalf("expected a kind validation error, got %v", err)
@@ -290,7 +290,7 @@ func TestCompleteOpenJob_BadKindIsRefusedAndWritesNothing(t *testing.T) {
 func TestCompleteOpenJob_UnknownPartRollsEverythingBack(t *testing.T) {
 	store := withTestDocumentStore(t)
 	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Leaks"))
-	_, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{
+	_, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{
 		PerformedAt: "2026-11-10", Parts: []maintenanceLogPartRequest{{EquipmentID: "no-such-part", Quantity: 1}},
 	})
 	if err == nil {
@@ -306,10 +306,10 @@ func TestCompleteOpenJob_UnknownPartRollsEverythingBack(t *testing.T) {
 func TestCompleteOpenJob_TwiceIsRefused(t *testing.T) {
 	store := withTestDocumentStore(t)
 	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Leaks"))
-	if _, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"}); err != nil {
+	if _, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"}); err != nil {
 		t.Fatalf("first Done: %v", err)
 	}
-	if _, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-11"}); !errors.Is(err, errOpenJobClosed) {
+	if _, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-11"}); !errors.Is(err, errOpenJobClosed) {
 		t.Fatalf("expected errOpenJobClosed, got %v", err)
 	}
 	entries, _ := store.ListMaintenanceLogEntries(maintenanceLogFilter{})
@@ -326,7 +326,7 @@ func TestCompleteOpenJob_CarriesThePhotosOntoTheLogLine(t *testing.T) {
 		t.Fatalf("AddOpenJobPhoto: %v", err)
 	}
 
-	_, entry, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
+	_, entry, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"})
 	if err != nil {
 		t.Fatalf("CompleteOpenJobCmd: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestOpenJobHandlers_RoundTrip(t *testing.T) {
 		t.Fatalf("expected one job, got %s (%v)", rec.Body.String(), err)
 	}
 
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/done", `{"performed_at":"2026-11-10","description":"New fitting"}`, job.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/done?today=2026-11-12", `{"performed_at":"2026-11-10","description":"New fitting"}`, job.ID)
 	if err := completeOpenJobHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("completeOpenJobHandler: %v, %d: %s", err, rec.Code, rec.Body.String())
 	}
@@ -487,7 +487,7 @@ func TestOpenJobHandlers_RoundTrip(t *testing.T) {
 		t.Fatalf("unexpected Done response: %s (%v)", rec.Body.String(), err)
 	}
 
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/done", `{"performed_at":"2026-11-10"}`, job.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/done?today=2026-11-12", `{"performed_at":"2026-11-10"}`, job.ID)
 	if err := completeOpenJobHandler(c); err != nil {
 		t.Fatalf("completeOpenJobHandler: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestOpenJobPhoto_SharedWithALogLineSurvivesTheJobUnlink(t *testing.T) {
 	if err := store.AddOpenJobPhoto(job.ID, doc.ID); err != nil {
 		t.Fatalf("AddOpenJobPhoto: %v", err)
 	}
-	if _, _, err := store.CompleteOpenJobCmd(job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"}); err != nil {
+	if _, _, err := store.CompleteOpenJobCmd(doneToday(t), job.ID, maintenanceLogEntryRequest{PerformedAt: "2026-11-10"}); err != nil {
 		t.Fatalf("CompleteOpenJobCmd: %v", err)
 	}
 	if err := store.RemoveOpenJobPhoto(job.ID, doc.ID); err != nil {

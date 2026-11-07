@@ -65,6 +65,14 @@ row, links it to the job and closes the job on the date of the work.
   job open. A second Done is a 409 and writes no second line.
 - The job's photos are linked onto the log line too, so the history shows
   them where it always has.
+- The browser sends `?today=` with Done as well. The line's date must be a real
+  day, no earlier than the day the job opened and no later than today.
+- A line from a job with no item has no item page to show it. Inventory →
+  Maintenance lists the lines with no item in a Service log section, reading
+  `GET /api/inventory/maintenance/log?no_item=true`. It covers a calendar-only
+  rule's completions, which have no item either. The section opens, edits and
+  deletes a line, with its photos, through the same dialog as an item's page;
+  it does not add one, since a standalone line still needs an item.
 
 Dropped is one confirm with an optional reason. It writes no log line, because
 nothing was done. A closed job stays on record, with its outcome, and the
@@ -80,8 +88,11 @@ is a list, not a board: no assignment, no comments, no priority.
 The REST surface is `/api/inventory/open-jobs`, with `done`, `drop` and
 `photos` beneath a job. Photos follow the service log's: a table of links to
 documents, JPEG or PNG only, appended in order. The shared test for whether a
-photo may be deleted now also looks at job photos, so a photo that a job and a
-log line both show is not deleted from under either.
+photo may be deleted now also looks at the photos of open jobs, so a photo that
+an open job and a log line both show is not deleted from under either. A done or
+dropped job's links stop counting, so "Remove and delete" on the log line's copy
+still deletes the document. Deleting an item offers the photos only its own jobs
+show, with the photos of its strip.
 
 ### 4. Mate reads them and proposes adding one
 
@@ -142,4 +153,7 @@ log line both show is not deleted from under either.
   more often than an improvement.
 - **A job takes photos only while open.** Done shares them with the log line,
   and the line's own photo strip takes any later ones.
+- **Mate's tool answer trims both lists together.** When `list_maintenance`
+  outgrows its size cap, it drops from whichever of the rules and the open jobs
+  is longer, so a long list of one never pushes out all of the other.
 - **No reopen and no delete.** A job entered by mistake is dropped with a reason.
