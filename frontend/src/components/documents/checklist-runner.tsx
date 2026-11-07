@@ -2,6 +2,8 @@ import { ArrowLeft, Check, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { AddToJobsButton } from '@/components/inventory/add-to-jobs-button'
+import { documentViewerHref } from '@/lib/document-citation'
 import { useChecklistRun, type ChecklistItemState } from '@/hooks/use-checklist-run'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/errors'
@@ -76,7 +78,7 @@ function ChecklistItemRow({
       // visually indented in the runner the same way it read in the note.
       style={{ paddingLeft: `${1 + item.depth * 1.25}rem` }}
       className={cn(
-        'flex min-h-14 w-full items-center gap-3 border-b border-border p-4 text-left disabled:opacity-60',
+        'flex min-h-14 w-full items-center gap-3 border-b border-border p-4 pr-14 text-left disabled:opacity-60 ',
         item.checked && 'text-muted-foreground line-through',
       )}
     >
@@ -195,7 +197,7 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
             list must never reorder under a thumb"). */}
         <ul>
           {run.items.map((item) => (
-            <li key={`${item.item_key}:${item.occurrence}`}>
+            <li key={`${item.item_key}:${item.occurrence}`} className="relative">
               <ChecklistItemRow
                 item={item}
                 isFirstUnchecked={`${item.item_key}:${item.occurrence}` === firstUncheckedKey}
@@ -203,6 +205,18 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
                 onToggle={() => { void handleToggle(item) }}
                 registerFirstUnchecked={(el) => { firstUncheckedRef.current = el }}
               />
+              {!closed && (
+                <AddToJobsButton
+                  what={item.text}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  draft={{
+                    title: item.text,
+                    source: 'checklist_line',
+                    source_link: documentViewerHref(noteId),
+                    source_label: noteTitle,
+                  }}
+                />
+              )}
             </li>
           ))}
         </ul>

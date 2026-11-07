@@ -17,6 +17,18 @@ it's done. For how open jobs differ from rules, see
 6. Tap **Save**. To add photos, use the photo row that appears, then tap
    **Close**.
 
+## Add a job from where you saw the problem
+
+1. On a watch report, an alarm card or a checklist line you're running, tap
+   **Add to jobs**. On a watch report and a checklist line it's the small list
+   icon beside the text.
+2. The Add job form opens with the title filled in. An alarm also fills in its
+   words as the notes.
+3. Choose the item, set **Before** if you want, and change the title if it
+   needs it.
+4. Tap **Save**. The job shows where it came from, and its row links back to
+   the report, the Alarms page or the checklist.
+
 You can also tell Mate: "add the shower pump to the jobs list". Tap **Apply**
 on the card it gives you.
 
