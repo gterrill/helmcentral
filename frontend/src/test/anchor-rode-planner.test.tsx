@@ -5,7 +5,8 @@ import { AnchorRodePlanner, type AnchorRodePlannerProps } from '@/components/anc
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { AnchorRequestError } from '@/lib/anchor-request'
-import { catenaryMethod, planningFigureM, ratioMethod, rawDepthFromPlanningFigureM, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
+import { feetToMeters, metersToFeet } from '@/lib/units'
+import { buildRodePlan, catenaryMethod, planningFigureM, ratioMethod, rawDepthFromPlanningFigureM, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
 import { toast } from 'sonner'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
@@ -1115,5 +1116,70 @@ describe('AnchorRodePlanner — Ratio rule checked against the planned load', ()
 
     expect(within(methodPanel()).getByRole('img')).toBeInTheDocument()
     expect(within(methodPanel()).queryByText(/anchor would be lifted/i)).toBeNull()
+  })
+})
+
+// The badge judges the deployed rode against the Pay Out figure as shown, so
+// paying out the rounded-down figure reads Scope OK.
+describe('AnchorRodePlanner — Scope badge against the shown Pay Out', () => {
+  // The props every case renders with; the search below plans from the same
+  // anchor config, so it sees exactly the recommendation the render shows.
+  function caseOverrides(depthM: number, imperial: boolean, deployedM: number): Partial<AnchorRodePlannerProps> {
+    const props = baseProps()
+    return {
+      isImperial: imperial,
+      planningDepthM: depthM,
+      anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary', chainOnboardM: 500 },
+      rodeDeployedM: deployedM,
+    }
+  }
+
+  // Finds a planning depth whose catenary rode, in the given unit, has a
+  // fraction in .05-.45, so Math.round shows a figure below the real rode.
+  function roundedDownCase(imperial: boolean): { depthM: number; shown: number } {
+    for (let depthM = 3; depthM <= 12; depthM += 0.1) {
+      const overrides = caseOverrides(depthM, imperial, 0)
+      const plan = buildRodePlan({
+        ...expectedPlanInput,
+        depth: { depthM, tideHeightFt: 2 },
+        chainOnboardM: overrides.anchorConfig!.chainOnboardM,
+      })
+      if (!plan) continue
+      const rode = imperial ? metersToFeet(plan.recommendedRodeM) : plan.recommendedRodeM
+      const fraction = rode - Math.floor(rode)
+      if (fraction >= 0.05 && fraction <= 0.45) {
+        const shown = Math.round(rode)
+        // Guard against passing vacuously: the shown figure is below the real rode.
+        expect(rode).toBeGreaterThan(shown)
+        return { depthM, shown }
+      }
+    }
+    throw new Error('no rounded-down fixture found')
+  }
+
+  function badgeFor(imperial: boolean, deployedDisplay: number) {
+    const { depthM } = roundedDownCase(imperial)
+    renderPlanner(caseOverrides(depthM, imperial, imperial ? feetToMeters(deployedDisplay) : deployedDisplay))
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+  }
+
+  it('reads Scope OK when the shown Pay Out figure is paid out (metres)', () => {
+    const { shown } = roundedDownCase(false)
+    badgeFor(false, shown)
+    expect(within(methodPanel()).getByText('Pay Out').nextElementSibling).toHaveTextContent(new RegExp(`^${shown}\\s*m`))
+    expect(screen.getByText('Scope OK')).toBeInTheDocument()
+  })
+
+  it('does not read Scope OK one metre short of the shown Pay Out figure', () => {
+    const { shown } = roundedDownCase(false)
+    badgeFor(false, shown - 1)
+    expect(screen.queryByText('Scope OK')).toBeNull()
+  })
+
+  it('reads Scope OK when the shown feet figure is paid out (imperial round trip)', () => {
+    const { shown } = roundedDownCase(true)
+    badgeFor(true, shown)
+    expect(within(methodPanel()).getByText('Pay Out').nextElementSibling).toHaveTextContent(new RegExp(`^${shown}\\s*ft`))
+    expect(screen.getByText('Scope OK')).toBeInTheDocument()
   })
 })

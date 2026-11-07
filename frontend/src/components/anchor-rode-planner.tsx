@@ -9,6 +9,7 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import {
   buildRodePlan,
   computeSwingRadiusM,
+  deployedScopeStatus,
   maxExpectedDepthM,
   planningFigureM,
   rawDepthFromPlanningFigureM,
@@ -16,8 +17,7 @@ import {
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
-  scopeRatio,
-  scopeStatus,
+  payOutDisplayValue,
   swingBreakdownText,
   tideHeightFtOrNull,
   WIND_BANDS,
@@ -243,8 +243,8 @@ export function AnchorRodePlanner({
   const [activeMethodId, setActiveMethodId] = useState<ScopeMethod>(anchorConfig.scopeMethod)
   useEffect(() => { setActiveMethodId(anchorConfig.scopeMethod) }, [anchorConfig.scopeMethod])
 
-  const currentScope = rodeDeployedM > 0 && plan !== null ? scopeRatio(rodeDeployedM, plan.depthFromHawseM) : null
-  const status = rodeDeployedM > 0 ? scopeStatus(currentScope, plan?.recommendedScope ?? null) : null
+  // The badge judges the rode against the Pay Out figure as shown.
+  const status = rodeDeployedM > 0 ? deployedScopeStatus(rodeDeployedM, plan, isImperial) : null
 
   // The swing circle is rode + bow offset + the hull's own length. loaM defaults
   // to 0 and is genuinely unset on real installs, so treating it as zero would
@@ -665,7 +665,7 @@ export function AnchorRodePlanner({
                         <div className="rounded-md border bg-background/60 px-3 py-2">
                           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Pay Out</p>
                           <p className="font-display text-3xl text-gauge-primary tabular-nums">
-                            {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))}
+                            {payOutDisplayValue(result.recommendedRodeM, isImperial)}
                             <span className="ml-1 text-base text-muted-foreground">{unit}</span>
                           </p>
                           {result.depthFromHawseM !== undefined && (
@@ -692,7 +692,7 @@ export function AnchorRodePlanner({
                           )}
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (
                             <WarningNote className="mt-2">
-                              Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
+                              Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
                             </WarningNote>
                           )}
                           <p className="mt-2 text-xs text-muted-foreground">{result.note}</p>

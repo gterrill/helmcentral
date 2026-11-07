@@ -4,6 +4,7 @@ import {
   buildRodePlan,
   catenaryMethod,
   computeSwingRadiusM,
+  deployedScopeStatus,
   swingBreakdownText,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
@@ -479,6 +480,49 @@ describe('scopeStatus', () => {
     expect(plan).not.toBeNull()
     expect(plan!.recommendedScope).toBe(3)
     expect(scopeStatus(3, plan!.recommendedScope)).toBe('ok')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// deployedScopeStatus — the deployed rode against the Pay Out figure as shown
+// ---------------------------------------------------------------------------
+describe('deployedScopeStatus', () => {
+  const real = buildRodePlan(baseInput)!
+  // Keeps the plan consistent: the scope follows the overridden rode.
+  const planWith = (recommendedRodeM: number) => ({
+    ...real,
+    recommendedRodeM,
+    recommendedScope: recommendedRodeM / real.depthFromHawseM,
+  })
+
+  it('is "ok" when the deployed rode equals the rounded-down shown figure', () => {
+    expect(deployedScopeStatus(55, planWith(55.3), false)).toBe('ok')
+  })
+
+  it('does not call a rode one unit short of the shown figure "ok"', () => {
+    expect(deployedScopeStatus(54, planWith(55.3), false)).not.toBe('ok')
+  })
+
+  it('judges against the rounded-up shown figure, not the raw recommendation', () => {
+    expect(deployedScopeStatus(55, planWith(54.7), false)).toBe('ok')
+    expect(deployedScopeStatus(54.6, planWith(54.7), false)).not.toBe('ok')
+  })
+
+  it('compares in feet under imperial, so a feet to metres round trip cannot read short', () => {
+    const plan = planWith(33.3 / METERS_PER_FOOT) // shows 33 ft
+    expect(deployedScopeStatus(33 / METERS_PER_FOOT, plan, true)).toBe('ok')
+    expect(deployedScopeStatus(32 / METERS_PER_FOOT, plan, true)).not.toBe('ok')
+  })
+
+  it('falls through to the low / insufficient ladder when short of the shown figure', () => {
+    const plan = planWith(55.3)
+    const low = deployedScopeStatus(54, plan, false)
+    expect(low).toBe(scopeStatus(scopeRatio(54, plan.depthFromHawseM), plan.recommendedScope))
+    expect(deployedScopeStatus(1, plan, false)).toBe('insufficient')
+  })
+
+  it('is "unknown" with no plan', () => {
+    expect(deployedScopeStatus(55, null, false)).toBe('unknown')
   })
 })
 
