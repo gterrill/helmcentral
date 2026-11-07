@@ -91,6 +91,12 @@ export interface MaintenanceRule {
    * server adds whichever meter-reset offset applies when it stores
    * whatever is actually submitted. */
   current_hours: number | null
+  /** True when current_hours is a gauge figure the operator typed for an item
+   * with no hour meter (ADR 0268), not a live reading. hours_read_on is then
+   * its date (YYYY-MM-DD) and hours_as_of is null. Always false for an item
+   * that has a meter. */
+  hours_by_hand: boolean
+  hours_read_on: string
 
   // ADR 0148. description/interval_* above are EFFECTIVE values: the
   // profile's own with this item's overrides applied, for a profile job.
@@ -240,6 +246,24 @@ export interface HourMeterReset {
   created_at: string
 }
 
+/** One kept hand reading (ADR 0268): the gauge figure the operator typed, and
+ * the same figure as true hours. */
+export interface HandHourReading {
+  id: string
+  equipment_id: string
+  read_on: string
+  gauge: number
+  hours: number
+  note: string
+  created_at: string
+}
+
+export interface HandHourReadingInput {
+  read_on: string
+  gauge: number
+  note: string
+}
+
 export interface MaintenanceRuleFilter {
   equipment?: string
   system?: string
@@ -251,6 +275,7 @@ const LOG = '/api/inventory/maintenance/log'
 const NO_RULES: MaintenanceRule[] = []
 const NO_SCHEDULE_ERRORS: MaintenanceScheduleError[] = []
 const NO_RESETS: HourMeterReset[] = []
+const NO_READINGS: HandHourReading[] = []
 const NO_ENTRIES: MaintenanceLogEntry[] = []
 
 interface RulesResponse {
@@ -449,6 +474,39 @@ export function useHourMeterResets(equipmentId: string | null) {
   return { resets: data ?? NO_RESETS, loading: isLoading, error: error?.message ?? null, refresh: refetch }
 }
 
+/** POST /api/inventory/equipment/:id/maintenance/hour-readings - keeps a
+ * gauge figure read by hand (ADR 0268). The server refuses an item that has
+ * an hour meter. */
+export async function recordHandHourReading(equipmentId: string, input: HandHourReadingInput): Promise<HandHourReading> {
+  const data = await apiRequest<{ reading: HandHourReading }>(
+    withToday(`${equipmentMaintenance(equipmentId)}/hour-readings`), { method: 'POST', json: input },
+  )
+  invalidateQueries([`${equipmentMaintenance(equipmentId)}/hour-readings`])
+  invalidateQueries([RULES])
+  return data.reading
+}
+
+/** DELETE /api/inventory/equipment/:id/maintenance/hour-readings/:readingId */
+export async function deleteHandHourReading(equipmentId: string, readingId: string): Promise<void> {
+  await apiRequest(`${equipmentMaintenance(equipmentId)}/hour-readings/${encodeURIComponent(readingId)}`, { method: 'DELETE' })
+  invalidateQueries([`${equipmentMaintenance(equipmentId)}/hour-readings`])
+  invalidateQueries([RULES])
+}
+
+/** GET /api/inventory/equipment/:id/maintenance/hour-readings - the kept hand
+ * readings, latest first. Pass null for an item with a meter: it has none. */
+export function useHandHourReadings(equipmentId: string | null) {
+  const path = `${equipmentMaintenance(equipmentId ?? '')}/hour-readings`
+  const { data, error, isLoading } = useApiQuery<HandHourReading[]>({
+    queryKey: [path],
+    path,
+    enabled: equipmentId !== null,
+    select: (raw: { readings?: HandHourReading[] }) => raw.readings ?? [],
+  })
+
+  return { readings: data ?? NO_READINGS, loading: isLoading, error: error?.message ?? null }
+}
+
 export interface MaintenanceLogFilter {
   equipment?: string
 }
@@ -566,4 +624,47 @@ export function hoursAsOfLabel(hoursAsOf: string | null): string | null {
   const ageSeconds = (Date.now() - ms) / 1000
   if (ageSeconds < 0) return null
   return `as of ${formatDataAge(ageSeconds)} ago`
+}
+
+/**
+ * "3 weeks ago" for a hand-read figure's date (ADR 0268) - the
+ * hand-read counterpart of hoursAsOfLabel, shown wherever that one shows so a
+ * typed figure is never presented as live. null for a missing or future date.
+ * today is a parameter so a test can pin it; the app passes nothing.
+ */
+export function handReadAge(readOn: string, today: string = todayISO()): string | null {
+  const day = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number)
+    return Date.UTC(y, m - 1, d)
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(readOn)) return null
+  const days = Math.round((day(today) - day(readOn)) / 86_400_000)
+  // A day or so ahead is the operator's clock east of the server's, not a bad date.
+  if (days < -1) return null
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`
+  let age: string
+  if (days <= 0) age = 'today'
+  else if (days === 1) age = 'yesterday'
+  else if (days < 14) age = plural(days, 'day')
+  else if (days < 56) age = plural(Math.floor(days / 7), 'week')
+  else age = plural(Math.floor(days / 30), 'month')
+  return age
+}
+
+/** "Read by hand, 3 weeks ago" for a hand-read figure's date. */
+export function handReadLabel(readOn: string, today: string = todayISO()): string | null {
+  const age = handReadAge(readOn, today)
+  return age === null ? null : `Read by hand, ${age}`
+}
+
+/** How old a rule's current hours are: "Read by hand, 3 weeks ago" for a typed
+ * figure, "as of 6h ago" for a live one, null when there is no reading. */
+export function hoursAgeLabel(rule: Pick<MaintenanceRule, 'hours_by_hand' | 'hours_read_on' | 'hours_as_of'>): string | null {
+  return rule.hours_by_hand ? handReadLabel(rule.hours_read_on) : hoursAsOfLabel(rule.hours_as_of)
+}
+
+/** A rule on an item with no hour meter can take a hand reading (the server
+ * refuses one on an item that has a meter). */
+export function canLogHandReading(rule: Pick<MaintenanceRule, 'equipment_id' | 'has_hour_meter_path'>): boolean {
+  return rule.equipment_id !== null && !rule.has_hour_meter_path
 }

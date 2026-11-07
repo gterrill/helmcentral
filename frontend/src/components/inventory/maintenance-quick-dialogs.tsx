@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import type { MaintenanceRule } from '@/hooks/use-maintenance'
+import { canLogHandReading, type MaintenanceRule } from '@/hooks/use-maintenance'
 import { errorMessage } from '@/lib/errors'
 
 // ADR 0138: two small, single-purpose dialogs shared by the Maintenance
@@ -149,7 +149,9 @@ export function MaintenanceLastDoneDialog({ rule, onCancel, onConfirm }: Mainten
           <FieldLabel htmlFor="maintenance-last-done-date">Last done (date)</FieldLabel>
           <Input id="maintenance-last-done-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        {rule?.has_hour_meter_path && (
+        {/* Hours typed for an item with no meter count as its latest hand
+            reading (ADR 0268), so an hours rule on one offers the field too. */}
+        {rule && (rule.has_hour_meter_path || (rule.interval_hours !== null && canLogHandReading(rule))) && (
           <Field>
             <FieldLabel htmlFor="maintenance-last-done-hours">Last done (hours, gauge reading)</FieldLabel>
             <Input

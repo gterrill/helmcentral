@@ -110,6 +110,12 @@ type maintenanceRuleView struct {
 	// the rare fixture with no timestamp evidence at all for an otherwise
 	// live reading.
 	HoursAsOf *string `json:"hours_as_of"`
+	// HoursByHand is true when CurrentHours is a figure the operator typed
+	// from a gauge, for an item with no hour meter (ADR 0268); HoursReadOn is
+	// then its date (YYYY-MM-DD) and HoursAsOf stays null. Never true for an
+	// item that has a meter.
+	HoursByHand bool   `json:"hours_by_hand"`
+	HoursReadOn string `json:"hours_read_on"`
 }
 
 // requireTodayParam reads and validates the ?today=YYYY-MM-DD query param
@@ -230,6 +236,8 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 	if hours.Known {
 		g := hours.Gauge
 		view.CurrentHours = &g
+		view.HoursByHand = hours.ByHand
+		view.HoursReadOn = hours.ReadOn
 	}
 	return view
 }
@@ -249,7 +257,14 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 // used to cost a reset-history query for nothing.
 func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReading, error) {
 	if eq.HourMeterSource == "" {
-		return maintenanceHourReading{}, nil
+		// No meter: the latest figure the operator typed (ADR 0268), marked as
+		// read by hand. An item WITH a meter never reaches this branch, so a
+		// quiet meter cannot be covered by a hand figure.
+		samples, resets, err := globalDocumentStore.HandHourSamples(eq.ID)
+		if err != nil {
+			return maintenanceHourReading{}, err
+		}
+		return handEquipmentHours(samples, resets, now), nil
 	}
 	resets, err := globalDocumentStore.ListHourMeterResets(eq.ID)
 	if err != nil {
@@ -1504,6 +1519,7 @@ func maintenanceRoutes() []apiRoute {
 		{http.MethodGet, "/api/inventory/maintenance/log/export.csv", tierRead, exportMaintenanceLogCSVHandler},
 		{http.MethodGet, "/api/inventory/maintenance/log/:id", tierRead, getMaintenanceLogEntryHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/meter-resets", tierRead, listHourMeterResetsHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/hour-readings", tierRead, listHandHourReadingsHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id/maintenance/profile-change-preview", tierRead, maintenanceProfileChangePreviewHandler},
 
 		// Maintenance writes (ADR 0138).
@@ -1518,6 +1534,8 @@ func maintenanceRoutes() []apiRoute {
 		{http.MethodPut, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, setMaintenanceRuleProcedureNoteHandler},
 		{http.MethodPost, "/api/inventory/maintenance/rules/:id/procedure-note", tierWrite, createMaintenanceProcedureNoteHandler},
 		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/meter-reset", tierWrite, recordHourMeterResetHandler},
+		{http.MethodPost, "/api/inventory/equipment/:id/maintenance/hour-readings", tierWrite, recordHandHourReadingHandler},
+		{http.MethodDelete, "/api/inventory/equipment/:id/maintenance/hour-readings/:readingId", tierWrite, deleteHandHourReadingHandler},
 		{http.MethodPost, "/api/inventory/maintenance/log", tierWrite, createMaintenanceLogEntryHandler},
 		{http.MethodPut, "/api/inventory/maintenance/log/:id", tierWrite, updateMaintenanceLogEntryHandler},
 		{http.MethodDelete, "/api/inventory/maintenance/log/:id", tierWrite, deleteMaintenanceLogEntryHandler},

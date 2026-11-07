@@ -5,6 +5,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ConfirmDelete } from '@/components/patterns'
+import { HandHoursDialog } from '@/components/inventory/maintenance-hand-hours-dialog'
 import { MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
@@ -18,11 +19,15 @@ import {
   createMaintenanceLogEntry,
   createMaintenanceRule,
   deleteMaintenanceLogEntry,
+  deleteHandHourReading,
   deleteMaintenanceRule,
+  handReadAge,
   maintenanceLogExportURL,
+  recordHandHourReading,
   recordHourMeterReset,
   updateMaintenanceLogEntry,
   updateMaintenanceRule,
+  useHandHourReadings,
   useHourMeterResets,
   useMaintenanceLogEntries,
   useMaintenanceRules,
@@ -61,6 +66,9 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
   const { profiles } = useEquipmentProfiles(true)
   const { entries, loading: entriesLoading } = useMaintenanceLogEntries({ equipment: equipmentId })
   const { resets } = useHourMeterResets(hourMeterSource ? equipmentId : null)
+  // An item with no meter keeps the gauge figures its operator reads by hand
+  // (ADR 0268); one with a meter has none.
+  const { readings } = useHandHourReadings(hourMeterSource ? null : equipmentId)
 
   const seenScheduleKey = useRef(scheduleKey)
   useEffect(() => {
@@ -74,10 +82,13 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
   const [creatingEntry, setCreatingEntry] = useState(false)
   const [editingEntry, setEditingEntry] = useState<MaintenanceLogEntry | null>(null)
   const [showRemoved, setShowRemoved] = useState(false)
+  const [deletingReading, setDeletingReading] = useState<string | null>(null)
   const [deletingRemoved, setDeletingRemoved] = useState<MaintenanceRule | null>(null)
   const [removedBusy, setRemovedBusy] = useState(false)
   const [removedError, setRemovedError] = useState<string | null>(null)
 
+  const [loggingReading, setLoggingReading] = useState(false)
+  const [readingError, setReadingError] = useState<string | null>(null)
   const [showMeterForm, setShowMeterForm] = useState(false)
   const [oldReading, setOldReading] = useState('')
   const [newReading, setNewReading] = useState('0')
@@ -117,6 +128,15 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
       setMeterError(errorMessage(err))
     } finally {
       setMeterSaving(false)
+    }
+  }
+
+  const handleDeleteReading = async (readingId: string) => {
+    setReadingError(null)
+    try {
+      await deleteHandHourReading(equipmentId, readingId)
+    } catch (err) {
+      setReadingError(errorMessage(err))
     }
   }
 
@@ -173,9 +193,9 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
           </Button>
         )}
       </div>
-      {hourMeterSource === '' && rules.some((rule) => rule.interval_hours !== null && !rule.not_applicable) && (
+      {hourMeterSource === '' && !rules.some((rule) => rule.hours_by_hand) && rules.some((rule) => rule.interval_hours !== null && !rule.not_applicable) && (
         <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-          Rules counted in hours can't count hours until this item is assigned an engine or generator source above.
+          This item has no hour meter, so rules counted in hours can't count hours until you log a gauge reading below.
         </p>
       )}
       {scheduleError && (
@@ -257,6 +277,46 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
           </div>
         )}
       </div>
+
+      {hourMeterSource === '' && (
+        <div className="rounded-md border border-border p-3">
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel>Hand-read hours</FieldLabel>
+            {canWrite && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setLoggingReading(true)}>
+                Log a reading
+              </Button>
+            )}
+          </div>
+          {readings.length === 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">No readings yet.</p>
+          ) : (
+            <ul className="mt-2 flex flex-col gap-1">
+              {readings.slice(0, 5).map((reading) => (
+                <li key={reading.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate">
+                    <span className="tabular-nums">{reading.gauge} h</span>
+                    <span className="text-xs text-muted-foreground"> - {reading.read_on} ({handReadAge(reading.read_on)}){reading.note ? ` - ${reading.note}` : ''}</span>
+                  </span>
+                  {canWrite && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      aria-label={`Delete reading of ${reading.gauge} h on ${reading.read_on}`}
+                      onClick={() => setDeletingReading(reading.id)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {readingError && <p role="alert" className="mt-2 text-sm text-destructive">{readingError}</p>}
+        </div>
+      )}
 
       {hourMeterSource && (
         <div className="rounded-md border border-border p-3">
@@ -351,6 +411,29 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
         onDelete={async (id) => {
           await deleteMaintenanceRule(id)
           setEditingRule(null)
+        }}
+      />
+
+      <HandHoursDialog
+        equipmentName="This item"
+        open={loggingReading}
+        onCancel={() => setLoggingReading(false)}
+        onSave={async (input) => {
+          await recordHandHourReading(equipmentId, input)
+          setLoggingReading(false)
+        }}
+      />
+
+      <ConfirmDelete
+        open={deletingReading !== null}
+        onOpenChange={(isOpen) => { if (!isOpen) setDeletingReading(null) }}
+        title="Delete this reading?"
+        description="Hours-based rules on this item count from the latest remaining reading instead."
+        deleting={false}
+        onConfirm={() => {
+          const id = deletingReading
+          setDeletingReading(null)
+          if (id) void handleDeleteReading(id)
         }}
       />
 

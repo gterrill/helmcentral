@@ -23,7 +23,7 @@ export function makeProfileJob(overrides: Partial<MaintenanceRule> = {}): Mainte
     last_done_hours: null, profile_service_id: 'engine-oil', procedure_note_id: '',
     ack_reason: '', acknowledged: false, created_at: null, updated_at: null,
     status: 'never_recorded', remaining_hours: null, remaining_days: null,
-    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
+    hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null, hours_by_hand: false, hours_read_on: '',
     ...ITEM_RULE_PROVENANCE,
     source: 'profile',
     profile_id: 'cummins-qsb67-550',

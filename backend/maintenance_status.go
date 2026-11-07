@@ -98,6 +98,11 @@ type maintenanceHourReading struct {
 	// live-second reading for a meter that stopped changing the moment its
 	// engine went quiet.
 	AsOf *time.Time
+	// ByHand marks a figure the operator typed from a gauge (ADR 0268), for an
+	// item with no hour meter. It has a ReadOn date (YYYY-MM-DD) in place of
+	// AsOf, and nothing may present it as live.
+	ByHand bool
+	ReadOn string
 }
 
 // maintenanceRuleStatusInput is computeMaintenanceRuleStatus's whole

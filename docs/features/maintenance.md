@@ -25,17 +25,18 @@ Each rule shows one of these states:
 - **Interval not set:** This covers a job that's named but has no frequency
   yet. A manufacturer's schedule sometimes lists a service with no interval,
   and this shows that plainly instead of hiding it.
-- **Hours unknown:** This appears when a rule runs on hours but the item's hours
-  reading has never been received. The calendar side of the rule, if it has
-  one, still shows correctly underneath.
+- **Hours unknown:** This appears when a rule runs on hours but the item has no
+  hours reading to count from. Either its hour meter has never sent one, or it
+  has no hour meter and nobody has logged a gauge reading. The calendar side of
+  the rule, if it has one, still shows correctly underneath.
 
 ## Where hours come from
 
-For gear with a running-hours reading, such as an engine, a generator or a
-watermaker, Helmcentral reads the current hours straight from the boat's own
-instrument data. It's the same reading the equipment record's hour meter
-already uses. If an item has no hour meter set, its hours-based rules can't be
-counted, and its record shows a warning until you set one.
+For gear with a running-hours reading, such as an engine or a generator,
+Helmcentral reads the current hours straight from the boat's own instrument
+data. It's the same reading the equipment record's hour meter already uses.
+Gear without one, such as a watermaker with a gauge on the panel, takes its
+hours from you instead. That's covered under "Gear with no hour meter" below.
 
 An hour meter only changes while the machine is running. The last reading it
 sent stays current for as long as the engine is off, whether you're at anchor
@@ -51,9 +52,40 @@ item's own page: the old reading, the new reading and the date. Hours keep
 counting from where the old one left off. See
 [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 
-Some gear has no hour reading at all, and some rules have no piece of gear
-behind them. For those, you type in an hours figure by hand when you complete
-the work.
+A rule with no piece of gear behind it has no hours at all, so it runs on the
+calendar only.
+
+### Gear with no hour meter
+
+An item with no hour meter counts its hours from the latest gauge figure you've
+typed for it. Helmcentral takes that figure from any of these:
+
+- **Log a reading:** Tap **Log a reading** on the item's own page or on the rule
+  in the Maintenance list. You give the date, the figure on the gauge and, if
+  you like, a note. Every reading is kept, so the item has a short history and
+  you can delete one you typed wrongly.
+- **Completing a rule or logging a service:** The hours you enter on the form
+  count as a reading on that date.
+- **Set last done:** The hours you enter there count as a reading too, dated the
+  day you gave, or today if you gave only hours.
+
+The latest date wins. If two figures share a date, the larger one counts, since
+hours only go up. A meter replacement is handled the same way as everywhere
+else, so you still type what the gauge shows.
+
+Wherever the list would show how old a live reading is, a figure you typed shows
+**Read by hand** with its age, such as "Read by hand, 3 weeks ago". The
+Complete form fills in the hours from it and says so. Helmcentral doesn't guess
+how many hours the gear has run since. If it ran hard after your last reading,
+the figure is behind, so read the gauge again before a job that's close.
+
+Two limits keep a typed figure from being mistaken for a live one:
+
+- **An item with an hour meter takes no hand readings.** If its meter goes quiet,
+  the rule says so and you fix the meter. A figure you typed won't quietly stand
+  in for it.
+- **No reading, no hours.** An item with no hour meter and no reading logged
+  shows **Hours unknown**, as before.
 
 ## Getting started on a boat with existing history
 
@@ -172,7 +204,9 @@ in your document library. Then it names the gaps:
 If an item's running hours aren't being read at the moment, Mate says the hours
 are unknown, the same way the list does. It won't put a figure in their place.
 A rule flagged that way can still read as fine on its calendar side alone, so
-treat "hours unknown" as a reason to read the meter yourself.
+treat "hours unknown" as a reason to read the meter yourself. For gear with no
+hour meter, Mate quotes a figure you typed as read by hand, with the date you
+read it, and never as a live reading.
 
 Mate can read the open jobs too. Ask it what's still broken on the boat, or
 what you've been meaning to fix on the generator. It lists each job with how

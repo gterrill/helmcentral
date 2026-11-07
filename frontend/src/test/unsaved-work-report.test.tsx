@@ -81,7 +81,7 @@ const rule = (): MaintenanceRule => ({
   last_done_hours: null, profile_service_id: '', procedure_note_id: '',
   ack_reason: '', acknowledged: false, created_at: '', updated_at: '',
   status: 'due_soon', remaining_hours: null, remaining_days: null,
-  hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null,
+  hours_unknown: false, has_hour_meter_path: true, hours_as_of: null, current_hours: null, hours_by_hand: false, hours_read_on: '',
   ...ITEM_RULE_PROVENANCE,
 })
 

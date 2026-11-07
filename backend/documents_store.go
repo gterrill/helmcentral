@@ -866,6 +866,21 @@ var documentStoreSchema = []string{
 		created_at   INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS hour_meter_resets_equipment_id ON hour_meter_resets (equipment_id, created_at DESC)`,
+
+	// hand_hour_readings: a gauge figure the operator read by hand for an item
+	// with no SignalK hour meter (ADR 0268). gauge is what was typed; hours is
+	// the same figure as true hours, converted with the meter-reset offset in
+	// force on read_on.
+	`CREATE TABLE IF NOT EXISTS hand_hour_readings (
+		id           TEXT PRIMARY KEY,
+		equipment_id TEXT NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+		read_on      TEXT NOT NULL,
+		gauge        REAL NOT NULL,
+		hours        REAL NOT NULL,
+		note         TEXT NOT NULL DEFAULT '',
+		created_at   INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS hand_hour_readings_equipment_id ON hand_hour_readings (equipment_id, read_on DESC)`,
 }
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's

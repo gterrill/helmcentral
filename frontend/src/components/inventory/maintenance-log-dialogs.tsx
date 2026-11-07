@@ -19,7 +19,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import {
   deleteMaintenanceLogPhoto,
-  hoursAsOfLabel,
+  hoursAgeLabel,
   uploadMaintenanceLogPhoto,
   type MaintenanceLogEntry,
   type MaintenanceLogEntryInput,
@@ -325,15 +325,17 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                       genuinely never-received reading asks the operator to
                       read the gauge themselves. */}
                   {rule && rule.current_hours != null ? (
-                    hoursAsOfLabel(rule.hours_as_of) && (
-                      <FieldDescription>Live reading, {hoursAsOfLabel(rule.hours_as_of)}.</FieldDescription>
+                    hoursAgeLabel(rule) && (
+                      <FieldDescription>
+                        {rule.hours_by_hand ? `${hoursAgeLabel(rule)}.` : `Live reading, ${hoursAgeLabel(rule)}.`}
+                      </FieldDescription>
                     )
                   ) : (
                     rule && requiresHoursNow(rule) && (
                       <FieldDescription>
                         {rule.has_hour_meter_path
                           ? 'The live reading has never been received - enter the current reading from the gauge.'
-                          : 'This item has no live hour meter - enter the current reading from the gauge.'}
+                          : 'This item has no hour meter and no reading logged - enter the current reading from the gauge.'}
                       </FieldDescription>
                     )
                   )}
