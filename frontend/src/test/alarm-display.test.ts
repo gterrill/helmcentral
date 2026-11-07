@@ -305,26 +305,6 @@ describe('alarmConditionSentence', () => {
     expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: '' }))).toBe('')
   })
 
-  it('appends live radar figures after the sentence', () => {
-    const alarm = makeAlarm({
-      op: undefined,
-      unit: undefined,
-      message: 'Target in guard zone 1.',
-      radar_target: { bearing_rad: (42 * Math.PI) / 180, range_m: 1.4 * 1852, cpa_m: 0.3 * 1852, tcpa_seconds: 100 },
-    })
-    expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 1 · 042°T · 1.4 NM · CPA 0.3 NM')
-  })
-
-  it('omits CPA when the radar has none, and wraps bearings into 0-359', () => {
-    const alarm = makeAlarm({
-      op: undefined,
-      unit: undefined,
-      message: 'Target in guard zone 2.',
-      radar_target: { bearing_rad: -Math.PI / 2, range_m: 926 },
-    })
-    expect(alarmConditionSentence(alarm)).toBe('Target in guard zone 2 · 270°T · 0.5 NM')
-  })
-
   // Law of Storms tendency rules (ADR 0095) fire on a Pa reading of a
   // pressureChangeNh derived path, so "now 6.0 mb" says nothing about
   // whether the barometer is rising or falling on that window. Pa already

@@ -53,7 +53,6 @@ function mapElement(aisTrails: Map<string, AisTrailPoint[]>, vessels: NearbyVess
       vesselTrail={[]}
       aisVessels={vessels}
       aisTrails={aisTrails}
-      radarTargets={[]}
       isDarkTheme={false}
     />
   )

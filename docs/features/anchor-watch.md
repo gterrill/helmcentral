@@ -97,10 +97,6 @@ Vessels tile both tell you how many it left out.
   marker turns red. It gains a ring once the alarm reaches alarm severity. It
   stays red for as long as that alarm is active, including after you have
   acknowledged it.
-- **Radar contacts:** Radar contacts draw as triangles on the same map. They
-  turn red on their own closing figures, independently of AIS. So a boat that
-  your radar and your AIS both see can show two red markers at once, with two
-  different numbers.
 
 ## AIS tracks on the map
 

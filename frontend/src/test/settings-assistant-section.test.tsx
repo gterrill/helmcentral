@@ -14,7 +14,7 @@ import type { SettingsPayload } from '@/hooks/use-settings-form'
 
 // ADR 0093: the Assistant settings section and the settings-draft plumbing
 // that carries its three fields (enabled, model, notes) through
-// hydrate/save, mirroring settings-mayara-section.test.tsx.
+// hydrate/save.
 
 const enabledBaseline: RegularSettingsDraft = { ...initialRegularSettingsDraft, assistantEnabled: true }
 
@@ -433,7 +433,7 @@ describe('assistant settings-draft plumbing', () => {
 
   // A blank model on the server (nothing configured yet, or explicitly
   // cleared) must hydrate as blank, not silently acquire the default model
-  // id — same reasoning as mayaraAddress.
+  // id — same reasoning as the influxdb fields.
   it('hydrates a blank model as blank', () => {
     const settings: SettingsPayload = { assistant: { enabled: false, model: '', notes: '' } }
 

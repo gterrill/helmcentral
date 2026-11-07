@@ -145,7 +145,6 @@ Stuck, or not sure it suits your boat? Ask in
   | [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) | True wind and other derived navigation data |
   | [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) | Generator and advanced electrical state (Victron GX devices) |
   | [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Optional, only for InfluxDB-backed history |
-  | [`mayara-server-signalk-plugin`](https://github.com/MarineYachtRadar/mayara-server-signalk-plugin) | Optional, ARPA radar targets. Needs a [mayara-server](https://github.com/MarineYachtRadar/mayara-server) reaching your radar |
 
 - **A browser on Baseline 2024 or newer**: Chrome/Edge 111+, Firefox 111+,
   Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
@@ -155,7 +154,6 @@ Stuck, or not sure it suits your boat? Ask in
 
 Telemetry history is in-memory by default. InfluxDB is optional for longer
 retention, and Mate uses it for passage and fuel estimates when it is there.
-Radar is also optional and remains off unless its dependencies are available.
 
 ## Configuration
 
@@ -284,7 +282,7 @@ equipment it belongs to. Records already in YachtWave
 [import](docs/features/import.md) rather than being retyped.
 
 Other features include a Route tile that follows the route SignalK is navigating,
-autopilot control on SignalK's v2 API, ARPA radar targets, and an
+autopilot control on SignalK's v2 API, and an
 embedded Windy weather map.
 
 Out of scope: hazard avoidance, weather routing, live

@@ -4,7 +4,7 @@ import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // use-vessel-state.ts is a thin telemetry consumer over the shared SSE
-// connection, same shape as use-radar-targets.ts / use-gauge-values.ts. The
+// connection, same shape as use-nearby-vessels.ts / use-gauge-values.ts. The
 // real stream and store run over the fake EventSource.
 const stream = installFakeTelemetryStream()
 

@@ -49,12 +49,6 @@ type signalKSnapshot struct {
 	// devices. Kept for the same reason as batteryPublishers: a silent device
 	// must keep the name it had.
 	deviceNames map[string]map[string]string
-	// controlStamps tracks mayara radar controls ("<context>|radars.<id>.controls.<name>"):
-	// the mayara timestamp last held and when, on our clock, it last advanced.
-	controlStamps map[string]controlStampEntry
-	// controlStampCount is controlStamps' size per context, so the cap is per
-	// vessel and other vessels cannot crowd out our own radar.
-	controlStampCount map[string]int
 	selfCtx           string // which context is this vessel, per the stream's hello frame
 	connected         bool
 	lastMessage       time.Time
@@ -305,8 +299,6 @@ func newSignalKSnapshot() *signalKSnapshot {
 		pendingUnits:      make(map[unitKey]string),
 		unitNotify:        make(chan struct{}, 1),
 		pathSeen:          make(map[string]time.Time),
-		controlStamps:     make(map[string]controlStampEntry),
-		controlStampCount: make(map[string]int),
 		sourceSeen:        make(map[string]sourceSeenEntry),
 		acSourceSeen:      make(map[acSourceKey]acSourceEntry),
 		batteryPublishers: make(map[string]map[string]struct{}),
@@ -318,65 +310,11 @@ func newSignalKSnapshot() *signalKSnapshot {
 	}
 }
 
-// controlStampEntry is what the snapshot remembers of one radar control.
-type controlStampEntry struct {
-	stamp      time.Time // mayara's timestamp on the value we hold
-	advancedAt time.Time // our receive time when stamp last changed
-}
-
-// controlStampsMax bounds controlStamps per vessel context. A boat has a
-// handful of radars of a dozen-odd controls each; the cap only stops a
-// hostile stream growing it.
-const controlStampsMax = 512
-
-// radarControlPath reports whether path is "radars.<id>.controls.<name>".
-func radarControlPath(path string) bool {
-	segments := strings.Split(path, ".")
-	return len(segments) == 4 && segments[0] == "radars" && segments[2] == "controls"
-}
-
-// noteControlStamp records a radar control delta. A timestamp different from
-// the one already held counts as an advance, in either direction: a replay
-// never changes the timestamp, while mayara's unsynchronised clock can step
-// back. A first sight of the path (the subscribe replay after process start),
-// a repeat, and an unparseable timestamp do not count. Caller holds s.mu.
-func (s *signalKSnapshot) noteControlStamp(context, key string, value any, envelope string, now time.Time) {
-	control := map[string]any{"value": value}
-	if envelope != "" {
-		control["timestamp"] = envelope
-	}
-	stamp, ok := mayaraControlStamp(control)
-	if !ok {
-		return
-	}
-	held, known := s.controlStamps[key]
-	if !known {
-		if s.controlStampCount[context] >= controlStampsMax {
-			return
-		}
-		s.controlStamps[key] = controlStampEntry{stamp: stamp}
-		s.controlStampCount[context]++
-		return
-	}
-	if !stamp.Equal(held.stamp) {
-		s.controlStamps[key] = controlStampEntry{stamp: stamp, advancedAt: now}
-	}
-}
-
-// controlAdvancedAt reports when, on our clock, a radar control's mayara
-// timestamp last advanced, or the zero time if it never has.
-func (s *signalKSnapshot) controlAdvancedAt(context, path string) time.Time {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.controlStamps[context+"|"+path].advancedAt
-}
-
-// radarTargetDeltaPath reports whether path is one of mayara's own ARPA
-// target nodes, "radars.<radar id>.targets.<target id>" (see
-// testdata/mayara/target-delta.json). radar_source.go's REST poller is the
-// only consumer of radar targets anywhere in this codebase; nothing reads
-// one off the snapshot tree, so applyDelta drops these before they reach it
-// rather than storing and later evicting them.
+// radarTargetDeltaPath reports whether path is one of the radar plugin's
+// target nodes, "radars.<radar id>.targets.<target id>". The plugin still
+// publishes them on the bus for Helmcam; nothing here reads one, and their
+// ids climb without end (about 6,000 measured), so applyDelta drops them
+// before they reach the tree rather than storing and later evicting them.
 func radarTargetDeltaPath(path string) bool {
 	segments := strings.SplitN(path, ".", 4)
 	return len(segments) >= 3 && segments[0] == "radars" && segments[2] == "targets"
@@ -512,14 +450,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 		}
 
 		for _, val := range update.Values {
-			// mayara's ARPA target nodes are never read off this snapshot --
-			// radar_source.go's REST poller owns radar targets entirely -- and
-			// every target id it has ever assigned climbs forever and is
-			// replayed as a null on every resubscribe (~6,000 measured against
-			// the boat, signalk_stream.go's read-limit comment). Storing them
-			// bought nothing and cost every whole-tree copy in this file a
-			// little more each week, so they are dropped before they ever
-			// reach the tree or pathSeen.
+			// Radar target nodes are never read here and grow without end
+			// (radarTargetDeltaPath), so they never reach the tree or
+			// pathSeen.
 			if radarTargetDeltaPath(val.Path) {
 				continue
 			}
@@ -566,9 +499,6 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 			if update.SourceRef != "" {
 				s.noteDeviceNameLocked(d.Context, val.Path, update.SourceRef, val.Value)
-			}
-			if radarControlPath(val.Path) {
-				s.noteControlStamp(d.Context, d.Context+"|"+val.Path, val.Value, update.Timestamp, now)
 			}
 
 			current := tree
@@ -1306,8 +1236,8 @@ func (s *signalKSnapshot) distressLatched(label string) bool {
 // comfortably longer than an ordinary AIS gap -- a target passing behind an
 // island, a VHF duty-cycle silence -- while still bounding growth to
 // "vessels heard within about the last hour," the same order of magnitude
-// as collisionTargetMaxAge and radarPresenceMaxAge's own "gone quiet" gates
-// elsewhere in this package.
+// as collisionTargetMaxAge's own "gone quiet" gate elsewhere in this
+// package.
 const vesselContextStaleAfter = 1 * time.Hour
 
 // evictStaleVesselContexts drops every non-self vessel context whose newest
@@ -1385,12 +1315,6 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 				delete(s.pathSeen, key)
 			}
 		}
-		for key := range s.controlStamps {
-			if strings.HasPrefix(key, prefix) {
-				delete(s.controlStamps, key)
-			}
-		}
-		delete(s.controlStampCount, context)
 		// sourceSeen is keyed "<context>|<$source>", the same shape as
 		// pathSeen's own "<context>|<path>" -- an evicted context must lose
 		// these too, or a contact heard once leaks one entry per $source it

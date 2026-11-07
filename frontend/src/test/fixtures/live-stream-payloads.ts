@@ -11,8 +11,7 @@
  * - tanks-state (every 10 s): datetime, every age, and one black water level.
  * - nearby-vessels (every 5 s): every vessel's age_seconds and bearing, most
  *   ranges and CPAs, the feed age and datetime.
- * - autopilot and radar-targets: no pilot and no radar on that server, so one
- *   seed each and nothing after. The hub only sends a payload that changed.
+ * - autopilot: no pilot on that server, so one seed and nothing after. The hub only sends a payload that changed.
  */
 
 /** electrical-state, the first of six. */
@@ -100,24 +99,10 @@ export const NEARBY_NEXT = {
 }
 
 /**
- * The live server had no pilot ({"present":false}) and no radar
- * ({"radars":[],"source":"disabled","targets":[]}). These follow the backend's
- * builders instead: buildAutopilotPayload (autopilot.go) and
- * buildRadarTargetsPayload (radar_source.go).
+ * The live server had no pilot ({"present":false}). This follows the
+ * backend's builder instead: buildAutopilotPayload (autopilot.go).
  */
 export const AUTOPILOT = {
   present: true, engaged: true, state: 'auto', mode: 'compass', target: 5.742,
   available_actions: ['dodge', 'tack', 'gybe'], stale: false,
-}
-
-export const RADAR = {
-  datetime: '2026-10-27T04:20:13Z', source: 'mayara',
-  radars: [{ id: 'fur6424A', name: 'Furuno DRS4D-NXT', transmitting: true }],
-  targets: [
-    {
-      id: 'fur6424A:3', radar_id: 'fur6424A', target_id: 3, status: 'tracking', bearing_rad: 0.733, range_m: 1852,
-      lat: -20.262, lon: 149.085, position_derived: true, course_rad: 3.9, sog_knots: 6.2, cpa_m: 420, tcpa_seconds: 610,
-      is_dangerous: false, acquisition: 'auto', age_seconds: 1.2,
-    },
-  ],
 }

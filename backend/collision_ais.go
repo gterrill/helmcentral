@@ -295,7 +295,6 @@ func readOwnEncounterFacts(snapshot *signalKSnapshot) ownEncounterFacts {
 // ever heard from just to read five fields off one of them.
 func encounterInputsForAISTarget(snapshot *signalKSnapshot, own ownEncounterFacts, vesselContext string) encounterInputs {
 	in := own.inputs
-	in.Kind = encounterKindAIS
 
 	var targetLat, targetLon float64
 	var targetPositionOK bool

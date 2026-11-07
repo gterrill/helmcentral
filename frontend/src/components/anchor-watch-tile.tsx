@@ -11,12 +11,11 @@ import { FORECAST_REFRESH_SECONDS, TRAIL_POLL_MS } from '@/config/app-config'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useAnchorWatch, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
-import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
+import { useNearbyVesselList, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { useAisTrails, type AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
-import { useMapContacts, usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
+import { usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
 import { useVesselFields } from '@/hooks/use-vessel-state'
 
 // anchor-watch-map.tsx imports maplibre-gl and react-map-gl at module scope
@@ -72,18 +71,9 @@ interface AnchorWatchTileProps {
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
-  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
-  // integration wired up simply omits it.
-  radarTargets?: RadarTarget[]
-  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
-  // integration wired up simply omits it.
-  radars?: RadarInfo[]
-  radarSource?: RadarSource
   isDarkTheme: boolean
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
-  showRadarEcho: boolean
-  onRadarEchoToggle: (enabled: boolean) => void
   onFullscreen: () => void
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
@@ -123,14 +113,9 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   aisVessels,
   aisTrails,
   aisCollisionAlarms,
-  radarTargets,
-  radars,
-  radarSource,
   isDarkTheme,
   showImageryLayer,
   onImageryToggle,
-  showRadarEcho,
-  onRadarEchoToggle,
   onFullscreen,
   placemarks,
   onPlacemarkCreate,
@@ -303,14 +288,9 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               aisVessels={aisVessels}
               aisTrails={aisTrails}
               aisCollisionAlarms={aisCollisionAlarms}
-              radarTargets={radarTargets}
-              radars={radars}
-              radarSource={radarSource}
               isDarkTheme={isDarkTheme}
               showImageryLayer={showImageryLayer}
               onImageryToggle={onImageryToggle}
-              showRadarEcho={showRadarEcho}
-              onRadarEchoToggle={onRadarEchoToggle}
               onFullscreen={onFullscreen}
               placemarks={placemarks}
               onPlacemarkCreate={onPlacemarkCreate}
@@ -357,15 +337,15 @@ const ANCHOR_FIELDS = [
 /**
  * The anchor watch tile. It reads the watch record, applies the live fix to it
  * (distance, bearing, drag state), and adds depth, current, heading, the tide
- * a drop records, the collision colours, the pins, the trails and the AIS and
- * radar contacts. The trails poll while the tile is mounted.
+ * a drop records, the collision colours, the pins, the trails and the AIS
+ * contacts. The trails poll while the tile is mounted.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
   'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
-  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide'>) {
+  | 'aisVessels' | 'tide'>) {
   const watch = useAnchorWatch()
-  const contacts = useMapContacts()
+  const aisVessels = useNearbyVesselList()
   const v = useVesselFields(ANCHOR_FIELDS)
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
@@ -377,7 +357,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
     <AnchorWatchTile
       {...props}
       {...pins}
-      {...contacts}
+      aisVessels={aisVessels}
       tide={tide}
       watch={atFix}
       vesselTrail={anchorTrail}

@@ -17,7 +17,7 @@ import type { HelpTarget } from '@/lib/help-links'
 // earlier test's cached page would silently answer a later test that expects
 // different content for the same id. `vi.resetModules()` plus a dynamic
 // import gets a clean cache per test, the same pattern
-// use-radar-capabilities.test.ts and web-push-section.test.tsx already use
+// web-push-section.test.tsx already uses
 // for the same reason.
 
 interface HelpPageFixture {

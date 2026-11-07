@@ -1,7 +1,7 @@
 # ADR 0069: The radar picture is relayed from mayara, while targets stay on the plugin
 
 ## Status
-Accepted
+Superseded by [ADR 0270](0270-helmcentral-drops-mayara-radar.md): the radar picture is gone from the anchor map. The record below is kept as written.
 
 Extends [ADR 0062](0062-marine-radar-targets-from-mayara.md), whose first decision was to take ARPA targets and leave the spokes alone. Targets are unchanged by this and still arrive through the mayara SignalK plugin exactly as 0062's amendment describes.
 

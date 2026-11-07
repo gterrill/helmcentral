@@ -5,6 +5,8 @@ Accepted
 
 Amends ADR 0090 §2. Extends ADR 0057 (AIS collision alarms from target contexts), ADR 0058 (the collision profile follows vessel state) and ADR 0062 (marine radar targets from mayara-server).
 
+Amended by [ADR 0270](0270-helmcentral-drops-mayara-radar.md): the radar-only branch (Rule 19(d)) was removed with the radar integration.
+
 ## Context
 
 A collision card today says `EPICURUS I - CPA WARNING` and nothing about the encounter itself: not what kind of crossing this is, which side she's on, or what the rules ask of us. Working that out means going to the chart and doing it by eye, at exactly the moment the operator least wants to be looking down.

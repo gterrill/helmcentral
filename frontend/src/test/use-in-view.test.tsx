@@ -5,8 +5,8 @@
  * IntersectionObserver.js), so it never actually reports an intersection.
  * FakeIntersectionObserver below stands in for it: it records what it was
  * asked to observe and exposes a way to fire the callback by hand, the same
- * way FakeWebSocket in use-radar-echo-stream.test.ts stands in for a socket
- * that never really connects.
+ * way the setup file's inert WebSocket stands in for a socket that never
+ * really connects.
  */
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

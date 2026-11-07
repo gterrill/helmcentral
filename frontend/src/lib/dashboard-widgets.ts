@@ -10,7 +10,6 @@ export const DASHBOARD_WIDGET_IDS = [
   'tanks',
   'route',
   'nearby-vessels',
-  'radar-targets',
   'battery-power',
   'solar',
   'alternator',
@@ -70,7 +69,6 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'tanks': 'Tanks',
   'route': 'Route',
   'nearby-vessels': 'Nearby Vessels',
-  'radar-targets': 'Radar Targets',
   'battery-power': 'Battery & Power',
   'solar': 'Solar',
   'alternator': 'Alternator',
@@ -133,7 +131,6 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
   'forecast-conditions': 'weather',
   'anchor-watch': 'situational',
   'nearby-vessels': 'situational',
-  'radar-targets': 'situational',
   'battery-power': 'power',
   'solar': 'power',
   'alternator': 'power',
@@ -152,8 +149,8 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
  * Power's footer off before an operator ever touched a resize handle.
  *
  * Numbers are not a guess at "roughly enough room": fifteen of these
- * (everything except radar-targets and autopilot, which didn't exist when
- * it was written) come straight from `defaultDashboardLayout` in
+ * (everything except autopilot, which didn't exist when it was
+ * written) come straight from `defaultDashboardLayout` in
  * backend/dashboard_pages.go, the hand-tuned arrangement that already ships
  * as a genuinely fresh install's first page — the anchor-watch entry there
  * even carries its own comment explaining why H:10, not 8, is what the
@@ -175,12 +172,10 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
  * and wider than its own minimum rather than equal to it, same as every
  * other non-wall widget in this table.
  *
- * radar-targets and autopilot have no backend precedent (both shipped after
- * that layout was written) — sized here from their own tile content
- * (radar-targets mirrors nearby-vessels' target-row list; autopilot from its
- * heading/target readout, mode strip, three button grids and the hold-to-
- * confirm engage bar) rather than measured live — still needs a check
- * against the real radar and a live pilot.
+ * autopilot has no backend precedent (it shipped after that layout was
+ * written) — sized here from its own tile content (heading/target readout,
+ * mode strip, three button grids and the hold-to-confirm engage bar) rather
+ * than measured live — still needs a check against a live pilot.
  *
  * Using `Record`, not a lookup function with a default, makes a new widget
  * with no entry here a compile error instead of a silent 0x0.
@@ -195,10 +190,6 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   'tanks': { w: 4, h: 4 },
   'route': { w: 4, h: 4 },
   'nearby-vessels': { w: 4, h: 5 },
-  // Uncertain: no backend precedent (added after defaultDashboardLayout was
-  // written). Mirrors nearby-vessels' list-of-bordered-rows shape and size —
-  // check against the real radar in the browser.
-  'radar-targets': { w: 4, h: 5 },
   'battery-power': { w: 4, h: 12 },
   'solar': { w: 4, h: 6 },
   'alternator': { w: 4, h: 6 },

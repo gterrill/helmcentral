@@ -6,22 +6,11 @@ import "fmt"
 // COLREGS "situation + role" line the card shows (ADR 0098): what kind of
 // encounter this is, and what the rules ask of us in it. classifyEncounter
 // has no snapshot access -- every input is a plain number or string the
-// caller already read (signalKCollisionNotifications for AIS,
-// radarCollisionNotifications for radar once ADR 0062 §8 ships it) -- which
+// caller already read (signalKCollisionNotifications) -- which
 // is what makes it fully table-testable (collision_colregs_test.go).
 //
 // It names a rule and a role. It does not compute a heading, and it is not a
 // substitute for keeping a lookout (ADR 0098).
-
-// encounterKind is what produced this contact: an AIS target, which carries
-// a navigation status and her own reported course, or a radar/ARPA contact,
-// which carries neither.
-type encounterKind string
-
-const (
-	encounterKindAIS   encounterKind = "ais"
-	encounterKindRadar encounterKind = "radar"
-)
 
 // encounterRole is which side of a COLREGS rule we are on. Rule 14's
 // obligation falls on both vessels equally, which is neither give-way nor
@@ -79,11 +68,8 @@ const (
 )
 
 // encounterInputs is everything classifyEncounter needs. The caller reads
-// every field off a snapshot (AIS) or a radarTarget (radar); this file never
-// touches either.
+// every field off a snapshot; this file never touches one.
 type encounterInputs struct {
-	Kind encounterKind
-
 	// Own vessel, read once per call from the self tree.
 	OwnHeadingDeg float64
 	OwnHeadingOK  bool
@@ -124,16 +110,16 @@ type encounterInputs struct {
 	TargetSOGKn float64
 	TargetSOGOK bool
 
-	// TCPASeconds is read straight off the plugin's (AIS) or mayara's
-	// (radar) own figure, never recomputed here -- ADR 0057 decision 2 and
-	// ADR 0062 decision 2 already settled that those are trusted as given.
+	// TCPASeconds is read straight off the plugin's own figure,
+	// never recomputed here -- ADR 0057 decision 2 already settled that it is
+	// trusted as given.
 	// classifyEncounter only ever reads its sign.
 	TCPASeconds float64
 	TCPAOK      bool
 
 	// TargetNavState is the AIS navigation.state value, verbatim off the
-	// wire (e.g. "motoring", "restricted manouverability"). Empty for a
-	// radar contact, which carries no such field.
+	// wire (e.g. "motoring", "restricted manouverability"). Empty when the
+	// target reports none.
 	TargetNavState string
 
 	// TargetShipTypeID is design.aisShipType.id, carried through for
@@ -200,10 +186,6 @@ func classifyEncounter(in encounterInputs) (encounter, bool) {
 		side = "starboard"
 	}
 	positionClause := fmt.Sprintf("she is on our %s %s (%03d° rel)", side, bearingLabel(foldedRB), rb)
-
-	if in.Kind == encounterKindRadar {
-		return classifyRadarEncounter(situation, positionClause, weOvertakeHer, foldedRB), true
-	}
 
 	// Rule 13 first: the overtaking vessel gives way whatever the vessel
 	// types, so this is decided before either vessel's type is even looked
@@ -359,28 +341,6 @@ func classifyBothSailing(situation, positionClause string, rb int, ownWindAngleD
 	}
 
 	return encounter{Situation: situation, Role: encounterRoleNone, Text: situationOnlySentence(situation, positionClause)}
-}
-
-// classifyRadarEncounter handles a radar/ARPA contact: no AIS, no nav
-// status, no type on either side of the pairing, so none of Rules 12-18's
-// give-way/stand-on framework applies. Rule 19(d) is the rule that governs a
-// vessel detected only by radar, and it assigns no role at all -- just two
-// cautions about which way not to turn.
-func classifyRadarEncounter(situation, positionClause string, weOvertakeHer bool, foldedRB int) encounter {
-	var advisory string
-	switch {
-	case weOvertakeHer:
-		// Rule 19(d)(i) exempts a vessel being overtaken from the
-		// forward-of-the-beam caution.
-		advisory = "the alter-to-port caution doesn't bind for a vessel you're overtaking (Rule 19(d)(i))"
-	case foldedRB <= 90:
-		advisory = "avoid altering course to port for her (Rule 19(d)(i))"
-	default:
-		advisory = "avoid altering course towards her (Rule 19(d)(ii))"
-	}
-
-	text := fmt.Sprintf("%s, %s. If not in sight, %s.", situation, positionClause, advisory)
-	return encounter{Situation: situation, Role: encounterRoleNone, Rule: "19(d)", Text: text}
 }
 
 // ── vessel typing ────────────────────────────────────────────────────────

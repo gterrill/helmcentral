@@ -16,11 +16,6 @@ export type AnchorConfig = {
   minClearanceAtLowM: number
 }
 
-export type MayaraConfig = {
-  address: string
-  port: number
-}
-
 // ADR 0093 voice phase: the three Settings → Mate → Voice switches, read
 // live the same way distance units and the anchor geometry are (see
 // hooks/use-app-config.ts) so hooks/use-mate-voice.ts and MateSheet see a
@@ -100,14 +95,6 @@ export const fallbackAnchorConfig: AnchorConfig = {
   minClearanceAtLowM: 0.5,
 }
 
-// Blank address is the documented "not configured" state — see
-// settings-draft.ts's mayaraAddress default for why an empty string, not a
-// plausible-looking host, is what an unset radar server normalizes to.
-export const fallbackMayaraConfig: MayaraConfig = {
-  address: '',
-  port: 6502,
-}
-
 export const fallbackAssistantVoiceConfig: AssistantVoiceConfig = {
   voiceInput: false,
   readAloud: false,
@@ -127,10 +114,6 @@ export type AppConfigSettings = {
     gps_from_bow_m?: number
     loa_m?: number
     min_clearance_at_low_m?: number
-  }
-  mayara?: {
-    address?: string
-    port?: number
   }
   assistant?: {
     voice_input?: boolean
@@ -158,13 +141,6 @@ function positiveNumber(value: unknown, fallback: number): number {
 // so it must not be rejected the way positiveNumber rejects 0.
 function nonNegativeNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
-}
-
-// A radar-server port has an upper bound a generic positiveNumber() doesn't
-// enforce — out of range falls back to the default rather than propagating a
-// value that could never be a real TCP port.
-function validPort(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 65535 ? value : fallback
 }
 
 export function normalizeUiConfig(settings: AppConfigSettings | null | undefined): UiConfig {
@@ -205,22 +181,9 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
   }
 }
 
-// settings.yaml is hand-editable and the endpoint returns whatever it was
-// given, so a non-string address or a non-finite/out-of-range port falls
-// back to the default for that field alone rather than propagating to the
-// map — same per-field discipline as normalizeUiConfig/normalizeAnchorConfig.
-export function normalizeMayaraConfig(settings: AppConfigSettings | null | undefined): MayaraConfig {
-  const mayara = settings?.mayara
-
-  const address = typeof mayara?.address === 'string' ? mayara.address.trim() : fallbackMayaraConfig.address
-  const port = validPort(mayara?.port, fallbackMayaraConfig.port)
-
-  return { address, port }
-}
-
 // Each switch defaults false independently on a non-boolean value, rather
 // than falling the whole block back to defaults - same per-field discipline
-// as normalizeAnchorConfig/normalizeMayaraConfig above.
+// as normalizeAnchorConfig above.
 export function normalizeAssistantVoiceConfig(settings: AppConfigSettings | null | undefined): AssistantVoiceConfig {
   const assistant = settings?.assistant
 

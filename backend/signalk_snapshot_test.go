@@ -1378,8 +1378,7 @@ func TestReconcileNotificationsAppliesALivenessPreservingReplacementSilently(t *
 
 // ── radar target deltas (backend-perf-audit.md Tier 1 #3) ─────────────────────
 
-// radarTargetDelta builds a delta carrying one mayara ARPA target node, the
-// shape captured in testdata/mayara/target-delta.json.
+// radarTargetDelta builds a delta carrying one radar-plugin ARPA target node.
 func radarTargetDelta(radarID string, targetID int) signalKDelta {
 	return signalKDelta{
 		Context: "vessels.self",
@@ -1397,7 +1396,7 @@ func radarTargetDelta(radarID string, targetID int) signalKDelta {
 // Reproduces the growth backend-perf-audit.md Tier 1 #3 measured: mayara
 // target ids only climb and are replayed as nulls on every resubscribe, so
 // storing them cost every whole-tree copy in this file a little more every
-// week. radar_source.go's REST poller owns radar targets entirely; nothing
+// week. Nothing
 // reads one off the snapshot, so applyDelta must never let one reach the
 // tree or pathSeen at all.
 func TestApplyDeltaDropsRadarTargetNodesFromTheSnapshot(t *testing.T) {

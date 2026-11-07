@@ -11,6 +11,24 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **A radar guard-zone alarm can now be stopped with "Stop showing".** It used
+  to be one of the alarms that can never be hidden. It's now an ordinary alarm
+  from another device on your network. It still reads "Radar Guard Zone 1", but
+  it no longer shows the target's bearing and range. One Stop showing covers
+  that zone on every range of the radar. Collision, anchor and distress alarms
+  still can't be hidden.
+- **Radar targets, the radar picture on the anchor map and the Mayara settings
+  are gone.** Helmcentral no longer reads radar at all: the Radar Targets tile,
+  the radar overlay and its toggle on the Anchor Watch map, the radar triangles
+  on that map and the Mayara section in Settings have all been taken out. A
+  Radar Targets tile on a saved page disappears on its own, and a `mayara:`
+  block left in `settings.yaml` is dropped the next time you save Settings.
+  Collision warnings use AIS only. Mate no longer answers questions about radar
+  contacts. Your radar and mayara keep working on the boat, and anything else
+  that reads them is unaffected.
+
 ### Fixed
 
 - **Paying out the Catenary Method's Pay Out figure now reads Scope OK.** The

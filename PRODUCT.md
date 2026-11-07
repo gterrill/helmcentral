@@ -83,8 +83,7 @@ Shipped:
   minutes for up to 24 hours, every attempt logged.
 - A watchdog on the delta stream raises an alarm if the SignalK connection is
   lost. An external service can monitor a periodic off-boat heartbeat.
-- A Route tile that follows the route SignalK is navigating, autopilot control on SignalK's v2 API, ARPA radar targets, embedded weather
-  radar.
+- A Route tile that follows the route SignalK is navigating, autopilot control on SignalK's v2 API, embedded weather radar.
 - Tides, weather, waves and forecast warnings as sandboxed WASM plugins loaded
   from a directory (Extism/wazero, no filesystem or process access, per-plugin
   host allowlist). Adding a region means dropping in a `.wasm` file. Weather and

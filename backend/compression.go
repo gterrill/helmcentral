@@ -65,14 +65,6 @@ var noCompressRoutePatterns = map[string]bool{
 	// same reasoning, same skip.
 	"/api/assistant/conversations/:id/run": true,
 
-	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this
-	// one inbound upgrade; signalk_publish.go and signalk_stream.go dial
-	// *outbound* websockets to SignalK and are not HTTP routes at all).
-	// There is no HTTP response body to compress once the connection has
-	// been upgraded, and wrapping the writer risks breaking whatever
-	// hijack/upgrade path coder/websocket relies on.
-	"/api/radar/spokes": true, // radar_spoke_relay.go: radarSpokeRelayHandler
-
 	// Already-compressed raster tile proxy endpoint (tile_proxy.go): PNG/
 	// JPEG/WebP map tiles gain nothing from a second compression pass, and
 	// it would spend CPU on every proxied fetch for no smaller a response.
@@ -127,7 +119,7 @@ var noCompressExtensions = []string{
 }
 
 // compressionSkipper decides which requests the gzip middleware leaves
-// alone: SSE streams, the websocket upgrade, the tile/image/font proxy
+// alone: SSE streams, the tile/image/font proxy
 // endpoints, already-compressed static file extensions, and any request
 // that already carries a byte Range. A Range header is the defensive case:
 // a range refers to offsets into the original representation, and

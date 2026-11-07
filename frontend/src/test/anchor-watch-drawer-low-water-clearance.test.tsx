@@ -67,8 +67,6 @@ const baseProps = {
   isDarkTheme: false,
   showImageryLayer: false,
   onImageryToggle: () => undefined,
-  showRadarEcho: false,
-  onRadarEchoToggle: () => undefined,
   onAnchorReposition: () => undefined,
   onRadiusChange: async () => undefined,
   adjustAnchor: async () => undefined,

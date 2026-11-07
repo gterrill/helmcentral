@@ -6,6 +6,9 @@ Accepted (2026-10-03). Amends the bus-notification wording in
 [ADR 0038](0038-alarms.md). Uses the radar target store from
 [ADR 0062](0062-marine-radar-targets-from-mayara.md) and the live-field
 contract from [ADR 0098](0098-collision-cards-describe-the-encounter.md).
+[ADR 0270](0270-helmcentral-drops-mayara-radar.md) removed the radar
+guard-zone wording and figures described below; a guard zone is now worded
+like any other network alarm.
 
 ## Context
 

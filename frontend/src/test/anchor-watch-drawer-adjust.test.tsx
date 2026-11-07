@@ -55,8 +55,6 @@ const baseProps = {
   isDarkTheme: false,
   showImageryLayer: false,
   onImageryToggle: () => undefined,
-  showRadarEcho: false,
-  onRadarEchoToggle: () => undefined,
   onRadiusChange: async () => undefined,
   adjustAnchor: vi.fn(async () => undefined),
   onClearAnchor: () => undefined,

@@ -1,7 +1,7 @@
 # ADR 0062: Marine Radar Targets from mayara-server
 
 ## Status
-Accepted
+Superseded by [ADR 0270](0270-helmcentral-drops-mayara-radar.md): Helmcentral no longer reads radar targets. The record below is kept as written.
 
 Extends ADR 0057 (AIS collision alarms from target contexts) and ADR 0029 (SignalK discovery by unicast sweep, not mDNS).
 

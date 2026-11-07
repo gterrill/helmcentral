@@ -54,7 +54,10 @@ kept in `alarm-rules.json`, the rule file, with no date.
    `fire`, `sinking`, `flooding`, `collision`, `grounding`, `listing`, `adrift`,
    `piracy`, `abandon`), `navigation.anchor`, `navigation.closestApproach`
    (which includes the Collision Watch fault), received distress of any kind,
-   radar guard zones, and any alarm in the `emergency` state whatever its kind.
+   and any alarm in the `emergency` state whatever its kind. Radar guard
+   zones were on this list until [ADR 0270](0270-helmcentral-drops-mayara-radar.md)
+   dropped the radar integration; a guard zone is now an ordinary network
+   alarm and can be stopped.
    The server computes it and sends it on the alarm as `ignorable`; the card
    offers the action from that flag alone and shows nothing otherwise. `POST`
    answers 400 for a kind the function refuses. A kind that somehow reached the

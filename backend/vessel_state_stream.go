@@ -126,7 +126,6 @@ func telemetryEmitters() []*streamEmitter {
 		{event: "gauge-values", interval: 1 * time.Second, build: buildGaugeValuesPayload, gateKey: gaugeValuesGateKey},
 		{event: "electrical-state", interval: 5 * time.Second, build: buildElectricalStatePayload, gateKey: electricalStateGateKey},
 		{event: "nearby-vessels", interval: 5 * time.Second, build: buildNearbyVesselsPayload, gateKey: nearbyVesselsGateKey},
-		{event: "radar-targets", interval: 2 * time.Second, build: buildRadarTargetsPayload, gateKey: radarTargetsGateKey},
 		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload, gateKey: solarStateGateKey},
 		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload, gateKey: tanksStateGateKey},
 		// Unlike SSE comment keepalives, this is observable in EventSource

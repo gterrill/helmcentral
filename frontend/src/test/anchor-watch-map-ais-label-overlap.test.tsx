@@ -192,8 +192,8 @@ describe('AnchorWatchMap AIS label suppression wiring', () => {
   // Not every MapRef test double implements project() — only a live
   // maplibre map does (see the guard in anchor-watch-map.tsx's suppression
   // effect). Every other suite that mounts AnchorWatchMap with a lighter
-  // mock (anchor-watch-map-ui.test.tsx, anchor-watch-map-radar-markers.
-  // test.tsx, anchor-watch-map-stale-closure.test.tsx, anchor-watch-drawer-
+  // mock (anchor-watch-map-ui.test.tsx,
+  // anchor-watch-map-stale-closure.test.tsx, anchor-watch-drawer-
   // bow-offset.test.tsx, among others) omits project() entirely and still
   // renders every AIS label unsuppressed — that's the "degrades to today's
   // behaviour" case, already covered there rather than duplicated here.

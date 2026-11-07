@@ -2,11 +2,12 @@ package main
 
 import (
 	"testing"
-	"time"
 )
 
-func TestPresentNotificationGuardZone(t *testing.T) {
-	title, body := presentNotification("radar.fur6424A.guardZone.1", "Radar fur6424A guard zone 1: target 100000030 acquired", nil)
+// A radar guard-zone notification still arrives on the bus from Helmcam's
+// mayara plugin; Helmcentral words it without the radar's key or the target id.
+func TestPresentNotificationGuardZoneIsWordedWithoutDeviceKeys(t *testing.T) {
+	title, body := presentNotification("radar.fur6424A.guardZone.1", "Radar fur6424A guard zone 1: target 100000030 acquired")
 	if title != "Radar Guard Zone 1" {
 		t.Fatalf("title = %q", title)
 	}
@@ -15,27 +16,33 @@ func TestPresentNotificationGuardZone(t *testing.T) {
 	}
 }
 
-func TestPresentNotificationGuardZoneIgnoresRadarID(t *testing.T) {
-	a, _ := presentNotification("radar.fur6424A.guardZone.2", "x", nil)
-	b, _ := presentNotification("radar.fur6424B.guardZone.2", "x", nil)
-	if a != "Radar Guard Zone 2" || a != b {
-		t.Fatalf("titles = %q, %q", a, b)
+// A dual-range radar raises the same zone under each range's key. Both fold to
+// one kind, so one Stop showing hides them both and the Settings list names
+// the folded kind by the same title.
+func TestGuardZoneKindFoldsTheRadarKey(t *testing.T) {
+	for _, path := range []string{"notifications.radar.fur6424A.guardZone.1", "notifications.radar.fur6424B.guardZone.1"} {
+		if got := alarmKindOf(path); got != "radar.guardZone.1" {
+			t.Fatalf("alarmKindOf(%q) = %q, want radar.guardZone.1", path, got)
+		}
+	}
+	if title, _ := presentNotification("radar.guardZone.1", ""); title != "Radar Guard Zone 1" {
+		t.Fatalf("folded kind title = %q", title)
 	}
 }
 
-func TestPresentNotificationGuardZoneNamesTheRadarWhenTwoAreLive(t *testing.T) {
-	one := []radarInfo{{ID: "fur6424A", Name: "Bow radar"}}
-	two := []radarInfo{{ID: "fur6424A", Name: "Bow radar"}, {ID: "fur6424B", Name: "Mast radar"}}
-	if title, _ := presentNotification("radar.fur6424A.guardZone.1", "x", one); title != "Radar Guard Zone 1" {
-		t.Fatalf("one radar: title = %q", title)
+func TestPresentNotificationStatusKeepsPathAndRuleID(t *testing.T) {
+	status := alarmStatus{
+		RuleID:  "notifications:radar.fur6424A.guardZone.1",
+		Label:   "radar.fur6424A.guardZone.1",
+		Path:    "notifications.radar.fur6424A.guardZone.1",
+		Message: "Radar fur6424A guard zone 1: target 7 acquired",
 	}
-	if title, _ := presentNotification("radar.fur6424B.guardZone.1", "x", two); title != "Radar Guard Zone 1 · Mast radar" {
-		t.Fatalf("two radars: title = %q", title)
+	got := presentNotificationStatus(status)
+	if got.Label != "Radar Guard Zone 1" || got.Message != "Target in guard zone 1." {
+		t.Fatalf("got %q / %q", got.Label, got.Message)
 	}
-	// No operator name: no device key either.
-	unnamed := []radarInfo{{ID: "fur6424A"}, {ID: "fur6424B"}}
-	if title, _ := presentNotification("radar.fur6424B.guardZone.1", "x", unnamed); title != "Radar Guard Zone 1" {
-		t.Fatalf("unnamed: title = %q", title)
+	if got.Path != status.Path || got.RuleID != status.RuleID {
+		t.Fatalf("path/rule id changed: %+v", got)
 	}
 }
 
@@ -53,55 +60,10 @@ func TestPresentNotificationGeneric(t *testing.T) {
 		{"received.distress.dsc-whatever", "Distress relayed.", "Distress Received", "Distress relayed."},
 	}
 	for _, c := range cases {
-		title, body := presentNotification(c.path, c.message, nil)
+		title, body := presentNotification(c.path, c.message)
 		if title != c.title || body != c.body {
 			t.Errorf("%q/%q -> %q / %q, want %q / %q", c.path, c.message, title, body, c.title, c.body)
 		}
-	}
-}
-
-func TestRadarFiguresForGuardZone(t *testing.T) {
-	cpa := 540.0
-	tcpa := 120.0
-	targets := []radarTarget{
-		{RadarID: "fur6424A", TargetID: 100000030, BearingRad: 0.73, RangeM: 2593, CpaM: &cpa, TcpaSeconds: &tcpa},
-		{RadarID: "fur6424B", TargetID: 100000031, BearingRad: 1, RangeM: 10},
-	}
-	got := radarFiguresFor("radar.fur6424A.guardZone.1", "Radar fur6424A guard zone 1: target 100000030 acquired", targets)
-	if got == nil || got.BearingRad != 0.73 || got.RangeM != 2593 || got.CpaM == nil || *got.CpaM != 540 || got.TcpaSeconds == nil || *got.TcpaSeconds != 120 {
-		t.Fatalf("figures = %+v", got)
-	}
-}
-
-func TestRadarFiguresNilWhenTargetUnknown(t *testing.T) {
-	targets := []radarTarget{{RadarID: "fur6424A", TargetID: 5}}
-	if got := radarFiguresFor("radar.fur6424A.guardZone.1", "target 100000030 acquired", targets); got != nil {
-		t.Fatalf("expected nil, got %+v", got)
-	}
-	if got := radarFiguresFor("radar.fur6424A.guardZone.1", "no id here", targets); got != nil {
-		t.Fatalf("expected nil, got %+v", got)
-	}
-	if got := radarFiguresFor("navigation.anchor", "target 5", targets); got != nil {
-		t.Fatalf("expected nil for non-radar, got %+v", got)
-	}
-}
-
-func TestPresentNotificationStatusKeepsPathAndRuleID(t *testing.T) {
-	status := alarmStatus{
-		RuleID:  "notifications:radar.fur6424A.guardZone.1",
-		Label:   "radar.fur6424A.guardZone.1",
-		Path:    "notifications.radar.fur6424A.guardZone.1",
-		Message: "Radar fur6424A guard zone 1: target 7 acquired",
-	}
-	got := presentNotificationStatus(status, []radarTarget{{RadarID: "fur6424A", TargetID: 7, RangeM: 100}}, nil, time.Time{})
-	if got.Label != "Radar Guard Zone 1" || got.Message != "Target in guard zone 1." {
-		t.Fatalf("got %q / %q", got.Label, got.Message)
-	}
-	if got.Path != status.Path || got.RuleID != status.RuleID {
-		t.Fatalf("path/rule id changed: %+v", got)
-	}
-	if got.RadarTarget == nil || got.RadarTarget.RangeM != 100 {
-		t.Fatalf("radar target = %+v", got.RadarTarget)
 	}
 }
 
@@ -115,7 +77,7 @@ func TestPresentNotificationWrittenTitles(t *testing.T) {
 		{"received.distress.ais-2026-10-16T000510416Z-970028911", "AIS distress: SART active, 3.1 nautical miles south. Monitor channel 16.", "AIS Distress", "AIS distress: SART active, 3.1 nautical miles south. Monitor channel 16."},
 	}
 	for _, c := range cases {
-		title, body := presentNotification(c.path, c.message, nil)
+		title, body := presentNotification(c.path, c.message)
 		if title != c.title || body != c.body {
 			t.Errorf("%q/%q -> %q / %q, want %q / %q", c.path, c.message, title, body, c.title, c.body)
 		}
@@ -152,15 +114,6 @@ func TestPresentCollision(t *testing.T) {
 		if title != c.title || body != c.body {
 			t.Errorf("%q -> %q / %q, want %q / %q", c.message, title, body, c.title, c.body)
 		}
-	}
-}
-
-func TestNeedsRadarTargets(t *testing.T) {
-	if needsRadarTargets([]alarmStatus{{Label: "navigation.anchor"}}) {
-		t.Fatal("no guard zone live, should not read the radar store")
-	}
-	if !needsRadarTargets([]alarmStatus{{Label: "navigation.anchor"}, {Label: "radar.fur6424A.guardZone.1"}}) {
-		t.Fatal("guard zone live, should read the radar store")
 	}
 }
 

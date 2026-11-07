@@ -6,8 +6,7 @@ import { useDocumentUploads } from '@/hooks/use-document-uploads'
 // FakeXHR stands in for the real XMLHttpRequest (ADR 0106 F2): the hook
 // uses XHR rather than fetch specifically so upload progress is real
 // (fetch can't report it), so these tests drive that transport directly
-// rather than mocking fetch, mirroring use-radar-echo-stream.test.ts's
-// FakeWebSocket for the same reason - happy-dom's XMLHttpRequest would
+// rather than mocking fetch, for the same reason a socket is faked elsewhere - happy-dom's XMLHttpRequest would
 // otherwise attempt a real network call.
 class FakeXHR {
   static instances: FakeXHR[] = []

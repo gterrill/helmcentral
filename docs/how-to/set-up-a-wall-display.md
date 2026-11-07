@@ -40,7 +40,7 @@ you're really there for:
   rotation before you rely on it.
 
 The rest check that the browser is new enough and has real graphics hardware,
-which the chart and radar tiles need. A software renderer counts as a failure.
+which the chart tiles need. A software renderer counts as a failure.
 Other checks cover magnification without the layout jumping, and whether the
 screen can be told to stay awake.
 

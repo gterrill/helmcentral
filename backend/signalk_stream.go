@@ -80,8 +80,8 @@ const (
 	// coder/websocket defaults to a 32KiB message read limit, and going over it
 	// is a fatal connection error, not a dropped frame. SignalK replays its
 	// whole model as the initial state dump on every subscribe, and that dump
-	// includes one mayara frame carrying a null for each of the ~6,000 radar
-	// target ids it has ever seen: 402KB measured against the boat. Under the
+	// includes one radar-plugin frame carrying a null for each of the ~6,000
+	// radar target ids it has ever seen: 402KB measured against the boat. Under the
 	// default limit the client died on that frame every single time it
 	// connected, so run's reconnect loop below spun for three days against a
 	// stream it could never read past, and the whole dashboard sat frozen on

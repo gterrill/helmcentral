@@ -284,7 +284,6 @@ describe('App polled queries (ADR 0215 phase 6)', () => {
       emit('solar-state', { ...live.SOLAR, current_w: 1372.3 + step })
       emit('tanks-state', step === 0 ? live.TANKS : live.TANKS_AGES_ONLY)
       emit('nearby-vessels', step === 0 ? live.NEARBY : live.NEARBY_NEXT)
-      emit('radar-targets', live.RADAR)
       // Every poll at once: the empty prefix matches every key.
       await act(async () => { await invalidateQueries([]) })
     }

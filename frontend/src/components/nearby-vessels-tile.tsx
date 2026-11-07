@@ -106,7 +106,7 @@ type NearbyVesselsTileProps = {
    * Seconds since the nearby-vessels feed itself last reported, or null if
    * the upstream source publishes no age for it. Distinct from each
    * vessel's own `age_seconds` (how long since that contact was last seen) —
-   * this is whether the AIS/radar feed behind the whole list has died.
+   * this is whether the AIS feed behind the whole list has died.
    * `buildNearbyVesselsPayload` (backend/main.go) carries no such field
    * today, so this is always null until a source actually publishes one.
    */

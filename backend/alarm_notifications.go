@@ -124,16 +124,8 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 	// Last, once every step above that keys on Label (a bare path) is done:
 	// swap Label and Message for the operator wording. Path and RuleID keep
 	// the bus identity.
-	var targets []radarTarget
-	if globalRadarTargetStore != nil && needsRadarTargets(out) {
-		targets = globalRadarTargetStore.list(now)
-	}
-	var radars []radarInfo
-	if needsRadarTargets(out) {
-		radars = radarsFromSnapshot(snapshot, now)
-	}
 	for i := range out {
-		out[i] = presentNotificationStatus(out[i], targets, radars, now)
+		out[i] = presentNotificationStatus(out[i])
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -623,7 +615,7 @@ func actOnSignalKNotification(snapshot *signalKSnapshot, path, action string, no
 	if vesselID != "" {
 		status.Label, status.Message = presentCollision(status.Message)
 	} else {
-		status.Label, status.Message = presentNotification(status.Label, status.Message, radarsForPresentation(snapshot, status.Label, now))
+		status.Label, status.Message = presentNotification(status.Label, status.Message)
 	}
 	if status.State == alarmStateEmergency {
 		return alarmStatus{}, fmt.Errorf("%w: %s.%s", errNotificationEmergency, notificationsRoot, path)

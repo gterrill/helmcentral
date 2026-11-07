@@ -1141,6 +1141,51 @@ func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
 // rejected the whole PATCH for that page (same failure mode
 // TestDashboardPages_RetiredWidgetIDStrippedOnLoad covers for rode-scope),
 // until they landed here too.
+// A page whose hero was a retired tile loses the hero with the tile, so it
+// never names a widget the page no longer has.
+func TestDashboardPages_RetiredHeroClearedOnLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	pageID := uuid.NewString()
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{
+				ID:   pageID,
+				Name: "Radar",
+				Hero: "radar-targets",
+				Widgets: []dashboardLayoutItem{
+					{ID: "clock", X: 0, Y: 0, W: 4, H: 7},
+					{ID: "radar-targets", X: 4, Y: 0, W: 6, H: 4},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal saved pages: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write pages file: %v", err)
+	}
+
+	loadDashboardPagesForTest(t)
+
+	dashboardPagesMu.RLock()
+	page, ok := dashboardPagesState[pageID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected page to load")
+	}
+	if page.Hero != "" {
+		t.Fatalf("expected the retired hero cleared, got %q", page.Hero)
+	}
+}
+
 func TestDashboardPages_ForecastDaysAndSeaStateStrippedOnLoad(t *testing.T) {
 	tempDir := t.TempDir()
 	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
@@ -1723,18 +1768,31 @@ func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
 	}
 }
 
-// radar-targets has been a real frontend widget (frontend/src/lib/dashboard-widgets.ts,
-// rendered by App.tsx's renderWidget and constrained in dashboard-bento-grid.tsx)
-// since before this test existed, but was never added to this map - a latent
-// 400 on save for any page that placed it. The three wall-display tiles are new
-// in the same change that fixes that gap. (ADR 0125 merged the original four
-// into three: forecast-days and sea-state became one forecast-conditions tile.)
-func TestValidateDashboardWidgets_AcceptsWallDisplayAndRadarTargetsBuiltins(t *testing.T) {
-	for _, id := range []string{"radar-targets", "clock", "current-conditions", "forecast-conditions"} {
+// The three wall-display tiles are builtins (ADR 0125: forecast-days and
+// sea-state became one forecast-conditions tile).
+func TestValidateDashboardWidgets_AcceptsWallDisplayBuiltins(t *testing.T) {
+	for _, id := range []string{"clock", "current-conditions", "forecast-conditions"} {
 		widgets := []dashboardLayoutItem{{ID: id, X: 0, Y: 0, W: 4, H: 6}}
 		if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 			t.Errorf("expected builtin id %q to be accepted, got %q", id, msg)
 		}
+	}
+}
+
+// The Radar Targets tile went with the radar integration (ADR 0270). Like the
+// other retired ids it is no longer a valid tile, and a saved page that holds
+// one is stripped on load (ADR 0047), so a layout PATCH never meets it.
+func TestValidateDashboardWidgets_RadarTargetsIsRetired(t *testing.T) {
+	widgets := []dashboardLayoutItem{{ID: "radar-targets", X: 0, Y: 0, W: 4, H: 6}}
+	if msg := validateDashboardWidgets(widgets, ""); msg == "" {
+		t.Fatal("radar-targets must no longer be a valid tile id")
+	}
+	kept, changed := stripRetiredWidgets([]dashboardLayoutItem{
+		{ID: "clock", X: 0, Y: 0, W: 4, H: 6},
+		{ID: "radar-targets", X: 4, Y: 0, W: 4, H: 6},
+	})
+	if !changed || len(kept) != 1 || kept[0].ID != "clock" {
+		t.Fatalf("expected radar-targets to be stripped on load, got changed=%v kept=%+v", changed, kept)
 	}
 }
 

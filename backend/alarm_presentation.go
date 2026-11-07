@@ -2,27 +2,17 @@ package main
 
 import (
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 )
 
-// alarmRadarTarget is the live radar figures for the target behind a
-// guard-zone notification. Computed on every read from the radar target
-// store, never frozen at raise (same contract as alarmStatus.Encounter), and
-// absent whenever the target cannot be found rather than guessed.
-type alarmRadarTarget struct {
-	BearingRad  float64  `json:"bearing_rad"` // true, radians (ADR 0062)
-	RangeM      float64  `json:"range_m"`
-	CpaM        *float64 `json:"cpa_m,omitempty"`
-	TcpaSeconds *float64 `json:"tcpa_seconds,omitempty"`
-}
-
 var (
-	radarGuardZonePath = regexp.MustCompile(`^radar\.([^.]+)\.guardZone\.(\d+)$`)
-	radarTargetInText  = regexp.MustCompile(`(?i)\btarget (\d+)\b`)
+	// The radar plugin's guard-zone notification, still on the bus for Helmcam
+	// (ADR 0270). Worded without the radar's device key or the target id.
+	// The radar's key is optional so the folded ignore kind
+	// ("radar.guardZone.1", canonicalAlarmKind) words the same.
+	radarGuardZonePath = regexp.MustCompile(`^radar\.(?:[^.]+\.)?guardZone\.(\d+)$`)
 	camelBoundary      = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 	trailingPunct      = regexp.MustCompile(`[.!?]+$`)
 	// The AIS prioritizer's target message (ADR 0057): "<NAME> - CPA WARNING".
@@ -43,19 +33,9 @@ var writtenTitles = map[string]string{
 // name and the situation sentence an operator reads. The title is never a
 // path, device id or plugin name; the body never carries internal ids and is
 // empty when the producer said nothing beyond the path.
-func presentNotification(path, message string, radars []radarInfo) (title, body string) {
+func presentNotification(path, message string) (title, body string) {
 	if m := radarGuardZonePath.FindStringSubmatch(path); m != nil {
-		title = "Radar Guard Zone " + m[2]
-		// Name the radar only when more than one is live, and then by the
-		// operator's own name for it, never its device key.
-		if len(radars) > 1 {
-			for _, r := range radars {
-				if r.ID == m[1] && r.Name != "" {
-					title += " · " + r.Name
-				}
-			}
-		}
-		return title, "Target in guard zone " + m[2] + "."
+		return "Radar Guard Zone " + m[1], "Target in guard zone " + m[1] + "."
 	}
 
 	message = strings.TrimSpace(message)
@@ -86,15 +66,6 @@ func presentNotification(path, message string, radars []radarInfo) (title, body 
 	return title, sentence(message, path)
 }
 
-// radarsForPresentation is the live radar list, read only when path is a
-// guard zone so other notifications skip the tree walk.
-func radarsForPresentation(snapshot *signalKSnapshot, path string, now time.Time) []radarInfo {
-	if !radarGuardZonePath.MatchString(path) {
-		return nil
-	}
-	return radarsFromSnapshot(snapshot, now)
-}
-
 // presentCollision words an AIS target's collision alarm. It is always a
 // collision risk; the vessel's name is lifted out of the plugin's
 // "<NAME> - CPA WARNING" when the message has that shape, and otherwise the
@@ -105,17 +76,6 @@ func presentCollision(message string) (title, body string) {
 		return "Collision Risk", m[1] + collisionBodySuffix
 	}
 	return "Collision Risk", sentence(message, "navigation.closestApproach")
-}
-
-// needsRadarTargets reports whether any status is a guard zone, so the radar
-// store is only copied when there is a figure to look up.
-func needsRadarTargets(statuses []alarmStatus) bool {
-	for _, status := range statuses {
-		if radarGuardZonePath.MatchString(status.Label) {
-			return true
-		}
-	}
-	return false
 }
 
 // sentence is the producer's message with its punctuation normalised to one
@@ -143,35 +103,12 @@ func humanisePath(path string) string {
 	return strings.Join(words, " ")
 }
 
-// radarFiguresFor finds the live radar target behind a guard-zone
-// notification. nil unless the path is a guard zone, the message names a
-// target id and the store currently holds that target.
-func radarFiguresFor(path, message string, targets []radarTarget) *alarmRadarTarget {
-	pm := radarGuardZonePath.FindStringSubmatch(path)
-	tm := radarTargetInText.FindStringSubmatch(message)
-	if pm == nil || tm == nil {
-		return nil
-	}
-	id, err := strconv.ParseUint(tm[1], 10, 64)
-	if err != nil {
-		return nil
-	}
-	key := radarTargetKey(pm[1], id)
-	for _, t := range targets {
-		if radarTargetKey(t.RadarID, t.TargetID) == key {
-			return &alarmRadarTarget{BearingRad: t.BearingRad, RangeM: t.RangeM, CpaM: t.CpaM, TcpaSeconds: t.TcpaSeconds}
-		}
-	}
-	return nil
-}
-
 // presentNotificationStatus rewrites a bus notification status (whose Label
 // is still the bare path) for display. Path and RuleID are untouched, so
 // everything keyed on them keeps working. Apply it once, last.
-func presentNotificationStatus(status alarmStatus, targets []radarTarget, radars []radarInfo, _ time.Time) alarmStatus {
+func presentNotificationStatus(status alarmStatus) alarmStatus {
 	path := status.Label
-	status.RadarTarget = radarFiguresFor(path, status.Message, targets)
-	status.Label, status.Message = presentNotification(path, status.Message, radars)
+	status.Label, status.Message = presentNotification(path, status.Message)
 	return status
 }
 

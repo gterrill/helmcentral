@@ -27,7 +27,6 @@ var validDashboardWidgetIDs = map[string]bool{
 	"tanks":               true,
 	"route":               true,
 	"nearby-vessels":      true,
-	"radar-targets":       true,
 	"battery-power":       true,
 	"solar":               true,
 	"alternator":          true,
@@ -51,6 +50,8 @@ var retiredDashboardWidgetIDs = map[string]bool{
 	"rode-scope":    true,
 	"forecast-days": true,
 	"sea-state":     true,
+	// The Radar Targets tile left with the radar integration (ADR 0270).
+	"radar-targets": true,
 }
 
 const dashboardLayoutMaxCoord = 1000
@@ -899,6 +900,10 @@ func loadDashboardPages() {
 				}
 				if kept, changed := stripRetiredWidgets(p.Widgets); changed {
 					p.Widgets = kept
+					anyStripped = true
+				}
+				if retiredDashboardWidgetIDs[p.Hero] {
+					p.Hero = ""
 					anyStripped = true
 				}
 				dashboardPagesState[p.ID] = p

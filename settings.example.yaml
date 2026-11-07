@@ -88,22 +88,6 @@ influxdb:
   org: my-org
   bucket: SignalK_Data
 
-# ARPA radar targets need no configuration here. They appear automatically
-# when the mayara SignalK plugin (github.com/MarineYachtRadar/
-# mayara-server-signalk-plugin) is installed on the SignalK server above and
-# mayara-server itself is running against the radar. Helmcentral reads both
-# through the SignalK connection it already has, the same way it reads every
-# other sensor.
-#
-# The live radar picture overlay on the anchor watch map is different: the
-# SignalK plugin proxies mayara's REST API but not its spoke stream (the
-# 8192-spoke sweep a live picture needs), so the overlay talks to
-# mayara-server directly and needs its address here. Leave it blank to leave
-# the overlay off.
-mayara:
-  address: ""
-  port: 6502
-
 # The Overpass server used for place names (the position tile), Mate's place
 # search, and the Nearby tile's osm-overpass plugin is that plugin's own
 # setting now (Settings -> Widgets -> Nearby -> osm-overpass's gear icon),

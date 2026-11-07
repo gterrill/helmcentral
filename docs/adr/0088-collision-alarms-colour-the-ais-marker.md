@@ -5,6 +5,8 @@ Accepted
 
 Extends ADR 0057 (AIS collision alarms) and ADR 0062 (radar targets).
 
+Amended by [ADR 0270](0270-helmcentral-drops-mayara-radar.md): the radar triangle markers are gone; only AIS markers turn red.
+
 ## Context
 
 ADR 0057 got the AIS collision-proximity alarm onto the alarm engine: a target's `notifications.navigation.closestApproach` now surfaces as a rule-shaped alarm, gated against a stale position and stripped of the self-context sensor fault it used to carry. What that ADR deliberately left open was how the alarm reaches the display the operator actually watches when a target is closing. The alarm card names the vessel, which is enough to raise the alert. It is not enough to point at the target on the chart, and the anchor-watch map is where that check happens, against the plotter and against the water.

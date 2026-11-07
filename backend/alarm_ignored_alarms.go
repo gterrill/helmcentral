@@ -57,7 +57,7 @@ func alarmKindIgnorable(kind, state string) bool {
 			return false
 		}
 	}
-	if strings.HasPrefix(kind, distressReceivedPrefix) || radarGuardZonePath.MatchString(kind) {
+	if strings.HasPrefix(kind, distressReceivedPrefix) {
 		return false
 	}
 	return true
@@ -65,9 +65,14 @@ func alarmKindIgnorable(kind, state string) bool {
 
 // canonicalAlarmKind folds the plotter's route alarms, which a device may raise
 // as either "perpendicularPassed" or "navigation.perpendicularPassed" and which
-// are worded as one alarm, to the bare spelling. Every other kind, the
-// navigation safety kinds among them, is left as it is.
+// are worded as one alarm, to the bare spelling. A radar guard zone drops the
+// radar's key ("radar.guardZone.1"), so a dual-range radar's two ranges are
+// one alarm to stop showing. Every other kind, the navigation safety kinds
+// among them, is left as it is.
 func canonicalAlarmKind(kind string) string {
+	if m := radarGuardZonePath.FindStringSubmatch(kind); m != nil {
+		return "radar.guardZone." + m[1]
+	}
 	bare := strings.TrimPrefix(kind, "navigation.")
 	if _, ok := navigationNotificationBodies[bare]; ok {
 		return bare
@@ -98,7 +103,7 @@ func ignoredAlarmsResponse() map[string]any {
 	entries := globalIgnoreStore.entries(ignoredAlarmsList)
 	out := make([]ignoredAlarmEntry, 0, len(entries))
 	for _, e := range entries {
-		title, _ := presentNotification(e.Key, "", nil)
+		title, _ := presentNotification(e.Key, "")
 		out = append(out, ignoredAlarmEntry{Kind: e.Key, Title: title, IgnoredAt: e.IgnoredAt.Format(time.RFC3339)})
 	}
 	return map[string]any{"alarms": out}
@@ -151,7 +156,7 @@ func ignoredAlarmTitles() []string {
 	entries := globalIgnoreStore.entries(ignoredAlarmsList)
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		title, _ := presentNotification(e.Key, "", nil)
+		title, _ := presentNotification(e.Key, "")
 		out = append(out, title)
 	}
 	return out

@@ -96,15 +96,13 @@ if (typeof globalThis.EventSource === 'undefined') {
 }
 
 // Unlike jsdom's WebSocket, which never actually opens a socket in this
-// setup, happy-dom's WebSocket dials a real connection. use-radar-echo-
-// stream.ts opens one as soon as a radar tile mounts, so any test that
-// mounts one incidentally (a full dashboard render, say) made a real,
+// setup, happy-dom's WebSocket dials a real connection. Anything that
+// opens one incidentally (a full dashboard render, say) made a real,
 // slow, non-deterministic outbound connection attempt to a host nothing in
 // the test run is listening on. Force it off (not guarded on `undefined`,
 // since happy-dom's is a real function) to an inert stub that never
-// connects. use-radar-echo-stream.test.ts installs its own fake via
-// vi.stubGlobal('WebSocket', ...) before each of its tests, which replaces
-// this one.
+// connects. A test that needs a socket installs its own fake via
+// vi.stubGlobal('WebSocket', ...), which replaces this one.
 if (typeof globalThis.WebSocket === 'function') {
   globalThis.WebSocket = class {
     static readonly CONNECTING = 0

@@ -208,43 +208,37 @@ func TestBuildSettingsPayload_SurfacesInfluxdbSectionFromDisk(t *testing.T) {
 	}
 }
 
-// TestSettingsPayloadRoundTripsMayaraBlock drives a real write/read cycle
-// through updateSettingsHandler (postSettings, settings_validation_test.go),
-// the same path the Settings UI uses, mirroring the Influxdb round trip
-// above. Mayara has no address on SignalK's own connection (fetchMayaraTargets,
-// radar_source.go) — it needs its own, used only by the radar picture
-// overlay — so this pins that address/port survive the save, and that
-// saving them does not clobber the rest of the file.
-func TestSettingsPayloadRoundTripsMayaraBlock(t *testing.T) {
+// A settings.yaml written before the radar integration was dropped (ADR 0270)
+// still carries a mayara block. It must load without complaint and the next
+// save must leave it out, with the rest of the file untouched.
+func TestSettingsSaveDropsTheRetiredMayaraBlock(t *testing.T) {
 	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	body, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	withMayara := append(body, []byte("mayara:\n    address: 192.168.50.81\n    port: 6502\n")...)
+	if err := os.WriteFile(settingsPath, withMayara, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	if _, err := readSettings(settingsPath); err != nil {
+		t.Fatalf("a retired mayara block must not stop settings loading: %v", err)
+	}
 
-	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
-		p.Mayara.Address = "192.168.50.81"
-		p.Mayara.Port = 6502
-	})
+	code, resp := postSettings(t, settingsPath, func(p *settingsPayload) {})
 	if code != http.StatusOK {
-		t.Fatalf("expected 200, got %d (body %v)", code, body)
+		t.Fatalf("expected 200, got %d (body %v)", code, resp)
 	}
 
 	saved, err := readSettings(settingsPath)
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
-	payload := buildSettingsPayload(saved)
-	if payload.Mayara.Address != "192.168.50.81" {
-		t.Fatalf("expected mayara.address to round-trip, got %q", payload.Mayara.Address)
+	if _, stale := saved["mayara"]; stale {
+		t.Fatalf("expected the save to drop the mayara block, got %v", saved["mayara"])
 	}
-	if payload.Mayara.Port != 6502 {
-		t.Fatalf("expected mayara.port to round-trip, got %d", payload.Mayara.Port)
-	}
-
-	// Saving the mayara block must not disturb unrelated fields already on
-	// disk (writeTestSettings, settings_validation_test.go).
-	if payload.Boat.Model != "Test Boat" {
+	if payload := buildSettingsPayload(saved); payload.Boat.Model != "Test Boat" {
 		t.Fatalf("expected boat.model to survive untouched, got %q", payload.Boat.Model)
-	}
-	if payload.Boat.VesselPrefix != "M/V" {
-		t.Fatalf("expected boat.vessel_prefix to survive untouched, got %q", payload.Boat.VesselPrefix)
 	}
 	address, port := persistedSignalK(t, settingsPath)
 	if address != "203.0.113.1" || port != 3000 {
@@ -252,63 +246,8 @@ func TestSettingsPayloadRoundTripsMayaraBlock(t *testing.T) {
 	}
 }
 
-// TestNormalizeSettingsPayloadDefaultsMayaraPort pins the port clamp (0 or
-// out of range -> 6502, mayara's default REST port) and, separately, that a
-// blank address is left blank rather than defaulting to a host the way
-// signalk.address defaults to defaultSignalKAddress — there is no sane
-// address to guess for a radar, and a guessed one would silently point the
-// overlay at the wrong box.
-func TestNormalizeSettingsPayloadDefaultsMayaraPort(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		port int
-		want int
-	}{
-		{"zero clamps to 6502", 0, 6502},
-		{"negative clamps to 6502", -1, 6502},
-		{"out of range clamps to 6502", 99999, 6502},
-		{"a valid port passes through unchanged", 6502, 6502},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := settingsPayload{}
-			req.Mayara.Port = tc.port
-			if got := normalizeSettingsPayload(req).Mayara.Port; got != tc.want {
-				t.Fatalf("port %d: got %d, want %d", tc.port, got, tc.want)
-			}
-		})
-	}
-
-	blank := normalizeSettingsPayload(settingsPayload{})
-	if blank.Mayara.Address != "" {
-		t.Fatalf("expected a blank mayara address to stay blank, got %q", blank.Mayara.Address)
-	}
-}
-
-// TestValidateSettingsChangeDoesNotProbeMayara pins the deliberate absence of
-// a mayara probe: a radar that is switched off, or a mayara box that is
-// simply unreachable, must never block an unrelated settings save the way an
-// unreachable new SignalK address does (validateSettingsChange above). Both
-// addresses are TEST-NET-3 (RFC 5737, see hostPort/postSettings above) so
-// this fails fast and without depending on the test machine's network if
-// anyone adds a probe here later.
-func TestValidateSettingsChangeDoesNotProbeMayara(t *testing.T) {
-	current := settingsPayload{}
-	current.Signalk.Address = "203.0.113.1"
-	current.Signalk.Port = 3000
-	current.Mayara.Address = "203.0.113.2"
-	current.Mayara.Port = 6502
-
-	next := current
-	next.Mayara.Address = "203.0.113.3"
-	next.Mayara.Port = 6503
-
-	if invalid := validateSettingsChange(current, next); invalid != nil {
-		t.Fatalf("a mayara address/port change must never be probed, got %+v", invalid)
-	}
-}
-
 // TestSettingsPayloadRoundTripsAssistantBlock drives a real write/read cycle
-// through updateSettingsHandler, mirroring the mayara round trip above. It
+// through updateSettingsHandler, mirroring the Influxdb round trip above. It
 // also proves multi-line operator standing notes survive a YAML round trip
 // (yaml.v3 emits a block scalar for a string containing newlines, and
 // readSettings must decode it back to the exact same string).
@@ -377,7 +316,7 @@ func TestNormalizeSettingsPayloadDefaultsAssistantModel(t *testing.T) {
 }
 
 // TestBuildSettingsPayload_SurfacesBlankAssistantModelFromDisk pins the
-// mayara-style unconditional assign: a model explicitly saved as "" on disk
+// influxdb-style unconditional assign: a model explicitly saved as "" on disk
 // must surface as "", not be mistaken for "absent" and papered over with
 // defaultAssistantModel.
 func TestBuildSettingsPayload_SurfacesBlankAssistantModelFromDisk(t *testing.T) {
@@ -863,7 +802,7 @@ func TestBuildSettingsPayload_AssistantBlockPredatesEmbeddingModelKeyDefaults(t 
 }
 
 // TestBuildSettingsPayload_SurfacesEmbeddingDimensionsFromDisk mirrors
-// TestNormalizeSettingsPayloadDefaultsMayaraPort's clamp table for the
+// the Influxdb clamp tables for the
 // read-from-disk path: a valid on-disk value survives, an invalid or absent
 // one falls back to the default, and an above-cap value is capped rather
 // than defaulted.

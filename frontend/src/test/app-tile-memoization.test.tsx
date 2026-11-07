@@ -166,7 +166,7 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
 
 // use-vessel-state is not mocked either: the vessel-state ticks below run
 // through its real store. Nor are the phase 5 stores (autopilot, electrical,
-// solar, tanks, nearby vessels, radar targets).
+// solar, tanks, nearby vessels).
 
 
 
@@ -584,9 +584,8 @@ describe('App stream tiles (ADR 0215 phase 5)', () => {
     { id: 'solar', x: 8, y: 6, w: 4, h: 6 },
     { id: 'tanks', x: 0, y: 12, w: 4, h: 6 },
     { id: 'nearby-vessels', x: 4, y: 12, w: 4, h: 6 },
-    { id: 'radar-targets', x: 8, y: 12, w: 4, h: 6 },
   ]
-  const TITLES = ['Autopilot', 'Battery & Power', 'Alternators', 'Generator', 'Solar', 'Tanks', 'Nearby Vessels', 'Radar Targets']
+  const TITLES = ['Autopilot', 'Battery & Power', 'Alternators', 'Generator', 'Solar', 'Tanks', 'Nearby Vessels']
 
   function counts(): Record<string, number> {
     return Object.fromEntries(TITLES.map((title) => [title, rendersOf(title)]))
@@ -640,12 +639,6 @@ describe('App stream tiles (ADR 0215 phase 5)', () => {
       event: 'nearby-vessels', first: live.NEARBY,
       repeat: { ...live.NEARBY, datetime: '2026-10-27T04:20:13Z', last_update_age_s: 83 },
       change: live.NEARBY_NEXT, shows: 'Nearby Vessels',
-    },
-    {
-      event: 'radar-targets', first: live.RADAR,
-      repeat: { ...live.RADAR, datetime: '2026-10-27T04:20:15Z', targets: live.RADAR.targets.map((t) => ({ ...t, age_seconds: 3.2 })) },
-      change: { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1800 })) },
-      shows: 'Radar Targets',
     },
   ]
 
@@ -729,13 +722,12 @@ describe('App stream tiles (ADR 0215 phase 5)', () => {
       expect(within(tile('Alternators')).getByText('--')).toBeInTheDocument()
     })
 
-    it('the battery, generator, tanks, nearby and radar tiles claim no reading', async () => {
+    it('the battery, generator, tanks and nearby tiles claim no reading', async () => {
       await mountStreams()
       expect(within(tile('Battery & Power')).getAllByText('—').length).toBeGreaterThan(0)
       expect(within(tile('Generator')).getByText('--')).toBeInTheDocument()
       expect(screen.queryByText('No tank data available')).toBeNull()
       expect(screen.queryByText(/No vessels/)).toBeNull()
-      expect(within(tile('Radar Targets')).getByText('--')).toBeInTheDocument()
     })
   })
 })
@@ -753,7 +745,6 @@ describe('App shell across every stream (ADR 0215 phases 1 to 5)', () => {
       { id: 'generator', x: 8, y: 20, w: 4, h: 4 },
       { id: 'solar', x: 0, y: 26, w: 4, h: 6 },
       { id: 'tanks', x: 4, y: 26, w: 4, h: 6 },
-      { id: 'radar-targets', x: 8, y: 26, w: 4, h: 6 },
     ]
     await mountApp()
     // The two things the shell does draw from: the navigation state picks the
@@ -772,7 +763,6 @@ describe('App shell across every stream (ADR 0215 phases 1 to 5)', () => {
       emit('solar-state', { ...live.SOLAR, current_w: 1372.3 + step })
       emit('tanks-state', step === 0 ? live.TANKS : live.TANKS_AGES_ONLY)
       emit('nearby-vessels', step === 0 ? live.NEARBY : live.NEARBY_NEXT)
-      emit('radar-targets', { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1852 - step })) })
       landWatch({ ...SET_WATCH, radius_meters: 30 + step })
     }
 
