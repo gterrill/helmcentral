@@ -127,6 +127,33 @@ You can log repairs and improvements that aren't tied to a scheduled rule the
 same way, from an item's own page, at any time. See
 [Log a service](../how-to/log-a-service.md).
 
+## Open jobs
+
+A rule repeats, so it never gets finished. A problem you've found and haven't
+fixed yet is different: "shower pump leaks at the outlet" is open until you
+fix it or decide you won't. **Open jobs** is where those go, so they don't live
+only in your head.
+
+- **Where it is:** The **Open jobs** group sits at the top of **Inventory →
+  Maintenance**, above Overdue, and on the page of the item the problem is on.
+  The Maintenance list's system filter applies to it.
+- **What a job holds:** A title, the item if there is one, notes, photos, and an
+  optional **Before** date for when you want it fixed by. Each row shows how
+  many days it has been open, such as "12 d", and the Before date, which is
+  marked once it has passed.
+- **Where it came from:** A job says whether you added it by hand or Mate did.
+  When it came from somewhere with a page of its own, the row links back to it.
+- **Done:** **Done** opens the same form as completing a rule: the date, the
+  hours off the gauge, what you did, who did it, the cost and any parts. Saving
+  writes one line to the service log, as a repair unless you choose improvement
+  or maintenance, and closes the job. The job's photos go onto that line.
+- **Drop:** **Drop** closes a job without a log line, for something that fixed
+  itself or isn't worth doing. You can say why, and you don't have to.
+- **Closed jobs:** A closed job leaves the group. **Show closed** lists it again
+  with how it ended.
+
+See [Keep track of an open job](../how-to/keep-track-of-an-open-job.md).
+
 ## Acknowledging a job you can't do yet
 
 A rule waiting on a part or a haul-out doesn't need to keep nagging.
@@ -144,8 +171,8 @@ completion form links straight to it, in case anything needs updating.
 
 ## The list
 
-**Inventory → Maintenance** shows every rule grouped by status: overdue first,
-then due soon, then the rest. You can filter by system, so you can check the
+**Inventory → Maintenance** starts with the open jobs, then shows every rule
+grouped by status: overdue first, then due soon, then the rest. You can filter by system, so you can check the
 electrical side of the boat without scrolling past the rest. Each item's own
 page also shows its rules and recent service history, alongside where the hours
 come from. Jobs from the item's profile and jobs added for that item alone are
@@ -181,6 +208,10 @@ treat "hours unknown" as a reason to read the meter yourself. For gear with no
 hour meter, Mate quotes a figure you typed as read by hand, with the date you
 read it, and never as a live reading.
 
+Mate can read the open jobs too. Ask it what's still broken on the boat, or
+what you've been meaning to fix on the generator. It lists each job with how
+long it has been open.
+
 Mate can also propose changes to the schedule. You can ask it to add a rule,
 change an interval, set what was last done, log a job as done or acknowledge a
 rule. It answers with a card listing each change in one line, such as
@@ -194,6 +225,9 @@ rule. It answers with a card listing each change in one line, such as
 - **A rule edited since:** If a rule was edited after Mate wrote the card,
   Apply refuses and says so, and you should ask Mate to redo it.
 
+You can also say "add the shower pump to the jobs list". Mate answers with a
+card for the job, and tapping **Apply** adds it to Open jobs.
+
 Hours on the card are what the gauge shows, the same as the forms here. See
 [Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
 
@@ -201,11 +235,15 @@ Hours on the card are what the gauge shows, the same as the forms here. See
 
 - **Not an alarm:** A rule going overdue doesn't raise a notification the way a
   system warning does. Maintenance is the record and the list, not a reminder
-  that follows you around the boat.
+  that follows you around the boat. An open job is the same: it never raises an
+  alarm and is never counted with the alarms.
+- **Not a task board:** An open job has no assignee, no comments and no
+  priority. It's a list of what's wrong, oldest first.
 - **Not stock control:** Parts used against a job are recorded for the history,
   and quantities on hand aren't adjusted.
 - **Not something Mate changes on its own:** Mate can propose additions and
-  edits, but only your tap on **Apply** makes them. It can't delete a rule or a
-  log entry, edit an existing log entry, add photos or parts, record a meter
+  edits, but only your tap on **Apply** makes them. It can add an open job, but
+  it can't close, drop or change one. It also can't delete a rule or a log
+  entry, edit an existing log entry, add photos or parts, record a meter
   replacement or attach a procedure note. You do those here, in Inventory →
   Maintenance.

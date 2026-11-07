@@ -22,6 +22,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Open jobs: a list of problems you know about and haven't fixed.** "Shower
+  pump leaks at the outlet" now has somewhere to go. The **Open jobs** group
+  sits at the top of Inventory → Maintenance, above Overdue, and on the page of
+  the item the problem is on. Each job shows how many days it has been open and
+  the date you want it fixed by, if you set one. **Done** writes one line to
+  the service log and closes the job. **Drop** closes it with no log line.
+  Mate can read the list, and you can ask it to add a job, which you then
+  confirm with **Apply**. A job never raises an alarm.
 - **Hours you read by hand now count for gear with no hour meter.** A watermaker
   filter change, or any rule on an item without an engine or generator meter,
   used to show "Hours unknown" for ever. Tap **Log a reading** on the item's page

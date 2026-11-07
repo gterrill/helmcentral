@@ -11,6 +11,7 @@ import { MaintenanceAckDialog, MaintenanceLastDoneDialog } from '@/components/in
 import { HandHoursDialog } from '@/components/inventory/maintenance-hand-hours-dialog'
 import { MaintenanceCompleteDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
+import { OpenJobsGroup } from '@/components/inventory/open-jobs-group'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { EQUIPMENT_SYSTEMS, EQUIPMENT_SYSTEM_LABELS, type EquipmentSystem } from '@/hooks/use-inventory'
@@ -124,6 +125,8 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
           )}
         </div>
       </div>
+
+      <OpenJobsGroup system={system} onOpenEquipment={onOpenEquipment} canWrite={canWrite} />
 
       {scheduleErrors.length > 0 && (
         <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

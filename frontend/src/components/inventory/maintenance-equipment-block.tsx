@@ -9,6 +9,7 @@ import { HandHoursDialog } from '@/components/inventory/maintenance-hand-hours-d
 import { MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { MaintenanceRuleDialog } from '@/components/inventory/maintenance-rule-dialog'
 import { OverrideMarker } from '@/components/inventory/maintenance-provenance'
+import { OpenJobsGroup } from '@/components/inventory/open-jobs-group'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { formatAppLocation } from '@/lib/app-location'
@@ -180,6 +181,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
 
   return (
     <div className="flex flex-col gap-4">
+      <OpenJobsGroup equipmentId={equipmentId} canWrite={canWrite} />
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           {rulesLoading ? 'Loading...' : `${rules.length} rule${rules.length === 1 ? '' : 's'}`}

@@ -306,10 +306,33 @@ type assistantMaintenanceRuleRow struct {
 	Link             string                  `json:"link"`
 }
 
+// assistantOpenJobRow is one open job (ADR 0269): a known problem not fixed
+// yet. It is not a rule, has no status and is never counted in Total.
+type assistantOpenJobRow struct {
+	ID            string  `json:"id"`
+	EquipmentID   *string `json:"equipment_id"`
+	EquipmentName string  `json:"equipment_name,omitempty"`
+	Title         string  `json:"title"`
+	Notes         string  `json:"notes,omitempty"`
+	OpenedOn      string  `json:"opened_on"`
+	// AgeDays is Today minus OpenedOn.
+	AgeDays  int    `json:"age_days"`
+	BeforeOn string `json:"before_on,omitempty"`
+	// Source is where it came from: manual, mate, watch_finding, alarm or
+	// checklist_line; SourceLabel names the alarm, finding or checklist line.
+	Source      string `json:"source"`
+	SourceLabel string `json:"source_label,omitempty"`
+	Link        string `json:"link"`
+}
+
 type assistantListMaintenanceResult struct {
 	// Today is the date every status was computed against.
 	Today string                        `json:"today"`
 	Rules []assistantMaintenanceRuleRow `json:"rules"`
+	// OpenJobs are the open jobs for the same item or system filter. They are
+	// left out when a status filter is given, because a job has no status of
+	// that kind.
+	OpenJobs []assistantOpenJobRow `json:"open_jobs"`
 	// ScheduleErrors lists items whose equipment profile could not supply its
 	// jobs. Those items' profile jobs are absent from Rules; say so rather
 	// than reading the gap as "nothing to do".
@@ -424,10 +447,33 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rank(rows[i].Status) < rank(rows[j].Status) })
 
-	result := assistantListMaintenanceResult{Today: today.Format("2006-01-02"), Rules: rows, ScheduleErrors: sched.Errors, Total: len(rows)}
+	openJobs := []assistantOpenJobRow{}
+	if statusFilter == "" {
+		jobs, err := store.ListOpenJobs(openJobFilter{EquipmentID: equipmentID, System: system, IncludeStored: args.IncludeStored})
+		if err != nil {
+			return "", fmt.Errorf("list_maintenance: %w", err)
+		}
+		for _, j := range jobs {
+			if args.CalendarOnly && j.EquipmentID != nil {
+				continue
+			}
+			openJobs = append(openJobs, assistantOpenJobRow{
+				ID: j.ID, EquipmentID: j.EquipmentID, EquipmentName: j.EquipmentName, Title: j.Title, Notes: j.Notes,
+				OpenedOn: j.OpenedOn, AgeDays: openJobAgeDays(j.OpenedOn, today), BeforeOn: j.BeforeOn,
+				Source: j.Source, SourceLabel: j.SourceLabel, Link: assistantMaintenanceLink,
+			})
+		}
+	}
+
+	result := assistantListMaintenanceResult{Today: today.Format("2006-01-02"), Rules: rows, OpenJobs: openJobs, ScheduleErrors: sched.Errors, Total: len(rows)}
 	shrink := func() bool {
 		if len(result.Rules) <= 1 {
-			return false
+			if len(result.OpenJobs) <= 1 {
+				return false
+			}
+			result.OpenJobs = result.OpenJobs[:len(result.OpenJobs)-1]
+			result.Truncated = true
+			return true
 		}
 		result.Rules = result.Rules[:len(result.Rules)-1]
 		result.Truncated = true
@@ -646,7 +692,9 @@ var mateToolListMaintenance = mateTool{
 			"operator when a job falls due, quote next_due_meter_reading (what their meter will read) " +
 			"with remaining_hours; last_done_engine_hours is cumulative engine hours, which equals the " +
 			"meter only if no meter replacement is recorded. Stored items are left out unless " +
-			"include_stored is true.",
+			"include_stored is true. open_jobs lists the open jobs: known problems not fixed yet (\"shower pump " +
+			"leaks at the outlet\"), oldest first, each with its age_days and any before_on date. A job is not a " +
+			"rule and not an alarm, has no status and is not in total; a status filter leaves open_jobs out.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

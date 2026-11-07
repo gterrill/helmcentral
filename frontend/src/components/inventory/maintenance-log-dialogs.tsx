@@ -52,7 +52,7 @@ interface PartsEditorProps {
   items: EquipmentItem[]
 }
 
-function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
+export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
   const [pickerId, setPickerId] = useState('')
   const [quantity, setQuantity] = useState('1')
 
@@ -438,7 +438,7 @@ interface MaintenanceLogEntryDialogProps {
   onDelete?: (id: string) => Promise<void>
 }
 
-const KIND_LABELS: Record<MaintenanceLogKind, string> = {
+export const KIND_LABELS: Record<MaintenanceLogKind, string> = {
   maintenance: 'Maintenance',
   repair: 'Repair',
   improvement: 'Improvement',

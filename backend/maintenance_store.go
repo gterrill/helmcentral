@@ -669,39 +669,42 @@ func insertMaintenanceLogPartsTx(tx *sql.Tx, logEntryID string, parts []maintena
 func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
 	var created maintenanceLogEntry
 	err := s.RunTx("create log entry", func(tx *sql.Tx, now time.Time) error {
-		if in.EquipmentID != nil {
-			ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, *in.EquipmentID)
-			if err != nil {
-				return fmt.Errorf("create log entry: check equipment: %w", err)
-			}
-			if !ok {
-				return errEquipmentNotFound
-			}
-		}
-
-		id := uuid.NewString()
-		if _, err := tx.Exec(`
-			INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at)
-			VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, nullableString(in.EquipmentID), in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
-		); err != nil {
-			return fmt.Errorf("create log entry: %w", err)
-		}
-		if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
-			return err
-		}
-
 		var err error
-		created, err = maintenanceLogEntryByID(tx, id)
-		if err != nil {
-			return err
-		}
-		return nil
+		created, err = insertMaintenanceLogEntryTx(tx, now, in)
+		return err
 	})
 	if err != nil {
 		return maintenanceLogEntry{}, err
 	}
 	return created, nil
+}
+
+// insertMaintenanceLogEntryTx is the standalone insert inside a transaction
+// the caller owns: CreateMaintenanceLogEntry runs it alone, and completing an
+// open job (open_jobs.go) runs it with the job's own close.
+func insertMaintenanceLogEntryTx(tx *sql.Tx, now time.Time, in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
+	if in.EquipmentID != nil {
+		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, *in.EquipmentID)
+		if err != nil {
+			return maintenanceLogEntry{}, fmt.Errorf("create log entry: check equipment: %w", err)
+		}
+		if !ok {
+			return maintenanceLogEntry{}, errEquipmentNotFound
+		}
+	}
+
+	id := uuid.NewString()
+	if _, err := tx.Exec(`
+		INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at)
+		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, nullableString(in.EquipmentID), in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
+	); err != nil {
+		return maintenanceLogEntry{}, fmt.Errorf("create log entry: %w", err)
+	}
+	if err := insertMaintenanceLogPartsTx(tx, id, in.Parts); err != nil {
+		return maintenanceLogEntry{}, err
+	}
+	return maintenanceLogEntryByID(tx, id)
 }
 
 // UpdateMaintenanceLogEntry replaces id's editable fields (performed_at,

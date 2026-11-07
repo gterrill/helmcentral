@@ -8,6 +8,7 @@ import { WATCHES_PATH } from '@/hooks/use-watches'
 import { MATE_MEMORIES_PATH } from '@/hooks/use-mate-memories'
 import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
 import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
+import { openJobRecordApplied } from '@/hooks/use-open-jobs'
 import { documentRecordApplied } from '@/hooks/use-documents'
 import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
 
@@ -33,6 +34,7 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   deck: decksRecordApplied,
   maintenance_rule: maintenanceRulesRecordApplied,
   maintenance_log: maintenanceLogRecordApplied,
+  open_job: openJobRecordApplied,
   vessel_particulars: vesselParticularsRecordApplied,
   document: (op) => documentRecordApplied(op.id),
 }
