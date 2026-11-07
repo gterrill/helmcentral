@@ -171,10 +171,9 @@ draws by `line-sort-key` on the band so the newest sits on top.
   which look the same on the dark chart, so it showed no fade. The span is at
   least an hour: a boat seen for minutes would otherwise fade its first minutes
   to clear, and its bands would jump a large share of the track at each step
-  of the clock below. They are worked
-  out against a clock that moves in five minute steps, so the map redraws them
-  once at each mark, with one timeout to the next, and not when each point
-  crosses a band edge.
+  of the clock below. They are worked out against a clock that moves in five
+  minute steps, so the map redraws them once at each mark, with one timeout to
+  the next, and not when each point crosses a band edge.
 - **Own swing trail:** The same bands span the whole stay, from dim yellow to
   bright yellow, solid at the old end. This also corrects the old gradient, which
   ran light yellow to darker amber and so read newest as dimmest.
