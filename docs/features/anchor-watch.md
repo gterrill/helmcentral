@@ -123,8 +123,11 @@ SignalK server for them.
 - **Gaps:** There's no line where a target left the circle and came back, or
   where more than 15 minutes passed between two reports. That includes any time
   Helmcentral itself was stopped.
-- **Brightness follows age:** The newest part of a track is solid amber and the
-  oldest fades towards clear, in a few steps across the 24 hours that are kept.
+- **Brightness follows age:** The last few minutes of a track are solid amber
+  and the oldest part fades towards clear. The fade runs in a few steps from
+  when the boat was first seen to now, so a boat seen for only a few hours
+  still fades. It spreads over at least an hour and never over more than the
+  24 hours that are kept. A boat that stops reporting fades as its track ages.
   The newest part is drawn on top. Age is counted on the boat's clock, so a
   screen with the wrong time still shows the same trails as the others.
 - **Starting and ending:** The tracks start empty when you drop the anchor and

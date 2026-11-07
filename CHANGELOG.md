@@ -28,6 +28,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Collision warnings use AIS only. Mate no longer answers questions about radar
   contacts. Your radar and mayara keep working on the boat, and anything else
   that reads them is unaffected.
+- **Other boats' trails on the Anchor Watch map now fade over the time you've
+  seen them.** They used to fade over a fixed 24 hours, so a boat seen for only
+  a few hours looked solid all the way along. Now they fade the way your own
+  trail does, from when the boat was first seen to now. The fade spreads over
+  at least an hour and never more than 24 hours.
 
 ### Fixed
 

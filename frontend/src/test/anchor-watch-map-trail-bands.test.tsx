@@ -144,6 +144,18 @@ describe('AnchorWatchMap AIS trails', () => {
     expect(Math.min(...bands)).toBeLessThan(TRAIL_BANDS - 1)
   })
 
+  it('fades a track only hours old across every band, as the own trail does', () => {
+    const points = [8 * HOUR, 6.5 * HOUR, 5 * HOUR, 4 * HOUR, 2.5 * HOUR, 10 * MIN].map((age, n) => aisPoint(age, -25.29 - n * 0.001))
+    renderMap({ aisVessels: [vessel('111111111', 'ALPHA')], aisTrails: tracksOf(points) })
+    expect(bandsOf('ais-trails').sort()).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('keeps a track only minutes old in the newest bands rather than fading its first minutes to clear', () => {
+    const points = [20 * MIN, 15 * MIN, 10 * MIN, 5 * MIN, 1 * MIN].map((age, n) => aisPoint(age, -25.29 - n * 0.001))
+    renderMap({ aisVessels: [vessel('111111111', 'ALPHA')], aisTrails: tracksOf(points) })
+    expect(Math.min(...bandsOf('ais-trails'))).toBeGreaterThanOrEqual(TRAIL_BANDS - 2)
+  })
+
   it('draws the newest on top by the line sort key alone, and uses the fading amber with no line gradient', () => {
     renderMap({
       aisVessels: [vessel('111111111', 'ALPHA')],

@@ -165,10 +165,16 @@ over `line-progress` faded with distance travelled. The map now splits each
 trail into five age bands (`lib/trail-age-bands.ts`), colours each band, and
 draws by `line-sort-key` on the band so the newest sits on top.
 
-- **AIS:** The bands span 24 hours, from nearly clear amber to solid amber. They
-  are worked out against a clock that moves in five minute steps, so the map
-  redraws them once at each mark, with one timeout to the next, and not when each
-  point crosses a band edge.
+- **AIS:** The bands span each track's own length, from its oldest point to now
+  and no more than 24 hours, from nearly clear amber to solid amber. A fixed 24
+  hours left a track only hours old in the top two bands, 1.0 and 0.78 opacity,
+  which look the same on the dark chart, so it showed no fade. The span is at
+  least an hour: a boat seen for minutes would otherwise fade its first minutes
+  to clear, and its bands would jump a large share of the track at each step
+  of the clock below. They are worked
+  out against a clock that moves in five minute steps, so the map redraws them
+  once at each mark, with one timeout to the next, and not when each point
+  crosses a band edge.
 - **Own swing trail:** The same bands span the whole stay, from dim yellow to
   bright yellow, solid at the old end. This also corrects the old gradient, which
   ran light yellow to darker amber and so read newest as dimmest.
