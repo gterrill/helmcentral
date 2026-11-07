@@ -140,6 +140,10 @@ every group that would otherwise say the same thing under a different heading. T
 going forward: a fact that varies by method belongs in that method's group; a fact about a
 shared input belongs once, in the footer, next to the control it gates.
 
+> Amended by [ADR 0271](0271-rode-planner-shows-only-what-anchoring-needs.md): the LOA
+> provenance line and the "Applies the … swing" caption above the button are gone, and the
+> button now reads "Set alarm to N". The "not configured" warning stays in the footer.
+
 Testing the tile against a calm night, 3 kt of wind, turned up a case the catenary method
 had no defence against: it recommended "Rode 7 m · 0.6:1". The physics was right for the
 modelled load, but a rode paid out that short pulls the anchor upward rather than holding

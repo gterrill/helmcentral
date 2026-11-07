@@ -2,7 +2,6 @@ import type { HullType } from '@/config/app-config'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
-import { radiusDisplayValue } from '@/lib/anchor-adjust'
 import { feetToMeters, toDisplayDistance } from '@/lib/units'
 
 /**
@@ -209,7 +208,7 @@ export function scopeRatio(rodeM: number, depthFromHawseM: number): number | nul
  * The ok / low (>=85%) / insufficient / unknown ladder, lifted verbatim from
  * the old tile. "unknown" — not a fail — whenever either scope is unavailable,
  * so a missing input can never render as the red "insufficient" state. The
- * planner's badge goes through deployedScopeStatus, which checks the shown Pay
+ * planner's badge goes through deployedScopeBadge, which checks the shown Pay
  * Out figure before this ladder.
  */
 export function scopeStatus(currentScope: number | null, recommendedScope: number | null): ScopeStatus {
@@ -229,18 +228,29 @@ export function payOutDisplayValue(rodeM: number, isImperial: boolean): number {
 }
 
 /**
- * The scope badge for a deployed rode against the plan. A rode at least the
- * Pay Out figure as shown reads OK, so paying out a figure rounded down from
- * 55.3 m isn't called Low. The comparison is in display units rather than
- * metres, so a figure typed in feet and stored as metres can't come back a hair
- * short; the 1e-6 rounding absorbs the float noise of that round trip. Anything
- * short of the shown figure goes through the scopeStatus ladder.
+ * The scope badge for a deployed rode against one method's figure: null with no
+ * rode out or no figure to judge against; otherwise "ok" when the rode reaches
+ * the Pay Out figure as shown, else how short it is. The gap is in display
+ * units rather than metres, so a figure typed in feet and stored as metres
+ * can't come back a hair short; the 1e-6 absorbs the float noise of that round
+ * trip. A paid-out rode of 55 against a shown 55 is ok even when the raw
+ * recommendation was 55.3. Short goes through the scopeStatus ladder, and the
+ * shortfall rounds up so paying out that many clears the badge.
  */
-export function deployedScopeStatus(rodeDeployedM: number, plan: RodePlan | null, isImperial: boolean): ScopeStatus {
-  if (plan === null) return 'unknown'
-  const deployed = Math.round(toDisplayDistance(rodeDeployedM, isImperial) * 1e6) / 1e6
-  if (deployed >= payOutDisplayValue(plan.recommendedRodeM, isImperial)) return 'ok'
-  return scopeStatus(scopeRatio(rodeDeployedM, plan.depthFromHawseM), plan.recommendedScope)
+export type DeployedScopeBadge = { status: 'ok' } | { status: 'low' | 'insufficient'; shortfall: number }
+
+export function deployedScopeBadge(
+  rodeDeployedM: number,
+  result: RodeMethodResult | null,
+  isImperial: boolean,
+): DeployedScopeBadge | null {
+  if (rodeDeployedM <= 0 || result === null || result.unavailableReason || result.depthFromHawseM === undefined) return null
+  const gap = payOutDisplayValue(result.recommendedRodeM, isImperial) - toDisplayDistance(rodeDeployedM, isImperial)
+  if (gap <= 1e-6) return { status: 'ok' }
+  const status = scopeStatus(scopeRatio(rodeDeployedM, result.depthFromHawseM), result.scopeRatio)
+  if (status === 'low' || status === 'insufficient') return { status, shortfall: Math.ceil(gap - 1e-6) }
+  // Short of the shown figure yet at or above the recommended scope: a hair short.
+  return { status: 'low', shortfall: 1 }
 }
 
 /**
@@ -299,7 +309,8 @@ export interface RodeMethodResult {
   label: string
   recommendedRodeM: number
   scopeRatio: number
-  note: string
+  /** True when the minimum scope ratio set the figure, not the method's own calculation. Absent when unavailable. */
+  scopeFloorApplied?: boolean
   /** a = H / w (m) from the plan's catenary model, the load every rode is drawn with; null when there is no plan. */
   catenaryParameterM: number | null
   /** What to tell the operator when this method's rode is too short for that load; null for a method that can't be. */
@@ -314,17 +325,6 @@ export interface RodeMethodResult {
 
 /** The caller builds the plan once and shares it, so every method sees the same load. */
 export type RodeMethod = (input: RodePlanInput, plan?: RodePlan | null) => RodeMethodResult | null
-
-/**
- * The depth + bow-height clause shared by both methods' notes. Scope is
- * computed against depth-from-hawse (depth + bow roller height), not depth
- * alone, so the caption has to name both terms of that sum rather than just
- * the depth half of it.
- */
-function depthAndBowHeightNote(planningDepthM: number, tideCorrected: boolean, bowRollerHeightM: number): string {
-  const depthLabel = tideCorrected ? '(tide-corrected)' : '(sounder only)'
-  return `Depth ${planningDepthM.toFixed(1)} m ${depthLabel} + ${bowRollerHeightM.toFixed(1)} m bow height`
-}
 
 /**
  * Shared by both methods' unavailable-depth branch: anchored with nothing
@@ -350,30 +350,26 @@ export const catenaryMethod: RodeMethod = (input, plan = buildRodePlan(input)) =
   if (plan === null) {
     return {
       id: 'catenary',
-      label: 'Catenary Method',
+      label: 'Catenary',
       recommendedRodeM: 0,
       scopeRatio: 0,
-      note: '',
       catenaryParameterM: null,
       liftWarning: null,
       unavailableReason: catenaryUnavailableReason(input),
     }
   }
 
-  const depthNote = depthAndBowHeightNote(plan.planningDepthM, plan.tideCorrected, input.bowRollerHeightM)
-  const floorNote = plan.scopeFloorApplied ? ` · ${MIN_SCOPE_RATIO}:1 minimum` : ''
-
   return {
     id: 'catenary',
-    label: 'Catenary Method',
+    label: 'Catenary',
     recommendedRodeM: plan.recommendedRodeM,
     scopeRatio: plan.recommendedScope,
+    scopeFloorApplied: plan.scopeFloorApplied,
     depthFromHawseM: plan.depthFromHawseM,
     tideCorrected: plan.tideCorrected,
     catenaryParameterM: plan.catenaryParameterM,
     // Its rode is at least the suspended length that just touches the anchor, so it can't lift.
     liftWarning: null,
-    note: `${depthNote} · Wind ${Math.round(input.windKts ?? 0)} kts · Chain ${input.chainSizeMm}mm · Hull ${input.hullType.replace('_', ' ')}${floorNote}`,
   }
 }
 
@@ -402,10 +398,9 @@ export const ratioMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
   if (input.depth === null || input.windKts === null || input.bowRollerHeightM <= 0) {
     return {
       id: 'ratio',
-      label: 'Ratio Method',
+      label: 'Ratio',
       recommendedRodeM: 0,
       scopeRatio: 0,
-      note: '',
       catenaryParameterM: null,
       liftWarning: null,
       unavailableReason: ratioUnavailableReason(input),
@@ -418,12 +413,9 @@ export const ratioMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
   const depthFromHawseM = planningDepthM + input.bowRollerHeightM
   const recommendedRodeM = depthFromHawseM * ratio
 
-  const depthNote = depthAndBowHeightNote(planningDepthM, tideCorrected, input.bowRollerHeightM)
-  const ratioNote = ratio === RATIO_HIGH ? `${ratio}:1 (wind ≥ ${RATIO_WIND_THRESHOLD_KTS} kts)` : `${ratio}:1`
-
   return {
     id: 'ratio',
-    label: 'Ratio Method',
+    label: 'Ratio',
     recommendedRodeM,
     scopeRatio: ratio,
     depthFromHawseM,
@@ -431,20 +423,11 @@ export const ratioMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
     // The load is the plan's, whatever the ratio rule says: only the rode differs.
     catenaryParameterM: plan?.catenaryParameterM ?? null,
     liftWarning: 'The ratio rule is too short for the planned conditions: the anchor would be lifted off the bottom.',
-    note: `${depthNote} · Wind ${Math.round(input.windKts)} kts · ${ratioNote}`,
   }
 }
 
 /** The array the planner component maps over, one SidebarGroup per result (ADR 0047 §2a). */
 export const rodeMethods: RodeMethod[] = [catenaryMethod, ratioMethod]
-
-export type LoaSource = 'settings' | 'signalk'
-
-export interface ResolvedLoa {
-  /** null when neither source has a usable figure — never a silent zero. */
-  loaM: number | null
-  source: LoaSource | null
-}
 
 /**
  * LOA precedence (ADR 0047), extracted from anchor-rode-planner.tsx so the
@@ -457,10 +440,10 @@ export interface ResolvedLoa {
  * swing circle or a radius ceiling from a zero LOA would report a circle
  * smaller than the boat.
  */
-export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number | null): ResolvedLoa {
-  if (settingsLoaM > 0) return { loaM: settingsLoaM, source: 'settings' }
-  if (vesselLengthOverallM !== null && vesselLengthOverallM > 0) return { loaM: vesselLengthOverallM, source: 'signalk' }
-  return { loaM: null, source: null }
+export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number | null): number | null {
+  if (settingsLoaM > 0) return settingsLoaM
+  if (vesselLengthOverallM !== null && vesselLengthOverallM > 0) return vesselLengthOverallM
+  return null
 }
 
 /**
@@ -472,31 +455,6 @@ export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number |
  */
 export function computeSwingRadiusM(recommendedRodeM: number, bowOffsetM: number, loaM: number | null): number | null {
   return loaM !== null ? recommendedRodeM + bowOffsetM + loaM : null
-}
-
-/**
- * "54 m rode + 8 m GPS to bow + 16 m boat": the parts of a swing radius in
- * whole display units. The total is rounded as the Swing figure is, and the
- * boat term takes up the rounding, so the line always adds up to Swing. The GPS
- * to bow term is left out when it rounds to zero.
- */
-export function swingBreakdownText(
-  rodeM: number,
-  bowOffsetM: number,
-  loaM: number,
-  isImperial: boolean,
-  bowOffsetCount: 1 | 2 = 1,
-): string {
-  const unit = isImperial ? 'ft' : 'm'
-  const total = radiusDisplayValue(rodeM + bowOffsetM + loaM, isImperial)
-  const rodePart = radiusDisplayValue(rodeM, isImperial)
-  // bowOffsetM is the effective offset (every count included); show one share of it.
-  const bowOne = radiusDisplayValue(bowOffsetM / bowOffsetCount, isImperial)
-  const bowPart = bowOne * bowOffsetCount
-  const boatPart = total - rodePart - bowPart
-  const bowLabel = bowOffsetCount === 2 ? `2 × ${bowOne}` : `${bowOne}`
-  const bow = bowPart > 0 ? ` + ${bowLabel} ${unit} GPS to bow` : ''
-  return `${rodePart} ${unit} rode${bow} + ${boatPart} ${unit} boat`
 }
 
 /**

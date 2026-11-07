@@ -99,10 +99,15 @@ describe('AnchorWatchDrawer swing includes the GPS to bow offset', () => {
     localStorage.clear()
   })
 
-  function swingLine(): string {
+  // Swing less the Pay Out figure and the 10 m boat is the GPS-to-bow part.
+  // Both figures are rounded to whole metres, so it is good to within 1 m.
+  function bowPart(): number {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
     fireEvent.click(screen.getByRole('tab', { name: /ratio/i }))
-    return within(screen.getByRole('tabpanel')).getByText(/ rode/).textContent ?? ''
+    const panel = within(screen.getByRole('tabpanel'))
+    const swing = Number(panel.getByText(/^Swing \d/).textContent?.match(/\d+/)?.[0])
+    const payOut = Number(panel.getByText('Pay Out').nextElementSibling?.textContent?.match(/\d+/)?.[0])
+    return swing - payOut - 10
   }
 
   it.each([
@@ -111,13 +116,13 @@ describe('AnchorWatchDrawer swing includes the GPS to bow offset', () => {
   ])('uses the configured offset once %s', (_name, extra) => {
     render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied={false} bowOffsetM={0} {...extra} />)
 
-    expect(swingLine()).toMatch(/ rode \+ 2 m GPS to bow \+ 10 m boat$/)
+    expect(Math.abs(bowPart() - 2)).toBeLessThanOrEqual(1)
   })
 
   it('uses the configured offset twice after a Drop with no heading, the mark being at the antenna', () => {
     render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied={false} bowOffsetM={0} bowOffsetReason="heading unavailable" />)
 
-    expect(swingLine()).toMatch(/ rode \+ 2 × 2 m GPS to bow \+ 10 m boat$/)
+    expect(Math.abs(bowPart() - 4)).toBeLessThanOrEqual(1)
   })
 
   it('uses the offset twice after a Drop made before the distance was set, once it is set later', () => {
@@ -131,13 +136,13 @@ describe('AnchorWatchDrawer swing includes the GPS to bow offset', () => {
       />,
     )
 
-    expect(swingLine()).toMatch(/ rode \+ 2 × 2 m GPS to bow \+ 10 m boat$/)
+    expect(Math.abs(bowPart() - 4)).toBeLessThanOrEqual(1)
   })
 
   it('keeps the offset the Drop applied', () => {
     render(<AnchorWatchDrawer {...baseProps} {...wind} bowOffsetApplied bowOffsetM={8} bowOffsetReason="" />)
 
-    expect(swingLine()).toMatch(/ rode \+ 8 m GPS to bow \+ 10 m boat$/)
+    expect(Math.abs(bowPart() - 8)).toBeLessThanOrEqual(1)
   })
 })
 

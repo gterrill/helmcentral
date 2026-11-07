@@ -13,6 +13,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The rode planner now shows only what you need at the moment of anchoring.**
+  It answers how much to pay out, whether what's out is enough, and what to set
+  the alarm to. The line under each tab that repeated your depth, wind and
+  chain, the sum under Swing, the legend under the drawing and the line saying
+  where the boat length came from are gone. The badge under the rode you have
+  out now reads "Enough rode" or "Short by" and how much more to pay out, in
+  place of Scope OK, Low or Insufficient. It judges against the method on the tab
+  you have open, and shows nothing when there's no recommendation yet. The **Apply as alarm radius** button is now **Set alarm
+  to** and the radius, for example "Set alarm to 65 m". The Depth caption reads
+  "From the bow roller, at high tide" or "From the bow roller, no tide station",
+  and the tabs are called Catenary and
+  Ratio. The warning that asks you to set the boat length is still there.
 - **A radar guard-zone alarm can now be stopped with "Stop showing".** It used
   to be one of the alarms that can never be hidden. It's now an ordinary alarm
   from another device on your network. It still reads "Radar Guard Zone 1", but

@@ -178,8 +178,7 @@ If you've set how far the antenna is from the bow in Settings → Anchor Watch,
 **Drop** puts the anchor mark ahead of the GPS by that distance, in the direction
 the boat is heading. The rode planner's Swing figure includes the distance
 whenever you've set it. That's because the antenna can swing out to the rode plus
-that distance from the anchor. Under the Swing figure the planner spells it out, for
-example "54 m rode + 8 m GPS to bow + 16 m boat".
+that distance from the anchor.
 
 The distance is a length, not a direction, so Swing counts it even when the mark
 itself hasn't been moved forward:
@@ -190,8 +189,7 @@ itself hasn't been moved forward:
   "Anchor mark is at the GPS, not the bow. There was no heading at Drop." With a
   map on screen they add "Move it with Adjust", because moving the mark with
   Adjust needs the map. The anchor is really one distance ahead of that mark, so
-  Swing counts the distance twice, for example "84 m rode + 2 × 10 m GPS to bow +
-  18 m boat". If you set the distance in Settings after such a Drop, Swing uses it.
+  Swing counts the distance twice. If you set the distance in Settings after such a Drop, Swing uses it.
 - **A mark you've placed by hand in Adjust:** Helmcentral doesn't move the mark
   again, but Swing still includes the distance.
 
@@ -340,17 +338,34 @@ The rode planner is a sidebar on the anchor watch page. It helps you plan
 pay-out and swing radius against tide-corrected depth and gust-seeded wind. You
 can use it before lowering the anchor.
 
+It answers three questions and leaves the working out off the screen:
+
+- **How much to pay out:** the Pay Out figure, with the scope and the swing
+  radius beneath it. When the Catenary figure would fall below 3:1, the planner
+  uses 3:1 and the scope reads "3.0:1 minimum".
+- **Is what's out enough:** once you've entered the rode you have out, a badge
+  reads "Enough rode", or "Short by" and how much more to pay out. It judges
+  against the method on the tab you have open. With no rode entered, or that
+  method unavailable, there's no badge.
+- **What to set the alarm to:** the **Set alarm to** button at the foot shows the
+  radius it will set, for example "Set alarm to 65 m", using the swing of the
+  method you chose in Settings. It reads "Set alarm" and stays greyed out
+  until there's a figure to set, for example when the boat length is missing.
+
 Its Depth field shows the figure the plan is computed against: the depth at this
 spot at the next high tide, plus your bow roller height above the water. That's
 the depth the chain has to reach on a rising tide, not just the depth under the
-keel right now. Type over it to plan against a different figure. The field
+keel right now. Under the field a short line says the figure is measured from the
+bow roller, and either "at high tide" or "no tide station" when Helmcentral has
+no tide to add. With nothing entered it asks you to type it from the bow roller. Type over it to plan against a
+different figure. The field
 won't accept a number that leaves no water at all once the tide and bow height
 are backed out, and it says so rather than saving it.
 
 Under each method's Pay Out figure the planner draws the rode side on. You see
 the bottom, the water, your bow and the chain running up to the bow roller. It's
-drawn to one scale, so a long rode looks long. The Catenary Method draws the
-curve its load would give. The Ratio Method is drawn with that same load, so
+drawn to one scale, so a long rode looks long. The Catenary tab draws the
+curve its load would give. The Ratio tab is drawn with that same load, so
 you can see what its rule of thumb does in the planned conditions.
 
 A warning shows when a rode is too short to lie on the bottom under the planned

@@ -4,11 +4,11 @@ import {
   buildRodePlan,
   catenaryMethod,
   computeSwingRadiusM,
-  deployedScopeStatus,
-  swingBreakdownText,
+  deployedScopeBadge,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
   planningFigureM,
+  payOutDisplayValue,
   ratioMethod,
   rawDepthFromPlanningFigureM,
   resolveLoaM,
@@ -25,6 +25,7 @@ import {
 } from '@/lib/rode-plan'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
+import { feetToMeters } from '@/lib/units'
 
 // Mirrors the unexported constant of the same name in rode-plan.ts — used
 // only to build test fixtures in feet from a figure in metres, never to
@@ -484,45 +485,66 @@ describe('scopeStatus', () => {
 })
 
 // ---------------------------------------------------------------------------
-// deployedScopeStatus — the deployed rode against the Pay Out figure as shown
+// deployedScopeBadge — the deployed rode against the Pay Out figure as shown
 // ---------------------------------------------------------------------------
-describe('deployedScopeStatus', () => {
-  const real = buildRodePlan(baseInput)!
-  // Keeps the plan consistent: the scope follows the overridden rode.
-  const planWith = (recommendedRodeM: number) => ({
+describe('deployedScopeBadge', () => {
+  const real = catenaryMethod(baseInput)!
+  // Keeps the result consistent: the scope follows the overridden rode.
+  const resultWith = (recommendedRodeM: number) => ({
     ...real,
     recommendedRodeM,
-    recommendedScope: recommendedRodeM / real.depthFromHawseM,
+    scopeRatio: recommendedRodeM / real.depthFromHawseM!,
   })
 
-  it('is "ok" when the deployed rode equals the rounded-down shown figure', () => {
-    expect(deployedScopeStatus(55, planWith(55.3), false)).toBe('ok')
+  it('is ok when the deployed rode equals the rounded-down shown figure', () => {
+    expect(deployedScopeBadge(55, resultWith(55.3), false)).toEqual({ status: 'ok' })
   })
 
-  it('does not call a rode one unit short of the shown figure "ok"', () => {
-    expect(deployedScopeStatus(54, planWith(55.3), false)).not.toBe('ok')
+  it('does not call a rode one unit short of the shown figure ok', () => {
+    expect(deployedScopeBadge(54, resultWith(55.3), false)?.status).not.toBe('ok')
   })
 
   it('judges against the rounded-up shown figure, not the raw recommendation', () => {
-    expect(deployedScopeStatus(55, planWith(54.7), false)).toBe('ok')
-    expect(deployedScopeStatus(54.6, planWith(54.7), false)).not.toBe('ok')
+    expect(deployedScopeBadge(55, resultWith(54.7), false)).toEqual({ status: 'ok' })
+    expect(deployedScopeBadge(54.6, resultWith(54.7), false)?.status).not.toBe('ok')
   })
 
   it('compares in feet under imperial, so a feet to metres round trip cannot read short', () => {
-    const plan = planWith(33.3 / METERS_PER_FOOT) // shows 33 ft
-    expect(deployedScopeStatus(33 / METERS_PER_FOOT, plan, true)).toBe('ok')
-    expect(deployedScopeStatus(32 / METERS_PER_FOOT, plan, true)).not.toBe('ok')
+    const result = resultWith(33.3 / METERS_PER_FOOT) // shows 33 ft
+    expect(deployedScopeBadge(33 / METERS_PER_FOOT, result, true)).toEqual({ status: 'ok' })
+    expect(deployedScopeBadge(32 / METERS_PER_FOOT, result, true)).toEqual({ status: 'low', shortfall: 1 })
   })
 
-  it('falls through to the low / insufficient ladder when short of the shown figure', () => {
-    const plan = planWith(55.3)
-    const low = deployedScopeStatus(54, plan, false)
-    expect(low).toBe(scopeStatus(scopeRatio(54, plan.depthFromHawseM), plan.recommendedScope))
-    expect(deployedScopeStatus(1, plan, false)).toBe('insufficient')
+  it('falls through to the scopeStatus ladder when short of the shown figure', () => {
+    const result = resultWith(55.3)
+    const low = deployedScopeBadge(54, result, false)!
+    expect(low.status).toBe(scopeStatus(scopeRatio(54, result.depthFromHawseM!), result.scopeRatio))
+    expect(deployedScopeBadge(1, result, false)?.status).toBe('insufficient')
   })
 
-  it('is "unknown" with no plan', () => {
-    expect(deployedScopeStatus(55, null, false)).toBe('unknown')
+  it('is null with no rode out, no result, or an unavailable result', () => {
+    expect(deployedScopeBadge(0, real, false)).toBeNull()
+    expect(deployedScopeBadge(55, null, false)).toBeNull()
+    expect(deployedScopeBadge(55, catenaryMethod({ ...baseInput, depth: null }), false)).toBeNull()
+  })
+
+  it('reports the shortfall in whole display units', () => {
+    const payOut = payOutDisplayValue(real.recommendedRodeM, false)
+    expect(deployedScopeBadge(payOut - 7, real, false)).toMatchObject({ shortfall: 7 })
+  })
+
+  it('rounds the shortfall up, so paying out that many clears the badge', () => {
+    expect(deployedScopeBadge(50.6, resultWith(55), false)).toMatchObject({ shortfall: 5 })
+  })
+
+  it('never reads a shortfall under 1', () => {
+    const payOut = payOutDisplayValue(real.recommendedRodeM, false)
+    expect(deployedScopeBadge(payOut - 0.2, real, false)).toMatchObject({ shortfall: 1 })
+  })
+
+  it('counts the shortfall in feet when imperial', () => {
+    const payOutFt = payOutDisplayValue(real.recommendedRodeM, true)
+    expect(deployedScopeBadge(feetToMeters(payOutFt - 12), real, true)).toMatchObject({ shortfall: 12 })
   })
 })
 
@@ -655,6 +677,15 @@ describe('catenaryMethod', () => {
     expect(result!.recommendedRodeM).toBeCloseTo(30.655137917018845, 6)
   })
 
+  it('labels the method plainly, with no echo of its inputs', () => {
+    expect(catenaryMethod(baseInput)!.label).toBe('Catenary')
+    expect(ratioMethod(baseInput)!.label).toBe('Ratio')
+    expect(catenaryMethod({ ...baseInput, depth: null })!.label).toBe('Catenary')
+    expect(ratioMethod({ ...baseInput, depth: null })!.label).toBe('Ratio')
+    expect(catenaryMethod(baseInput)).not.toHaveProperty('note')
+    expect(ratioMethod(baseInput)).not.toHaveProperty('note')
+  })
+
   it('names the missing input in unavailableReason rather than rendering a dash', () => {
     const result = catenaryMethod({ ...baseInput, depth: null })
     expect(result).not.toBeNull()
@@ -673,28 +704,6 @@ describe('catenaryMethod', () => {
     const anchored = catenaryMethod({ ...baseInput, depth: null, isAnchored: true })
     expect(notAnchored!.unavailableReason).toBe('no depth reading')
     expect(anchored!.unavailableReason).toBe('no depth entered')
-  })
-
-  it('appends the floor marker to the note when the MIN_SCOPE_RATIO floor binds', () => {
-    const result = catenaryMethod({ ...baseInput, windKts: 3 })
-    expect(result).not.toBeNull()
-    expect(result!.note).toContain(` · ${MIN_SCOPE_RATIO}:1 minimum`)
-  })
-
-  // Scope is computed against depth-from-hawse (depth + bow roller height),
-  // not depth alone, so the caption has to name both terms of that sum
-  // rather than just the depth half of it — sitting between the depth clause
-  // and the wind clause, ahead of chain/hull/floor.
-  it('names the tide-correction status between the depth and wind clauses', () => {
-    const result = catenaryMethod(baseInput) // live depth 5, no tide, bowRollerHeightM 1
-    expect(result).not.toBeNull()
-    expect(result!.note).toContain('Depth 5.0 m (sounder only) + 1.0 m bow height · Wind 20 kts')
-  })
-
-  it('omits the floor marker when the raw catenary recommendation already clears the floor', () => {
-    const result = catenaryMethod(baseInput) // windKts: 20, ~5:1 — well clear of the floor
-    expect(result).not.toBeNull()
-    expect(result!.note).not.toContain('minimum')
   })
 })
 
@@ -742,7 +751,7 @@ describe('ratioMethod', () => {
     expect(result).not.toBeNull()
     const expectedDepthM = 5 + 3 / 3.28084
     expect(result!.recommendedRodeM).toBeCloseTo((expectedDepthM + 1) * 5, 6)
-    expect(result!.note).toContain('tide-corrected')
+    expect(result!.tideCorrected).toBe(true)
   })
 
   it('falls back to sounder-only depth when the datum carries no tide stamp', () => {
@@ -753,15 +762,7 @@ describe('ratioMethod', () => {
     })
     expect(result).not.toBeNull()
     expect(result!.recommendedRodeM).toBeCloseTo((5 + 1) * 5, 6)
-    expect(result!.note).toContain('sounder only')
-  })
-
-  // Same bow-height naming rule as catenaryMethod, and via the same helper:
-  // the ratio scope is also computed against depth-from-hawse, not depth alone.
-  it('names the tide-correction status between the depth and wind clauses', () => {
-    const result = ratioMethod({ ...baseInput, windKts: 15 })
-    expect(result).not.toBeNull()
-    expect(result!.note).toContain('Depth 5.0 m (sounder only) + 1.0 m bow height · Wind 15 kts')
+    expect(result!.tideCorrected).toBe(false)
   })
 
   it('names "no depth reading" first in the unavailable ladder when not anchored', () => {
@@ -949,20 +950,20 @@ describe('resolvePlanningWindBand', () => {
 // ─────────────────────────────────────────────────────────────
 describe('resolveLoaM', () => {
   it('prefers an explicit settings.anchor.loa_m over SignalK', () => {
-    expect(resolveLoaM(15, 12)).toEqual({ loaM: 15, source: 'settings' })
+    expect(resolveLoaM(15, 12)).toBe(15)
   })
 
   it('falls back to SignalK design.length.overall when settings has none', () => {
-    expect(resolveLoaM(0, 12)).toEqual({ loaM: 12, source: 'signalk' })
+    expect(resolveLoaM(0, 12)).toBe(12)
   })
 
   it('a zero or negative SignalK length does not count as configured', () => {
-    expect(resolveLoaM(0, 0)).toEqual({ loaM: null, source: null })
-    expect(resolveLoaM(0, -1)).toEqual({ loaM: null, source: null })
+    expect(resolveLoaM(0, 0)).toBe(null)
+    expect(resolveLoaM(0, -1)).toBe(null)
   })
 
   it('returns null with neither source present, not a silent zero', () => {
-    expect(resolveLoaM(0, null)).toEqual({ loaM: null, source: null })
+    expect(resolveLoaM(0, null)).toBe(null)
   })
 })
 
@@ -981,35 +982,14 @@ describe('computeSwingRadiusM', () => {
   })
 })
 
-describe('swingBreakdownText', () => {
-  it('names the three parts of the swing', () => {
-    expect(swingBreakdownText(54, 8, 15, false)).toBe('54 m rode + 8 m GPS to bow + 15 m boat')
+describe('scopeFloorApplied on the method result', () => {
+  it('is true on the catenary result when the minimum ratio set the figure', () => {
+    expect(catenaryMethod({ ...baseInput, windKts: 3 })!.scopeFloorApplied).toBe(true)
   })
 
-  it('leaves out the GPS to bow term when there is no bow offset', () => {
-    expect(swingBreakdownText(54, 0, 15, false)).toBe('54 m rode + 15 m boat')
-  })
-
-  it('lets the boat term take up the rounding so the parts add up to the total', () => {
-    expect(swingBreakdownText(54.4, 8.4, 15.4, false)).toBe('54 m rode + 8 m GPS to bow + 16 m boat')
-  })
-
-  it('leaves out the GPS to bow term when it rounds to zero', () => {
-    expect(swingBreakdownText(54, 0.4, 15, false)).toBe('54 m rode + 15 m boat')
-    expect(swingBreakdownText(54, 0, 15, false)).toBe('54 m rode + 15 m boat')
-  })
-
-  it('shows the GPS to bow term twice when the mark sits at the antenna, and still adds up', () => {
-    // the offset passed in is the effective one: 2 × 10 m = 20 m
-    expect(swingBreakdownText(54, 20, 18, false, 2)).toBe('54 m rode + 2 × 10 m GPS to bow + 18 m boat')
-    // total 54.4 + 16.8 + 15.4 = 86.6 -> 87; the boat term takes up the rounding
-    expect(swingBreakdownText(54.4, 16.8, 15.4, false, 2)).toBe('54 m rode + 2 × 8 m GPS to bow + 17 m boat')
-    expect(swingBreakdownText(54, 0, 15, false, 2)).toBe('54 m rode + 15 m boat')
-  })
-
-  it('works in feet', () => {
-    // 10 m = 33 ft, 2 m = 7 ft, 24 m total = 79 ft
-    expect(swingBreakdownText(10, 2, 12, true)).toBe('33 ft rode + 7 ft GPS to bow + 39 ft boat')
+  it('is false when the model cleared the floor, and absent when unavailable', () => {
+    expect(catenaryMethod(baseInput)!.scopeFloorApplied).toBe(false)
+    expect(catenaryMethod({ ...baseInput, depth: null })!.scopeFloorApplied).toBeUndefined()
   })
 })
 
@@ -1058,12 +1038,12 @@ describe('the method results carry their load and lift warning', () => {
     expect(ratioMethod(baseInput)!.catenaryParameterM).toBeCloseTo(plan.catenaryParameterM, 9)
   })
 
-  it('the Ratio Method has no parameter when there is no catenary plan, and unavailable results have none', () => {
+  it('the Ratio method has no parameter when there is no catenary plan, and unavailable results have none', () => {
     expect(ratioMethod({ ...baseInput, chainSizeMm: 0 })!.catenaryParameterM).toBeNull()
     expect(catenaryMethod({ ...baseInput, depth: null })!.catenaryParameterM).toBeNull()
   })
 
-  it('the Catenary Method has no lift warning, since its rode is never short of the suspended length', () => {
+  it('the Catenary method has no lift warning, since its rode is never short of the suspended length', () => {
     expect(catenaryMethod(baseInput)!.liftWarning).toBeNull()
   })
 

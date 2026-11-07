@@ -72,7 +72,7 @@ describe('rode plan vectors (shared with the Go port)', () => {
 
   it('resolves the boat length', () => {
     for (const l of vectors.loa) {
-      expect(resolveLoaM(l.settingsLoaM, l.vesselLengthOverallM).loaM).toBe(l.loaM)
+      expect(resolveLoaM(l.settingsLoaM, l.vesselLengthOverallM)).toBe(l.loaM)
     }
   })
 })

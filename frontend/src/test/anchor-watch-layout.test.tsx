@@ -118,7 +118,7 @@ describe('Anchor Watch layout: save depth lives in the rode planner', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
     const line = screen.getByTestId('anchor-save-depth')
     expect(line).toHaveTextContent('4.2 m at datum, from the sounder')
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: /^set alarm/i })
     expect(apply.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Save as a saved place' })).toHaveTextContent('Save…')
   })
@@ -127,7 +127,7 @@ describe('Anchor Watch layout: save depth lives in the rode planner', () => {
     renderDrawer({ ...watch, active: false })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
     expect(screen.queryByTestId('anchor-save-depth')).toBeNull()
-    const footer = screen.getByRole('button', { name: /apply as alarm radius/i }).parentElement as HTMLElement
+    const footer = screen.getByRole('button', { name: /^set alarm/i }).parentElement as HTMLElement
     const band = footer.nextElementSibling as HTMLElement
     expect(band).not.toBeNull()
     expect(band).toBeEmptyDOMElement()
