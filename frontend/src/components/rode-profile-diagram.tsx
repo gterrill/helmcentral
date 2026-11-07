@@ -53,9 +53,8 @@ const f = (n: number) => n.toFixed(1)
  * really looks five times as long as the water is deep. The cost is a flat
  * curve in deep water, which is what the chain really does.
  *
- * The figures sit in an HTML legend under the drawing, not as svg text: the
- * svg scales to the sidebar, which would shrink any text in it below the
- * text-xs floor.
+ * The figures are in the svg's aria-label, not drawn: the svg scales to the
+ * sidebar, which would shrink any text in it below the text-xs floor.
  */
 export const RodeProfileDiagram = memo(function RodeProfileDiagram({
   rodeM,
@@ -134,15 +133,6 @@ export const RodeProfileDiagram = memo(function RodeProfileDiagram({
           <AnchorGlyph x={toX(0)} y={seabedY - 7} />
         </g>
       </svg>
-
-      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        <li>{`Bow roller to bottom ${tenth(depthFromHawseM)} ${unit}${tideCorrected ? ', high water' : ''}`}</li>
-        <li>{`Bow ${tenth(bowRollerHeightM)} ${unit}`}</li>
-        <li className="flex items-center gap-1">
-          <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded" style={{ backgroundColor: RODE_COLOUR }} />
-          {`Rode ${whole(rodeM)} ${unit}`}
-        </li>
-      </ul>
 
       {planned.anchorLifting && liftWarning !== null && <WarningNote className="mt-1">{liftWarning}</WarningNote>}
     </div>

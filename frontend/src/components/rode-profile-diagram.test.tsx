@@ -64,20 +64,19 @@ describe('RodeProfileDiagram', () => {
   it('rounds the rode as the Pay Out figure does', () => {
     render(<RodeProfileDiagram {...base} rodeM={30.4} />)
     expect(label()).toContain('30 m of rode')
-    expect(screen.getByText(/^Rode 30 m$/)).toBeTruthy()
   })
 
   it('states the length in feet when imperial', () => {
     render(<RodeProfileDiagram {...base} rodeM={9.2} depthFromHawseM={3} isImperial />)
-    expect(screen.getByText(/^Rode 30 ft$/)).toBeTruthy()
+    expect(label()).toContain('30 ft of rode')
   })
 
-  it('shows its figures in a text-xs legend under the drawing, not as tiny svg text', () => {
+  it('carries its figures in the label only: no legend and no svg text', () => {
     const { container } = render(<RodeProfileDiagram {...base} />)
     expect(container.querySelector('svg text')).toBeNull()
-    expect(screen.getByText('Bow roller to bottom 6.0 m, high water').closest('ul')!.className).toContain('text-xs')
-    expect(screen.getByText('Bow 1.0 m')).toBeTruthy()
-    expect(screen.getByText('Rode 30 m')).toBeTruthy()
+    expect(container.querySelector('ul')).toBeNull()
+    expect(screen.queryByText(/^Bow roller to bottom/)).toBeNull()
+    expect(screen.queryByText(/^Rode 30 m$/)).toBeNull()
   })
 
   it('draws no "today" water line, only the high-water one', () => {

@@ -70,9 +70,9 @@ unreachable. Neither change clears your swing trail or the AIS tracks, and
 neither does **Undo**. After a move, boats are recorded within 500 m of the new
 anchor position, and the tracks already drawn stay where they are.
 
-The rode planner sidebar's **Apply as alarm radius** button also sets the radius
-to match the swing your planned rode and boat length need, without opening
-Adjust.
+The rode planner sidebar's **Set alarm to** button also sets the radius to match
+the swing your planned rode and boat length need, without opening Adjust. The
+button shows the radius it will set, for example "Set alarm to 65 m".
 
 If the drop landed somewhere badly wrong, raise the watch and drop again once
 you're lying properly. That's usually simpler than adjusting a long way.

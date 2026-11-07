@@ -41,7 +41,7 @@ how far below the waterline the depth transducer sits, so that Helmcentral can
 turn the reading into the depth at chart datum.
 
 1. Open **Anchor watch** and open the rode planner. Its line is at the foot of
-   the planner, below **Apply as alarm radius**.
+   the planner, below **Set alarm to**.
 2. Read the line, for example "4.2 m at datum, from the sounder". That's the
    figure Helmcentral will save. If it shows a sentence instead of a **Save…**
    link, the sentence says what's missing. If it says "Already saved at", a place

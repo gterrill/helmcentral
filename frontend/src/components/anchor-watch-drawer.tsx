@@ -94,7 +94,7 @@ interface AnchorWatchDrawerProps {
   isDarkTheme: boolean
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
-  // Kept for the Rode Planner's "Apply as alarm radius" button
+  // Kept for the Rode Planner's "Set alarm" button
   // (onApplyAlarmRadius below) — the one radius write that predates Adjust
   // mode and still stands alongside it, since the planner's own sidebar
   // isn't part of the Adjust flow.
@@ -200,7 +200,7 @@ export function AnchorWatchDrawer({
 }: AnchorWatchDrawerProps) {
   const isAnchored = anchorState !== 'none'
 
-  // The Rode Planner's "Apply as alarm radius" is the one surviving radius
+  // The Rode Planner's "Set alarm" is the one surviving radius
   // write in this header now that the interim −/+ stepper (ADR 0133 Phase
   // 1) is gone. useAnchorWatch's updateRadius throws on a failed PATCH
   // rather than silently no-op'ing (impeccable P1); this is where that

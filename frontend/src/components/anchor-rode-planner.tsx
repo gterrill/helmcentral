@@ -14,18 +14,19 @@ import {
   planningFigureM,
   rawDepthFromPlanningFigureM,
   resolveLoaM,
+  rodeShortfallDisplay,
+  scopeTargetOf,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
   payOutDisplayValue,
-  swingBreakdownText,
   tideHeightFtOrNull,
   WIND_BANDS,
   type PlanningDepthDatum,
   type RodeMethodResult,
   type RodePlanInput,
-  type ScopeStatus,
 } from '@/lib/rode-plan'
+import { formatRadiusDisplay } from '@/lib/anchor-adjust'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { fromDisplayDistance, toDisplayDistance } from '@/lib/units'
 import { RodeProfileDiagram } from '@/components/rode-profile-diagram'
@@ -90,7 +91,7 @@ export interface AnchorRodePlannerProps {
   applyLockedReason?: string | null
 }
 
-function scopeBadgeClass(status: ScopeStatus): string {
+function scopeBadgeClass(status: 'ok' | 'low' | 'insufficient'): string {
   switch (status) {
     case 'ok':
       return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
@@ -98,21 +99,6 @@ function scopeBadgeClass(status: ScopeStatus): string {
       return 'border-amber-500/40 bg-amber-500/10 text-amber-400'
     case 'insufficient':
       return 'border-red-500/40 bg-red-500/10 text-red-400'
-    default:
-      return 'border-muted bg-muted/40 text-muted-foreground'
-  }
-}
-
-function scopeBadgeLabel(status: ScopeStatus): string {
-  switch (status) {
-    case 'ok':
-      return 'Scope OK'
-    case 'low':
-      return 'Scope Low'
-    case 'insufficient':
-      return 'Scope Insufficient'
-    default:
-      return 'Scope Unknown'
   }
 }
 
@@ -152,7 +138,7 @@ export function AnchorRodePlanner({
 
   const isInactive = anchorState === 'none'
   const isAnchored = !isInactive
-  const inactiveReason = 'Set anchor watch to record deployed rode and apply an alarm radius.'
+  const inactiveReason = 'Drop anchor to record the rode out and set the alarm.'
 
   const [pendingSeaState, setPendingSeaState] = useState<SeaState>(seaState)
   const [pendingSeabedType, setPendingSeabedType] = useState<SeabedType>(seabedType)
@@ -226,8 +212,8 @@ export function AnchorRodePlanner({
   // The plan is built once and handed to every method, so they share one load.
   const methodResults = useMemo(() => rodeMethods.map((method) => method(planInput, plan)), [planInput, plan])
 
-  // The configured method leads the tab strip. It is the one "Apply as alarm
-  // radius" uses (ADR 0059 §4), so it is the one the planner should open on —
+  // The configured method leads the tab strip. It is the one "Set alarm"
+  // uses (ADR 0059 §4), so it is the one the planner should open on —
   // the operator shouldn't have to hunt for the figure the button below will
   // apply. Sort is stable, so the other method keeps its rodeMethods order.
   const orderedMethodResults = useMemo(() => {
@@ -243,30 +229,44 @@ export function AnchorRodePlanner({
   const [activeMethodId, setActiveMethodId] = useState<ScopeMethod>(anchorConfig.scopeMethod)
   useEffect(() => { setActiveMethodId(anchorConfig.scopeMethod) }, [anchorConfig.scopeMethod])
 
-  // The badge judges the rode against the Pay Out figure as shown.
-  const status = rodeDeployedM > 0 ? deployedScopeStatus(rodeDeployedM, plan, isImperial) : null
+  const unit = isImperial ? 'ft' : 'm'
 
   // The swing circle is rode + bow offset + the hull's own length. loaM defaults
   // to 0 and is genuinely unset on real installs, so treating it as zero would
-  // report a circle smaller than the boat and let "Apply as alarm radius" shrink
+  // report a circle smaller than the boat and let "Set alarm" shrink
   // a correct alarm circle. Surface the missing input instead of computing with it.
   //
   // LOA precedence (ADR 0047), extracted to lib/rode-plan.ts's resolveLoaM —
   // the Adjust mode's radius ceiling needs the exact same resolution rule.
-  const { loaM: resolvedLoaM, source: loaSource } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
+  const { loaM: resolvedLoaM } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
   const loaConfigured = resolvedLoaM !== null
 
-  // Apply as alarm radius must use the swing of whichever method the operator
+  // Set alarm must use the swing of whichever method the operator
   // has configured (anchor.scope_method), never the other one's figure — the
   // panel shows both methods' swings side by side, and applying the one the
-  // operator isn't looking at would contradict the caption right above the
-  // button (ADR 0059 §4, ADR 0047). rodeMethods always yields one result for
+  // operator isn't looking at would contradict the figure on the button
+  // itself (ADR 0059 §4, ADR 0047). rodeMethods always yields one result for
   // 'catenary' and one for 'ratio' (see rodeMethods above), and scopeMethod is
   // typed to exactly those two ids, so this always finds a match.
   const configuredMethodResult = methodResults.find((result) => result !== null && result.id === anchorConfig.scopeMethod)!
   const configuredSwingRadiusM = !configuredMethodResult.unavailableReason
     ? computeSwingRadiusM(configuredMethodResult.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
     : null
+
+  // The badge judges the rode against the Pay Out figure as shown, for the
+  // configured method: the one Set alarm uses and the one the planner opens on.
+  const scopeTarget = scopeTargetOf(configuredMethodResult)
+  const status = rodeDeployedM > 0 ? deployedScopeStatus(rodeDeployedM, scopeTarget, isImperial) : null
+  const badge: { label: string; className: string } | null = (() => {
+    if (status === 'ok') return { label: 'Enough rode', className: scopeBadgeClass('ok') }
+    if ((status === 'low' || status === 'insufficient') && scopeTarget !== null) {
+      return {
+        label: `Short by ${rodeShortfallDisplay(rodeDeployedM, scopeTarget, isImperial)} ${unit}`,
+        className: scopeBadgeClass(status),
+      }
+    }
+    return null
+  })()
 
   // The actual write, shared by the debounced call below and by a Retry
   // action's immediate re-attempt of the same input — a Retry press
@@ -362,7 +362,6 @@ export function AnchorRodePlanner({
     void onApplyAlarmRadius(configuredSwingRadiusM)
   }, [isInactive, configuredSwingRadiusM, onApplyAlarmRadius, applyLockedReason])
 
-  const unit = isImperial ? 'ft' : 'm'
   const bowRollerHeightM = anchorConfig.bowRollerHeightM
 
   // ADR 0063 (amended) — the editable Depth input holds the figure the plan
@@ -490,8 +489,8 @@ export function AnchorRodePlanner({
     persistPlanningDepth(nextDepthM)
   }, [isImperial, tide, bowRollerHeightM, persistPlanningDepth])
 
-  // Whether the rise to the next high got added — the caption says so and
-  // names the bow height baked into the figure the input shows.
+  // Whether the rise to the next high got added; the caption says so, along
+  // with the bow roller the figure is measured from.
   const isDepthTideCorrected = useMemo(() => maxExpectedDepthM(resolvedDepth, tide) !== null, [resolvedDepth, tide])
 
   const depthCaption = (() => {
@@ -500,21 +499,16 @@ export function AnchorRodePlanner({
     if (depthOverrideBelowMinimum) {
       return 'Below bow height plus tide rise, not saved'
     }
-    const bowLabel = `${toDisplayDistance(bowRollerHeightM, isImperial).toFixed(1)} ${unit} bow`
     if (resolvedDepth === null) {
-      if (!isAnchored) return 'no depth reading'
-      // Names the figure the field expects, not "the depth": a bare sounder
+      if (!isAnchored) return 'No depth reading'
+      // Says the figure is measured from the bow roller: a bare sounder
       // reading typed here would have bow height and tide rise taken off it.
       // Whether a rise applies is the same test the inversion uses, run
       // against the tide right now.
       const riseApplies = maxExpectedDepthM({ depthM: 0, tideHeightFt: tideHeightFtOrNull(tide) }, tide) !== null
-      return riseApplies
-        ? `No depth entered, type depth at high tide + ${bowLabel}`
-        : `No depth entered, type depth + ${bowLabel}`
+      return riseApplies ? 'Type it from the bow roller, at high tide' : 'Type it from the bow roller'
     }
-    return isDepthTideCorrected
-      ? `High tide + ${bowLabel}`
-      : `Sounder + ${bowLabel}, no tide station`
+    return isDepthTideCorrected ? 'From the bow roller, at high tide' : 'From the bow roller, no tide station'
   })()
 
   if (!open) {
@@ -648,10 +642,10 @@ export function AnchorRodePlanner({
                   // renders in every panel — each method proposes its own circle.
                   // Chain-onboard is genuinely per-method — each method can
                   // recommend a different rode, so each can separately outgrow
-                  // what's aboard — and stays here. LOA provenance and its warning
-                  // describe the single shared LOA input, not anything specific to
-                  // a method, so they render once in SidebarFooter instead,
-                  // directly above Apply, where they gate it (ADR 0059 §4).
+                  // what's aboard — and stays here. The LOA warning describes the
+                  // single shared LOA input, not anything specific to a method, so
+                  // it renders once in SidebarFooter instead, directly above Set
+                  // alarm, where it gates it (ADR 0059 §4).
                   const methodSwingRadiusM = !result.unavailableReason
                     ? computeSwingRadiusM(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
                     : null
@@ -680,22 +674,16 @@ export function AnchorRodePlanner({
                             />
                           )}
                           <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                            <span>Scope {result.scopeRatio.toFixed(1)}:1</span>
+                            <span>Scope {result.scopeRatio.toFixed(1)}:1{result.scopeFloorApplied ? ' minimum' : ''}</span>
                             {methodSwingRadiusM !== null && (
-                              <span>Swing {Math.round(toDisplayDistance(methodSwingRadiusM, isImperial))} {unit}</span>
+                              <span>Swing {formatRadiusDisplay(methodSwingRadiusM, isImperial)}</span>
                             )}
                           </div>
-                          {methodSwingRadiusM !== null && resolvedLoaM !== null && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {swingBreakdownText(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM, isImperial, bowOffsetCount)}
-                            </p>
-                          )}
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (
                             <WarningNote className="mt-2">
                               Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
                             </WarningNote>
                           )}
-                          <p className="mt-2 text-xs text-muted-foreground">{result.note}</p>
                         </div>
                       )}
                     </TabsContent>
@@ -722,9 +710,9 @@ export function AnchorRodePlanner({
                 />
               </label>
 
-              {rodeDeployedM > 0 && status !== null && (
-                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold uppercase tracking-[0.12em] ${scopeBadgeClass(status)}`}>
-                  {scopeBadgeLabel(status)}
+              {badge !== null && (
+                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold ${badge.className}`}>
+                  {badge.label}
                 </div>
               )}
 
@@ -736,32 +724,17 @@ export function AnchorRodePlanner({
         </SidebarContent>
 
         <SidebarFooter className="border-t">
-          {/* LOA is a shared input, not a per-method fact, so its provenance
-              and warning are stated once here — directly above the control
-              they gate — rather than repeated inside every method group
-              (ADR 0059 §4). */}
-          {resolvedLoaM !== null && loaSource !== null && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              LOA {Number(toDisplayDistance(resolvedLoaM, isImperial).toFixed(1))} {unit} from {loaSource === 'settings' ? 'settings' : 'SignalK'}
-            </p>
-          )}
           {!loaConfigured && (
             <WarningNote className="mt-2">Set boat length (LOA) in Settings → Anchor to get a swing radius.</WarningNote>
           )}
-          {/* Names which method's figure Apply will use, or why it can't yet
-              (ADR 0047, ADR 0059 §4) — the operator should never have to
-              guess which of the two swings shown above just got applied.
-              When LOA itself is unresolved the warning above already says
-              why, so this slot stays quiet instead of repeating it. */}
-          {configuredMethodResult.unavailableReason ? (
+          {/* Says why the configured method can't give a figure to set. When
+              LOA itself is unresolved the warning above already says why, so
+              this slot stays quiet instead of repeating it. */}
+          {configuredMethodResult.unavailableReason && (
             <p className="text-xs text-muted-foreground">
               {configuredMethodResult.label} unavailable — {configuredMethodResult.unavailableReason}
             </p>
-          ) : configuredSwingRadiusM !== null ? (
-            <p className="text-xs text-muted-foreground">
-              Applies the {configuredMethodResult.label} swing, {Math.round(toDisplayDistance(configuredSwingRadiusM, isImperial))} {unit}
-            </p>
-          ) : null}
+          )}
           {applyLockedReason !== null && (
             <p className="text-xs text-muted-foreground">{applyLockedReason}</p>
           )}
@@ -772,7 +745,9 @@ export function AnchorRodePlanner({
             disabled={isInactive || configuredSwingRadiusM === null || applyLockedReason !== null}
             onClick={handleApplyAlarmRadius}
           >
-            Apply as alarm radius
+            {configuredSwingRadiusM !== null
+              ? `Set alarm to ${formatRadiusDisplay(configuredSwingRadiusM, isImperial)}`
+              : 'Set alarm'}
           </Button>
         </SidebarFooter>
         <div className="border-t px-3 py-2 empty:hidden">{saveDepth}</div>

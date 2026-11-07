@@ -311,7 +311,7 @@ describe('AnchorWatchMap clears a deferred fit when the anchor is raised', () =>
 // code-review finding 6 (the other half): a fit already deferred for the
 // CURRENT session (map not ready, or container unmeasurable) short-circuited
 // out of the effect entirely on a later render, so a radius change (the
-// stepper, or the Rode Planner's "Apply as alarm radius") landing before it
+// stepper, or the Rode Planner's "Set alarm") landing before it
 // resolved was silently dropped -- the eventual retry fit the STALE radius
 // the deferral was first created with.
 describe("AnchorWatchMap keeps a deferred fit's radius current", () => {

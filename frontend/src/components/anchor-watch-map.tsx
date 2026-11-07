@@ -679,7 +679,7 @@ export function AnchorWatchMap({
       // A fit for this same session is already deferred (map not ready, or
       // container unmeasurable) — keep its radius current rather than
       // silently dropping a radius change (the stepper, or the Rode
-      // Planner's "Apply as alarm radius") that lands before it resolves;
+      // Planner's "Set alarm") that lands before it resolves;
       // otherwise the eventual retry fits the STALE radius this effect was
       // first deferred with (code review finding 6).
       pendingFitRef.current = { ...pendingFitRef.current, radiusM: radiusMeters }

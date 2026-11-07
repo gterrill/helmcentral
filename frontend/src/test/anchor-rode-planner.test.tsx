@@ -125,7 +125,7 @@ describe('AnchorRodePlanner — save depth slot', () => {
     expect(screen.queryByTestId('slot')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
     const slot = screen.getByTestId('slot')
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: /^set alarm/i })
     expect(apply.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
@@ -155,26 +155,19 @@ describe('AnchorRodePlanner — collapse state', () => {
 })
 
 describe('AnchorRodePlanner — no false-positive scope badge (regression guard)', () => {
-  it('renders no "Scope Insufficient" badge when rodeDeployedM is 0', () => {
+  it('renders no scope badge when rodeDeployedM is 0', () => {
     renderPlanner({ rodeDeployedM: 0 })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.queryByText(/scope insufficient/i)).toBeNull()
-    expect(screen.queryByText(/scope unknown/i)).toBeNull()
-    expect(screen.queryByText(/scope ok/i)).toBeNull()
-    expect(screen.queryByText(/scope low/i)).toBeNull()
+    expect(screen.queryByText(/^enough rode$/i)).toBeNull()
+    expect(screen.queryByText(/^short by/i)).toBeNull()
   })
 
   it('shows the badge once a deployed rode is entered', () => {
     renderPlanner({ rodeDeployedM: 40 })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const badges = [
-      screen.queryByText(/scope insufficient/i),
-      screen.queryByText(/scope unknown/i),
-      screen.queryByText(/scope ok/i),
-      screen.queryByText(/scope low/i),
-    ].filter(Boolean)
+    const badges = [screen.queryByText(/^enough rode$/i), screen.queryByText(/^short by \d+ (m|ft)$/i)].filter(Boolean)
     expect(badges.length).toBe(1)
   })
 })
@@ -191,7 +184,7 @@ describe('AnchorRodePlanner — apply as alarm radius follows the configured met
     renderPlanner({ onApplyAlarmRadius, anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    fireEvent.click(screen.getByRole('button', { name: /apply as alarm radius/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^set alarm/i }))
 
     await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
     const expected = ratioMethod(expectedPlanInput)!.recommendedRodeM + props.bowOffsetM + props.anchorConfig.loaM
@@ -204,21 +197,22 @@ describe('AnchorRodePlanner — apply as alarm radius follows the configured met
     renderPlanner({ onApplyAlarmRadius, anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    fireEvent.click(screen.getByRole('button', { name: /apply as alarm radius/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^set alarm/i }))
 
     await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
     const expected = catenaryMethod(expectedPlanInput)!.recommendedRodeM + props.bowOffsetM + props.anchorConfig.loaM
     expect(onApplyAlarmRadius.mock.calls[0][0]).toBeCloseTo(expected, 6)
   })
 
-  it('names the configured method and its figure in a caption above the button', () => {
+  it('puts the configured method\'s swing in the button label, with no caption above it', () => {
     const props = baseProps()
     renderPlanner({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     const expectedRodeM = ratioMethod(expectedPlanInput)!.recommendedRodeM
     const expectedRadius = Math.round(expectedRodeM + props.bowOffsetM + props.anchorConfig.loaM)
-    expect(screen.getByText(`Applies the Ratio Method swing, ${expectedRadius} m`)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `Set alarm to ${expectedRadius} m` })).toBeInTheDocument()
+    expect(screen.queryByText(/^Applies the/)).toBeNull()
   })
 
   it('disables Apply and names the reason when the configured method itself is unavailable, without falling back to the other method', () => {
@@ -234,9 +228,9 @@ describe('AnchorRodePlanner — apply as alarm radius follows the configured met
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText(/Catenary Method unavailable —/i)).toBeInTheDocument()
+    expect(screen.getByText(/Catenary unavailable —/i)).toBeInTheDocument()
 
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: 'Set alarm' })
     expect(apply).toBeDisabled()
     fireEvent.click(apply)
     expect(onApplyAlarmRadius).not.toHaveBeenCalled()
@@ -251,10 +245,10 @@ describe('AnchorRodePlanner — disabled with no active watch', () => {
     const rodeInput = screen.getByLabelText(/rode deployed/i)
     expect(rodeInput).toBeDisabled()
 
-    const applyButton = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const applyButton = screen.getByRole('button', { name: /^set alarm/i })
     expect(applyButton).toBeDisabled()
 
-    expect(screen.getAllByText(/set anchor watch to/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/drop anchor to record the rode out/i).length).toBeGreaterThan(0)
   })
 })
 
@@ -469,7 +463,7 @@ describe('AnchorRodePlanner — does not collide with the app left nav', () => {
 // A boat's swing circle is rode + bow offset + the hull's own length. loaM
 // defaults to 0 (config/app-config.ts) and is genuinely unset on real installs,
 // which would make the planner report a swing radius smaller than the boat and
-// let "Apply as alarm radius" *shrink* an existing, correct alarm circle. Per
+// let "Set alarm" *shrink* an existing, correct alarm circle. Per
 // the repo's fallback policy that must surface, not silently compute with zero.
 describe('AnchorRodePlanner — LOA not configured', () => {
   it('warns and refuses to apply an alarm radius when loaM is 0', () => {
@@ -483,7 +477,7 @@ describe('AnchorRodePlanner — LOA not configured', () => {
 
     expect(screen.getByText(/boat length/i)).toBeInTheDocument()
 
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: /^set alarm/i })
     expect(apply).toBeDisabled()
     fireEvent.click(apply)
     expect(onApplyAlarmRadius).not.toHaveBeenCalled()
@@ -508,7 +502,7 @@ describe('AnchorRodePlanner — LOA not configured', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.getByText(/boat length/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /apply as alarm radius/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^set alarm/i })).toBeDisabled()
     expect(screen.queryByText(/^Swing \d/)).toBeNull()
   })
 })
@@ -518,16 +512,21 @@ describe('AnchorRodePlanner — LOA not configured', () => {
 // gps_from_bow_m, LOA doesn't depend on which sensor/antenna published it.
 // Settings remains an explicit operator override and must still win when set.
 describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', () => {
-  it('prefers settings LOA over SignalK when both are present', () => {
+  it('prefers settings LOA over SignalK when both are present', async () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
     const props = baseProps()
     renderPlanner({
+      onApplyAlarmRadius,
       anchorConfig: { ...props.anchorConfig, loaM: 12 },
       vesselLengthOverallM: 17.9,
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText(/LOA 12 m from settings/i)).toBeInTheDocument()
-    expect(screen.queryByText(/from signalk/i)).toBeNull()
+    expect(screen.queryByText(/LOA \d/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^set alarm/i }))
+    await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
+    const expected = ratioMethod(expectedPlanInput)!.recommendedRodeM + props.bowOffsetM + 12
+    expect(onApplyAlarmRadius.mock.calls[0][0]).toBeCloseTo(expected, 6)
   })
 
   it('falls back to SignalK LOA when settings LOA is 0', () => {
@@ -538,11 +537,11 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText(/LOA 17\.9 m from SignalK/i)).toBeInTheDocument()
-    expect(screen.queryByText(/from settings/i)).toBeNull()
+    expect(screen.queryByText(/LOA \d/)).toBeNull()
+    expect(screen.queryByText(/from signalk/i)).toBeNull()
   })
 
-  it('shows a swing radius and enables Apply as alarm radius using SignalK-only LOA', async () => {
+  it('shows a swing radius and enables Set alarm using SignalK-only LOA', async () => {
     const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
     const props = baseProps()
     renderPlanner({
@@ -560,7 +559,7 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
     expect(within(catenaryPanel).getByText(/^Swing \d/)).toBeInTheDocument()
     expect(screen.queryByText(/boat length/i)).toBeNull()
 
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: /^set alarm/i })
     expect(apply).not.toBeDisabled()
     fireEvent.click(apply)
 
@@ -594,8 +593,8 @@ describe('AnchorRodePlanner — rode methods are tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     const [first, second] = screen.getAllByRole('tab')
-    expect(first).toHaveTextContent('Ratio Method')
-    expect(second).toHaveTextContent('Catenary Method')
+    expect(first).toHaveTextContent('Ratio')
+    expect(second).toHaveTextContent('Catenary')
     expect(first).toHaveAttribute('aria-selected', 'true')
 
     const expected = ratioMethod(expectedPlanInput)!
@@ -608,8 +607,8 @@ describe('AnchorRodePlanner — rode methods are tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     const [first, second] = screen.getAllByRole('tab')
-    expect(first).toHaveTextContent('Catenary Method')
-    expect(second).toHaveTextContent('Ratio Method')
+    expect(first).toHaveTextContent('Catenary')
+    expect(second).toHaveTextContent('Ratio')
     expect(first).toHaveAttribute('aria-selected', 'true')
 
     const expected = catenaryMethod(expectedPlanInput)!
@@ -640,7 +639,7 @@ describe('AnchorRodePlanner — rode methods are tabs', () => {
       </SidebarProvider>,
     )
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
-    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio Method')
+    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio')
 
     rerender(
       <SidebarProvider>
@@ -649,7 +648,7 @@ describe('AnchorRodePlanner — rode methods are tabs', () => {
     )
 
     const [first] = screen.getAllByRole('tab')
-    expect(first).toHaveTextContent('Catenary Method')
+    expect(first).toHaveTextContent('Catenary')
     expect(first).toHaveAttribute('aria-selected', 'true')
     const expected = catenaryMethod(expectedPlanInput)!
     expect(within(methodPanel()).getByText(`Scope ${expected.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
@@ -667,31 +666,18 @@ describe('AnchorRodePlanner — rode methods are tabs', () => {
     const catenaryPanel = selectMethodTab(/catenary/i)
     expect(within(catenaryPanel).getByText(/unavailable —/i)).toBeInTheDocument()
   })
-
-  it('does not duplicate the LOA provenance line into a method panel', () => {
-    renderPlanner()
-    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
-
-    // LOA provenance is a shared-input fact, not a per-method one (see the
-    // "shared LOA input lives in the footer" describe block below).
-    expect(within(methodPanel()).queryByText(/from settings/i)).toBeNull()
-    expect(within(selectMethodTab(/catenary/i)).queryByText(/from settings/i)).toBeNull()
-  })
 })
 
 // LOA describes a single shared input (bow offset + hull length), not
-// anything specific to a method, so its provenance line and its warning are
-// stated once in SidebarFooter, directly above Apply — the control they
-// gate — rather than repeated inside every method panel (ADR 0059 §4).
+// anything specific to a method, so its warning is stated once in
+// SidebarFooter, directly above Apply, and its provenance is not shown at all.
 describe('AnchorRodePlanner — shared LOA input lives in the footer', () => {
-  it('renders the LOA provenance line once, in the footer, not inside either method panel', () => {
+  it('does not print where the LOA came from', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getAllByText(/LOA .* from settings/i)).toHaveLength(1)
-
-    expect(within(methodPanel()).queryByText(/from settings/i)).toBeNull()
-    expect(within(selectMethodTab(/catenary/i)).queryByText(/from settings/i)).toBeNull()
+    expect(screen.queryByText(/LOA/)).toBeNull()
+    expect(screen.queryByText(/from settings|from signalk/i)).toBeNull()
   })
 
   it('renders the LOA warning once, in the footer, not inside either method panel', () => {
@@ -710,8 +696,47 @@ describe('AnchorRodePlanner — shared LOA input lives in the footer', () => {
 // Each method panel now shows its own swing figure, computed from that
 // method's own recommended rode, so the ratio panel's circle isn't silently
 // missing or borrowed from catenary's.
+describe('AnchorRodePlanner — no input echoes under the method tabs', () => {
+  it('prints no depth, wind or chain note and no diagram legend in either panel', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    for (const panel of [methodPanel(), selectMethodTab(/catenary/i)]) {
+      expect(within(panel).queryByText(/bow height/i)).toBeNull()
+      expect(within(panel).queryByText(/Chain \d+mm/)).toBeNull()
+      expect(within(panel).queryByText(/^Bow roller to bottom/)).toBeNull()
+      expect(within(panel).queryByText(/^Rode \d/)).toBeNull()
+    }
+  })
+})
+
+describe('AnchorRodePlanner — scope floor and button units', () => {
+  it('says the minimum set the Catenary scope when the floor binds', () => {
+    const props = baseProps()
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' },
+      maxGustKts: { '10m': null, '30m': null, '1h': 2, '24h': null },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(within(methodPanel()).getByText(/^Scope 3\.0:1 minimum$/)).toBeInTheDocument()
+  })
+
+  it('reads a plain scope when the model cleared the floor', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(within(methodPanel()).queryByText(/minimum/)).toBeNull()
+  })
+
+  it('names the radius in feet on the button when imperial', () => {
+    renderPlanner({ isImperial: true })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.getByRole('button', { name: /^Set alarm to \d+ ft$/ })).toBeInTheDocument()
+  })
+})
+
 describe('AnchorRodePlanner — Swing on both method tabs', () => {
-  it('shows a Swing figure in the Ratio Method panel, computed from its own recommended rode', () => {
+  it('shows a Swing figure in the Ratio panel, computed from its own recommended rode', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
@@ -728,34 +753,12 @@ describe('AnchorRodePlanner — Swing on both method tabs', () => {
     expect(catenarySwing).not.toBe(ratioSwing)
   })
 
-  it.each([
-    ['metric', false, 'm'],
-    ['imperial', true, 'ft'],
-  ])('spells out the swing under it so the parts add up to the Swing figure (%s)', (_name, isImperial, unit) => {
-    renderPlanner({ bowOffsetM: 8, isImperial })
+  it('does not spell out the swing sum under the Scope and Swing row', () => {
+    renderPlanner({ bowOffsetM: 8 })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const panel = selectMethodTab(/ratio/i)
-    const swing = Number(within(panel).getByText(/^Swing \d/).textContent?.match(/\d+/)?.[0])
-    const line = within(panel).getByText(new RegExp(` rode \\+ \\d+ ${unit} GPS to bow \\+ \\d+ ${unit} boat$`))
-    const parts = [...(line.textContent ?? '').matchAll(/(\d+) (?:m|ft) /g)].map((m) => Number(m[1]))
-    expect(parts).toHaveLength(3)
-    expect(parts.reduce((a, b) => a + b, 0)).toBe(swing)
-  })
-
-  it('leaves the GPS to bow term out when the offset is zero', () => {
-    renderPlanner({ bowOffsetM: 0 })
-    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
-
-    expect(within(selectMethodTab(/ratio/i)).getByText(/^\d+ m rode \+ 12 m boat$/)).toBeInTheDocument()
-  })
-
-  it('gives no breakdown when LOA is unresolved', () => {
-    const props = baseProps()
-    renderPlanner({ anchorConfig: { ...props.anchorConfig, loaM: 0 }, vesselLengthOverallM: null })
-    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
-
-    expect(within(methodPanel()).queryByText(/ rode \+ /)).toBeNull()
+    expect(within(selectMethodTab(/ratio/i)).queryByText(/ rode \+ /)).toBeNull()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/GPS to bow/)).toBeNull()
   })
 
   it('shows Swing in neither panel when LOA is unresolved', () => {
@@ -889,37 +892,36 @@ describe('AnchorRodePlanner — Depth cell', () => {
     // match would find two hits instead of the Depth cell's own caption.
     // Names the figure the field expects: typing the bare sounder reading
     // here would have bow height and tide rise subtracted from it.
-    expect(screen.getByText('No depth entered, type depth at high tide + 1.0 m bow')).toBeInTheDocument()
+    expect(screen.getByText('Type it from the bow roller, at high tide')).toBeInTheDocument()
   })
 
-  it('names the sounder-plus-bow figure when anchored with nothing recorded and no tide station', () => {
+  it('asks for the depth when anchored with nothing recorded and no tide station', () => {
     renderPlanner({ depthM: 42, planningDepthM: null, planningTideHeightFt: null, tide: { ...tide, current_tide_height_ft: -1, high_tide_height_ft: -1 } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText('No depth entered, type depth + 1.0 m bow')).toBeInTheDocument()
+    expect(screen.getByText('Type it from the bow roller')).toBeInTheDocument()
   })
 
   // The double-correction guard: baseProps' tide has current_tide_height_ft 2,
   // high_tide_height_ft 5 -> a 3ft rise -> 3/3.28084 = 0.914m corrected onto the
   // 5m raw reading, plus the 1m bow roller height. The input shows that
-  // corrected 6.9 figure, and the caption names both the correction and the
-  // bow height baked into it.
-  it('holds the tide- and bow-corrected figure in the input, and the caption names both', () => {
+  // corrected 6.9 figure, and the caption says the high-tide correction applied.
+  it('holds the tide- and bow-corrected figure in the input, and the caption says it is measured from the bow roller at high tide', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(depthInput().value).toBe('6.9')
-    expect(screen.getByText('High tide + 1.0 m bow')).toBeInTheDocument()
+    expect(screen.getByText('From the bow roller, at high tide')).toBeInTheDocument()
   })
 
-  it('shows the sounder-plus-bow caption when the datum carries no tide stamp', () => {
+  it('shows the no-tide-station caption when the datum carries no tide stamp', () => {
     renderPlanner({ planningDepthM: 5, planningTideHeightFt: null })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     // No tide stamp on the datum -> maxExpectedDepthM is null -> figure is
     // just the raw 5 + bow 1 = 6.
     expect(depthInput().value).toBe('6.0')
-    expect(screen.getByText('Sounder + 1.0 m bow, no tide station')).toBeInTheDocument()
+    expect(screen.getByText('From the bow roller, no tide station')).toBeInTheDocument()
   })
 
   describe('persistence', () => {
@@ -1031,7 +1033,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     })
   })
 
-  it('locks Apply as alarm radius and says why while Adjust is open', () => {
+  it('locks Set alarm and says why while Adjust is open', () => {
     const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
     const props = baseProps()
     renderPlanner({
@@ -1044,7 +1046,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
     selectMethodTab(/catenary/i)
 
-    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    const apply = screen.getByRole('button', { name: /^set alarm/i })
     expect(apply).toBeDisabled()
     expect(screen.getByText('Finish Adjust first')).toBeInTheDocument()
     fireEvent.click(apply)
@@ -1106,7 +1108,7 @@ describe('AnchorRodePlanner — Ratio rule checked against the planned load', ()
     renderPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 45, '24h': null } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio Method')
+    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio')
     expect(within(methodPanel()).getByText(/ratio rule is too short for the planned conditions/i)).toBeInTheDocument()
   })
 
@@ -1120,7 +1122,7 @@ describe('AnchorRodePlanner — Ratio rule checked against the planned load', ()
 })
 
 // The badge judges the deployed rode against the Pay Out figure as shown, so
-// paying out the rounded-down figure reads Scope OK.
+// paying out the rounded-down figure reads Enough rode.
 describe('AnchorRodePlanner — Scope badge against the shown Pay Out', () => {
   // The props every case renders with; the search below plans from the same
   // anchor config, so it sees exactly the recommendation the render shows.
@@ -1163,23 +1165,68 @@ describe('AnchorRodePlanner — Scope badge against the shown Pay Out', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
   }
 
-  it('reads Scope OK when the shown Pay Out figure is paid out (metres)', () => {
+  it('reads Enough rode when the shown Pay Out figure is paid out (metres)', () => {
     const { shown } = roundedDownCase(false)
     badgeFor(false, shown)
     expect(within(methodPanel()).getByText('Pay Out').nextElementSibling).toHaveTextContent(new RegExp(`^${shown}\\s*m`))
-    expect(screen.getByText('Scope OK')).toBeInTheDocument()
+    expect(screen.getByText('Enough rode')).toBeInTheDocument()
   })
 
-  it('does not read Scope OK one metre short of the shown Pay Out figure', () => {
+  it('reads Short by 1 m one metre short of the shown Pay Out figure', () => {
     const { shown } = roundedDownCase(false)
     badgeFor(false, shown - 1)
-    expect(screen.queryByText('Scope OK')).toBeNull()
+    expect(screen.queryByText('Enough rode')).toBeNull()
+    expect(screen.getByText('Short by 1 m')).toBeInTheDocument()
   })
 
-  it('reads Scope OK when the shown feet figure is paid out (imperial round trip)', () => {
+  it('judges against the configured Ratio method, not the catenary figure', () => {
+    const props = baseProps()
+    const catenary = catenaryMethod(expectedPlanInput)!
+    const ratio = ratioMethod(expectedPlanInput)!
+    const catenaryShown = Math.round(catenary.recommendedRodeM)
+    const ratioShown = Math.round(ratio.recommendedRodeM)
+    expect(ratioShown).toBeGreaterThan(catenaryShown + 1)
+    const config = { ...props.anchorConfig, scopeMethod: 'ratio' as const, chainOnboardM: 500 }
+
+    const first = renderPlanner({ anchorConfig: config, rodeDeployedM: catenaryShown })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.queryByText('Enough rode')).toBeNull()
+    expect(screen.getByText(`Short by ${ratioShown - catenaryShown} m`)).toBeInTheDocument()
+    first.unmount()
+
+    localStorage.clear()
+    renderPlanner({ anchorConfig: config, rodeDeployedM: ratioShown })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.getByText('Enough rode')).toBeInTheDocument()
+  })
+
+  it('shows no badge when the configured method is unavailable', () => {
+    const props = baseProps()
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary', windageAreaM2: 0 },
+      rodeDeployedM: 40,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.queryByText('Enough rode')).toBeNull()
+    expect(screen.queryByText(/^Short by/)).toBeNull()
+  })
+
+  it('reads the shortfall in feet when imperial', () => {
+    const { shown } = roundedDownCase(true)
+    badgeFor(true, shown - 10)
+    expect(screen.getByText('Short by 10 ft')).toBeInTheDocument()
+  })
+
+  it('writes the badge in sentence case', () => {
+    const { shown } = roundedDownCase(false)
+    badgeFor(false, shown)
+    expect(screen.getByText('Enough rode').className).not.toContain('uppercase')
+  })
+
+  it('reads Enough rode when the shown feet figure is paid out (imperial round trip)', () => {
     const { shown } = roundedDownCase(true)
     badgeFor(true, shown)
     expect(within(methodPanel()).getByText('Pay Out').nextElementSibling).toHaveTextContent(new RegExp(`^${shown}\\s*ft`))
-    expect(screen.getByText('Scope OK')).toBeInTheDocument()
+    expect(screen.getByText('Enough rode')).toBeInTheDocument()
   })
 })
