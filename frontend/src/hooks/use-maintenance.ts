@@ -362,6 +362,8 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
     withToday(`${RULES}/${encodeURIComponent(id)}/last-done`), { method: 'POST', json: body },
   )
   invalidateQueries([RULES])
+  // The server keeps the hours typed here as a hand reading when the item has no meter.
+  if (data.rule.equipment_id) invalidateQueries([`${equipmentMaintenance(data.rule.equipment_id)}/hour-readings`])
   return data.rule
 }
 
@@ -530,6 +532,8 @@ export function useMaintenanceLogEntries(filter: MaintenanceLogFilter | null) {
 export async function createMaintenanceLogEntry(input: MaintenanceLogEntryInput): Promise<MaintenanceLogEntry> {
   const data = await apiRequest<{ entry: MaintenanceLogEntry }>(LOG, { method: 'POST', json: input })
   invalidateQueries([LOG])
+  // An entry's hours are the item's hand-read hours (ADR 0268).
+  invalidateQueries([RULES])
   return data.entry
 }
 
@@ -537,6 +541,8 @@ export async function createMaintenanceLogEntry(input: MaintenanceLogEntryInput)
 export async function updateMaintenanceLogEntry(id: string, input: MaintenanceLogEntryInput): Promise<MaintenanceLogEntry> {
   const data = await apiRequest<{ entry: MaintenanceLogEntry }>(`${LOG}/${encodeURIComponent(id)}`, { method: 'PUT', json: input })
   invalidateQueries([LOG])
+  // An entry's hours are the item's hand-read hours (ADR 0268).
+  invalidateQueries([RULES])
   return data.entry
 }
 
@@ -544,6 +550,7 @@ export async function updateMaintenanceLogEntry(id: string, input: MaintenanceLo
 export async function deleteMaintenanceLogEntry(id: string): Promise<void> {
   await apiRequest<void>(`${LOG}/${encodeURIComponent(id)}`, { method: 'DELETE' })
   invalidateQueries([LOG])
+  invalidateQueries([RULES])
 }
 
 /** POST /api/inventory/maintenance/log/:id/photos - one multipart upload,

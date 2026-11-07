@@ -60,6 +60,7 @@ export interface OpenJobFilter {
 
 const JOBS = '/api/inventory/open-jobs'
 const LOG = '/api/inventory/maintenance/log'
+const RULES = '/api/inventory/maintenance/rules'
 const NO_JOBS: OpenJob[] = []
 
 function withToday(url: string): string {
@@ -109,6 +110,8 @@ export async function completeOpenJob(
   )
   invalidateQueries([JOBS])
   invalidateQueries([LOG])
+  // The entry's hours are the item's hand-read hours (ADR 0268).
+  invalidateQueries([RULES])
   return data
 }
 

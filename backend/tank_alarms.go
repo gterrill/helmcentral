@@ -373,6 +373,12 @@ func withTankAlarmBodies(statuses []alarmStatus) []alarmStatus {
 	return statuses
 }
 
+// tankLevelRoundingTolerance is how far above 1 a ratio may drift and still be
+// a full tank. It covers float rounding in the sender's arithmetic (a level of
+// 1.0000001), not overfill: anything larger is a sender on the wrong scale and
+// must still show as a missing tank.
+const tankLevelRoundingTolerance = 1e-6
+
 // tankLevelPercent is the percentage a reading of currentLevel means. SignalK
 // publishes the level as a ratio from 0 to 1, so 1 is full and 0.01 is one
 // percent. A number outside that range, or NaN, is not a level: it is reported
@@ -380,8 +386,11 @@ func withTankAlarmBodies(statuses []alarmStatus) []alarmStatus {
 // a missing tank instead of a plausible wrong one. The Tanks tile and the
 // alarms both read it through here, so they cannot disagree.
 func tankLevelPercent(raw float64) (percent float64, ok bool) {
-	if math.IsNaN(raw) || raw < 0 || raw > 1 {
+	if math.IsNaN(raw) || raw < 0 || raw > 1+tankLevelRoundingTolerance {
 		return 0, false
+	}
+	if raw > 1 {
+		raw = 1
 	}
 	return roundTo1(raw * 100), true
 }

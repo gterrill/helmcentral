@@ -277,6 +277,40 @@ func TestSetLastDoneHours_CountsAsAHandReadingOnlyWithoutAMeter(t *testing.T) {
 	}
 }
 
+// A mistyped Set last done figure corrected the same day must lower the hours:
+// the larger-figure-wins rule on one date would otherwise keep the typo.
+func TestSetLastDoneHours_ASecondSetOnTheSameDayReplacesTheFirst(t *testing.T) {
+	withTestDocumentStore(t)
+	maker := mustCreateHandlerTestEquipment(t, "Watermaker")
+	rule := handHoursRule(t, maker.ID)
+	at := "2026-05-01"
+	today := mustParseDate(t, "2026-06-15")
+	for _, h := range []float64{1500, 150} {
+		hours := h
+		if _, err := globalDocumentStore.SetMaintenanceRuleLastDoneCmd(today, rule.ID, maintenanceLastDoneRequest{LastDoneAt: &at, LastDoneHours: &hours}); err != nil {
+			t.Fatalf("SetMaintenanceRuleLastDoneCmd: %v", err)
+		}
+	}
+	// A reading logged by hand the same day, with its own note, stays.
+	if code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-05-01","gauge":100,"note":"gauge photo"}`); code != http.StatusCreated {
+		t.Fatalf("record: %d %s", code, body)
+	}
+	readings, err := globalDocumentStore.ListHandHourReadings(maker.ID)
+	if err != nil {
+		t.Fatalf("ListHandHourReadings: %v", err)
+	}
+	if len(readings) != 2 {
+		t.Fatalf("want the corrected Set last done and the hand reading, got %+v", readings)
+	}
+	view, err := resolveMaintenanceRuleView(rule.ID, today)
+	if err != nil {
+		t.Fatalf("resolveMaintenanceRuleView: %v", err)
+	}
+	if view.CurrentHours == nil || *view.CurrentHours != 150 {
+		t.Fatalf("the corrected 150 must stand, got %+v", view.CurrentHours)
+	}
+}
+
 // Fallback policy: a quiet meter reads unknown even when hours were typed for
 // the item, because that figure must never pass for the live reading.
 func TestRuleView_ItemWithMeterNeverFallsBackToHandHours(t *testing.T) {

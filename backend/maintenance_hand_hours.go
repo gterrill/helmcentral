@@ -292,6 +292,8 @@ func deleteHandHourReadingHandler(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+const lastDoneReadingNote = "Set last done"
+
 // recordLastDoneHandReadingTx keeps the hours typed on Set last done as a
 // reading dated that day (today when only hours were given), when the item has
 // no hour meter. An item with a meter keeps nothing: its hours are the meter's.
@@ -307,6 +309,13 @@ func recordLastDoneHandReadingTx(tx *sql.Tx, now, today time.Time, equipmentID s
 	if readOn > today.Format("2006-01-02") {
 		return nil // a date still to come is not a reading
 	}
-	_, err = insertHandHourReadingTx(tx, now, equipmentID, readOn, gauge, hours, "Set last done")
+	// A second Set last done for the same day replaces the first, so a mistyped
+	// figure can be corrected down (the larger figure on one date wins
+	// otherwise). Readings logged by hand carry other notes and stay.
+	if _, err = tx.Exec(`DELETE FROM hand_hour_readings WHERE equipment_id = ? AND read_on = ? AND note = ?`,
+		equipmentID, readOn, lastDoneReadingNote); err != nil {
+		return fmt.Errorf("replace set last done reading"+": %w", err)
+	}
+	_, err = insertHandHourReadingTx(tx, now, equipmentID, readOn, gauge, hours, lastDoneReadingNote)
 	return err
 }

@@ -106,6 +106,9 @@ func TestAnchorPositionLostClearsWhenATrustedFixReturns(t *testing.T) {
 	if !ok || event.Kind != alarmEventCleared || event.Rule.ID != anchorPositionLostRuleID {
 		t.Fatalf("a trusted fix must clear the alarm, got %+v", event)
 	}
+	if event.Status.Message != "Position restored" {
+		t.Fatalf("a returned fix says so, got %q", event.Status.Message)
+	}
 
 	if _, ok := watcher.check(start.Add(anchorPositionLostDelay + 2*time.Second)); ok {
 		t.Fatalf("a clear is reported once")
@@ -180,6 +183,9 @@ func TestAnchorPositionLostClearsWhenTheWatchIsCancelled(t *testing.T) {
 	event, ok := watcher.check(start.Add(anchorPositionLostDelay + time.Second))
 	if !ok || event.Kind != alarmEventCleared {
 		t.Fatalf("weighing anchor must take the alarm with it, got %+v", event)
+	}
+	if event.Status.Message != "Anchor watch cancelled" {
+		t.Fatalf("a cancel must not claim the position is back, got %q", event.Status.Message)
 	}
 }
 
