@@ -16,7 +16,7 @@ if [ $# -ne 1 ]; then
   exit 2
 fi
 
-wt=$(cd "$1" 2>/dev/null && pwd) || {
+wt=$(cd "$1" 2>/dev/null && pwd -P) || {
   echo "security-review: $1 is not a directory" >&2
   exit 1
 }
@@ -40,18 +40,24 @@ if [ "$(git -C "$wt" rev-parse --show-toplevel)" != "$wt" ]; then
 fi
 
 branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD)
-ahead=$(git -C "$wt" rev-list --count origin/main..HEAD)
+# /security-review diffs origin/HEAD..., so the guard checks that same ref.
+base=origin/HEAD
+git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null || {
+  echo "security-review: $base does not resolve in $wt; run git fetch origin" >&2
+  exit 1
+}
+ahead=$(git -C "$wt" rev-list --count "$base"..HEAD)
 if [ "$ahead" -eq 0 ]; then
-  echo "security-review: $branch has no commits ahead of origin/main, so the diff is empty and a review would check nothing. Commit first (git fetch origin if origin/main is stale)." >&2
+  echo "security-review: $branch has no commits ahead of $base, so the diff is empty and a review would check nothing. Commit first (git fetch origin if $base is stale)." >&2
   exit 1
 fi
-if git -C "$wt" diff --quiet origin/main...HEAD; then
-  echo "security-review: $branch has $ahead commit(s) ahead of origin/main but they change nothing, so a review would check nothing." >&2
+if git -C "$wt" diff --quiet "$base"...HEAD; then
+  echo "security-review: $branch has $ahead commit(s) ahead of $base but they change nothing, so a review would check nothing." >&2
   exit 1
 fi
 
 command -v claude >/dev/null || { echo "security-review: the claude CLI is required" >&2; exit 1; }
 
-echo "security-review: reviewing $branch ($ahead commit(s) ahead of origin/main) in $wt"
+echo "security-review: reviewing $branch ($ahead commit(s) ahead of $base) in $wt"
 cd "$wt"
 claude -p "/security-review"

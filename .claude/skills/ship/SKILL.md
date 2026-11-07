@@ -14,17 +14,9 @@ checkout, and `git status` must hold only your changes. Run `git fetch
 origin` and rebase onto `origin/main`; local `main` often lags.
 
 `/code-review` reviews the path you give it, so step 5 passes the worktree's
-path. `/security-review` takes no argument and diffs the session's own
-directory, whatever a `cd` says. When a subagent built the change and this
-session still sits in the main checkout, move it with `EnterWorktree` and the
-worktree's path. Tell the operator first: it waits on a permission prompt,
-which has held sessions for 15 minutes. It refuses a session that has already
-entered another worktree, naming `.claude/worktrees` as the reason; then
-review `git diff origin/main...HEAD` inside the worktree by hand for step 7.
+path.
 
-**Done:** the first two are true, and the session's directory is the
-worktree or step 7 will be a hand review. If the first two are not, stop and
-ask.
+**Done:** the first two are true. If not, stop and ask.
 
 ## 2. Release notes and docs
 
@@ -123,14 +115,16 @@ still running.
 
 ## 7. Security review
 
-Run `/security-review`. It takes no arguments and never edits code, and it
-reports only HIGH and MEDIUM findings at 8/10 confidence or above. It diffs
-`origin/HEAD...` in the session's directory, so it sees committed work only and
-runs after step 6. Fix each confirmed finding test-first, then go back to step 4.
+Run `sh scripts/security-review.sh <worktree>` (from any directory). It starts
+`claude -p "/security-review"` inside the worktree, because `/security-review`
+diffs the directory its session started in. The review never edits code and
+reports only HIGH and MEDIUM findings at 8/10 confidence or above. It sees
+committed work only, so it runs after step 6. The script fails when the branch
+has no commits ahead of `origin/HEAD`. Fix each confirmed finding test-first,
+then go back to step 4.
 
-**Done:** the report covers this branch's commits, and it has no findings or
-every finding is fixed and pushed. A report on an empty diff ran in the
-wrong directory: go back to step 1.
+**Done:** the script ran and its report covers this branch's commits, and it
+has no findings or every finding is fixed and pushed.
 
 ## 8. Watch until merged
 
