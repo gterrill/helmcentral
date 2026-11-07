@@ -12,9 +12,15 @@ in how the card is stored and decoded.
 Amended: the inline map keeps cooperative gestures, and a Full screen button
 opens the same layers in a dialog with plain gestures and zoom buttons. Only
 one map exists at a time, because browsers cap WebGL contexts: the inline map
-unmounts while the dialog is open. Each surface frames afresh, with no pan or
-zoom carried across, as the Anchor watch tile and drawer keep their own fit.
-An active alarm still shows at the top of the dialog.
+unmounts while the dialog is open. A surface starts at the other's pan and
+zoom once the operator has moved either by hand; an untouched card still fits
+its bounds in the bigger box. Both maps mount the shared place-name layers
+(bays and straits, islands, peaks, towns; the marina point is left off the marina map, which names its own marina) under the card's own layers, with the OpenSeaMap
+raster and imagery beneath them. An active alarm still shows at the top of the
+dialog.
+
+Amended: a facility name that repeats, such as two "Fuel Dock"s, labels only its
+first feature. Every dot stays.
 
 ## Context
 

@@ -272,6 +272,15 @@ export const lonLat = ([lat, lon]: [number, number]): [number, number] => [lon, 
 
 export const featureCollection = (features: GeoJSON.Feature[]): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features })
 
+/** A facility named the same as one labelled within this many metres gets no label of its own. */
+const SAME_NAME_METRES = 150
+
+/** Metres between two points, on a flat earth: close enough over a marina. */
+function metresApart(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const k = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180))
+  return Math.hypot((b.lat - a.lat) * 111_320, (b.lon - a.lon) * 111_320 * k)
+}
+
 /**
  * The marina's outline, pontoons and points as GeoJSON for the map. A point
  * shape has no extent and is not drawn as a line; a closed polygon is drawn
@@ -298,17 +307,27 @@ export function marinaFeatures(card: MarinaCard): MarinaFeatureCollections {
       const mid = p.shape.kind === 'line' ? lineMidpoint(p.shape.points) : p.shape.points[0]
       return { type: 'Feature', properties: { name: p.name }, geometry: { type: 'Point', coordinates: lonLat(mid) } }
     })
-  const point = (p: { kind: string; name: string; lat: number; lon: number }): GeoJSON.Feature => ({
-    type: 'Feature',
-    properties: { kind: p.kind, label: p.name || kindLabel(p.kind) },
-    geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-  })
+  // Every point keeps its dot. A name repeated close by, such as two "Fuel Dock"s
+  // on one wharf, is labelled once; the same name far apart is labelled at each.
+  const points = (list: { kind: string; name: string; lat: number; lon: number }[]): GeoJSON.Feature[] => {
+    const labelled: { label: string; lat: number; lon: number }[] = []
+    return list.map((p): GeoJSON.Feature => {
+      const label = p.name || kindLabel(p.kind)
+      const repeat = labelled.some((l) => l.label === label && metresApart(l, p) < SAME_NAME_METRES)
+      if (!repeat) labelled.push({ label, lat: p.lat, lon: p.lon })
+      return {
+        type: 'Feature',
+        properties: repeat ? { kind: p.kind } : { kind: p.kind, label },
+        geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+      }
+    })
+  }
   return {
     outline: fc(outline),
     pontoons: fc(pontoons),
     pontoonLabels: fc(pontoonLabels),
-    facilities: fc(card.geometry.facilities.map(point)),
-    ashore: fc(card.geometry.ashore.map(point)),
+    facilities: fc(points(card.geometry.facilities)),
+    ashore: fc(points(card.geometry.ashore)),
   }
 }
 

@@ -105,4 +105,27 @@ describe('marina card map data', () => {
     ] } }))
     expect(f.facilities.features.map((x) => x.properties?.label)).toEqual(['Boatramp', 'Haul-out'])
   })
+
+  it('keeps every facility dot but labels only one of a name repeated close together', () => {
+    const f = marinaFeatures(marinaCard({ geometry: { outline: [], pontoons: [], facilities: [
+      { kind: 'fuel', name: 'Fuel Dock', lat: -20.1, lon: 148.1 },
+      { kind: 'fuel', name: 'Fuel Dock', lat: -20.1005, lon: 148.1 },
+      { kind: 'ramp', name: 'Boatramp', lat: -20.3, lon: 148.3 },
+    ], ashore: [
+      { kind: 'chandler', name: '', lat: -20.4, lon: 148.4 },
+      { kind: 'chandler', name: '', lat: -20.4005, lon: 148.4 },
+    ] } }))
+    expect(f.facilities.features).toHaveLength(3)
+    expect(f.facilities.features.map((x) => x.properties?.label)).toEqual(['Fuel Dock', undefined, 'Boatramp'])
+    expect(f.ashore.features).toHaveLength(2)
+    expect(f.ashore.features.map((x) => x.properties?.label)).toEqual(['Chandler', undefined])
+  })
+
+  it('labels a repeated name at each place when they are far apart', () => {
+    const f = marinaFeatures(marinaCard({ geometry: { outline: [], pontoons: [], ashore: [], facilities: [
+      { kind: 'fuel', name: 'Fuel Dock', lat: -20.1, lon: 148.1 },
+      { kind: 'fuel', name: 'Fuel Dock', lat: -20.12, lon: 148.1 },
+    ] } }))
+    expect(f.facilities.features.map((x) => x.properties?.label)).toEqual(['Fuel Dock', 'Fuel Dock'])
+  })
 })

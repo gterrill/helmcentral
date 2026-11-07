@@ -2,6 +2,7 @@ import type { ExpressionSpecification, SymbolLayerSpecification } from 'maplibre
 import { useMemo } from 'react'
 import { Layer, Source } from 'react-map-gl/maplibre'
 
+import { GradeLegend } from '@/components/anchorage-shelter-rose'
 import { MateCardMap, POINT_LABEL_LAYOUT, RequireWebGL2, ROUND_LINE_LAYOUT, useThemeColours } from '@/components/mate-card-map'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { anchorageFeatures, anchorageFrame, anchorageTitle, GRADE_TOKEN } from '@/lib/anchorage-card'
@@ -24,6 +25,17 @@ export default function AssistantAnchorageMapImpl({ card }: { card: AnchorageCar
     <RequireWebGL2 name="anchorage">
       <AnchorageMap card={card} />
     </RequireWebGL2>
+  )
+}
+
+/** The key to the fetch rays: the same chips and tokens as the card's shelter rose. */
+function RayLegend({ full }: { full: boolean }) {
+  return (
+    <div className="flex flex-col gap-1">
+      {/* A narrow inline card keeps to one row of chips. */}
+      <span className={`text-xs font-medium text-foreground ${full ? '' : 'hidden @sm:block'}`}>Shelter along each line</span>
+      <GradeLegend label="Map key: shelter grades" />
+    </div>
   )
 }
 
@@ -54,7 +66,7 @@ function AnchorageMap({ card }: { card: AnchorageCard }) {
   })
 
   return (
-    <MateCardMap title={anchorageTitle(card)} bounds={bounds} beforeId="anchorage-restricted-fill">
+    <MateCardMap title={anchorageTitle(card)} bounds={bounds} beforeId="anchorage-restricted-fill" legend={(full) => <RayLegend full={full} />}>
       <Source id="anchorage-restricted" type="geojson" data={features.restrictedAreas}>
         <Layer id="anchorage-restricted-fill" type="fill" paint={{ 'fill-color': restrictedColour, 'fill-opacity': 0.28 }} />
         <Layer id="anchorage-restricted-edge" type="line" paint={{ 'line-color': restrictedColour, 'line-width': 2 }} />

@@ -44,9 +44,11 @@ beforeEach(() => {
 describe('AssistantAnchorageMapImpl', () => {
   it('fits the anchorage and the mile round it, with cooperative gestures', () => {
     render(<AssistantAnchorageMapImpl card={anchorageCard()} />)
-    const view = mapProps.initialViewState as { bounds: number[][]; fitBoundsOptions: { padding: number } }
+    const view = mapProps.initialViewState as { bounds: number[][]; fitBoundsOptions: { padding: { top: number; left: number; bottom: number } } }
     expect(view.bounds[0][0]).toBeLessThan(view.bounds[1][0])
-    expect(view.fitBoundsOptions.padding).toBeGreaterThan(0)
+    expect(view.fitBoundsOptions.padding.top).toBeGreaterThan(0)
+    // The legend sits over the bottom-left corner, so the fit leaves more room there.
+    expect(view.fitBoundsOptions.padding.bottom).toBeGreaterThan(view.fitBoundsOptions.padding.top)
     expect(mapProps.cooperativeGestures).toBe(true)
   })
 
@@ -87,6 +89,7 @@ describe('AssistantAnchorageMapImpl', () => {
   it('keeps every map label at 12 px or larger', () => {
     render(<AssistantAnchorageMapImpl card={anchorageCard()} />)
     for (const [id, props] of Object.entries(layerProps)) {
+      if (id.startsWith('place-names-')) continue // the shared place-name styles size their own text
       const size = (props.layout as Record<string, unknown> | undefined)?.['text-size']
       if (size !== undefined) expect(size, id).toBeGreaterThanOrEqual(12)
     }
@@ -95,6 +98,7 @@ describe('AssistantAnchorageMapImpl', () => {
   it('takes the satellite off when asked, and keeps the imagery under the OpenSeaMap marks', () => {
     render(<AssistantAnchorageMapImpl card={anchorageCard()} />)
     expect(layerProps['world-imagery-layer'].beforeId).toBe('openseamap-layer')
+    expect(layerProps['place-names-water'].beforeId).toBe('anchorage-restricted-fill')
     expect(layerProps['openseamap-layer'].beforeId).toBe('anchorage-restricted-fill')
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()

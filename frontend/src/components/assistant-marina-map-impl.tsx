@@ -24,6 +24,9 @@ export default function AssistantMarinaMapImpl({ card }: { card: MarinaCard }) {
   )
 }
 
+// The basemap's marina point would print the marina's own name under the card's labels.
+const OMIT_PLACE_LABELS = ['place-names-harbor'] as const
+
 function MarinaMap({ card }: { card: MarinaCard }) {
   const [showAshore, setShowAshore] = useState(false)
 
@@ -45,6 +48,7 @@ function MarinaMap({ card }: { card: MarinaCard }) {
       title={marinaTitle(card)}
       bounds={bounds}
       beforeId="marina-outline-casing"
+      omitPlaceLabels={OMIT_PLACE_LABELS}
       controls={hasAshore && <MapToggleButton icon={Store} label="Toggle shops and services ashore" on={showAshore} onToggle={() => setShowAshore((v) => !v)} />}
     >
       {/* The marina's outline: a thin stroke on a light casing, so it reads on imagery and on the chart. */}

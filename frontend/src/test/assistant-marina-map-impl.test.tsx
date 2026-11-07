@@ -69,6 +69,7 @@ describe('AssistantMarinaMapImpl', () => {
     render(<AssistantMarinaMapImpl card={marinaCard()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Toggle shops and services ashore' }))
     for (const [id, props] of Object.entries(layerProps)) {
+      if (id.startsWith('place-names-')) continue // the shared place-name styles size their own text
       const size = (props.layout as Record<string, unknown> | undefined)?.['text-size']
       if (size !== undefined) expect(size, id).toBeGreaterThanOrEqual(12)
     }
@@ -99,6 +100,7 @@ describe('AssistantMarinaMapImpl', () => {
     fireEvent.click(toggle)
     fireEvent.click(toggle)
     expect(layerProps['world-imagery-layer'].beforeId).toBe('openseamap-layer')
+    expect(layerProps['place-names-water'].beforeId).toBe('marina-outline-casing')
     expect(layerProps['openseamap-layer'].beforeId).toBe('marina-outline-casing')
   })
 

@@ -85,6 +85,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The maps on Mate's marina and anchorage cards are easier to read.** The
+  anchorage map now has a small key in its bottom-left corner saying what each
+  shelter colour means, on the card and in full screen. Both maps now show
+  place names: bays and straits, islands, peaks and towns, and on the anchorage
+  map the names of marinas too. On the marina map, a name that appears twice
+  close together, such as two fuel docks on one wharf, is written once, though
+  every dot stays. Opening full screen starts where you had panned and zoomed the
+  card, and closing it puts the card back where you left the full-screen map.
 - **During an anchor watch the nearby boats list stops at 40.** It holds the
   boats nearest you, plus those near your anchor, so a very crowded anchorage
   can't swamp a phone. It keeps the ones closest to your anchor if there are

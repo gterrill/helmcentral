@@ -2,21 +2,21 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl, { type SymbolLayerSpecification } from 'maplibre-gl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { Expand, Minus, Plus, X } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
-import type { MapRef } from 'react-map-gl/maplibre'
+import { useCallback, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type Ref } from 'react'
+import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
 import { Layer, Map, Source } from 'react-map-gl/maplibre'
 
 import { FullscreenAlarmBanner } from '@/components/fullscreen-alarm-banner'
 import { useCardMapExpanded } from '@/components/lazy-card-map'
 import { MapIconButton } from '@/components/map-icon-button'
-import { PLACE_FONT } from '@/components/map-place-labels'
+import { BASE_VECTOR_SOURCE_ID, MapPlaceLabels, PLACE_FONT, PLACE_LABEL_LAYER_IDS, warnIfBaseVectorSourceMissing, type PlaceLabelId } from '@/components/map-place-labels'
 import { Dialog, DialogClose, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import type { Bounds } from '@/lib/marina-card'
 import { themeColour, useIsDarkTheme } from '@/lib/map-theme'
-import { WORLD_IMAGERY_MAX_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
+import { WORLD_IMAGERY_MAX_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION, worldImageryVisibleAtZoom } from '@/lib/world-imagery'
 import { hasWebGL2 } from '@/lib/webgl'
 
 // The base the marina and anchorage maps on a Mate card share: the Carto style
@@ -25,6 +25,9 @@ import { hasWebGL2 } from '@/lib/webgl'
 // between the two as children.
 
 const FIT_PADDING = 28
+// The legend sits over the bottom-left corner: its box is about 48 px tall with
+// its margin, so a fit leaves that much more room below.
+const LEGEND_FIT_ALLOWANCE = 48
 
 export const ROUND_LINE_LAYOUT = { 'line-cap': 'round', 'line-join': 'round' } as const
 
@@ -80,9 +83,23 @@ export function useThemeColours<T>(read: (base: MapColours) => T): T {
  * and its box stays blank at its size. The imagery choice lives here, so it
  * survives the swap.
  */
-export function MateCardMap({ title, bounds, beforeId, controls, children }: { title: string; bounds: Bounds; beforeId: string; controls?: ReactNode; children: ReactNode }) {
+export function MateCardMap({ title, bounds, beforeId, controls, legend, omitPlaceLabels, children }: {
+  title: string
+  bounds: Bounds
+  beforeId: string
+  controls?: ReactNode
+  /** The map's key, drawn bottom-left. `full` is true in the full-screen dialog. */
+  legend?: (full: boolean) => ReactNode
+  /** Place-name layers this card draws for itself. */
+  omitPlaceLabels?: readonly PlaceLabelId[]
+  children: ReactNode
+}) {
   const [imagery, setImagery] = useState(true)
   const [expanded, setExpanded] = useCardMapExpanded()
+  // Where the operator last panned or zoomed to, handed to whichever map mounts
+  // next. A ref, not state: nothing draws from it. Null until the map has been
+  // moved by hand, so an untouched card still fits its bounds in a bigger box.
+  const viewRef = useRef<CardView | null>(null)
   // Full screen unmounts the inline button, so focus goes back to the new one.
   const expandRef = useRef<HTMLButtonElement>(null)
   // Base UI focuses the first tabbable thing, which would be the alarm banner's
@@ -92,7 +109,10 @@ export function MateCardMap({ title, bounds, beforeId, controls, children }: { t
     <MapBody
       full={full}
       bounds={bounds}
+      viewRef={viewRef}
       beforeId={beforeId}
+      legend={legend}
+      omitPlaceLabels={omitPlaceLabels}
       imagery={imagery}
       onToggleImagery={() => setImagery((v) => !v)}
       onExpand={() => setExpanded(true)}
@@ -129,9 +149,19 @@ export function MateCardMap({ title, bounds, beforeId, controls, children }: { t
   )
 }
 
+/** The centre and zoom of a map the operator has moved. */
+interface CardView {
+  longitude: number
+  latitude: number
+  zoom: number
+}
+
 interface MapBodyProps {
   full: boolean
   bounds: Bounds
+  viewRef: MutableRefObject<CardView | null>
+  legend?: (full: boolean) => ReactNode
+  omitPlaceLabels?: readonly PlaceLabelId[]
   beforeId: string
   imagery: boolean
   onToggleImagery: () => void
@@ -142,8 +172,22 @@ interface MapBodyProps {
 }
 
 /** The map and its button stack, mounted inline or in the full-screen dialog. */
-function MapBody({ full, bounds, beforeId, imagery, onToggleImagery, onExpand, expandRef, controls, children }: MapBodyProps) {
+function MapBody({ full, bounds, viewRef, legend, omitPlaceLabels, beforeId, imagery, onToggleImagery, onExpand, expandRef, controls, children }: MapBodyProps) {
   const mapRef = useRef<MapRef | null>(null)
+  // Whether the loaded style has the vector source the place names draw from.
+  const [hasNames, setHasNames] = useState(false)
+  // The zoom buttons move the map from code, which carries no originalEvent, so
+  // they tag the move with event data that comes back on its moveend.
+  const zoomBy = (zoom: 'zoomIn' | 'zoomOut') => mapRef.current?.[zoom](undefined, { fromButton: true })
+  // The satellite fades in from zoom 9, so the names turn white-on-black only from there.
+  const [zoomedIn, setZoomedIn] = useState(false)
+  const remember = (e: ViewStateChangeEvent & { fromButton?: boolean }) => {
+    setZoomedIn(worldImageryVisibleAtZoom(e.viewState.zoom))
+    // Only a move the operator made counts: the fit to the bounds on mount does not.
+    if (!e.originalEvent && !e.fromButton) return
+    const { longitude, latitude, zoom } = e.viewState
+    viewRef.current = { longitude, latitude, zoom }
+  }
   // The twist of a pinch and Shift with the arrow keys still rotate a map whose
   // dragRotate is off. Locked from the moment the map exists, not on load, which
   // waits for the style and tiles.
@@ -153,15 +197,23 @@ function MapBody({ full, bounds, beforeId, imagery, onToggleImagery, onExpand, e
     const map = m.getMap()
     map.touchZoomRotate.disableRotation()
     map.keyboard.disableRotation()
+    // Fail fast: the place names draw from the basemap's own vector source.
+    map.on('style.load', () => {
+      warnIfBaseVectorSourceMissing(map)
+      setHasNames(!!map.getSource(BASE_VECTOR_SOURCE_ID))
+    })
+    setZoomedIn(worldImageryVisibleAtZoom(map.getZoom()))
   }, [])
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const dark = useIsDarkTheme()
   return (
-    <div className="relative h-full w-full">
+    // A container, so the legend's heading goes by the card's width, not the screen's.
+    <div className="@container relative h-full w-full">
       <Map
         ref={setMap}
         mapLib={maplibregl}
-        initialViewState={{ bounds, fitBoundsOptions: { padding: FIT_PADDING, maxZoom: WORLD_IMAGERY_MAX_ZOOM } }}
+        initialViewState={viewRef.current ?? { bounds, fitBoundsOptions: { padding: legend ? { top: FIT_PADDING, right: FIT_PADDING, left: FIT_PADDING, bottom: FIT_PADDING + LEGEND_FIT_ALLOWANCE } : FIT_PADDING, maxZoom: WORLD_IMAGERY_MAX_ZOOM } }}
+        onMoveEnd={remember}
         style={{ width: '100%', height: '100%' }}
         mapStyle={dark ? STYLE_DARK : STYLE_LIGHT}
         attributionControl={{ compact: true }}
@@ -173,8 +225,13 @@ function MapBody({ full, bounds, beforeId, imagery, onToggleImagery, onExpand, e
         touchPitch={false}
       >
         {children}
+        {/* The place names go in just under the card's lowest layer. OpenSeaMap is anchored under the
+            lowest of them, and the imagery under OpenSeaMap, so the order is fixed by id and not by which
+            layer react-map-gl happens to add first. With no vector source in the style there are no names,
+            and OpenSeaMap goes under the card's layer instead. */}
+        <MapPlaceLabels isDarkTheme={dark} overImagery={imagery && zoomedIn} beforeId={beforeId} omit={omitPlaceLabels} />
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
-          <Layer id="openseamap-layer" type="raster" beforeId={beforeId} paint={{ 'raster-opacity': 0.85 }} />
+          <Layer id="openseamap-layer" type="raster" beforeId={hasNames ? PLACE_LABEL_LAYER_IDS.find((id) => !omitPlaceLabels?.includes(id)) : beforeId} paint={{ 'raster-opacity': 0.85 }} />
         </Source>
         {imagery && <WorldImageryLayer opacity={WORLD_IMAGERY_OPACITY_EXPRESSION} beforeId="openseamap-layer" />}
       </Map>
@@ -182,8 +239,8 @@ function MapBody({ full, bounds, beforeId, imagery, onToggleImagery, onExpand, e
       <div className="absolute right-2 top-2 flex flex-col gap-2">
         {full ? (
           <>
-            <MapIconButton icon={Plus} label="Zoom in" onClick={() => mapRef.current?.zoomIn()} />
-            <MapIconButton icon={Minus} label="Zoom out" onClick={() => mapRef.current?.zoomOut()} />
+            <MapIconButton icon={Plus} label="Zoom in" onClick={() => zoomBy('zoomIn')} />
+            <MapIconButton icon={Minus} label="Zoom out" onClick={() => zoomBy('zoomOut')} />
           </>
         ) : (
           <MapIconButton ref={expandRef} icon={Expand} label="Full screen" onClick={onExpand} />
@@ -191,6 +248,8 @@ function MapBody({ full, bounds, beforeId, imagery, onToggleImagery, onExpand, e
         <ImageryToggleButton on={imagery} onToggle={onToggleImagery} />
         {controls}
       </div>
+      {/* Bottom-left: the attribution is bottom-right and the buttons top-right. */}
+      {legend && <div className="pointer-events-none absolute bottom-2 left-2 max-w-[70%] rounded-md bg-background/85 px-2 py-1.5 shadow-sm">{legend(full)}</div>}
     </div>
   )
 }

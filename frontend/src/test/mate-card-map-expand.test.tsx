@@ -28,22 +28,29 @@ const alarm = { rule_id: 'r', label: 'Bilge high', path: 'notifications.bilge', 
 const { router, wrapper } = testRouter('/')
 
 const mapProps: Record<string, unknown>[] = []
+const layerProps: Record<string, Record<string, unknown>> = {}
 const zoom = vi.hoisted(() => ({ zoomIn: vi.fn(), zoomOut: vi.fn() }))
 const fakeMap = vi.hoisted(() => ({
   touchZoomRotate: { disableRotation: vi.fn() },
   keyboard: { disableRotation: vi.fn() },
   getContainer: () => null,
+  on: vi.fn(),
+  getSource: vi.fn(),
+  getZoom: () => 12,
 }))
 vi.mock('react-map-gl/maplibre', async () => {
   const { forwardRef, useImperativeHandle } = await import('react')
   return {
     Map: forwardRef(function FakeMap(props: { children?: ReactNode } & Record<string, unknown>, ref) {
-      useImperativeHandle(ref, () => ({ zoomIn: zoom.zoomIn, zoomOut: zoom.zoomOut, getMap: () => fakeMap }))
+      useImperativeHandle(ref, () => ({ zoomIn: zoom.zoomIn, zoomOut: zoom.zoomOut, getMap: () => fakeMap }), [])
       mapProps.push(props)
       return <div data-testid="map">{props.children}</div>
     }),
     Source: ({ id, children }: { id: string; children?: ReactNode }) => <div data-testid={`source-${id}`}>{children}</div>,
-    Layer: ({ id }: { id: string }) => <i data-testid={`layer-${id}`} />,
+    Layer: (props: { id: string } & Record<string, unknown>) => {
+      layerProps[props.id] = props
+      return <i data-testid={`layer-${props.id}`} />
+    },
   }
 })
 vi.mock('maplibre-gl', () => ({ default: {} }))
@@ -64,12 +71,14 @@ const lastProps = () => mapProps[mapProps.length - 1]
 
 beforeEach(() => {
   mapProps.length = 0
+  for (const k of Object.keys(layerProps)) delete layerProps[k]
   mockAlarms.list = []
   callbacks = []
   zoom.zoomIn.mockClear()
   zoom.zoomOut.mockClear()
   fakeMap.touchZoomRotate.disableRotation.mockClear()
   fakeMap.keyboard.disableRotation.mockClear()
+  fakeMap.on.mockClear()
   vi.stubGlobal('IntersectionObserver', FakeObserver)
   for (const t of ['--primary', '--gauge-primary', '--foreground', '--background', '--muted-foreground', '--destructive']) {
     document.documentElement.style.setProperty(t, '10 20% 30%')
@@ -123,6 +132,111 @@ describe.each(cards)('the $label card map, expanded', ({ ui, name, layer }) => {
     expect(screen.getByRole('button', { name: 'Full screen' })).toBeInTheDocument()
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
     expect(lastProps().cooperativeGestures).toBe(true)
+  })
+})
+
+describe.each(cards)('the $label card map, legibility', ({ ui }) => {
+  const moved = (view: { longitude: number; latitude: number; zoom: number }, by: object | null = {}, extra: object = {}) =>
+    act(() => (lastProps().onMoveEnd as (e: unknown) => void)({ viewState: view, originalEvent: by ?? undefined, ...extra }))
+
+  it('draws place names, over imagery while the imagery is on', () => {
+    render(ui(), { wrapper })
+    expect(screen.getAllByTestId(/^layer-place-/).length).toBeGreaterThan(0)
+  })
+
+  it('warns when the basemap has no vector source, on each style load', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(ui(), { wrapper })
+    const [event, onStyleLoad] = fakeMap.on.mock.calls.find(([name]) => name === 'style.load') ?? []
+    expect(event).toBe('style.load')
+    onStyleLoad()
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('base vector source'))
+    error.mockRestore()
+  })
+
+  it('anchors OpenSeaMap under the lowest place name once the style has its vector source, and under the card otherwise', () => {
+    render(ui(), { wrapper })
+    const card = layerProps['openseamap-layer'].beforeId
+    expect(card).not.toMatch(/^place-names-/)
+    expect(layerProps['place-names-water'].beforeId).toBe(card)
+    fakeMap.getSource.mockReturnValue({})
+    const onStyleLoad = fakeMap.on.mock.calls.find(([name]) => name === 'style.load')?.[1]
+    act(() => onStyleLoad())
+    expect(layerProps['openseamap-layer'].beforeId).toBe('place-names-water')
+    fakeMap.getSource.mockReturnValue(undefined)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    act(() => onStyleLoad())
+    expect(layerProps['openseamap-layer'].beforeId).toBe(card)
+    vi.mocked(console.error).mockRestore()
+  })
+
+  it('draws the names over imagery only while the imagery is on and zoomed in enough to show', () => {
+    render(ui(), { wrapper })
+    const halo = () => (layerProps['place-names-island'].paint as Record<string, string>)['text-halo-color']
+    expect(halo()).toBe('#000000')
+    moved({ longitude: 1, latitude: 2, zoom: 8 })
+    expect(halo()).not.toBe('#000000')
+    moved({ longitude: 1, latitude: 2, zoom: 9.5 })
+    expect(halo()).toBe('#000000')
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+    expect(halo()).not.toBe('#000000')
+  })
+
+  it('opens full screen where the card was panned to, and the card returns to where full screen was left', () => {
+    render(ui(), { wrapper })
+    expect(lastProps().initialViewState).toHaveProperty('bounds')
+    moved({ longitude: 1, latitude: 2, zoom: 9 })
+    fireEvent.click(screen.getByRole('button', { name: 'Full screen' }))
+    expect(lastProps().initialViewState).toEqual({ longitude: 1, latitude: 2, zoom: 9 })
+    moved({ longitude: 3, latitude: 4, zoom: 12 })
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(lastProps().initialViewState).toEqual({ longitude: 3, latitude: 4, zoom: 12 })
+  })
+
+  it('refits the bounds in full screen when the card was never moved by hand', () => {
+    render(ui(), { wrapper })
+    moved({ longitude: 1, latitude: 2, zoom: 9 }, null)
+    fireEvent.click(screen.getByRole('button', { name: 'Full screen' }))
+    expect(lastProps().initialViewState).toHaveProperty('bounds')
+  })
+
+  it('remembers a view reached with the zoom buttons', () => {
+    render(ui(), { wrapper })
+    fireEvent.click(screen.getByRole('button', { name: 'Full screen' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(zoom.zoomIn).toHaveBeenLastCalledWith(undefined, { fromButton: true })
+    moved({ longitude: 5, latitude: 6, zoom: 14 }, null, { fromButton: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(lastProps().initialViewState).toEqual({ longitude: 5, latitude: 6, zoom: 14 })
+  })
+})
+
+describe('the place names on each card map', () => {
+  it('leaves the marina point off the marina map, which names its own marina', () => {
+    render(<AssistantMarinaMapImpl card={marinaCard()} />, { wrapper })
+    expect(screen.queryByTestId('layer-place-names-harbor')).not.toBeInTheDocument()
+    expect(screen.getByTestId('layer-place-names-island')).toBeInTheDocument()
+  })
+
+  it('keeps marina names on the anchorage map', () => {
+    render(<AssistantAnchorageMapImpl card={anchorageCard()} />, { wrapper })
+    expect(screen.getByTestId('layer-place-names-harbor')).toBeInTheDocument()
+  })
+})
+
+describe('the anchorage card map legend', () => {
+  it('keys the ray colours inside the map, on the card and in full screen', () => {
+    render(<AssistantAnchorageMapImpl card={anchorageCard()} />, { wrapper })
+    const inMap = () => within(screen.getByTestId('map').parentElement as HTMLElement).getByRole('list', { name: 'Map key: shelter grades' })
+    expect(inMap()).toHaveTextContent('Sheltered')
+    expect(inMap()).toHaveTextContent('Exposed')
+    fireEvent.click(screen.getByRole('button', { name: 'Full screen' }))
+    expect(within(screen.getByRole('dialog')).getByRole('list', { name: 'Map key: shelter grades' })).toBeInTheDocument()
+  })
+
+  it('is not on the marina map', () => {
+    render(<AssistantMarinaMapImpl card={marinaCard()} />, { wrapper })
+    expect(screen.queryByRole('list', { name: 'Map key: shelter grades' })).not.toBeInTheDocument()
   })
 })
 
