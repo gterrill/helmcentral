@@ -3,14 +3,13 @@ import maplibregl, { type ExpressionSpecification, type LineLayerSpecification }
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Ship, X } from 'lucide-react'
+import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, circlePolygon } from '@/lib/geo'
 import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import { AisCappedNote } from '@/components/ais-capped-note'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import {
@@ -29,9 +28,6 @@ import { MapIconButton } from '@/components/map-icon-button'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
-import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
-import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
-import type { RadarEchoStatus } from '@/hooks/use-radar-echo-stream'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { hasWebGL2 } from '@/lib/webgl'
 import { ANCHOR_VIEW_MAX_ZOOM, ANCHOR_VIEW_MIN_ZOOM, fitRadiusZoom } from '@/lib/anchor-view'
@@ -65,64 +61,6 @@ const HIGH_DRIFT_IMPACT_KTS = 1.5
 // worse off than before. A stored zoom that belongs to the current anchor
 // session overrides this outright.
 const DEFAULT_ZOOM_BEFORE_FIT = 14
-
-export interface RadarEchoAvailability {
-  available: boolean
-  // Always present alongside `available: false`, so the toggle never
-  // silently does nothing (the plan's own requirement) -- a disabled
-  // control carries the reason in its title rather than just being greyed
-  // out with no explanation.
-  reason: string | null
-}
-
-/**
- * The radar-echo toggle's precedence chain, checked in the stated order:
- * no mayara address configured, no radar present, radar not transmitting
- * (STANDBY), capabilities unreadable, stream disconnected. Each reason is
- * checked only once the ones before it have already passed, so e.g. an
- * unconfigured integration reports "no mayara radar configured" rather than
- * a confusing "no radar found".
- *
- * The stream-disconnected check is gated on `echoEnabled`: `echoStatus` is
- * a module-level value (use-radar-echo-stream.ts) that settles to
- * 'disconnected' the moment the *last* subscriber releases -- including an
- * ordinary, intentional toggle-off. Without the `echoEnabled` gate, turning
- * the overlay off would leave it permanently unable to be turned back on,
- * since the very act of disabling it sets the status this function would
- * otherwise read as a reason to stay disabled.
- */
-export function resolveRadarEchoAvailability(params: {
-  /** Null until the first radar frame: the map claims neither on nor off. */
-  radarSource: RadarSource | null
-  radars: RadarInfo[]
-  capabilitiesError: string | null
-  capabilitiesLoading: boolean
-  echoEnabled: boolean
-  echoStatus: RadarEchoStatus
-}): RadarEchoAvailability {
-  if (params.radarSource === null) {
-    return { available: false, reason: 'Waiting for radar data…' }
-  }
-  if (params.radarSource === 'disabled') {
-    return { available: false, reason: 'No mayara radar configured' }
-  }
-  if (params.radars.length === 0) {
-    return { available: false, reason: 'No radar found' }
-  }
-  if (!params.radars[0].transmitting) {
-    return { available: false, reason: 'Radar in STANDBY' }
-  }
-  if (params.capabilitiesLoading) {
-    return { available: false, reason: 'Loading radar capabilities…' }
-  }
-  if (params.capabilitiesError !== null) {
-    return { available: false, reason: params.capabilitiesError }
-  }
-  if (params.echoEnabled && (params.echoStatus === 'disconnected' || params.echoStatus === 'reconnecting')) {
-    return { available: false, reason: 'Radar stream disconnected' }
-  }
-  return { available: true, reason: null }
-}
 
 // AIS label collision avoidance (design critique item 4) now lives in
 // lib/marker-labels.ts, shared with the poi-map widget's own marker labels
@@ -338,21 +276,9 @@ export interface AnchorWatchMapProps {
   // every existing caller/test with no alarm feed wired up — the AIS marker
   // block below reads it with optional chaining and stays amber throughout.
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
-  // Optional, and defaulted below, so every existing caller and test that
-  // mounts this map without a mayara integration keeps compiling untouched
-  // — the same treatment `placemarks` already gets.
-  radarTargets?: RadarTarget[]
-  // The radar *units* mayara knows about (distinct from radarTargets, its
-  // ARPA contacts) -- optional and defaulted below, same treatment as
-  // radarTargets, so every existing caller/test with no mayara integration
-  // wired up keeps compiling untouched.
-  radars?: RadarInfo[]
-  radarSource?: RadarSource | null
   isDarkTheme: boolean
   showImageryLayer?: boolean
   onImageryToggle?: (enabled: boolean) => void
-  showRadarEcho?: boolean
-  onRadarEchoToggle?: (enabled: boolean) => void
   onFullscreen?: () => void
   // Design critique item 3: six controls stacked in-tile clipped the bottom
   // two at tile height. Defaults to the collapsed three (fullscreen + zoom)
@@ -369,7 +295,7 @@ export interface AnchorWatchMapProps {
   // interactive={false} straight through to the underlying maplibre map,
   // which detaches every mouse/touch/keyboard handler (no zoom, pan, rotate
   // or gesture handling), and hides every on-map control (zoom, fullscreen,
-  // satellite, radar echo, recentre) - there is nothing for a display with
+  // satellite, recentre) - there is nothing for a display with
   // no touchscreen to drive them with. The map still swings to a new anchor
   // session and markers/trails still update, since those are driven
   // imperatively (easeTo) rather than through one of the handlers this
@@ -465,14 +391,9 @@ export function AnchorWatchMap({
   aisVessels,
   aisTrails,
   aisCollisionAlarms,
-  radarTargets = [],
-  radars = [],
-  radarSource = null,
   isDarkTheme,
   showImageryLayer = false,
   onImageryToggle,
-  showRadarEcho = false,
-  onRadarEchoToggle,
   onFullscreen,
   expandedControls = false,
   placemarks = [],
@@ -794,66 +715,14 @@ export function AnchorWatchMap({
     warnIfBaseVectorSourceMissing(map)
   }, [])
 
-  // Dual-range radars (this boat's Furuno) present two radar keys off one
-  // antenna; radars[0] speaks for the pair, same convention
-  // radarHeaderLabel (radar-targets-tile.tsx) already uses.
-  const primaryRadar = radars[0] ?? null
-  // Capabilities are only worth fetching once a radar exists and is
-  // actually transmitting -- otherwise resolveRadarEchoAvailability below
-  // has already explained why there's nothing to show, and a GET here
-  // would just be wasted backend/mayara round-trips for a picture that
-  // can't be drawn regardless of what it returns.
-  const radarEchoRadarId = primaryRadar && primaryRadar.transmitting && radarSource !== null && radarSource !== 'disabled' ? primaryRadar.id : null
-  const {
-    capabilities: radarEchoCapabilities,
-    palette: radarEchoPalette,
-    error: radarEchoCapabilitiesError,
-    loading: radarEchoCapabilitiesLoading,
-  } = useRadarCapabilities(radarEchoRadarId)
-
-  const {
-    status: radarEchoStatus,
-    handleMapLoad: handleRadarEchoMapLoad,
-    handleStyleData: handleRadarEchoStyleData,
-  } = useRadarEchoLayer({
-    mapRef,
-    // Own ship, not the radar's own reported fix: mayara captures Spoke.lat/lon
-    // once and does not refresh it (resolveEchoCentre).
-    vesselLat,
-    vesselLon,
-    radarId: radarEchoRadarId,
-    enabled: showRadarEcho,
-    capabilities: radarEchoCapabilities,
-    palette: radarEchoPalette,
-  })
-
-  const radarEchoAvailability = useMemo(
-    () =>
-      resolveRadarEchoAvailability({
-        radarSource,
-        radars,
-        capabilitiesError: radarEchoCapabilitiesError,
-        capabilitiesLoading: radarEchoCapabilitiesLoading,
-        echoEnabled: showRadarEcho,
-        echoStatus: radarEchoStatus,
-      }),
-    [radarSource, radars, radarEchoCapabilitiesError, radarEchoCapabilitiesLoading, showRadarEcho, radarEchoStatus],
-  )
-
   const handleMapLoad = useCallback(() => {
-    handleRadarEchoMapLoad()
     applyTopInset()
     // The map instance is guaranteed to exist by the time 'load' fires —
     // this is the fallback path for fitToAnchor above, for the common case
     // where it ran before react-map-gl had finished constructing the
     // underlying map (or session change followed by a not-yet-ready map).
     retryPendingFit()
-  }, [handleRadarEchoMapLoad, applyTopInset, retryPendingFit])
-
-  const handleMapStyleData = useCallback(() => {
-    handleStyleData()
-    handleRadarEchoStyleData()
-  }, [handleStyleData, handleRadarEchoStyleData])
+  }, [applyTopInset, retryPendingFit])
 
   // Collapse the enlarged marker after 3 seconds. Only the highlight is
   // transient — every marker's range stays on show permanently.
@@ -1331,10 +1200,6 @@ export function AnchorWatchMap({
     onImageryToggle?.(!showImageryLayer)
   }, [showImageryLayer, onImageryToggle])
 
-  const handleRadarEchoToggle = useCallback(() => {
-    onRadarEchoToggle?.(!showRadarEcho)
-  }, [showRadarEcho, onRadarEchoToggle])
-
   // AIS labels whose projected screen position lands under the metric overlay, under the
   // control stack, or within AIS_LABEL_COLLISION_RADIUS_PX of a higher-priority
   // vessel's label — see resolveMarkerLabelSuppression above. `project`
@@ -1494,7 +1359,7 @@ export function AnchorWatchMap({
         // needs to tell "the operator moved the view" from "the code did".
         onDragStart={handleUserGestureStart}
         onZoomStart={handleUserGestureStart}
-        onStyleData={handleMapStyleData}
+        onStyleData={handleStyleData}
         onClick={handleMapClick}
         // Carto and OpenStreetMap both require attribution, and since the
         // backend now proxies and caches their tiles (ADR 0067) rather than
@@ -1669,15 +1534,13 @@ export function AnchorWatchMap({
         </Source>
 
         {/* AIS vessel markers (ADR 0088 colours them). Shape carries
-            identity, colour carries state, the same split the radar block
-            below uses: a circle with the Ship glyph is always an AIS
-            contact, never a triangle. Red is the one shared danger colour
-            with radar's dangerous triangle below, added once a collision
-            alarm is in force for this target; a ring marks alarm severity
-            and above. Amber is AIS's own identity colour, so a warn tier
-            can't borrow it and an intermediate orange next to amber isn't
-            legible at chart scale — hence one red for every live state,
-            with the state itself spelled out in the accessible label. */}
+            identity, colour carries state: a circle with the Ship glyph is
+            always an AIS contact. Red is the one danger colour, added once a
+            collision alarm is in force for this target; a ring marks alarm
+            severity and above. Amber is AIS's own identity colour, so a warn
+            tier can't borrow it and an intermediate orange next to amber
+            isn't legible at chart scale — hence one red for every live
+            state, with the state itself spelled out in the accessible label. */}
         {aisVessels.map((vessel) => {
           if (vessel.lat === undefined || vessel.lon === undefined) return null
           const isSelected = selectedVesselId === vessel.id
@@ -1753,72 +1616,6 @@ export function AnchorWatchMap({
                   </div>
                 )}
               </button>
-            </Marker>
-          )
-        })}
-
-        {/* Radar target markers (ADR 0062). Shape carries identity, colour
-            carries state: AIS keeps its filled circle with the Ship glyph
-            above, radar draws a filled triangle oriented along course_rad —
-            the ARPA convention, readable without relying on hue. A target
-            with no lat/lon (no mayara fix and no own-ship position to
-            project from) renders nothing, exactly as the AIS block above. */}
-        {radarTargets.map((target) => {
-          if (target.lat === undefined || target.lon === undefined) return null
-          const distanceM = Math.round(haversineMeters(vesselLat, vesselLon, target.lat, target.lon))
-          const bearing = Math.round(bearingDeg(vesselLat, vesselLon, target.lat, target.lon))
-          const acquiring = target.status === 'acquiring'
-          // course_rad is true course in radians, same convention as the
-          // vessel heading rotation just below. Unknown motion (course_rad
-          // absent) leaves the triangle pointing north rather than guessing.
-          const rotationDeg = target.course_rad !== undefined ? (target.course_rad * 180) / Math.PI : 0
-          return (
-            <Marker
-              key={target.id}
-              latitude={target.lat}
-              longitude={target.lon}
-              style={{ zIndex: target.is_dangerous ? 25 : 8 }}
-            >
-              <div
-                className="flex flex-col items-center"
-                style={{ minWidth: 40, minHeight: 40 }}
-                aria-label={`Radar target: ${target.id}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div
-                  style={{
-                    transform: `scale(${markerScale}) rotate(${rotationDeg}deg)`,
-                    transformOrigin: 'center',
-                    transition: 'transform 150ms ease-out',
-                  }}
-                >
-                  {/*
-                    bg-foreground, not bg-secondary. In the day theme
-                    --secondary is 0 0% 92%, near-white, and the map tiles
-                    underneath are near-white too: the first live run put 20
-                    targets on the chart and only the 3 dangerous ones were
-                    visible, the other 17 showing as a floating RDR label with
-                    no marker above it. --foreground is 0% on day and 92% on
-                    night, so it is legible in both by construction.
-                  */}
-                  <div
-                    className={cn(
-                      'h-4 w-4 shadow-lg',
-                      acquiring
-                        ? 'border-2 border-foreground bg-transparent'
-                        : target.is_dangerous
-                          ? 'bg-red-600 ring-2 ring-red-600/50'
-                          : 'bg-foreground',
-                    )}
-                    style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-                  />
-                </div>
-                <div className={`mt-0.5 text-center font-mono text-xs font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
-                  <div className="whitespace-nowrap">
-                    RDR {formatRange(distanceM)} · {bearing}°
-                  </div>
-                </div>
-              </div>
             </Marker>
           )
         })}
@@ -2066,12 +1863,12 @@ export function AnchorWatchMap({
       {/* Zoom + Recenter controls. Design critique item 3: six buttons
           stacked in-tile clipped the bottom two at tile height. The
           in-tile default (expandedControls unset) keeps fullscreen, zoom
-          and recentre; satellite and radar move into this same stack
+          and recentre; satellite moves into this same stack
           under expandedControls, which the fullscreen drawer opts into —
           same control, same code, just more room to show all of it.
 
           Kiosk maps are display-only: every button here is an interaction
-          control (zoom, fullscreen, satellite/radar-echo toggle, recentre) —
+          control (zoom, fullscreen, satellite toggle, recentre) —
           nothing informational — so the whole stack is dropped rather than
           picked apart one button at a time when `interactive` is false.
           Unlike every other control here, the Adjust icon (and its own
@@ -2095,20 +1892,6 @@ export function AnchorWatchMap({
             {expandedControls && (
               <>
                 <ImageryToggleButton on={showImageryLayer} onToggle={handleImageryToggle} />
-                <button
-                  onClick={handleRadarEchoToggle}
-                  aria-label="Toggle radar echo overlay"
-                  disabled={!radarEchoAvailability.available}
-                  title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
-                  className={cn(
-                    'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
-                    showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-                    !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
-                  )}
-                  style={{ transition: 'background-color 150ms ease-out' }}
-                >
-                  <Radar className="h-4 w-4" />
-                </button>
               </>
             )}
         </>

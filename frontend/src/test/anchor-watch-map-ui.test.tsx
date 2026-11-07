@@ -121,7 +121,6 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       vesselTrail={[]}
       aisVessels={aisVessels}
       aisTrails={new Map()}
-      radarTargets={[]}
       isDarkTheme={false}
       showImageryLayer
       onImageryToggle={() => undefined}
@@ -138,8 +137,8 @@ function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Pa
 describe('AnchorWatchMap controls and AIS selection', () => {
   // Design critique item 3: six buttons stacked in-tile clipped the bottom
   // two at tile height. The default (no expandedControls) collapses the
-  // in-tile stack to fullscreen, zoom and recentre; satellite and radar
-  // are only reachable via expandedControls, which the fullscreen drawer
+  // in-tile stack to fullscreen, zoom and recentre; satellite
+  // is only reachable via expandedControls, which the fullscreen drawer
   // passes (anchor-watch-drawer.tsx) — every control stays reachable, just
   // relocated rather than deleted.
   it('collapses to fullscreen, zoom and recentre when expandedControls is unset (the tile default)', () => {
@@ -150,7 +149,6 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(within(controls).getByRole('button', { name: 'Zoom in' })).toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: 'Zoom out' })).toBeInTheDocument()
     expect(within(controls).queryByRole('button', { name: 'Toggle satellite imagery' })).not.toBeInTheDocument()
-    expect(within(controls).queryByRole('button', { name: 'Toggle radar echo overlay' })).not.toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: 'Re-centre on anchor' })).toBeInTheDocument()
   })
 
@@ -164,7 +162,6 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 
     expect(zoomOut.nextElementSibling).toBe(recentre)
     expect(recentre.nextElementSibling).toBe(satellite)
-    expect(within(controls).getByRole('button', { name: 'Toggle radar echo overlay' })).toBeInTheDocument()
     expect(within(controls).getByRole('button', { name: 'Re-centre on anchor' })).toBeInTheDocument()
     expect(screen.getByTestId('anchor-watch-metrics').style.zIndex).toBe('2000')
   })

@@ -46,7 +46,6 @@ describe('AnchorWatchMap stacking', () => {
         vesselTrail={[]}
         aisVessels={[]}
         aisTrails={new Map()}
-        radarTargets={[]}
         isDarkTheme={false}
       />,
     )

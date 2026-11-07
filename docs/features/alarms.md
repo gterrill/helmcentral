@@ -28,18 +28,14 @@ the board until the value has recovered. Every alarm card shows its clearing
 condition in your selected units: "Falling 1.1 mb/hr. Clears once the fall eases
 to 0.7 mb/hr."
 
-An alarm raised by something else on the network, such as a radar guard zone or
-an engine gateway, has no rule behind it. Here is how those cards behave:
+An alarm raised by something else on the network, such as an engine gateway or
+the chartplotter, has no rule behind it. Here is how those cards behave:
 
 - **Clearing:** The alarm clears when the instrument that raised it lets go. The
   card gives no clearing condition it can't vouch for.
-- **Title:** The card names the event in plain words, "Radar Guard Zone 1",
-  rather than the instrument's own address. With two radars live, the title also
-  carries the name you gave the radar, so you can tell which one raised it.
-- **Guard zone figures:** While the radar is still tracking the target, a guard
-  zone card also gives its bearing, range and closest approach. For example:
-  "Target in guard zone 1 · 042°T · 1.4 NM · CPA 0.3 NM". If the radar has lost the target, or
-  its feed is down, the card only says that a target is in the zone.
+- **Title:** The card names the event in plain words made from the alarm's own
+  name, such as "Waypoint Passed" or "Propulsion Starboard Over Temperature",
+  rather than the instrument's own address.
 - **Getting worse after you acknowledge:** If an alarm like this gets worse after
   you've acknowledged it, it comes back as active and needs a fresh
   acknowledgement. The card shows when it was acknowledged, even if you did it at
@@ -187,7 +183,6 @@ Safety alarms never offer **Stop showing**. They are:
 - anchor alarms
 - collision warnings for AIS targets
 - received distress calls
-- radar guard zones
 - anything the instrument network marks as an emergency
 
 If an alarm you've stopped showing comes back as an emergency, it shows.
@@ -290,13 +285,10 @@ wrong role on the card is worse than a missing one. This line is a read of the
 rule in force, not a course to steer. It doesn't replace keeping a proper
 lookout, or judging risk of collision by every means you have.
 
-A radar-only contact doesn't get this line yet. For now it carries only the
-restricted-visibility caution about which way not to turn.
-
 ## The rules list
 
 Rules are grouped by what they watch: electrical, environment, propulsion,
-tanks, radar and so on. The grouping is sorted alphabetically and worked out
+tanks and so on. The grouping is sorted alphabetically and worked out
 from what each rule reads, so there's nothing to categorise by hand. A rule whose
 alarm is live is marked as firing. Each one shows its threshold and the point it
 clears at, in your own units, and deleting one asks first.

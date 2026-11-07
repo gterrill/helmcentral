@@ -42,7 +42,7 @@ func TestAlarmKindIgnorable(t *testing.T) {
 		{"navigation.closestApproach", alarmStateAlarm, false},
 		{"received.distress.ais-123456789", alarmStateAlarm, false},
 		{"received.distress.dsc-123-1700000000", alarmStateAlarm, false},
-		{"radar.furuno1.guardZone.1", alarmStateAlarm, false},
+		{"radar.furuno1.guardZone.1", alarmStateAlarm, true}, // a plain network alarm since ADR 0270
 
 		// Emergency state overrides the kind.
 		{"perpendicularPassed", alarmStateEmergency, false},
@@ -134,7 +134,7 @@ func TestIgnoreAlarmHandlers(t *testing.T) {
 		t.Fatalf("list: %+v", body)
 	}
 
-	for _, kind := range []string{"navigation.anchor", "mob", "radar.x.guardZone.1", "received.distress.ais-1"} {
+	for _, kind := range []string{"navigation.anchor", "mob", "received.distress.ais-1"} {
 		if rec := post(`{"kind":"` + kind + `"}`); rec.Code != http.StatusBadRequest {
 			t.Errorf("safety kind %q: got %d, want 400", kind, rec.Code)
 		}

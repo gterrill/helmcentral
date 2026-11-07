@@ -228,7 +228,6 @@ const INSET_HEIGHT_CLASS: Partial<Record<PanelId, string>> = {
 }
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
-const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
 
 // ADR 0124: the max wait requestIdleCallback (or its setTimeout fallback)
 // is given before firing the note editor's own chunk prefetch regardless of
@@ -363,10 +362,6 @@ function AppShell() {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
   })
-  const [showRadarEcho, setShowRadarEcho] = useState(() => {
-    const raw = globalThis.localStorage?.getItem(ANCHOR_RADAR_ECHO_ENABLED_KEY)
-    return raw === 'true'
-  })
   const [layoutEditingRequested, setLayoutEditing] = useState(false)
   const canEditLayout = useMinWidth(BREAKPOINTS.lg)
   // Derived, not stored: narrowing the window past `lg` removes both the grid and
@@ -423,10 +418,6 @@ function AppShell() {
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(ANCHOR_RADAR_ECHO_ENABLED_KEY, String(showRadarEcho))
-  }, [showRadarEcho])
 
   // Hoisted ahead of useDarkMode (rather than left beside displayOptions
   // below, where it used to live) so the wall dark-theme override just below
@@ -1117,7 +1108,6 @@ function AppShell() {
     onOpenHouseBankRoles: openHouseBankRoles,
     onOpenGeneratorRoles: openGeneratorRoles,
     onAnchorImageryToggle: setShowAnchorImagery,
-    onRadarEchoToggle: setShowRadarEcho,
   }), [openWidgetConfig, openAlarmsPanel, openForecastPanel, openAnchorWatchPanel, openHouseBankRoles, openGeneratorRoles])
   // Maps follow the skin of the page they sit on, not the page on screen: a
   // wall keeps its resting pages mounted (ADR 0217), and a resting map that
@@ -1134,10 +1124,9 @@ function AppShell() {
       readOnly={!canWrite}
       ctx={equipmentContext}
       showAnchorImagery={showAnchorImagery}
-      showRadarEcho={showRadarEcho}
       actions={widgetActions}
     />
-  ), [layoutEditing, isDisplay, isDarkTheme, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, showRadarEcho, widgetActions])
+  ), [layoutEditing, isDisplay, isDarkTheme, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, widgetActions])
   const renderWidgetPlain = useMemo(() => renderWidgetFor(false), [renderWidgetFor])
   const renderWidgetInstrument = useMemo(() => renderWidgetFor(true), [renderWidgetFor])
 
@@ -1618,8 +1607,6 @@ function AppShell() {
               isDarkTheme={isDarkTheme}
               showImageryLayer={showAnchorImagery}
               onImageryToggle={setShowAnchorImagery}
-              showRadarEcho={showRadarEcho}
-              onRadarEchoToggle={setShowRadarEcho}
               isImperial={isImperialDistance}
               anchorConfig={anchorConfig}
               windBandId={windBandId}

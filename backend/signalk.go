@@ -1496,7 +1496,7 @@ func tanksFeedAge(tanks []tankLevelData) float64 {
 // nearbyVesselsFeedAge reduces each contact's own age_seconds (how long
 // since that vessel was last seen) down to the one age the Nearby Vessels
 // tile itself goes stale on: the freshest contact in range. Zero vessels in
-// range is silence, not evidence the AIS/radar feed died, so an empty slice
+// range is silence, not evidence the AIS feed died, so an empty slice
 // correctly falls through to freshestAge's -1 rather than 0.
 func nearbyVesselsFeedAge(vessels []nearbyVessel) float64 {
 	ages := make([]float64, len(vessels))

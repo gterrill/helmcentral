@@ -35,12 +35,6 @@ var (
 	buildRevision = "unknown"
 )
 
-// globalRadarTargetStore holds the current set of ARPA radar targets fed by
-// radarPoller (radar_source.go), read by the "radar-targets" telemetry
-// emitter and GET /api/radar/targets. nil until initialised in main(),
-// mirroring globalNearbyContactStore (nearby_contacts.go).
-var globalRadarTargetStore *radarTargetStore
-
 func main() {
 	// migrate-db is a one-off, operator-run subcommand (ADR 0141), never
 	// automatic at startup: it renames and copies data, so it has to be a
@@ -107,10 +101,10 @@ func main() {
 	// combined with credentials is rejected by every browser anyway, and was
 	// half the README's security warning (docs/adr/0040).
 	e.Use(corsMiddleware())
-	// gzip response compression (compression.go), skipping SSE streams, the
-	// radar websocket upgrade, and the already-compressed tile/image/font
-	// proxy endpoints - see compressionSkipper's doc comment for the full
-	// list and why each is excluded.
+	// gzip response compression (compression.go), skipping SSE streams and
+	// the already-compressed tile/image/font proxy endpoints - see
+	// compressionSkipper's doc comment for the full list and why each is
+	// excluded.
 	registerCompressionMiddleware(e)
 
 	// Encrypted secrets store. Must be opened before any provider
@@ -555,16 +549,6 @@ func main() {
 			log.Printf("could not seed the anomaly alarm rules: %v", err)
 		}
 	}
-	// Radar (ADR 0062, amended for the mayara SignalK plugin): a target store
-	// fed by radarPoller (radar_source.go), which polls the plugin's proxied
-	// REST endpoint through the already-configured SignalK connection —
-	// there is no separate mayara host/port, and no push path through
-	// SignalK to subscribe to instead for targets. Initialised
-	// unconditionally, same as the SignalK snapshot below — an absent or
-	// unreachable plugin is a live "disabled"/"mayara-unreachable" source in
-	// the telemetry payload, not an absent store.
-	globalRadarTargetStore = newRadarTargetStore()
-
 	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
 	// is no REST read path to fall back to: a dropped stream surfaces as an
 	// outage rather than being papered over.
@@ -596,7 +580,6 @@ func main() {
 	globalSourceRegistry = newSourceRegistry(sourceStore, influxTelemetryConfigured, queryInfluxSourceHistory)
 	go globalSourceRegistry.run(streamCtx, globalSignalKSnapshot)
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
-	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// The document indexer (above): started once at boot and woken
 	// immediately so any document left pending/extract or pending/enrich by
 	// a crash or restart resumes right away rather than waiting for the
@@ -697,7 +680,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, alarmRoutes()...)
 	routes = append(routes, alarmTransportRoutes()...)
 	routes = append(routes, nearbyVesselRoutes()...)
-	routes = append(routes, radarRoutes()...)
 	routes = append(routes, placeNameRoutes()...)
 	routes = append(routes, forecastProviderRoutes()...)
 	routes = append(routes, anchorRoutes()...)

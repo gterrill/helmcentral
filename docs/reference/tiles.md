@@ -8,8 +8,8 @@ for and how you put one on a page.
 
 ## Built-in tiles
 
-There are twenty: Vessel, Wind, Depth & Tide, Position, Today & Now,
-Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets, Battery & Power,
+There are nineteen: Vessel, Wind, Depth & Tide, Position, Today & Now,
+Anchor Watch, Tanks, Route, Nearby Vessels, Battery & Power,
 Solar, Alternator, Generator, Switches, Hot Water, Autopilot, Clock, Current
 Conditions and Forecast Conditions. Each one can appear once per page.
 

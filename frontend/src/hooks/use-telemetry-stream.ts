@@ -79,7 +79,6 @@ const SEEDED_EVENTS = [
   'solar-state',
   'tanks-state',
   'nearby-vessels',
-  'radar-targets',
 ] as const
 
 // The last payload of each event on the current connection. A listener that

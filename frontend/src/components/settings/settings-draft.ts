@@ -306,13 +306,6 @@ const draftFields = {
   influxdbOrg: text(['influxdb', 'org'], '', { trim: true }),
   influxdbBucket: text(['influxdb', 'bucket'], '', { trim: true }),
 
-  // Blank by default and left blank when unset, trimmed and never defaulted: a
-  // plausible-looking default host would produce a confusing failure (the
-  // overlay silently pointed at the wrong box) rather than an obvious one (no
-  // address configured). An explicit blank from the server hydrates as blank.
-  mayaraAddress: text(['mayara', 'address'], '', { trim: true }),
-  mayaraPort: port(['mayara', 'port'], '6502'),
-
   authMode: choice<'none' | 'signalk'>(['auth', 'mode'], 'none', ['none', 'signalk']),
 
   assistantEnabled: flag(['assistant', 'enabled'], false),

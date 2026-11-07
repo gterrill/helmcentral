@@ -35,7 +35,6 @@ type assistantAlarm struct {
 	Threshold    *float64               `json:"threshold,omitempty"`
 	ClearValue   *float64               `json:"clear_value,omitempty"`
 	Encounter    string                 `json:"encounter,omitempty"`
-	RadarTarget  *alarmRadarTarget      `json:"radar_target,omitempty"`
 	Evidence     string                 `json:"evidence,omitempty"`
 	LiveEvidence string                 `json:"live_evidence,omitempty"`
 	Sensors      []assistantAlarmSensor `json:"sensors,omitempty"`
@@ -111,8 +110,8 @@ func (d assistantToolDeps) executeGetActiveAlarms(ctx context.Context, _ json.Ra
 			Label: a.Label, Message: a.Message, State: a.State, Phase: string(a.Phase),
 			Silenced: a.Silenced, RuleID: a.RuleID, Path: a.Path, Unit: a.Unit,
 			Op: a.Op, Threshold: a.Threshold, ClearValue: a.ClearValue,
-			Encounter: a.Encounter, RadarTarget: a.RadarTarget,
-			Evidence: a.Evidence, LiveEvidence: a.LiveEvidence,
+			Encounter: a.Encounter,
+			Evidence:  a.Evidence, LiveEvidence: a.LiveEvidence,
 			Sensors: assistantAlarmSensors(a.Sensors), LiveSensors: assistantAlarmSensors(a.LiveSensors),
 			Investigate: d.alarmInvestigateTargets(a),
 		}
@@ -175,9 +174,9 @@ func (d assistantToolDeps) alarmInvestigateTargets(a alarmStatus) []string {
 		return out
 	}
 	if rest, ok := strings.CutPrefix(a.Path, notificationsRoot+"."); ok {
-		// Many bus alarms (collision urns, vebus.lowBattery, radar guard
-		// zones) name a notification, not a path that carries data. Name the
-		// path only when the live tree has a value there.
+		// Many bus alarms (collision urns, vebus.lowBattery) name a
+		// notification, not a path that carries data. Name the path only when
+		// the live tree has a value there.
 		if d.pathHasData != nil && d.pathHasData(rest) {
 			return []string{rest}
 		}
@@ -260,10 +259,10 @@ var mateToolGetActiveAlarms = mateTool{
 		Description: "List the alarms active on the boat right now, worst first. Each has its label and " +
 			"message, state, when it was raised and acknowledged (boat local time, see timezone; if " +
 			"timezone_note is set the times are UTC, say so), the rule id and watched path, and where the rule " +
-			"has them the reading, threshold and clear point; collision alarms add the encounter line and radar " +
-			"target figures. investigate lists what to pass to the history tools for that alarm: a SignalK path, " +
+			"has them the reading, threshold and clear point; collision alarms add the encounter line. " +
+			"investigate lists what to pass to the history tools for that alarm: a SignalK path, " +
 			"or for a silent source a $source id. When it is empty the alarm has no sensor of its own to read " +
-			"(a bus notification with no data behind it, such as a collision or radar guard zone alarm); say so " +
+			"(a bus notification with no data behind it, such as a collision alarm); say so " +
 			"rather than guessing a path. Only sensor-health alarms (impossible reading, frozen, silent source) " +
 			"list sensors: each sensor's identifier, name and quantity as it stood when the alarm was raised " +
 			"(sensors) and now (live_sensors). For those, live_same_as_raised true means the sensors failing now " +

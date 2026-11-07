@@ -5,7 +5,7 @@ import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 
-// Same maplibre-gl / react-map-gl stubs as anchor-watch-map-radar-markers.test.tsx.
+// Same maplibre-gl / react-map-gl stubs as anchor-watch-map-ui.test.tsx.
 vi.mock('maplibre-gl', () => ({
   default: {},
 }))

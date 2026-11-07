@@ -37,8 +37,6 @@ const changed: RegularSettingsDraft = {
   influxdbUrl: 'http://influx.example',
   influxdbOrg: 'org',
   influxdbBucket: 'bucket',
-  mayaraAddress: 'radar.example',
-  mayaraPort: '7000',
   authMode: 'signalk',
   assistantEnabled: true,
   assistantModel: 'test/model',
@@ -125,8 +123,6 @@ describe('settings draft fields', () => {
     influxdbUrl: ' http://influx ',
     influxdbOrg: ' org ',
     influxdbBucket: ' bucket ',
-    mayaraAddress: ' radar ',
-    mayaraPort: 'zz',
     authMode: 'signalk',
     assistantEnabled: true,
     assistantModel: ' m ',
@@ -170,7 +166,6 @@ describe('settings draft fields', () => {
       min_clearance_at_low_m: 0.5,
     },
     influxdb: { enabled: true, url: 'http://influx', org: 'org', bucket: 'bucket' },
-    mayara: { address: 'radar', port: 6502 },
     auth: { mode: 'signalk' },
     assistant: {
       enabled: true,
@@ -208,7 +203,7 @@ describe('settings draft fields', () => {
 
   it('saves each starting default when its box holds no usable number', () => {
     const blank = Object.fromEntries(
-      ['signalkPort', 'bowRollerHeightM', 'gpsFromBowM', 'loaM', 'chainSizeMm', 'chainOnboardM', 'windageAreaM2', 'minClearanceAtLowM', 'mayaraPort']
+      ['signalkPort', 'bowRollerHeightM', 'gpsFromBowM', 'loaM', 'chainSizeMm', 'chainOnboardM', 'windageAreaM2', 'minClearanceAtLowM']
         .map((key) => [key, 'abc']),
     )
     const patch = buildRegularSettingsPatch({ ...initialRegularSettingsDraft, ...blank })
@@ -222,14 +217,12 @@ describe('settings draft fields', () => {
       windage_area_m2: 35,
       min_clearance_at_low_m: 0.5,
     })
-    expect(patch.mayara?.port).toBe(6502)
   })
 
   it('reads the server answer as it always did', () => {
     const answer: SettingsPayload = {
       signalk: { address: '', port: 0 },
       anchor: { transducer_depth_m: 0, hull_type: 'junk', scope_method: 'ratio', gps_from_bow_m: 0 },
-      mayara: { address: '' },
       assistant: { model: '', cost_tier: 'bogus', allowed_models: [' a ', ''] },
       ui: { tide_station_id: ' id ' },
       units: 'furlongs',
@@ -241,7 +234,6 @@ describe('settings draft fields', () => {
     expect(draft.transducerDepthM).toBe('')
     expect(draft.hullType).toBe('power_cat')
     expect(draft.gpsFromBowM).toBe('0')
-    expect(draft.mayaraAddress).toBe('')
     expect(draft.assistantModel).toBe('')
     expect(draft.assistantCostTier).toBe('')
     expect(draft.assistantAllowedModels).toEqual(['a'])

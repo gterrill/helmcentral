@@ -42,14 +42,14 @@ what happened, where it is, and whether to do something. Write every alarm
 title, body and notification for that reader, not for the code that raised
 it. See [ADR 0157](docs/adr/0157-alarm-cards-say-what-happened-not-where-it-came-from.md).
 
-- **Title: the event, in a few words.** "Radar Guard Zone 1", "Anchor
+- **Title: the event, in a few words.** "Waypoint Passed", "Anchor
   Dragging", "House Bank Low". It fits one line on a phone. Never a SignalK
   path, device key (`fur6424A`), plugin name or rule id. Name a device only
   when two of the same kind are live, and then by the operator's name for it.
   A rule alarm's title is the operator's own label; leave it alone.
 - **Body: the situation.** What, where, how close, which way it is going, in
-  that order and in the operator's units: `Target in guard zone 1 · 042°T ·
-  1.4 NM · CPA 0.3 NM`. With no figures to give, one plain sentence. Present
+  that order and in the operator's units: `TASHTEGO inside the CPA limit.`
+  With no figures to give, one plain sentence. Present
   tense, the boat's frame ("45 m from the drop point", not "value now 45").
 - **No internal identifiers.** Track ids, `$source`, paths and rule ids stay
   off the card. The one exception is an id the operator needs to find the same

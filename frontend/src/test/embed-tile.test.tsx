@@ -83,8 +83,8 @@ function mockBox(el: Element, box: { top: number; left: number; right: number; b
 // documented TODO (node_modules/happy-dom/lib/intersection-observer/
 // IntersectionObserver.js) — so it never actually reports an intersection.
 // This fake stands in for it and exposes a way to fire the callback by hand,
-// the same way FakeWebSocket in use-radar-echo-stream.test.ts stands in for
-// a socket that never really connects.
+// the same way the setup file's inert WebSocket stands in for a socket that
+// never really connects.
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = []
 

@@ -237,11 +237,13 @@ describe('App header settings-for-this-page button', () => {
     expect(screen.getByRole('button', { name: 'Mate settings' })).toBeInTheDocument()
   })
 
-  it('hides the button on the Windy panel, which uses no Mayara settings', () => {
+  it('hides the button on the Windy panel, which has no settings section', () => {
     window.history.replaceState({}, '', '/radar')
     render(<App />)
 
-    expect(screen.queryByRole('button', { name: 'Mayara settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Alarms settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Anchor Watch settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mate settings' })).not.toBeInTheDocument()
   })
 
   it('hides the button on the Dashboard', () => {
@@ -251,7 +253,6 @@ describe('App header settings-for-this-page button', () => {
     expect(screen.queryByRole('button', { name: 'Alarms settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Anchor Watch settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Mate settings' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Mayara settings' })).not.toBeInTheDocument()
   })
 
   it('hides the button on Settings itself', () => {
@@ -261,7 +262,6 @@ describe('App header settings-for-this-page button', () => {
     expect(screen.queryByRole('button', { name: 'Alarms settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Anchor Watch settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Mate settings' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Mayara settings' })).not.toBeInTheDocument()
   })
 
   it('hides the button on a panel with no matching Settings section (Forecast)', () => {
@@ -271,7 +271,6 @@ describe('App header settings-for-this-page button', () => {
     expect(screen.queryByRole('button', { name: 'Alarms settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Anchor Watch settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Mate settings' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Mayara settings' })).not.toBeInTheDocument()
   })
 
   it('clicking it on Anchor Watch opens Settings with the Anchor Watch section active', async () => {

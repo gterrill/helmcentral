@@ -171,7 +171,7 @@ func TestGetActiveAlarms_ValueOnlyForRuleReadings(t *testing.T) {
 		Phase: alarmPhaseActive, State: alarmStateAlert, Value: 11.8, Op: "below", Threshold: &thr,
 		ClearValue: &clear, Unit: "V"}
 	bus := alarmStatus{RuleID: "bus1", Label: "Anchor Dragging", Phase: alarmPhaseActive, State: alarmStateAlert,
-		Encounter: "Crossing, give way", RadarTarget: &alarmRadarTarget{BearingRad: 1, RangeM: 2000}}
+		Encounter: "Crossing, give way"}
 	out := runActiveAlarms(t, assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{rule, bus} }})
 	var got struct {
 		Alarms []map[string]any `json:"alarms"`
@@ -188,8 +188,8 @@ func TestGetActiveAlarms_ValueOnlyForRuleReadings(t *testing.T) {
 	if _, ok := got.Alarms[1]["value"]; ok {
 		t.Errorf("bus alarm must not carry value: %v", got.Alarms[1])
 	}
-	if got.Alarms[1]["encounter"] != "Crossing, give way" || got.Alarms[1]["radar_target"] == nil {
-		t.Errorf("encounter/radar_target missing: %v", got.Alarms[1])
+	if got.Alarms[1]["encounter"] != "Crossing, give way" {
+		t.Errorf("encounter missing: %v", got.Alarms[1])
 	}
 }
 

@@ -108,8 +108,6 @@ const tileProps = {
   isDarkTheme: false,
   showImageryLayer: false,
   onImageryToggle: vi.fn(),
-  showRadarEcho: false,
-  onRadarEchoToggle: vi.fn(),
   onFullscreen: vi.fn(),
   interactive: true,
 }

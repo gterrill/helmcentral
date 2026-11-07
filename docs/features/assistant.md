@@ -764,7 +764,7 @@ card to change the alarm. Nothing changes until you tap **Apply**.
 
 Some parts can be missing, and Mate says so when they are. An alarm raised by
 another instrument on the network has no level of its own to quote. A collision
-or radar alarm has no reading behind it. Without InfluxDB there is no history to
+alarm has no reading behind it. Without InfluxDB there is no history to
 chart. Mate doesn't group a reading with related ones, so it can't tell you
 what the other sensors on the same item did unless you ask it to check them.
 The button isn't on the banner across the top. Tap **View** there and the

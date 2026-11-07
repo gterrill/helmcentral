@@ -6,7 +6,6 @@ import { DRAG_BUFFER_METERS, type AnchorWatchState } from '@/hooks/use-anchor-wa
 import type { AlarmState } from '@/hooks/use-alarms'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
@@ -92,18 +91,9 @@ interface AnchorWatchDrawerProps {
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
-  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
-  // integration wired up simply omits it.
-  radarTargets?: RadarTarget[]
-  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
-  // integration wired up simply omits it.
-  radars?: RadarInfo[]
-  radarSource?: RadarSource
   isDarkTheme: boolean
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
-  showRadarEcho: boolean
-  onRadarEchoToggle: (enabled: boolean) => void
   // Kept for the Rode Planner's "Apply as alarm radius" button
   // (onApplyAlarmRadius below) — the one radius write that predates Adjust
   // mode and still stands alongside it, since the planner's own sidebar
@@ -179,14 +169,9 @@ export function AnchorWatchDrawer({
   aisVessels,
   aisTrails,
   aisCollisionAlarms,
-  radarTargets,
-  radars,
-  radarSource,
   isDarkTheme,
   showImageryLayer,
   onImageryToggle,
-  showRadarEcho,
-  onRadarEchoToggle,
   onRadiusChange,
   onClearAnchor,
   placemarks,
@@ -615,17 +600,12 @@ export function AnchorWatchDrawer({
                 aisVessels={aisVessels}
                 aisTrails={aisTrails}
                 aisCollisionAlarms={aisCollisionAlarms}
-                radarTargets={radarTargets}
-                radars={radars}
-                radarSource={radarSource}
                 isDarkTheme={isDarkTheme}
                 showImageryLayer={showImageryLayer}
                 onImageryToggle={onImageryToggle}
-                showRadarEcho={showRadarEcho}
-                onRadarEchoToggle={onRadarEchoToggle}
                 // The tile trims its own in-map stack to fullscreen+zoom
                 // (design critique item 3); this drawer IS the fullscreen
-                // view, so it gets satellite/radar/recentre back — every
+                // view, so it gets satellite/recentre back — every
                 // control stays reachable, just relocated.
                 expandedControls
                 // Namespaces the persisted fitted-zoom key (code-review

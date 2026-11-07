@@ -17,7 +17,6 @@ import { LiveGeneratorTile } from '@/components/generator-tile'
 import { LiveNearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { LivePoiMapTile } from '@/components/poi-map-tile'
 import { LivePositionTile } from '@/components/position-tile'
-import { LiveRadarTargetsTile } from '@/components/radar-targets-tile'
 import { LiveRouteTile } from '@/components/route-tile'
 import { LiveSolarTile } from '@/components/solar-tile'
 import { LiveTanksTile } from '@/components/tanks-tile'
@@ -52,7 +51,6 @@ export interface WidgetHostActions {
   onOpenHouseBankRoles: (() => void) | undefined
   onOpenGeneratorRoles: (() => void) | undefined
   onAnchorImageryToggle: (on: boolean) => void
-  onRadarEchoToggle: (on: boolean) => void
 }
 
 export interface WidgetHostProps {
@@ -71,7 +69,6 @@ export interface WidgetHostProps {
   /** Items, profiles and reporting sources for the equipment tiles. */
   ctx: EquipmentTileContext
   showAnchorImagery: boolean
-  showRadarEcho: boolean
   actions: WidgetHostActions
 }
 
@@ -95,7 +92,6 @@ export const WidgetHost = memo(function WidgetHost({
   readOnly,
   ctx,
   showAnchorImagery,
-  showRadarEcho,
   actions,
 }: WidgetHostProps) {
   // One stable handler per widget id: the tiles below are memoized too, and
@@ -215,8 +211,6 @@ export const WidgetHost = memo(function WidgetHost({
           isDarkTheme={isDarkTheme}
           showImageryLayer={showAnchorImagery}
           onImageryToggle={actions.onAnchorImageryToggle}
-          showRadarEcho={showRadarEcho}
-          onRadarEchoToggle={actions.onRadarEchoToggle}
           onFullscreen={actions.onOpenAnchorWatch}
           interactive={interactive}
         />
@@ -227,8 +221,6 @@ export const WidgetHost = memo(function WidgetHost({
       return <LiveRouteTile />
     case 'nearby-vessels':
       return <LiveNearbyVesselsTile distanceUnits={distanceUnits} />
-    case 'radar-targets':
-      return <LiveRadarTargetsTile distanceUnits={distanceUnits} />
     case 'battery-power':
       return <LiveBatteryPowerTile onOpenRoles={actions.onOpenHouseBankRoles} />
     case 'solar':

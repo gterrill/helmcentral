@@ -10,7 +10,7 @@ import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // use-gauge-values.ts is a thin telemetry consumer, same shape as
-// use-radar-targets.ts: it reads one SSE event and maps the payload. The real
+// use-nearby-vessels.ts: it reads one SSE event and maps the payload. The real
 // stream and store run over the fake EventSource.
 const stream = installFakeTelemetryStream()
 // The real stream, with its subscribeTelemetry counted: a store is meant to

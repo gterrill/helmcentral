@@ -64,7 +64,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       vesselTrail={[]}
       aisVessels={[]}
       aisTrails={new Map()}
-      radarTargets={[]}
       isDarkTheme={false}
       {...overrides}
     />,

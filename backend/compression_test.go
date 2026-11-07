@@ -299,8 +299,8 @@ func TestCompression_ETag304StaysCorrectUnderGzip(t *testing.T) {
 
 // TestCompression_SkipperExcludesStreamingAndBinaryRoutes is a direct,
 // white-box check of compressionSkipper's route table for the paths that
-// are impractical to exercise end-to-end in a fast unit test (the radar
-// websocket upgrade, and the tile/font proxy endpoints that need a live
+// are impractical to exercise end-to-end in a fast unit test (the
+// tile/font proxy endpoints that need a live
 // upstream or a fake tileCache to actually answer). Echo sets c.Path() to
 // the exact registered pattern once a route has matched (e.g.
 // "/api/world-imagery/:z/:x/:y", never the resolved "/api/world-imagery/9/1/2"),
@@ -318,7 +318,6 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		{"/api/stream", false},
 		{"/api/logs/stream", false},
 		{"/api/assistant/conversations/:id/messages", true},
-		{"/api/radar/spokes", true},
 		{"/api/world-imagery/:z/:x/:y", true},
 		// Off the skip list since Tier 3: fetchBasemapUpstream's plain
 		// http.Client transparently decompresses upstream, so the JSON/PBF

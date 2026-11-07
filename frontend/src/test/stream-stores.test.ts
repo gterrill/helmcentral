@@ -10,7 +10,6 @@ import * as live from './fixtures/live-stream-payloads'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessels'
-import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useTankAlarmLevels, useTanksState } from '@/hooks/use-tanks-state'
 
@@ -110,36 +109,6 @@ describe('nearby vessels store', () => {
 
     expect(result.current).not.toBe(first)
     expect(result.current[0].age_seconds).toBe(126)
-  })
-})
-
-describe('radar store', () => {
-  it('is loading, with the source unclaimed, before the first event', () => {
-    const { result } = renderHook(() => useRadarTargets())
-    expect(result.current.loading).toBe(true)
-    expect(result.current.targets).toEqual([])
-    expect(result.current.source).toBeNull()
-  })
-
-  it('keeps the snapshot when only datetime and a fresh target age moved', () => {
-    const { result } = renderHook(() => useRadarTargets())
-    emit('radar-targets', live.RADAR)
-    const first = result.current
-
-    emit('radar-targets', { ...live.RADAR, datetime: '2026-10-27T04:20:15Z', targets: live.RADAR.targets.map((t) => ({ ...t, age_seconds: 3.2 })) })
-
-    expect(result.current).toBe(first)
-  })
-
-  it('hands down a new target when its range moves', () => {
-    const { result } = renderHook(() => useRadarTargets())
-    emit('radar-targets', live.RADAR)
-    const first = result.current
-
-    emit('radar-targets', { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1800 })) })
-
-    expect(result.current.targets[0].range_m).toBe(1800)
-    expect(result.current.radars).toBe(first.radars)
   })
 })
 

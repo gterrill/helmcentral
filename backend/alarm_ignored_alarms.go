@@ -57,7 +57,7 @@ func alarmKindIgnorable(kind, state string) bool {
 			return false
 		}
 	}
-	if strings.HasPrefix(kind, distressReceivedPrefix) || radarGuardZonePath.MatchString(kind) {
+	if strings.HasPrefix(kind, distressReceivedPrefix) {
 		return false
 	}
 	return true
@@ -98,7 +98,7 @@ func ignoredAlarmsResponse() map[string]any {
 	entries := globalIgnoreStore.entries(ignoredAlarmsList)
 	out := make([]ignoredAlarmEntry, 0, len(entries))
 	for _, e := range entries {
-		title, _ := presentNotification(e.Key, "", nil)
+		title, _ := presentNotification(e.Key, "")
 		out = append(out, ignoredAlarmEntry{Kind: e.Key, Title: title, IgnoredAt: e.IgnoredAt.Format(time.RFC3339)})
 	}
 	return map[string]any{"alarms": out}
@@ -151,7 +151,7 @@ func ignoredAlarmTitles() []string {
 	entries := globalIgnoreStore.entries(ignoredAlarmsList)
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		title, _ := presentNotification(e.Key, "", nil)
+		title, _ := presentNotification(e.Key, "")
 		out = append(out, title)
 	}
 	return out

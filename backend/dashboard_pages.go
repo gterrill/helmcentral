@@ -27,7 +27,6 @@ var validDashboardWidgetIDs = map[string]bool{
 	"tanks":               true,
 	"route":               true,
 	"nearby-vessels":      true,
-	"radar-targets":       true,
 	"battery-power":       true,
 	"solar":               true,
 	"alternator":          true,
@@ -51,6 +50,8 @@ var retiredDashboardWidgetIDs = map[string]bool{
 	"rode-scope":    true,
 	"forecast-days": true,
 	"sea-state":     true,
+	// The Radar Targets tile left with the radar integration (ADR 0270).
+	"radar-targets": true,
 }
 
 const dashboardLayoutMaxCoord = 1000

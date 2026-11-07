@@ -144,7 +144,7 @@ func buildNearbyVesselsPayload() map[string]any {
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"vessels":  vessels,
-		// Whether the AIS/radar feed behind the whole list has died — the
+		// Whether the AIS feed behind the whole list has died — the
 		// freshest contact's age, distinct from each vessel's own
 		// age_seconds. Zero vessels in range stays -1 (unknown), never 0:
 		// silence is not evidence the feed died (ADR 0068).

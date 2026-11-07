@@ -73,12 +73,9 @@ func bandAge(ageSeconds float64) float64 {
 // returns.
 //
 // bandAgeSeconds controls whether a bare "age_seconds" key (as opposed to
-// one already caught by the "_age_s" suffix rule below) gets banded: radar
-// targets' per-target age_seconds is parsed by the frontend but never
-// rendered (confirmed by grep across frontend/src), so it bands like any
-// other age; nearby-vessels' per-vessel age_seconds is rendered on every row
-// ("12s ago", nearby-vessels-tile.tsx) and must stay exact, so that event
-// passes false.
+// one already caught by the "_age_s" suffix rule below) gets banded:
+// nearby-vessels' per-vessel age_seconds is rendered on every row ("12s ago",
+// nearby-vessels-tile.tsx) and must stay exact, so that event passes false.
 //
 // extraDropKeys names additional top-level fields to drop beyond the
 // "datetime" every gated event drops automatically — used by solar-state for
@@ -220,15 +217,6 @@ func tanksStateGateKey(encoded []byte) string {
 // over still sends.
 func nearbyVesselsGateKey(encoded []byte) string {
 	return telemetryGateKeyFor(encoded, false)
-}
-
-// radarTargetsGateKey covers radar_source.go's buildRadarTargetsPayload:
-// datetime, and — unlike nearby-vessels — each target's own age_seconds,
-// which the frontend parses (use-radar-targets.ts) but never renders
-// (confirmed by grep across frontend/src's radar-targets-tile.tsx), so
-// bandAgeSeconds is true here.
-func radarTargetsGateKey(encoded []byte) string {
-	return telemetryGateKeyFor(encoded, true)
 }
 
 // solarStateGateKey covers solar_state.go's buildSolarStatePayload: datetime, the

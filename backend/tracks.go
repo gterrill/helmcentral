@@ -62,8 +62,7 @@ func recordMotoringPoint(lat, lon float64) {
 // The returned channel closes once the goroutine has actually returned.
 // main.go has no need for it (a fire-and-forget "go startTrackPoller(...)"
 // simply discards it), but it gives a test a properly synchronized way to
-// know shutdown is complete, mirroring radarSpokeRelay.done
-// (radar_spoke_relay.go) for the same reason: a plain sleep-and-hope after
+// know shutdown is complete: a plain sleep-and-hope after
 // cancel gives no happens-before guarantee that this goroutine's last read
 // of a package-level global (globalSignalKSnapshot, mutated by other tests)
 // has actually finished.

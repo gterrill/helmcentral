@@ -3,14 +3,11 @@ import { useMemo } from 'react'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { anchorWatchAt, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { useNearbyVesselList } from '@/hooks/use-nearby-vessels'
-import { useRadarTargets } from '@/hooks/use-radar-targets'
 
-/** The AIS and radar inputs both anchor maps draw. */
+/** The AIS contacts both anchor maps draw. */
 export function useMapContacts() {
   const aisVessels = useNearbyVesselList()
-  const { targets: radarTargets, radars, source: radarSource } = useRadarTargets()
-  // Undefined until the first radar event; the map reads that as not heard yet and claims nothing.
-  return { aisVessels, radarTargets, radars, radarSource: radarSource ?? undefined }
+  return { aisVessels }
 }
 
 /**

@@ -24,7 +24,6 @@ import { InfluxdbSection } from '@/components/settings/sections/influxdb-section
 import { LogsSection } from '@/components/settings/sections/logs-section'
 import { SavedPlacesSection } from '@/components/settings/sections/saved-places-section'
 import { OutsideAssistantsSection } from '@/components/settings/sections/outside-assistants-section'
-import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { OfflineCoastlineSection } from '@/components/settings/sections/offline-coastline-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { PluginsSection } from '@/components/settings/sections/plugins-section'
@@ -293,8 +292,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
         return <InfluxdbSection draft={draft} onChange={handleDraftChange} />
-      case 'mayara':
-        return <MayaraSection draft={draft} onChange={handleDraftChange} />
       case 'anchor-watch':
         return (
           <AnchorWatchOptionsSection

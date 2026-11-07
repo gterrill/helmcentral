@@ -82,7 +82,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       vesselTrail={[]}
       aisVessels={defaultAisVessels}
       aisTrails={new Map()}
-      radarTargets={[]}
       isDarkTheme={false}
       showImageryLayer
       onImageryToggle={() => undefined}
@@ -110,7 +109,7 @@ describe('AnchorWatchMap interactive prop', () => {
     expect(lastMapProps?.interactive).toBe(false)
   })
 
-  // Zoom, fullscreen, satellite, radar-echo and recentre are all
+  // Zoom, fullscreen, satellite and recentre are all
   // interaction-only controls - nothing about them is informational, so the
   // whole in-map control stack is dropped rather than picked apart one
   // button at a time.
@@ -122,7 +121,6 @@ describe('AnchorWatchMap interactive prop', () => {
     expect(screen.queryByRole('button', { name: 'Zoom out' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Full screen' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Toggle satellite imagery' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Toggle radar echo overlay' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Re-centre on anchor' })).not.toBeInTheDocument()
   })
 

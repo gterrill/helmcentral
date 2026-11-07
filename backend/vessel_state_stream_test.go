@@ -197,24 +197,6 @@ func TestTelemetryStreamHonoursPerEmitterIntervals(t *testing.T) {
 	}
 }
 
-// TestTelemetryEmittersIncludeRadarTargets guards the one-line wiring in
-// telemetryEmitters (ADR 0062 phase 3): radar targets move roughly once per
-// antenna rotation (1.25-2.5s, see radarTargetMaxAge in radar_store.go), so
-// 2s keeps up without forcing the slower AIS nearby-vessels emitter's
-// resend cadence onto a much busier payload.
-func TestTelemetryEmittersIncludeRadarTargets(t *testing.T) {
-	for _, emitter := range telemetryEmitters() {
-		if emitter.event != "radar-targets" {
-			continue
-		}
-		if emitter.interval != 2*time.Second {
-			t.Fatalf("radar-targets interval = %v, want 2s", emitter.interval)
-		}
-		return
-	}
-	t.Fatal("telemetryEmitters() does not include a radar-targets emitter")
-}
-
 // TestTelemetryHeartbeatIsObservableAndPeriodic guards the SSE browser
 // watchdog's only defense against a silently-stalled stream: heartbeat must
 // broadcast every interval, full stop, never gated on whether its payload

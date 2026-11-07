@@ -12,8 +12,6 @@ import (
 // same pattern collisionNotification/makeAlarm use elsewhere in this package.
 func baseAISEncounterInputs() encounterInputs {
 	return encounterInputs{
-		Kind: encounterKindAIS,
-
 		OwnHeadingDeg: 0,
 		OwnHeadingOK:  true,
 		OwnSOGKn:      6,
@@ -471,82 +469,6 @@ func TestClassifyEncounterTCPAAtZeroStillProducesALine(t *testing.T) {
 
 	if _, ok := classifyEncounter(in); !ok {
 		t.Error("expected a line at TCPA=0")
-	}
-}
-
-// ── radar branch (ADR 0062 §7b/§8: built and tested, not wired to an alarm yet) ──
-
-func TestClassifyEncounterRadarForwardOfBeam(t *testing.T) {
-	in := baseAISEncounterInputs()
-	in.Kind = encounterKindRadar
-	in.TargetNavState = "" // radar carries no nav status
-	in.BearingToTargetDeg = 30
-	in.TargetCOGDeg = 200
-	in.BearingToSelfDeg = 90
-
-	got, ok := classifyEncounter(in)
-	if !ok {
-		t.Fatal("expected a line")
-	}
-	if got.Role != encounterRoleNone {
-		t.Errorf("role: got %q, want none (rule 19 assigns no give-way/stand-on role)", got.Role)
-	}
-	if got.Rule != "19(d)" {
-		t.Errorf("rule: got %q, want 19(d)", got.Rule)
-	}
-	if !strings.HasPrefix(got.Text, "Crossing, she is on our starboard bow (030° rel). If not in sight") {
-		t.Errorf("text: %q", got.Text)
-	}
-	if !strings.Contains(got.Text, "avoid altering course to port") {
-		t.Errorf("forward of the beam should caution against a port turn: %q", got.Text)
-	}
-}
-
-func TestClassifyEncounterRadarAbeamOrAbaft(t *testing.T) {
-	in := baseAISEncounterInputs()
-	in.Kind = encounterKindRadar
-	in.TargetNavState = ""
-	in.BearingToTargetDeg = 100 // abeam, and outside the overtaking arc
-	in.TargetCOGDeg = 200
-	in.BearingToSelfDeg = 90
-
-	got, ok := classifyEncounter(in)
-	if !ok {
-		t.Fatal("expected a line")
-	}
-	if got.Rule != "19(d)" {
-		t.Errorf("rule: got %q, want 19(d)", got.Rule)
-	}
-	if !strings.Contains(got.Text, "avoid altering course towards her") {
-		t.Errorf("abeam or abaft should caution against turning toward her: %q", got.Text)
-	}
-	if strings.Contains(got.Text, "to port") {
-		t.Errorf("the forward-of-beam caution must not appear abeam/abaft: %q", got.Text)
-	}
-}
-
-// Rule 19(d)(i) exempts a vessel we are overtaking from the "forward of the
-// beam, avoid altering to port" caution.
-func TestClassifyEncounterRadarOvertakingExemptsThePortCaution(t *testing.T) {
-	in := baseAISEncounterInputs()
-	in.Kind = encounterKindRadar
-	in.TargetNavState = ""
-	in.BearingToTargetDeg = 15 // forward of the beam
-	in.TargetCOGDeg = 0
-	in.BearingToSelfDeg = 180 // we're overtaking her from astern of her
-
-	got, ok := classifyEncounter(in)
-	if !ok {
-		t.Fatal("expected a line")
-	}
-	if got.Situation != "Overtaking" {
-		t.Errorf("situation: got %q, want Overtaking", got.Situation)
-	}
-	if strings.Contains(got.Text, "avoid altering course to port") {
-		t.Errorf("19(d)(i) exempts a vessel being overtaken: %q", got.Text)
-	}
-	if !strings.Contains(got.Text, "19(d)(i)") {
-		t.Errorf("text should still cite 19(d)(i) for the exemption: %q", got.Text)
 	}
 }
 

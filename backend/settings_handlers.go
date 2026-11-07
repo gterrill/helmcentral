@@ -30,11 +30,6 @@ const (
 	// Watch's low-water clearance warning uses until the operator sets
 	// their own (ADR 0135) - not a vessel-specific value.
 	defaultMinClearanceAtLowM = 0.5
-	// defaultMayaraPort is mayara-server's own default REST/WebSocket port.
-	// Used only to clamp an out-of-range settings.mayara.port; unlike
-	// defaultSignalKAddress there is no equivalent default *address* — see
-	// normalizeSettingsPayload.
-	defaultMayaraPort = 6502
 )
 
 type settingsPayload struct {
@@ -108,14 +103,6 @@ type settingsPayload struct {
 		Org     string `json:"org"`
 		Bucket  string `json:"bucket"`
 	} `json:"influxdb"`
-	// Mayara is the mayara-server address, used only by the radar picture
-	// overlay. Targets do not need it: they arrive through the SignalK plugin
-	// (ADR 0062 amendment). The overlay does, because the plugin returns 404
-	// for the spoke stream.
-	Mayara struct {
-		Address string `json:"address"`
-		Port    int    `json:"port"`
-	} `json:"mayara"`
 	// Assistant configures the onboard OpenRouter-backed assistant, Mate
 	// (ADR 0093): off by default, BYOK (the key lives in the secrets store,
 	// not here), and Notes are operator standing notes injected verbatim
@@ -378,10 +365,9 @@ func updateSettingsHandler(c echo.Context) error {
 		"org":     normalized.Influxdb.Org,
 		"bucket":  normalized.Influxdb.Bucket,
 	}
-	settings["mayara"] = map[string]any{
-		"address": normalized.Mayara.Address,
-		"port":    normalized.Mayara.Port,
-	}
+	// Helmcentral dropped its radar integration (ADR 0270); a settings.yaml
+	// written before that still carries this key, and every save drops it.
+	delete(settings, "mayara")
 	settings["assistant"] = map[string]any{
 		"enabled":              normalized.Assistant.Enabled,
 		"model":                normalized.Assistant.Model,
@@ -687,21 +673,11 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
 	}
 
-	if mayaraMap, ok := settings["mayara"].(map[string]any); ok {
-		// Unconditional, like the influxdb fields above: an address stored as
-		// blank must surface as blank, not be mistaken for "absent" and papered
-		// over with whatever normalizeSettingsPayload({}) defaulted payload to.
-		payload.Mayara.Address = strings.TrimSpace(coerceString(mayaraMap["address"]))
-		if port := coercePort(mayaraMap["port"]); port > 0 && port <= 65535 {
-			payload.Mayara.Port = port
-		}
-	}
-
 	if assistantMap, ok := settings["assistant"].(map[string]any); ok {
 		if v, ok := assistantMap["enabled"].(bool); ok {
 			payload.Assistant.Enabled = v
 		}
-		// Unconditional, like the mayara address above: a model or notes
+		// Unconditional, like the influxdb fields above: a model or notes
 		// value stored as blank must surface as blank, not be mistaken for
 		// "absent" and papered over with normalizeSettingsPayload({})'s
 		// default model.
@@ -882,16 +858,6 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
 	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
 	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
-
-	// Unlike Signalk.Address just above, a blank mayara address stays blank
-	// rather than defaulting to a host: there is no sane address to guess for
-	// a radar, and an unconfigured mayara address is exactly how the radar
-	// picture overlay reports itself as off (plan: "Backend" section).
-	normalized.Mayara.Address = strings.TrimSpace(req.Mayara.Address)
-	normalized.Mayara.Port = req.Mayara.Port
-	if normalized.Mayara.Port <= 0 || normalized.Mayara.Port > 65535 {
-		normalized.Mayara.Port = defaultMayaraPort
-	}
 
 	normalized.Assistant.Enabled = req.Assistant.Enabled
 	normalized.Assistant.Model = strings.TrimSpace(req.Assistant.Model)

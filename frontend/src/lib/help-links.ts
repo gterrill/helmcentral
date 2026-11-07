@@ -74,7 +74,6 @@ export const SETTINGS_HELP_TARGETS: Record<SettingsSectionId, HelpTarget> = {
   signalk: { page: 'reference/configuration', heading: 'SignalK' },
   influxdb: { page: 'reference/configuration', heading: 'Environment variables' },
   'anchor-watch': { page: 'features/anchor-watch', heading: 'The rode planner' },
-  mayara: { page: 'features/dashboard', heading: 'Radar targets' },
   alarms: { page: 'features/alarms', heading: 'Getting told' },
   assistant: { page: 'how-to/set-up-the-assistant', heading: '2. Configure it in Helmcentral' },
   'offline-coastline': { page: 'features/offline-coastline' },

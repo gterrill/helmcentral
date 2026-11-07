@@ -39,7 +39,7 @@ can't tell you what they're doing.
 
 ## Instrument tiles
 
-Twenty built-in tiles cover the boat's core systems, from Vessel and Wind
+Nineteen built-in tiles cover the boat's core systems, from Vessel and Wind
 through Battery & Power, Autopilot and Forecast Conditions. You can also build
 six more types yourself, including these:
 
@@ -129,8 +129,8 @@ unavailable" when Helmcentral can't read AIS, and "AIS silent for 25m" when
 SignalK is working but no vessel has reported for over ten minutes. On a narrow tile a long
 vessel name takes a second line instead of being cut off.
 
-Nearby Vessels and Radar Targets are lists that grow and shrink as contacts
-come and go. How tall one is drawn depends on what's under it:
+Nearby Vessels is a list that grows and shrinks as contacts
+come and go. How tall it is drawn depends on what's under it:
 
 - **Lowest in its column:** When nothing is below it, the tile is drawn only as
   tall as its list needs, down to a header and one line. It's never taller than
@@ -369,19 +369,6 @@ them.
   pilot isn't currently advertising.
 - **Changing who is steering:** Anything that changes who is steering takes a
   press and hold.
-
-### Radar targets
-
-These are ARPA contacts from the ship's own radar, if you run one. They plot on
-the anchor map as course-oriented triangles, distinct from the AIS circles, and
-list with range, bearing and the CPA and TCPA the radar computed.
-
-This is the marine radar. For weather radar, use the [Windy](#windy) panel.
-
-Radar is optional and stays off unless the pieces are there: mayara-server
-running against the physical radar, and its plugin installed on the boat's
-instrument server. Helmcentral needs no configuration of its own beyond that,
-and it finds the radar on the feed. Without both pieces the tile reads `—`.
 
 ### Windy
 

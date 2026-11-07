@@ -50,7 +50,7 @@ and never counts as better than partial.
 
 **Network alarm**:
 An alarm raised by another device on the boat's network, such as the chart
-plotter or a radar, rather than by Helmcentral's own alarm rules or watches.
+plotter or an engine gateway, rather than by Helmcentral's own alarm rules or watches.
 _Avoid_: Bus notification, SignalK alarm, external alarm
 
 **Alarm kind**:

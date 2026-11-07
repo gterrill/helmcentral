@@ -86,7 +86,7 @@ const ANCHOR_DRAWER_FIELDS = [
 /**
  * The anchor watch page. Like the tile, it reads the watch record and applies
  * the live fix; the record's fields and writes, the pins, the trails, the AIS
- * and radar contacts and everything from vessel state are filled in here.
+ * contacts and everything from vessel state are filled in here.
  *
  * vesselLat/vesselLon fall back from the live fix to the anchor point (e.g.
  * GPS lost after the anchor was already set), and stay null only when neither
@@ -109,7 +109,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'placeName' | 'saveDepth' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
-  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide' | 'onDropAnchor'>) {
+  | 'aisVessels' | 'tide' | 'onDropAnchor'>) {
   const watch = useAnchorWatch()
   const contacts = useMapContacts()
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)

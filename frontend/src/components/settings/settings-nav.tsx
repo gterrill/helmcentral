@@ -11,7 +11,6 @@ export type SettingsSectionId =
   | 'plugins'
   | 'influxdb'
   | 'anchor-watch'
-  | 'mayara'
   | 'alarms'
   | 'assistant'
   | 'offline-coastline'
@@ -40,7 +39,6 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
     items: [
       { id: 'signalk', label: 'SignalK' },
       { id: 'influxdb', label: 'InfluxDB' },
-      { id: 'mayara', label: 'Mayara' },
     ],
   },
   {
