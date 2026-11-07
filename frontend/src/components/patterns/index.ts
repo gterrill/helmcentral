@@ -30,4 +30,5 @@ export { Page, type PageAction, type PagerProps, type PagerTarget, type PageProp
 export { SettingsLayout, type SettingsLayoutProps } from './settings-layout'
 export { SaveBar, type SaveBarProps } from './save-bar'
 export { TreeLayout, type TreeLayoutProps } from './tree-layout'
+export { WarningNote, type WarningNoteProps } from './warning-note'
 export { SaveBarSlot, SAVE_BAR_SLOT_ID } from './save-bar-slot'

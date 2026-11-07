@@ -4,7 +4,8 @@
 
 Accepted. Amended by ADR 0063 (seed the planning depth from the drop), which splits the
 wind and depth overrides below: wind stays a client-only planning input, while the
-planning depth is seeded at the drop and stored on the watch record.
+planning depth is seeded at the drop and stored on the watch record. Amended 2026-11-07
+(catenary formula includes the h² term), see the last section.
 
 ## Context
 
@@ -153,3 +154,25 @@ manual-only.
   future edits to the math can't silently drift.
 - A future widget retirement follows the same `retiredDashboardWidgetIDs` mechanism
   rather than inventing a new one.
+
+## Amendment, 2026-11-07: the catenary rode includes the h² term
+
+`calculateCatenary` recommended `sqrt(2·a·h)`, where `a` is the horizontal load over the
+submerged chain weight per metre and `h` is the height of the bow roller above the
+seabed. The chain that just touches the anchor with a flat tangent is `sqrt(h² + 2·a·h)`,
+so the recommendation now uses that. The old figure left out the `h²` term, and the omission
+cost two ways:
+
+- **Short by a few percent in wind.** Once wind pushed the figure past the 3:1 floor, the
+  planner paid out slightly less chain than the load model said was needed to reach the
+  anchor. The rode diagram, which draws the real curve, showed the anchor lifting for the
+  planner's own recommendation.
+- **Near zero in light air.** As the load went to zero the old raw figure went to zero.
+  The new one goes to `h`, so the raw recommendation can never fall below 1:1. The 3:1
+  floor already covered this in the planner, so no operator saw the old raw figure. At
+  exactly zero load `calculateCatenary` still returns null.
+
+The 3:1 floor stays, because the anchor still lifts below roughly that scope, so
+`buildRodePlan` still sets the figure the operator sees in light air. The characterization
+tests in `test/rode-plan.test.ts` pin the new raw values. The Go port covers the ratio
+method only, so the formula did not change there.

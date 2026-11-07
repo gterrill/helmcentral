@@ -38,6 +38,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Complete form and Mate show the figure as "Read by hand" with its age, never
   as a live reading. An item that has an hour meter takes no hand readings, so a
   silent meter still shows "Hours unknown".
+- **A side view of each method's rode in the rode planner.** Each method now
+  draws the seabed, the water, the bow and the chain from the anchor up to the
+  bow roller, with the depth from the bow roller to the bottom, the bow height and the
+  rode length.
+  A warning shows when the rode is too short to lie on the bottom under the
+  planned load, and on the Ratio tab it says the ratio rule is too short for
+  the planned conditions.
 - **Anchor Position Lost alarm.** With an anchor watch set, Helmcentral now
   raises an alarm when the GPS fix has been missing or untrustworthy for a full
   minute. Before, a dead or jammed GPS left the anchor watch quietly frozen,
@@ -48,6 +55,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The Catenary Method now gives the full length of chain to reach the bottom.**
+  Its figure came out a few percent short of that length. It now gives the full
+  length, so once the wind takes the figure past the 3:1 minimum you'll see a
+  slightly longer rode. In light air the 3:1 minimum still applies, as before.
 - **The rode planner's Swing now includes the GPS to bow distance before you
   drop, after a Drop with no heading, and after you place the anchor by hand.**
   In those three cases Swing left the distance out, so **Apply as alarm radius**

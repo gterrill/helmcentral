@@ -18,6 +18,8 @@ export interface CatenaryResult {
   recommendedRodeM: number
   minScopeRatio: number
   horizontalLoadN: number
+  /** a = H / w (m): the parameter of the catenary the recommendation was worked from. */
+  catenaryParameterM: number
 }
 
 const AIR_DENSITY_KG_M3 = 1.225
@@ -80,6 +82,15 @@ function interpolateChainDryWeightKgPerM(chainSizeMm: number): number {
   return CHAIN_DRY_WEIGHT_KG_PER_M[12]
 }
 
+/**
+ * The suspended length of rode that just touches the anchor with a flat
+ * tangent: sqrt(h² + 2ah), where h is the bow roller's height above the seabed
+ * and a = H / w the catenary parameter.
+ */
+export function suspendedLengthM(heightM: number, parameterM: number): number {
+  return Math.sqrt(heightM * heightM + 2 * parameterM * heightM)
+}
+
 export function calculateCatenary(input: CatenaryInput): CatenaryResult | null {
   if (
     input.depthM <= 0
@@ -112,7 +123,8 @@ export function calculateCatenary(input: CatenaryInput): CatenaryResult | null {
     return null
   }
 
-  const recommendedRodeM = Math.sqrt((2 * horizontalLoadN * depthFromHawseM) / submergedWeightNPerM)
+  const catenaryParameterM = horizontalLoadN / submergedWeightNPerM
+  const recommendedRodeM = suspendedLengthM(depthFromHawseM, catenaryParameterM)
   const minScopeRatio = recommendedRodeM / depthFromHawseM
 
   if (!Number.isFinite(recommendedRodeM) || !Number.isFinite(minScopeRatio)) {
@@ -123,5 +135,6 @@ export function calculateCatenary(input: CatenaryInput): CatenaryResult | null {
     recommendedRodeM,
     minScopeRatio,
     horizontalLoadN,
+    catenaryParameterM,
   }
 }

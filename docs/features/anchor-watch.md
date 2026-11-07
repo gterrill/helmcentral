@@ -348,6 +348,17 @@ keel right now. Type over it to plan against a different figure. The field
 won't accept a number that leaves no water at all once the tide and bow height
 are backed out, and it says so rather than saving it.
 
+Under each method's Pay Out figure the planner draws the rode side on. You see
+the bottom, the water, your bow and the chain running up to the bow roller. It's
+drawn to one scale, so a long rode looks long. The Catenary Method draws the
+curve its load would give. The Ratio Method is drawn with that same load, so
+you can see what its rule of thumb does in the planned conditions.
+
+A warning shows when a rode is too short to lie on the bottom under the planned
+load. On the Ratio tab the warning says the ratio rule is too short for the
+planned conditions, which means the anchor would be lifted. Pay out the
+Catenary figure or more.
+
 Its map takes pins. Click open water to mark a bombie, a mooring block or the
 nearest bit of shoreline, and watch the range close as you swing. Pins are
 shared across every device watching the anchorage, so marking a hazard from the

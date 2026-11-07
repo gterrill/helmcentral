@@ -3,20 +3,12 @@ import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
 import { radiusDisplayValue } from '@/lib/anchor-adjust'
-
-const METERS_PER_FOOT = 3.28084
+import { feetToMeters } from '@/lib/units'
 
 /**
- * No rode method may ever recommend a scope below this, regardless of what
- * its own math says. calculateCatenary has no floor built in — fed a calm
- * night at 3kt wind it recommended 0.6:1, mathematically correct for the
- * modelled load but nautically indefensible: below roughly 3:1 the rode
- * angle pulls the anchor upward out of the seabed regardless of how little
- * horizontal load the catenary math says it's holding. The floor is a
- * composition-layer policy (ADR 0047's "composition" over catenary.ts's
- * "physics"), applied here rather than in calculateCatenary, so the physics
- * function stays pinned and policy-free and its characterization tests keep
- * asserting the raw, unfloored numbers.
+ * No rode method may recommend a scope below this. Below roughly 3:1 the rode
+ * angle pulls the anchor out of the seabed whatever the load model says, so the
+ * floor is applied here, not in calculateCatenary, which stays pure physics.
  */
 export const MIN_SCOPE_RATIO = 3
 
@@ -67,6 +59,8 @@ export interface RodePlan {
   scopeFloorApplied: boolean
   exceedsChainOnboard: boolean
   chainRemainingM: number
+  /** a = H / w (m), the catenary parameter the recommendation used, for drawing the rode's shape. */
+  catenaryParameterM: number
 }
 
 /**
@@ -134,7 +128,7 @@ export function maxExpectedDepthM(datum: PlanningDepthDatum | null, tide: TideTo
   if (tide.high_tide_height_ft < 0) return null
 
   const riseFt = tide.high_tide_height_ft - datum.tideHeightFt
-  const riseM = Math.max(0, riseFt) / METERS_PER_FOOT
+  const riseM = feetToMeters(Math.max(0, riseFt))
   return datum.depthM + riseM
 }
 
@@ -265,6 +259,7 @@ export function buildRodePlan(input: RodePlanInput): RodePlan | null {
     scopeFloorApplied,
     exceedsChainOnboard,
     chainRemainingM,
+    catenaryParameterM: catenary.catenaryParameterM,
   }
 }
 
@@ -279,11 +274,20 @@ export interface RodeMethodResult {
   recommendedRodeM: number
   scopeRatio: number
   note: string
+  /** a = H / w (m) from the plan's catenary model, the load every rode is drawn with; null when there is no plan. */
+  catenaryParameterM: number | null
+  /** What to tell the operator when this method's rode is too short for that load; null for a method that can't be. */
+  liftWarning: string | null
+  /** Bow roller to seabed (m) at the planning depth the method worked from. Absent when unavailable. */
+  depthFromHawseM?: number
+  /** Whether the rise to the next high was part of that planning depth. Absent when unavailable. */
+  tideCorrected?: boolean
   /** Set when the method cannot answer — the caption names *why*, never a bare dash. */
   unavailableReason?: string
 }
 
-export type RodeMethod = (input: RodePlanInput) => RodeMethodResult | null
+/** The caller builds the plan once and shares it, so every method sees the same load. */
+export type RodeMethod = (input: RodePlanInput, plan?: RodePlan | null) => RodeMethodResult | null
 
 /**
  * The depth + bow-height clause shared by both methods' notes. Scope is
@@ -315,8 +319,7 @@ function catenaryUnavailableReason(input: RodePlanInput): string {
   return 'catenary calculation unavailable'
 }
 
-export const catenaryMethod: RodeMethod = (input) => {
-  const plan = buildRodePlan(input)
+export const catenaryMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
 
   if (plan === null) {
     return {
@@ -325,6 +328,8 @@ export const catenaryMethod: RodeMethod = (input) => {
       recommendedRodeM: 0,
       scopeRatio: 0,
       note: '',
+      catenaryParameterM: null,
+      liftWarning: null,
       unavailableReason: catenaryUnavailableReason(input),
     }
   }
@@ -337,6 +342,11 @@ export const catenaryMethod: RodeMethod = (input) => {
     label: 'Catenary Method',
     recommendedRodeM: plan.recommendedRodeM,
     scopeRatio: plan.recommendedScope,
+    depthFromHawseM: plan.depthFromHawseM,
+    tideCorrected: plan.tideCorrected,
+    catenaryParameterM: plan.catenaryParameterM,
+    // Its rode is at least the suspended length that just touches the anchor, so it can't lift.
+    liftWarning: null,
     note: `${depthNote} · Wind ${Math.round(input.windKts ?? 0)} kts · Chain ${input.chainSizeMm}mm · Hull ${input.hullType.replace('_', ' ')}${floorNote}`,
   }
 }
@@ -362,7 +372,7 @@ function ratioUnavailableReason(input: RodePlanInput): string {
  * roller height from RodePlanInput — chain size, windage area, sea state,
  * seabed type, and hull type never factor in, unlike catenaryMethod.
  */
-export const ratioMethod: RodeMethod = (input) => {
+export const ratioMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
   if (input.depth === null || input.windKts === null || input.bowRollerHeightM <= 0) {
     return {
       id: 'ratio',
@@ -370,6 +380,8 @@ export const ratioMethod: RodeMethod = (input) => {
       recommendedRodeM: 0,
       scopeRatio: 0,
       note: '',
+      catenaryParameterM: null,
+      liftWarning: null,
       unavailableReason: ratioUnavailableReason(input),
     }
   }
@@ -377,7 +389,8 @@ export const ratioMethod: RodeMethod = (input) => {
   const { planningDepthM, tideCorrected } = planningDepthWithTide(input.depth, input.tide)
 
   const ratio = input.windKts >= RATIO_WIND_THRESHOLD_KTS ? RATIO_HIGH : RATIO_NORMAL
-  const recommendedRodeM = (planningDepthM + input.bowRollerHeightM) * ratio
+  const depthFromHawseM = planningDepthM + input.bowRollerHeightM
+  const recommendedRodeM = depthFromHawseM * ratio
 
   const depthNote = depthAndBowHeightNote(planningDepthM, tideCorrected, input.bowRollerHeightM)
   const ratioNote = ratio === RATIO_HIGH ? `${ratio}:1 (wind ≥ ${RATIO_WIND_THRESHOLD_KTS} kts)` : `${ratio}:1`
@@ -387,6 +400,11 @@ export const ratioMethod: RodeMethod = (input) => {
     label: 'Ratio Method',
     recommendedRodeM,
     scopeRatio: ratio,
+    depthFromHawseM,
+    tideCorrected,
+    // The load is the plan's, whatever the ratio rule says: only the rode differs.
+    catenaryParameterM: plan?.catenaryParameterM ?? null,
+    liftWarning: 'The ratio rule is too short for the planned conditions: the anchor would be lifted off the bottom.',
     note: `${depthNote} · Wind ${Math.round(input.windKts)} kts · ${ratioNote}`,
   }
 }
