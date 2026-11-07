@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-11-07
+
 ### Breaking
 
 - **Rebuild and reinstall your weather plugin after upgrading.** The plugin now
@@ -19,6 +21,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   What to do: build the Open-Meteo or Apple WeatherKit plugin from the same
   release and replace the one in your weather plugins folder. A plugin you
   wrote yourself should send `null` for a wind direction it doesn't have.
+- **Tank senders must report the level as a ratio from 0 to 1.** A tank at
+  1 percent used to read as full, because Helmcentral guessed the scale from the
+  number, which also kept the low-fuel and low-water alarms quiet. It now reads
+  every level as a ratio, the way SignalK reports them, so 0.5 is half full. A
+  sender that reports 0 to 100 now shows that tank as no reading, and its tank
+  alarms can't fire. What to do: after upgrading, look at the Tanks tile. If a
+  tank shows no reading, set its sender, or the SignalK plugin that publishes
+  it, to report a ratio from 0 to 1.
 
 ### Added
 
@@ -100,12 +110,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   report them.** Before, the last device to answer won, even when it was the
   lower one. The history charts for a reading two devices share now show one
   average instead of lines from both.
-- **A tank at 1 percent no longer reads as full.** Tank levels are read as a
-  ratio from 0 to 1, the way SignalK reports them. Before, a level of exactly 1
-  or less was guessed to be a ratio and anything above a percentage, so a
-  sender on a percent scale could show a nearly empty tank as full and keep the
-  low-fuel and low-water alarms quiet. A level outside 0 to 1 now shows as no
-  reading for that tank instead of a guess.
 - **Frequency alarms read in hertz.** An alarm on shore power or inverter
   frequency showed "3600 RPM" on its card, in email, ntfy and webhooks. Only
   an engine's revolutions are read in RPM now.
@@ -126,6 +130,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Long vessel names are readable on a phone.** In the Nearby Vessels tile,
   and in the Nearby map's list when it sits under the places, a long name takes
   a second line instead of being cut off.
+- **Save now shows it's working in every tile settings dialog.** In the gauge,
+  gauge group, indicator lamps, ribbon, embed and Nearby map dialogs, the
+  button reads "Saving…" and stays greyed out until the tile is saved, so a
+  slow connection no longer leaves it looking ready to tap again. If the save
+  fails, the dialog stays open and shows "Could not save the tile" (or "Could
+  not save the indicator ribbon"), and you can try again. A pop-up message still
+  gives the cause. The embed and Nearby map dialogs used to close before the
+  save had finished. Duplicate on a gauge group and Remove ribbon wait for a
+  save in progress too.
 
 ### Changed
 
@@ -151,17 +164,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   short buzz when the hold takes, if your phone can. After you
   confirm a download or a removal, the map goes back to normal.
 
-### Fixed
-
-- **Save now shows it's working in every tile settings dialog.** In the gauge,
-  gauge group, indicator lamps, ribbon, embed and Nearby map dialogs, the
-  button reads "Saving…" and stays greyed out until the tile is saved, so a
-  slow connection no longer leaves it looking ready to tap again. If the save
-  fails, the dialog stays open and shows "Could not save the tile" (or "Could
-  not save the indicator ribbon"), and you can try again. A pop-up message still
-  gives the cause. The embed and Nearby map dialogs used to close before the
-  save had finished. Duplicate on a gauge group and Remove ribbon wait for a
-  save in progress too.
 
 ## [0.61.0] - 2026-11-06
 
@@ -3220,7 +3222,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.61.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.62.0...HEAD
+[0.62.0]: https://github.com/gterrill/helmcentral/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/gterrill/helmcentral/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/gterrill/helmcentral/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/gterrill/helmcentral/compare/v0.58.0...v0.59.0
