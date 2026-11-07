@@ -16,6 +16,20 @@ func TestPresentNotificationGuardZoneIsWordedWithoutDeviceKeys(t *testing.T) {
 	}
 }
 
+// A dual-range radar raises the same zone under each range's key. Both fold to
+// one kind, so one Stop showing hides them both and the Settings list names
+// the folded kind by the same title.
+func TestGuardZoneKindFoldsTheRadarKey(t *testing.T) {
+	for _, path := range []string{"notifications.radar.fur6424A.guardZone.1", "notifications.radar.fur6424B.guardZone.1"} {
+		if got := alarmKindOf(path); got != "radar.guardZone.1" {
+			t.Fatalf("alarmKindOf(%q) = %q, want radar.guardZone.1", path, got)
+		}
+	}
+	if title, _ := presentNotification("radar.guardZone.1", ""); title != "Radar Guard Zone 1" {
+		t.Fatalf("folded kind title = %q", title)
+	}
+}
+
 func TestPresentNotificationStatusKeepsPathAndRuleID(t *testing.T) {
 	status := alarmStatus{
 		RuleID:  "notifications:radar.fur6424A.guardZone.1",

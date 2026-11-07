@@ -1141,6 +1141,51 @@ func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
 // rejected the whole PATCH for that page (same failure mode
 // TestDashboardPages_RetiredWidgetIDStrippedOnLoad covers for rode-scope),
 // until they landed here too.
+// A page whose hero was a retired tile loses the hero with the tile, so it
+// never names a widget the page no longer has.
+func TestDashboardPages_RetiredHeroClearedOnLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	pageID := uuid.NewString()
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{
+				ID:   pageID,
+				Name: "Radar",
+				Hero: "radar-targets",
+				Widgets: []dashboardLayoutItem{
+					{ID: "clock", X: 0, Y: 0, W: 4, H: 7},
+					{ID: "radar-targets", X: 4, Y: 0, W: 6, H: 4},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal saved pages: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write pages file: %v", err)
+	}
+
+	loadDashboardPagesForTest(t)
+
+	dashboardPagesMu.RLock()
+	page, ok := dashboardPagesState[pageID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected page to load")
+	}
+	if page.Hero != "" {
+		t.Fatalf("expected the retired hero cleared, got %q", page.Hero)
+	}
+}
+
 func TestDashboardPages_ForecastDaysAndSeaStateStrippedOnLoad(t *testing.T) {
 	tempDir := t.TempDir()
 	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")

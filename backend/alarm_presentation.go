@@ -10,7 +10,9 @@ import (
 var (
 	// The radar plugin's guard-zone notification, still on the bus for Helmcam
 	// (ADR 0270). Worded without the radar's device key or the target id.
-	radarGuardZonePath = regexp.MustCompile(`^radar\.[^.]+\.guardZone\.(\d+)$`)
+	// The radar's key is optional so the folded ignore kind
+	// ("radar.guardZone.1", canonicalAlarmKind) words the same.
+	radarGuardZonePath = regexp.MustCompile(`^radar\.(?:[^.]+\.)?guardZone\.(\d+)$`)
 	camelBoundary      = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 	trailingPunct      = regexp.MustCompile(`[.!?]+$`)
 	// The AIS prioritizer's target message (ADR 0057): "<NAME> - CPA WARNING".

@@ -902,6 +902,10 @@ func loadDashboardPages() {
 					p.Widgets = kept
 					anyStripped = true
 				}
+				if retiredDashboardWidgetIDs[p.Hero] {
+					p.Hero = ""
+					anyStripped = true
+				}
 				dashboardPagesState[p.ID] = p
 			}
 			// Absorb a v1 file's kiosk fields into the display model (ADR

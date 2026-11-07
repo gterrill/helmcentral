@@ -70,6 +70,10 @@ The radar figures and the safety exception both go. The wording stays.
   refused: the emergency kinds, `navigation.anchor`,
   `navigation.closestApproach`, received distress, and any alarm in the
   `emergency` state.
+- **One kind per zone:** the ignore list stores a guard zone without the
+  radar's key (`radar.guardZone.1`). The boat's dual-range radar raises the
+  same zone under each range's key, and the two cards read the same, so one
+  **Stop showing** has to hide both.
 
 The alarm that never clears at anchor is the reason for the second point. An
 alarm the operator can never silence is worse than one that is easy to

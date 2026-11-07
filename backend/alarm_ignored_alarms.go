@@ -65,9 +65,14 @@ func alarmKindIgnorable(kind, state string) bool {
 
 // canonicalAlarmKind folds the plotter's route alarms, which a device may raise
 // as either "perpendicularPassed" or "navigation.perpendicularPassed" and which
-// are worded as one alarm, to the bare spelling. Every other kind, the
-// navigation safety kinds among them, is left as it is.
+// are worded as one alarm, to the bare spelling. A radar guard zone drops the
+// radar's key ("radar.guardZone.1"), so a dual-range radar's two ranges are
+// one alarm to stop showing. Every other kind, the navigation safety kinds
+// among them, is left as it is.
 func canonicalAlarmKind(kind string) string {
+	if m := radarGuardZonePath.FindStringSubmatch(kind); m != nil {
+		return "radar.guardZone." + m[1]
+	}
 	bare := strings.TrimPrefix(kind, "navigation.")
 	if _, ok := navigationNotificationBodies[bare]; ok {
 		return bare
