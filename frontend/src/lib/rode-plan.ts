@@ -208,7 +208,7 @@ export function scopeRatio(rodeM: number, depthFromHawseM: number): number | nul
  * The ok / low (>=85%) / insufficient / unknown ladder, lifted verbatim from
  * the old tile. "unknown" — not a fail — whenever either scope is unavailable,
  * so a missing input can never render as the red "insufficient" state. The
- * planner's badge goes through deployedScopeStatus, which checks the shown Pay
+ * planner's badge goes through deployedScopeBadge, which checks the shown Pay
  * Out figure before this ladder.
  */
 export function scopeStatus(currentScope: number | null, recommendedScope: number | null): ScopeStatus {
@@ -227,42 +227,30 @@ export function payOutDisplayValue(rodeM: number, isImperial: boolean): number {
   return Math.round(toDisplayDistance(rodeM, isImperial))
 }
 
-/** What a deployed rode is judged against: one method's recommendation and the water it was worked from. */
-export interface ScopeTarget {
-  recommendedRodeM: number
-  depthFromHawseM: number
-  scopeRatio: number
-}
-
-/** The method's figure as a target, or null when the method can't answer. */
-export function scopeTargetOf(result: RodeMethodResult | null): ScopeTarget | null {
-  if (result === null || result.unavailableReason || result.depthFromHawseM === undefined) return null
-  return { recommendedRodeM: result.recommendedRodeM, depthFromHawseM: result.depthFromHawseM, scopeRatio: result.scopeRatio }
-}
-
 /**
- * The scope badge for a deployed rode against a method's figure. A rode at
- * least the Pay Out figure as shown reads OK, so paying out a figure rounded
- * down from 55.3 m isn't called Low. The comparison is in display units rather
- * than metres, so a figure typed in feet and stored as metres can't come back a
- * hair short; the 1e-6 rounding absorbs the float noise of that round trip.
- * Anything short of the shown figure goes through the scopeStatus ladder.
+ * The scope badge for a deployed rode against one method's figure: null with no
+ * rode out or no figure to judge against; otherwise "ok" when the rode reaches
+ * the Pay Out figure as shown, else how short it is. The gap is in display
+ * units rather than metres, so a figure typed in feet and stored as metres
+ * can't come back a hair short; the 1e-6 absorbs the float noise of that round
+ * trip. A paid-out rode of 55 against a shown 55 is ok even when the raw
+ * recommendation was 55.3. Short goes through the scopeStatus ladder, and the
+ * shortfall rounds up so paying out that many clears the badge.
  */
-export function deployedScopeStatus(rodeDeployedM: number, target: ScopeTarget | null, isImperial: boolean): ScopeStatus {
-  if (target === null) return 'unknown'
-  const deployed = Math.round(toDisplayDistance(rodeDeployedM, isImperial) * 1e6) / 1e6
-  if (deployed >= payOutDisplayValue(target.recommendedRodeM, isImperial)) return 'ok'
-  return scopeStatus(scopeRatio(rodeDeployedM, target.depthFromHawseM), target.scopeRatio)
-}
+export type DeployedScopeBadge = { status: 'ok' } | { status: 'low' | 'insufficient'; shortfall: number }
 
-/**
- * How far the rode deployed falls short of the Pay Out figure as shown, in
- * whole display units, rounded up so paying out that many clears the badge, and
- * never under 1. Compared in display units, as deployedScopeStatus is.
- */
-export function rodeShortfallDisplay(rodeDeployedM: number, target: ScopeTarget, isImperial: boolean): number {
-  const gap = payOutDisplayValue(target.recommendedRodeM, isImperial) - toDisplayDistance(rodeDeployedM, isImperial)
-  return Math.max(1, Math.ceil(gap - 1e-6))
+export function deployedScopeBadge(
+  rodeDeployedM: number,
+  result: RodeMethodResult | null,
+  isImperial: boolean,
+): DeployedScopeBadge | null {
+  if (rodeDeployedM <= 0 || result === null || result.unavailableReason || result.depthFromHawseM === undefined) return null
+  const gap = payOutDisplayValue(result.recommendedRodeM, isImperial) - toDisplayDistance(rodeDeployedM, isImperial)
+  if (gap <= 1e-6) return { status: 'ok' }
+  const status = scopeStatus(scopeRatio(rodeDeployedM, result.depthFromHawseM), result.scopeRatio)
+  if (status === 'low' || status === 'insufficient') return { status, shortfall: Math.ceil(gap - 1e-6) }
+  // Short of the shown figure yet at or above the recommended scope: a hair short.
+  return { status: 'low', shortfall: 1 }
 }
 
 /**
@@ -441,14 +429,6 @@ export const ratioMethod: RodeMethod = (input, plan = buildRodePlan(input)) => {
 /** The array the planner component maps over, one SidebarGroup per result (ADR 0047 §2a). */
 export const rodeMethods: RodeMethod[] = [catenaryMethod, ratioMethod]
 
-export type LoaSource = 'settings' | 'signalk'
-
-export interface ResolvedLoa {
-  /** null when neither source has a usable figure — never a silent zero. */
-  loaM: number | null
-  source: LoaSource | null
-}
-
 /**
  * LOA precedence (ADR 0047), extracted from anchor-rode-planner.tsx so the
  * Adjust mode's radius ceiling (lib/anchor-adjust.ts's alarmRadiusBounds) and
@@ -460,10 +440,10 @@ export interface ResolvedLoa {
  * swing circle or a radius ceiling from a zero LOA would report a circle
  * smaller than the boat.
  */
-export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number | null): ResolvedLoa {
-  if (settingsLoaM > 0) return { loaM: settingsLoaM, source: 'settings' }
-  if (vesselLengthOverallM !== null && vesselLengthOverallM > 0) return { loaM: vesselLengthOverallM, source: 'signalk' }
-  return { loaM: null, source: null }
+export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number | null): number | null {
+  if (settingsLoaM > 0) return settingsLoaM
+  if (vesselLengthOverallM !== null && vesselLengthOverallM > 0) return vesselLengthOverallM
+  return null
 }
 
 /**

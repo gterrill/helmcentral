@@ -9,13 +9,11 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import {
   buildRodePlan,
   computeSwingRadiusM,
-  deployedScopeStatus,
+  deployedScopeBadge,
   maxExpectedDepthM,
   planningFigureM,
   rawDepthFromPlanningFigureM,
   resolveLoaM,
-  rodeShortfallDisplay,
-  scopeTargetOf,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -25,6 +23,7 @@ import {
   type PlanningDepthDatum,
   type RodeMethodResult,
   type RodePlanInput,
+  type ScopeStatus,
 } from '@/lib/rode-plan'
 import { formatRadiusDisplay } from '@/lib/anchor-adjust'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
@@ -91,7 +90,7 @@ export interface AnchorRodePlannerProps {
   applyLockedReason?: string | null
 }
 
-function scopeBadgeClass(status: 'ok' | 'low' | 'insufficient'): string {
+function scopeBadgeClass(status: Exclude<ScopeStatus, 'unknown'>): string {
   switch (status) {
     case 'ok':
       return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
@@ -238,7 +237,7 @@ export function AnchorRodePlanner({
   //
   // LOA precedence (ADR 0047), extracted to lib/rode-plan.ts's resolveLoaM —
   // the Adjust mode's radius ceiling needs the exact same resolution rule.
-  const { loaM: resolvedLoaM } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
+  const resolvedLoaM = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
   const loaConfigured = resolvedLoaM !== null
 
   // Set alarm must use the swing of whichever method the operator
@@ -254,19 +253,10 @@ export function AnchorRodePlanner({
     : null
 
   // The badge judges the rode against the Pay Out figure as shown, for the
-  // configured method: the one Set alarm uses and the one the planner opens on.
-  const scopeTarget = scopeTargetOf(configuredMethodResult)
-  const status = rodeDeployedM > 0 ? deployedScopeStatus(rodeDeployedM, scopeTarget, isImperial) : null
-  const badge: { label: string; className: string } | null = (() => {
-    if (status === 'ok') return { label: 'Enough rode', className: scopeBadgeClass('ok') }
-    if ((status === 'low' || status === 'insufficient') && scopeTarget !== null) {
-      return {
-        label: `Short by ${rodeShortfallDisplay(rodeDeployedM, scopeTarget, isImperial)} ${unit}`,
-        className: scopeBadgeClass(status),
-      }
-    }
-    return null
-  })()
+  // method on the open tab, so it answers the figure the operator is looking
+  // at. Set alarm above stays on the Settings method.
+  const activeMethodResult = methodResults.find((result) => result !== null && result.id === activeMethodId) ?? null
+  const scopeBadge = deployedScopeBadge(rodeDeployedM, activeMethodResult, isImperial)
 
   // The actual write, shared by the debounced call below and by a Retry
   // action's immediate re-attempt of the same input — a Retry press
@@ -679,9 +669,9 @@ export function AnchorRodePlanner({
                               <span>Swing {formatRadiusDisplay(methodSwingRadiusM, isImperial)}</span>
                             )}
                           </div>
-                          {result.recommendedRodeM > anchorConfig.chainOnboardM && (
+                          {payOutDisplayValue(result.recommendedRodeM, isImperial) > payOutDisplayValue(anchorConfig.chainOnboardM, isImperial) && (
                             <WarningNote className="mt-2">
-                              Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
+                              Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {payOutDisplayValue(anchorConfig.chainOnboardM, isImperial)} {unit} aboard
                             </WarningNote>
                           )}
                         </div>
@@ -710,9 +700,9 @@ export function AnchorRodePlanner({
                 />
               </label>
 
-              {badge !== null && (
-                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold ${badge.className}`}>
-                  {badge.label}
+              {scopeBadge !== null && (
+                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold ${scopeBadgeClass(scopeBadge.status)}`}>
+                  {scopeBadge.status === 'ok' ? 'Enough rode' : `Short by ${scopeBadge.shortfall} ${unit}`}
                 </div>
               )}
 

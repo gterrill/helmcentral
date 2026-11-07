@@ -57,9 +57,10 @@ drops anything that only echoes an input or explains where a figure came from.
   becomes "Enough rode" when the deployed rode reaches the Pay Out figure as
   shown, and "Short by N" when it does not, where N is the Pay Out figure less
   the deployed rode in the operator's unit, rounded up so that paying out N
-  clears the badge, never under 1. It judges against the configured method, the
-  same one the button uses, and shows nothing when that method is unavailable. Amber and
-  red stay. An unknown status shows no badge. The text is sentence case.
+  clears the badge, never under 1. It judges against the method on the open tab,
+  so it answers the figure on screen, while the button keeps the method chosen in
+  Settings. It shows nothing when the open method is unavailable. Amber and red
+  stay. An unknown status shows no badge. The text is sentence case.
 - **The Depth caption.** "From the bow roller, at high tide", "From the bow
   roller, no tide station", "No depth reading", "Type it from the bow roller, at
   high tide", "Type it from the bow roller", and the refusal "Below bow height

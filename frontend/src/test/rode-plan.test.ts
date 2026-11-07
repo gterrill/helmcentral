@@ -4,7 +4,7 @@ import {
   buildRodePlan,
   catenaryMethod,
   computeSwingRadiusM,
-  deployedScopeStatus,
+  deployedScopeBadge,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
   planningFigureM,
@@ -15,10 +15,8 @@ import {
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
-  rodeShortfallDisplay,
   scopeRatio,
   scopeStatus,
-  scopeTargetOf,
   seedPlanningWindKts,
   tideHeightFtOrNull,
   WIND_BANDS,
@@ -487,45 +485,66 @@ describe('scopeStatus', () => {
 })
 
 // ---------------------------------------------------------------------------
-// deployedScopeStatus — the deployed rode against the Pay Out figure as shown
+// deployedScopeBadge — the deployed rode against the Pay Out figure as shown
 // ---------------------------------------------------------------------------
-describe('deployedScopeStatus', () => {
-  const real = buildRodePlan(baseInput)!
-  // Keeps the plan consistent: the scope follows the overridden rode.
-  const planWith = (recommendedRodeM: number) => ({
+describe('deployedScopeBadge', () => {
+  const real = catenaryMethod(baseInput)!
+  // Keeps the result consistent: the scope follows the overridden rode.
+  const resultWith = (recommendedRodeM: number) => ({
+    ...real,
     recommendedRodeM,
-    depthFromHawseM: real.depthFromHawseM,
-    scopeRatio: recommendedRodeM / real.depthFromHawseM,
+    scopeRatio: recommendedRodeM / real.depthFromHawseM!,
   })
 
-  it('is "ok" when the deployed rode equals the rounded-down shown figure', () => {
-    expect(deployedScopeStatus(55, planWith(55.3), false)).toBe('ok')
+  it('is ok when the deployed rode equals the rounded-down shown figure', () => {
+    expect(deployedScopeBadge(55, resultWith(55.3), false)).toEqual({ status: 'ok' })
   })
 
-  it('does not call a rode one unit short of the shown figure "ok"', () => {
-    expect(deployedScopeStatus(54, planWith(55.3), false)).not.toBe('ok')
+  it('does not call a rode one unit short of the shown figure ok', () => {
+    expect(deployedScopeBadge(54, resultWith(55.3), false)?.status).not.toBe('ok')
   })
 
   it('judges against the rounded-up shown figure, not the raw recommendation', () => {
-    expect(deployedScopeStatus(55, planWith(54.7), false)).toBe('ok')
-    expect(deployedScopeStatus(54.6, planWith(54.7), false)).not.toBe('ok')
+    expect(deployedScopeBadge(55, resultWith(54.7), false)).toEqual({ status: 'ok' })
+    expect(deployedScopeBadge(54.6, resultWith(54.7), false)?.status).not.toBe('ok')
   })
 
   it('compares in feet under imperial, so a feet to metres round trip cannot read short', () => {
-    const plan = planWith(33.3 / METERS_PER_FOOT) // shows 33 ft
-    expect(deployedScopeStatus(33 / METERS_PER_FOOT, plan, true)).toBe('ok')
-    expect(deployedScopeStatus(32 / METERS_PER_FOOT, plan, true)).not.toBe('ok')
+    const result = resultWith(33.3 / METERS_PER_FOOT) // shows 33 ft
+    expect(deployedScopeBadge(33 / METERS_PER_FOOT, result, true)).toEqual({ status: 'ok' })
+    expect(deployedScopeBadge(32 / METERS_PER_FOOT, result, true)).toEqual({ status: 'low', shortfall: 1 })
   })
 
-  it('falls through to the low / insufficient ladder when short of the shown figure', () => {
-    const plan = planWith(55.3)
-    const low = deployedScopeStatus(54, plan, false)
-    expect(low).toBe(scopeStatus(scopeRatio(54, plan.depthFromHawseM), plan.scopeRatio))
-    expect(deployedScopeStatus(1, plan, false)).toBe('insufficient')
+  it('falls through to the scopeStatus ladder when short of the shown figure', () => {
+    const result = resultWith(55.3)
+    const low = deployedScopeBadge(54, result, false)!
+    expect(low.status).toBe(scopeStatus(scopeRatio(54, result.depthFromHawseM!), result.scopeRatio))
+    expect(deployedScopeBadge(1, result, false)?.status).toBe('insufficient')
   })
 
-  it('is "unknown" with no target', () => {
-    expect(deployedScopeStatus(55, null, false)).toBe('unknown')
+  it('is null with no rode out, no result, or an unavailable result', () => {
+    expect(deployedScopeBadge(0, real, false)).toBeNull()
+    expect(deployedScopeBadge(55, null, false)).toBeNull()
+    expect(deployedScopeBadge(55, catenaryMethod({ ...baseInput, depth: null }), false)).toBeNull()
+  })
+
+  it('reports the shortfall in whole display units', () => {
+    const payOut = payOutDisplayValue(real.recommendedRodeM, false)
+    expect(deployedScopeBadge(payOut - 7, real, false)).toMatchObject({ shortfall: 7 })
+  })
+
+  it('rounds the shortfall up, so paying out that many clears the badge', () => {
+    expect(deployedScopeBadge(50.6, resultWith(55), false)).toMatchObject({ shortfall: 5 })
+  })
+
+  it('never reads a shortfall under 1', () => {
+    const payOut = payOutDisplayValue(real.recommendedRodeM, false)
+    expect(deployedScopeBadge(payOut - 0.2, real, false)).toMatchObject({ shortfall: 1 })
+  })
+
+  it('counts the shortfall in feet when imperial', () => {
+    const payOutFt = payOutDisplayValue(real.recommendedRodeM, true)
+    expect(deployedScopeBadge(feetToMeters(payOutFt - 12), real, true)).toMatchObject({ shortfall: 12 })
   })
 })
 
@@ -931,20 +950,20 @@ describe('resolvePlanningWindBand', () => {
 // ─────────────────────────────────────────────────────────────
 describe('resolveLoaM', () => {
   it('prefers an explicit settings.anchor.loa_m over SignalK', () => {
-    expect(resolveLoaM(15, 12)).toEqual({ loaM: 15, source: 'settings' })
+    expect(resolveLoaM(15, 12)).toBe(15)
   })
 
   it('falls back to SignalK design.length.overall when settings has none', () => {
-    expect(resolveLoaM(0, 12)).toEqual({ loaM: 12, source: 'signalk' })
+    expect(resolveLoaM(0, 12)).toBe(12)
   })
 
   it('a zero or negative SignalK length does not count as configured', () => {
-    expect(resolveLoaM(0, 0)).toEqual({ loaM: null, source: null })
-    expect(resolveLoaM(0, -1)).toEqual({ loaM: null, source: null })
+    expect(resolveLoaM(0, 0)).toBe(null)
+    expect(resolveLoaM(0, -1)).toBe(null)
   })
 
   it('returns null with neither source present, not a silent zero', () => {
-    expect(resolveLoaM(0, null)).toEqual({ loaM: null, source: null })
+    expect(resolveLoaM(0, null)).toBe(null)
   })
 })
 
@@ -960,45 +979,6 @@ describe('computeSwingRadiusM', () => {
 
   it('returns null when LOA is unresolved, rather than a circle smaller than the boat', () => {
     expect(computeSwingRadiusM(30, 2, null)).toBeNull()
-  })
-})
-
-describe('rodeShortfallDisplay', () => {
-  const target = scopeTargetOf(catenaryMethod(baseInput))!
-  const payOut = payOutDisplayValue(target.recommendedRodeM, false)
-
-  it('is the Pay Out figure less the rode deployed, in whole display units', () => {
-    expect(rodeShortfallDisplay(payOut - 7, target, false)).toBe(7)
-  })
-
-  it('rounds up, so paying out that many clears the badge', () => {
-    const t = { ...target, recommendedRodeM: 55 }
-    expect(rodeShortfallDisplay(50.6, t, false)).toBe(5)
-  })
-
-  it('never reads less than 1, so a rode a hair short is still short', () => {
-    expect(rodeShortfallDisplay(payOut - 0.2, target, false)).toBe(1)
-  })
-
-  it('counts in feet when imperial', () => {
-    const payOutFt = payOutDisplayValue(target.recommendedRodeM, true)
-    expect(rodeShortfallDisplay(feetToMeters(payOutFt - 12), target, true)).toBe(12)
-  })
-})
-
-describe('scopeTargetOf', () => {
-  it('takes a method\'s own rode, height and scope', () => {
-    const ratio = ratioMethod(baseInput)!
-    expect(scopeTargetOf(ratio)).toEqual({
-      recommendedRodeM: ratio.recommendedRodeM,
-      depthFromHawseM: ratio.depthFromHawseM,
-      scopeRatio: ratio.scopeRatio,
-    })
-  })
-
-  it('is null when the method is unavailable', () => {
-    expect(scopeTargetOf(catenaryMethod({ ...baseInput, depth: null }))).toBeNull()
-    expect(scopeTargetOf(null)).toBeNull()
   })
 })
 

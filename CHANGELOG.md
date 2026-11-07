@@ -19,8 +19,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   chain, the sum under Swing, the legend under the drawing and the line saying
   where the boat length came from are gone. The badge under the rode you have
   out now reads "Enough rode" or "Short by" and how much more to pay out, in
-  place of Scope OK, Low or Insufficient. It judges against the method you chose
-  in Settings, and shows nothing when there's no recommendation yet. The **Apply as alarm radius** button is now **Set alarm
+  place of Scope OK, Low or Insufficient. It judges against the method on the tab
+  you have open, and shows nothing when there's no recommendation yet. The **Apply as alarm radius** button is now **Set alarm
   to** and the radius, for example "Set alarm to 65 m". The Depth caption reads
   "From the bow roller, at high tide" or "From the bow roller, no tide station",
   and the tabs are called Catenary and

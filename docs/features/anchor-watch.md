@@ -345,8 +345,8 @@ It answers three questions and leaves the working out off the screen:
   uses 3:1 and the scope reads "3.0:1 minimum".
 - **Is what's out enough:** once you've entered the rode you have out, a badge
   reads "Enough rode", or "Short by" and how much more to pay out. It judges
-  against the method you chose in Settings. With no rode entered, or that method
-  unavailable, there's no badge.
+  against the method on the tab you have open. With no rode entered, or that
+  method unavailable, there's no badge.
 - **What to set the alarm to:** the **Set alarm to** button at the foot shows the
   radius it will set, for example "Set alarm to 65 m", using the swing of the
   method you chose in Settings. It reads "Set alarm" and stays greyed out

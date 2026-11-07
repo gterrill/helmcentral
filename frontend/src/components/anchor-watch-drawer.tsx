@@ -268,7 +268,7 @@ export function AnchorWatchDrawer({
   // hand-placed move (buildAdjustCommitTargets' own `restore`).
   const adjustOpenedFromRef = useRef<{ lat: number; lon: number; radiusMeters: number; facts: AnchorAdjustRestore } | null>(null)
 
-  const { loaM: resolvedLoaM } = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
+  const resolvedLoaM = resolveLoaM(anchorConfig.loaM, vesselLengthOverallM)
   // The Adjust mode's own radius ceiling/floor (ADR 0133's amendment) — chain
   // onboard plus resolved LOA, the same precedence rule the Rode Planner's
   // own swing circle already uses (lib/rode-plan.ts's resolveLoaM).

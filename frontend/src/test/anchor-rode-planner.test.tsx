@@ -710,6 +710,29 @@ describe('AnchorRodePlanner — no input echoes under the method tabs', () => {
   })
 })
 
+describe('AnchorRodePlanner — chain aboard warning compares what it shows', () => {
+  it('does not warn when only rounding separates the figure from what is aboard', () => {
+    const props = baseProps()
+    const recommended = ratioMethod(expectedPlanInput)!.recommendedRodeM
+    const aboard = Math.round(recommended)
+    // Guard against passing vacuously: raw metres exceed what is aboard.
+    expect(recommended).toBeGreaterThan(aboard)
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, chainOnboardM: aboard } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).queryByText(/only .* aboard/i)).toBeNull()
+  })
+
+  it('warns once the shown figure exceeds what is aboard', () => {
+    const props = baseProps()
+    const aboard = Math.round(ratioMethod(expectedPlanInput)!.recommendedRodeM) - 2
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, chainOnboardM: aboard } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).getByText(/only .* aboard/i)).toBeInTheDocument()
+  })
+})
+
 describe('AnchorRodePlanner — scope floor and button units', () => {
   it('says the minimum set the Catenary scope when the floor binds', () => {
     const props = baseProps()
@@ -1179,7 +1202,7 @@ describe('AnchorRodePlanner — Scope badge against the shown Pay Out', () => {
     expect(screen.getByText('Short by 1 m')).toBeInTheDocument()
   })
 
-  it('judges against the configured Ratio method, not the catenary figure', () => {
+  it("judges against the open tab's method, and Set alarm keeps the Settings method", () => {
     const props = baseProps()
     const catenary = catenaryMethod(expectedPlanInput)!
     const ratio = ratioMethod(expectedPlanInput)!
@@ -1188,19 +1211,22 @@ describe('AnchorRodePlanner — Scope badge against the shown Pay Out', () => {
     expect(ratioShown).toBeGreaterThan(catenaryShown + 1)
     const config = { ...props.anchorConfig, scopeMethod: 'ratio' as const, chainOnboardM: 500 }
 
-    const first = renderPlanner({ anchorConfig: config, rodeDeployedM: catenaryShown })
+    renderPlanner({ anchorConfig: config, rodeDeployedM: catenaryShown })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
-    expect(screen.queryByText('Enough rode')).toBeNull()
+    // The Ratio tab opens first, and the catenary figure is short of it.
     expect(screen.getByText(`Short by ${ratioShown - catenaryShown} m`)).toBeInTheDocument()
-    first.unmount()
 
-    localStorage.clear()
-    renderPlanner({ anchorConfig: config, rodeDeployedM: ratioShown })
-    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    selectMethodTab(/catenary/i)
     expect(screen.getByText('Enough rode')).toBeInTheDocument()
+    expect(screen.queryByText(/^Short by/)).toBeNull()
+    const expectedRadius = Math.round(ratio.recommendedRodeM + props.bowOffsetM + props.anchorConfig.loaM)
+    expect(screen.getByRole('button', { name: `Set alarm to ${expectedRadius} m` })).toBeInTheDocument()
+
+    selectMethodTab(/ratio/i)
+    expect(screen.getByText(`Short by ${ratioShown - catenaryShown} m`)).toBeInTheDocument()
   })
 
-  it('shows no badge when the configured method is unavailable', () => {
+  it("shows no badge when the open tab's method is unavailable", () => {
     const props = baseProps()
     renderPlanner({
       anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary', windageAreaM2: 0 },
