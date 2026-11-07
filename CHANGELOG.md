@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Paying out the Catenary Method's Pay Out figure now reads Scope OK.** The
+  badge used to compare your rode with the exact recommendation, so a
+  recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m read
+  Scope Low. It now judges your rode against the Pay Out figure the Catenary
+  Method shows. A rode shorter than that figure reads Scope Low or Scope
+  Insufficient as before.
+
 ## [0.62.0] - 2026-11-07
 
 ### Breaking

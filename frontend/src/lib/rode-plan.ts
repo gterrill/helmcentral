@@ -3,7 +3,7 @@ import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
 import { radiusDisplayValue } from '@/lib/anchor-adjust'
-import { feetToMeters } from '@/lib/units'
+import { feetToMeters, toDisplayDistance } from '@/lib/units'
 
 /**
  * No rode method may recommend a scope below this. Below roughly 3:1 the rode
@@ -208,13 +208,39 @@ export function scopeRatio(rodeM: number, depthFromHawseM: number): number | nul
 /**
  * The ok / low (>=85%) / insufficient / unknown ladder, lifted verbatim from
  * the old tile. "unknown" — not a fail — whenever either scope is unavailable,
- * so a missing input can never render as the red "insufficient" state.
+ * so a missing input can never render as the red "insufficient" state. The
+ * planner's badge goes through deployedScopeStatus, which checks the shown Pay
+ * Out figure before this ladder.
  */
 export function scopeStatus(currentScope: number | null, recommendedScope: number | null): ScopeStatus {
   if (currentScope === null || recommendedScope === null) return 'unknown'
   if (currentScope >= recommendedScope) return 'ok'
   if (currentScope >= recommendedScope * 0.85) return 'low'
   return 'insufficient'
+}
+
+/**
+ * The Pay Out figure as the planner prints it: the rode in the operator's unit,
+ * rounded to a whole number. The headline and the badge both read it, so they
+ * can't disagree.
+ */
+export function payOutDisplayValue(rodeM: number, isImperial: boolean): number {
+  return Math.round(toDisplayDistance(rodeM, isImperial))
+}
+
+/**
+ * The scope badge for a deployed rode against the plan. A rode at least the
+ * Pay Out figure as shown reads OK, so paying out a figure rounded down from
+ * 55.3 m isn't called Low. The comparison is in display units rather than
+ * metres, so a figure typed in feet and stored as metres can't come back a hair
+ * short; the 1e-6 rounding absorbs the float noise of that round trip. Anything
+ * short of the shown figure goes through the scopeStatus ladder.
+ */
+export function deployedScopeStatus(rodeDeployedM: number, plan: RodePlan | null, isImperial: boolean): ScopeStatus {
+  if (plan === null) return 'unknown'
+  const deployed = Math.round(toDisplayDistance(rodeDeployedM, isImperial) * 1e6) / 1e6
+  if (deployed >= payOutDisplayValue(plan.recommendedRodeM, isImperial)) return 'ok'
+  return scopeStatus(scopeRatio(rodeDeployedM, plan.depthFromHawseM), plan.recommendedScope)
 }
 
 /**
