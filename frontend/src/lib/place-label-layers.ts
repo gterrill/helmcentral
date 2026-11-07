@@ -136,6 +136,8 @@ export function placeLabelPaint(isDarkTheme: boolean, overImagery: boolean): { l
   return isDarkTheme ? { land: DARK_LAND_PAINT, water: DARK_WATER_PAINT } : { land: LIGHT_LAND_PAINT, water: LIGHT_WATER_PAINT }
 }
 
+export type PlaceLabelId = (typeof PLACE_LABEL_LAYER_IDS)[number]
+
 export interface PlaceLabelLayer {
   id: (typeof PLACE_LABEL_LAYER_IDS)[number]
   type: 'symbol'

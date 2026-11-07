@@ -94,9 +94,9 @@ export function AnchorageShelterRose({ card }: { card: AnchorageCard }) {
   )
 }
 
-export function GradeLegend() {
+export function GradeLegend({ label = 'Shelter grades' }: { label?: string }) {
   return (
-    <ul aria-label="Shelter grades" className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+    <ul aria-label={label} className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {(Object.keys(GRADE_LABEL) as ShelterGrade[]).map((g) => (
         <li key={g} className="flex items-center gap-1">
           <span className="inline-block h-2 w-2 rounded-sm" style={{ background: gradeFill(g) }} aria-hidden="true" />
