@@ -158,10 +158,67 @@ type vesselStatusLowWater struct {
 	Clearance   *statusValue `json:"clearance,omitempty"`
 	Margin      *statusValue `json:"margin,omitempty"`
 	LowTideTime string       `json:"low_tide_time,omitempty"`
-	Note        string       `json:"note"`
+	// Method says where depth_at_low comes from: "station" (the station's
+	// prediction applied to the depth now) or "calibrated" (the sounder's own
+	// readings at this anchorage, ADR 0274). It is derived from the calibration
+	// being ready. DepthAtLowHalfWidth is the half width of the 95% interval on
+	// a calibrated figure: "2.4 m, plus or minus 0.2". CautiousSource is the
+	// figure the verdict rests on.
+	Method              string                   `json:"method,omitempty"`
+	DepthAtLowHalfWidth *statusValue             `json:"depth_at_low_half_width,omitempty"`
+	CautiousSource      string                   `json:"cautious_source,omitempty"`
+	Calibration         *vesselStatusCalibration `json:"calibration,omitempty"`
+	Note                string                   `json:"note"`
 }
 
-const lowWaterStatusNote = "depth_now is the sounder's reading at the boat's own position, projected to the next low tide by the tide's fall (depth_at_low), less the draft (clearance), compared with the margin the operator set in Settings, Anchor Watch. It is the same check the Anchor Watch page shows."
+// vesselStatusCalibration is the local tide calibration's part of low_water. The
+// figures are there only when ready is true; otherwise not_ready_why says what
+// is missing and hours_of_readings how far along it is. Figures are metres with
+// a display figure; half widths are the 95% interval.
+type vesselStatusCalibration struct {
+	Ready           bool    `json:"ready"`
+	NotReady        string  `json:"not_ready,omitempty"`
+	NotReadyWhy     string  `json:"not_ready_why,omitempty"`
+	HoursOfReadings float64 `json:"hours_of_readings"`
+	// TidePercentOfStation is k as a percentage: how much of the station's range
+	// the water here runs. TideMinutesLater is how many minutes later the tide
+	// here runs than the station's; negative means it runs earlier.
+	TidePercentOfStation *float64        `json:"tide_percent_of_station,omitempty"`
+	TidePercentHalfWidth *float64        `json:"tide_percent_half_width,omitempty"`
+	TideMinutesLater     *int            `json:"tide_minutes_later,omitempty"`
+	StationDepthAtLow    *statusValue    `json:"station_depth_at_low,omitempty"`
+	ShallowestSounded    *statusInterval `json:"shallowest_sounded,omitempty"`
+	HighTideTime         string          `json:"high_tide_time,omitempty"`
+	HighNotAvailableWhy  string          `json:"high_not_available_why,omitempty"`
+	HighAtBoat           *statusInterval `json:"high_at_boat,omitempty"`
+	DeepestSounded       *statusInterval `json:"deepest_sounded,omitempty"`
+	StationName          string          `json:"station_name,omitempty"`
+	StationDistanceM     *float64        `json:"station_distance_m,omitempty"`
+	StationMatchNote     string          `json:"station_match_note,omitempty"`
+}
+
+// statusInterval is a depth with the half width of its 95% interval, both with
+// display figures in the operator's units.
+type statusInterval struct {
+	statusValue
+	HalfWidth *statusValue `json:"half_width,omitempty"`
+}
+
+// calibrationNotReadyWhy says in words why the calibration is not ready, with
+// nothing in it to quote as a depth.
+var calibrationNotReadyWhy = map[string]string{
+	tideCalTooFewReadings:  "there are not yet enough readings to say how the tide here differs from the station's",
+	tideCalTooScattered:    "the sounder's readings are too scattered to calibrate yet",
+	tideCalImplausibleFit:  "the readings do not fit the station's tide, so the calibration is not used",
+	tideCalNoRecentReading: "the sounder has given no reading in the last few minutes",
+	tideCalNoTideCurve:     "the station's tide predictions do not cover the readings or the next tide",
+	tideCalNoClearanceSet:  "set a low-water clearance in Anchor Watch settings to judge the calibration",
+	tideCalWorking:         "the calibration is being worked out",
+	tideCalNoUpcomingHigh:  "the tide has no upcoming high",
+	tideCalUnavailable:     "the calibration could not be worked out",
+}
+
+const lowWaterStatusNote = "depth_now is the sounder's reading at the boat's own position. depth_at_low is the estimated depth there at the next low tide, less the draft (clearance), compared with the margin the operator set in Settings, Anchor Watch. method says how depth_at_low was worked out: \"station\" is depth_now less the fall the tide station predicts (tide_fall), and has no interval; \"calibrated\" is the depth the sounder's own readings at this anchorage point to, with depth_at_low_half_width the 95% interval, and no tide_fall. Always name the method and give a calibrated figure with its half width. The calibration block has the hours of readings used, the tide here as a percentage of the station's, tide_minutes_later (how many minutes later the tide here runs than the station's, negative if earlier), the shallowest sounded spot, the next high and station_match_note, which you may quote; none of its figures is there until ready is true, and not_ready_why says what is missing. The verdict is too_shallow when the bottom of the interval of the most cautious figure (cautious_source) is under draft plus margin. It is the same check the Anchor Watch page shows."
 
 var lowWaterWhy = map[string]string{
 	lowWaterNoDepth:         "the sounder has no fresh depth reading",
@@ -738,7 +795,7 @@ func (d assistantToolDeps) vesselStatusBoatFor(ctx context.Context, t telemetryR
 	// same gate the page's endpoint uses. Otherwise it says why it is not there.
 	if lowWaterApplies(state, out.Anchor.Down) {
 		var err error
-		if out.Anchor.LowWater, out.Anchor.LowWaterMissing, err = d.vesselStatusLowWaterFor(ctx, state, system, now); err != nil {
+		if out.Anchor.LowWater, out.Anchor.LowWaterMissing, err = d.vesselStatusLowWaterFor(ctx, state, watch, active, system, now); err != nil {
 			return vesselStatusBoat{}, err
 		}
 	} else {
@@ -747,22 +804,43 @@ func (d assistantToolDeps) vesselStatusBoatFor(ctx context.Context, t telemetryR
 	return out, nil
 }
 
+// lowWaterMethodOf is "calibrated" while a calibration is ready, otherwise
+// "station". Mate is told the method by name; the wire the page reads has none.
+func lowWaterMethodOf(res lowWaterClearance) string {
+	if res.Calibration != nil && res.Calibration.Ready {
+		return "calibrated"
+	}
+	if res.Status == lowWaterOK || res.Status == lowWaterTooShallow {
+		return "station"
+	}
+	return ""
+}
+
+// calibratorFor is the calibrator for the watch the caller read, or none when
+// calibration is not wired.
+func (d assistantToolDeps) calibratorFor(watch anchorWatchData, watchSet bool) lowWaterCalibrator {
+	if d.calibrateLowWater == nil {
+		return nil
+	}
+	return d.calibrateLowWater(watch, watchSet)
+}
+
 // vesselStatusLowWaterFor runs the Anchor Watch's low-water check for the boat's
 // spot. It gives the reason there is no check
 // when the margin cannot be read, and an error only when a figure cannot be
 // shown in the operator's units. tileTide and anchorSettings are required
 // dependencies (vesselStatusMissingDeps).
-func (d assistantToolDeps) vesselStatusLowWaterFor(ctx context.Context, state vesselStateData, system string, now time.Time) (*vesselStatusLowWater, string, error) {
+func (d assistantToolDeps) vesselStatusLowWaterFor(ctx context.Context, state vesselStateData, watch anchorWatchData, watchSet bool, system string, now time.Time) (*vesselStatusLowWater, string, error) {
 	res, err := buildLowWater(state,
 		func() (tideTodayResponse, error) { return d.tileTide(ctx, now) },
 		func() (float64, error) {
 			s, err := d.anchorSettings()
 			return s.MinClearanceAtLowM, err
-		}, now)
+		}, d.calibratorFor(watch, watchSet), now)
 	if err != nil {
 		return nil, "the low-water clearance could not be worked out: " + firstErrorLine(err), nil
 	}
-	out := &vesselStatusLowWater{Status: res.Status, Reason: res.Reason, Note: lowWaterStatusNote}
+	out := &vesselStatusLowWater{Status: res.Status, Reason: res.Reason, Method: lowWaterMethodOf(res), CautiousSource: res.CautiousSource, Note: lowWaterStatusNote}
 	if res.Reason != "" {
 		out.Why = lowWaterWhy[res.Reason]
 		if res.Detail != "" && !strings.Contains(out.Why, res.Detail) {
@@ -799,7 +877,81 @@ func (d assistantToolDeps) vesselStatusLowWaterFor(ctx context.Context, state ve
 		}
 		out.LowTideTime = d.boatTime().DayClock(at)
 	}
+	if out.DepthAtLowHalfWidth, err = figure(res.DepthAtLowHalfWidthM); err != nil {
+		return nil, "", err
+	}
+	if res.Calibration != nil {
+		if out.Calibration, err = d.vesselStatusCalibrationFor(res.Calibration, figure); err != nil {
+			return nil, "", err
+		}
+	}
 	return out, "", nil
+}
+
+// vesselStatusCalibrationFor shapes the calibration for Mate: every depth with a
+// display figure in the operator's units, and the high tide's time as a boat-time
+// label. Nothing is shaped that is not there.
+func (d assistantToolDeps) vesselStatusCalibrationFor(c *lowWaterCalibration, figure func(*float64) (*statusValue, error)) (*vesselStatusCalibration, error) {
+	out := &vesselStatusCalibration{
+		Ready: c.Ready, NotReady: c.NotReady, HoursOfReadings: c.HoursOfReadings,
+		StationName: c.StationName, StationMatchNote: c.StationMatchNote,
+		TideMinutesLater: c.TideMinutesLater,
+	}
+	if c.StationDistanceM != nil {
+		out.StationDistanceM = floatPtr(roundTo(*c.StationDistanceM, 0))
+	}
+	if c.NotReady != "" {
+		out.NotReadyWhy = calibrationNotReadyWhy[c.NotReady]
+		if c.NotReadyDetail != "" {
+			out.NotReadyWhy += " (" + c.NotReadyDetail + ")"
+		}
+	}
+	if c.HighNotAvailable != "" {
+		out.HighNotAvailableWhy = calibrationNotReadyWhy[c.HighNotAvailable]
+		if c.HighNotAvailableDetail != "" {
+			out.HighNotAvailableWhy += " (" + c.HighNotAvailableDetail + ")"
+		}
+	}
+	if c.K != nil {
+		out.TidePercentOfStation = floatPtr(roundTo(*c.K*100, 0))
+	}
+	if c.KHalfWidth != nil {
+		out.TidePercentHalfWidth = floatPtr(roundTo(*c.KHalfWidth*100, 0))
+	}
+	var err error
+	if out.StationDepthAtLow, err = figure(c.StationDepthAtLowM); err != nil {
+		return nil, err
+	}
+	interval := func(f *lowWaterFigure) (*statusInterval, error) {
+		if f == nil {
+			return nil, nil
+		}
+		v, err := figure(&f.ValueM)
+		if err != nil {
+			return nil, err
+		}
+		hw, err := figure(&f.HalfWidthM)
+		if err != nil {
+			return nil, err
+		}
+		return &statusInterval{statusValue: *v, HalfWidth: hw}, nil
+	}
+	for _, f := range []struct {
+		dst **statusInterval
+		src *lowWaterFigure
+	}{{&out.ShallowestSounded, c.ShallowestSounded}, {&out.HighAtBoat, c.HighAtBoat}, {&out.DeepestSounded, c.DeepestSounded}} {
+		if *f.dst, err = interval(f.src); err != nil {
+			return nil, err
+		}
+	}
+	if c.HighTideTime != "" {
+		at, perr := time.Parse(time.RFC3339, c.HighTideTime)
+		if perr != nil {
+			return nil, fmt.Errorf("get_vessel_status: the next high tide time %q: %w", c.HighTideTime, perr)
+		}
+		out.HighTideTime = d.boatTime().DayClock(at)
+	}
+	return out, nil
 }
 
 // engineStatus judges one engine. An engine whose readings have stopped is off
@@ -1176,8 +1328,10 @@ var mateToolGetVesselStatus = mateTool{
 			"power (house bank charge, voltage and current, solar watts, DC load), every tank with its level and " +
 			"alarm levels, the surroundings (depth, true wind and gust, barometric pressure and its three hour " +
 			"change), the engines and the anchor, with the Anchor Watch's own low-water clearance check for the boat's spot " +
-			"(anchor.low_water: the sounder depth now, the tide's fall to the next low, the depth then, the draft, the clearance " +
-			"and the margin the operator set in Settings, Anchor Watch, which can be linked as [Anchor Watch settings](/settings/anchor-watch); " +
+			"(anchor.low_water: the sounder depth now, the depth at the next low and how it was worked out (method: the tide station's prediction, " +
+			"or calibrated against the sounder's own readings here, which comes with a 95% half width to quote as \"2.4 m, plus or minus 0.2\", " +
+			"the hours of readings, the shallowest sounded spot, the next high and a note when the tide here does not follow the station), " +
+			"the draft, the clearance and the margin the operator set in Settings, Anchor Watch, which can be linked as [Anchor Watch settings](/settings/anchor-watch); " +
 			"Helmcentral has no chart, and the sounder depth is the depth at the boat's own position), the active and ignored alarms, the sensor checks (frozen, " +
 			"impossible and silent sensors), the planned stay with its distance from the boat, and " +
 			"observations: odd things below an alarm, such as the house bank draining faster overnight than usual. " +

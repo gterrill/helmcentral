@@ -3,7 +3,14 @@ import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { TideToday } from '@/hooks/use-tide-today'
-import { lowWaterClearanceReasonLabel, underKeelPhrase, type LowWaterClearanceResult } from '@/lib/low-water-clearance'
+import {
+  calibrationNotReadyText,
+  lowWaterClearanceReasonLabel,
+  readingsSpanText,
+  underKeelPhrase,
+  underKeelRangePhrase,
+  type LowWaterClearanceResult,
+} from '@/lib/low-water-clearance'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
 import { depthValueText, feetToMeters } from '@/lib/units'
@@ -169,6 +176,20 @@ export function AnchorWatchReadings({
   const staleSuffix = stale && lowWaterWorkedOutAt !== null ? ` · not updated since ${clockTime(lowWaterWorkedOutAt, timeZone)}` : ''
   const staleStyle = stale ? 'italic opacity-70' : ''
   const quietLine = cn('truncate text-xs', quiet, staleStyle, hud ? 'hidden border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-2')
+  // A calibrated clearance shows its range. A too-shallow warning on the boat's
+  // own cell also shows the bottom of the range, which is what it is judged on.
+  const length = { format: (m: number) => depthValueText(m, isImperial), unit: lengthUnit }
+  const clearanceText = (v: Exclude<LowWaterClearanceResult, { status: 'unknown' }>, tooShallow: boolean) => {
+    if (v.depthAtLowHalfWidthM === undefined) return underKeelPhrase(v.clearanceM)
+    // A too-shallow line shows the figure the verdict rests on: the boat's cell,
+    // the station estimate, or the shallowest sounded spot.
+    if (tooShallow && v.verdictClearanceM !== undefined) {
+      return v.verdictHalfWidthM === undefined
+        ? underKeelPhrase(v.verdictClearanceM)
+        : underKeelRangePhrase(v.verdictClearanceM, v.verdictHalfWidthM, true, length)
+    }
+    return underKeelRangePhrase(v.clearanceM, v.depthAtLowHalfWidthM, false, length)
+  }
   const clearance = (
     <>
       {lowWaterFailed && lowWaterClearance === null && (
@@ -187,13 +208,15 @@ export function AnchorWatchReadings({
               : 'mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-400',
           )}
         >
-          Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at {clockTime(lowWaterClearance.lowTideTime, timeZone)}
+          Too shallow at low water · {clearanceText(lowWaterClearance, true)} at {clockTime(lowWaterClearance.lowTideTime, timeZone)}
+          {lowWaterClearance.cautiousSource === 'shallowest_sounded' && ' · set by the shallowest sounded spot'}
+          {lowWaterClearance.cautiousSource === 'station' && ' · set by the tide station estimate'}
           {staleSuffix}
         </div>
       )}
       {lowWaterClearance?.status === 'ok' && (
         <p data-testid="low-water-clearance" className={quietLine}>
-          {underKeelPhrase(lowWaterClearance.clearanceM)} at low water · {clockTime(lowWaterClearance.lowTideTime, timeZone)}
+          {clearanceText(lowWaterClearance, false)} at low water · {clockTime(lowWaterClearance.lowTideTime, timeZone)}
           {staleSuffix}
         </p>
       )}
@@ -201,6 +224,52 @@ export function AnchorWatchReadings({
         <p data-testid="low-water-clearance" className={quietLine}>
           {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
           {staleSuffix}
+        </p>
+      )}
+    </>
+  )
+
+  // Where the low-water depth comes from (ADR 0274): the station's prediction,
+  // labelled as such, until the sounder's own readings at this anchorage have
+  // narrowed to better than the margin; then the calibrated estimate with its
+  // 95% interval. The shallowest and deepest sounded spots, the next high and the
+  // tide-match note come with it. Wrapped lines, because the figures run long.
+  const verdict = lowWaterClearance !== null && lowWaterClearance.status !== 'unknown' ? lowWaterClearance : null
+  const calibration = verdict?.calibration
+  const depthText = (m: number) => depthValueText(m, isImperial)
+  const withInterval = (f: { depthM: number; halfWidthM: number }) => `${depthText(f.depthM)} ${lengthUnit} ±${depthText(f.halfWidthM)}`
+  const noteLine = cn('text-xs', quiet, staleStyle, hud ? 'hidden w-0 min-w-full border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-1')
+  let methodText: string | null = null
+  if (verdict !== null) {
+    if (calibration?.ready && verdict.depthAtLowHalfWidthM !== undefined) {
+      methodText = `Locally calibrated depth estimate (${readingsSpanText(calibration.hoursOfReadings)} of readings) · ${withInterval({ depthM: verdict.depthAtLowM, halfWidthM: verdict.depthAtLowHalfWidthM })}`
+    } else {
+      methodText = `Depth based on tide station prediction · ${depthText(verdict.depthAtLowM)} ${lengthUnit}`
+      if (calibration && !calibration.ready && calibration.notReady) {
+        methodText += ` · ${calibrationNotReadyText(calibration.notReady, calibration.hoursOfReadings)}`
+      }
+    }
+  }
+  const calibrationLines = methodText !== null && (
+    <>
+      <p data-testid="low-water-method" className={noteLine}>
+        {methodText}
+        {staleSuffix}
+      </p>
+      {calibration?.shallowestDiffers && calibration.shallowestSounded && (
+        <p data-testid="low-water-shallowest" className={noteLine}>
+          Shallowest sounded spot {withInterval(calibration.shallowestSounded)} at low water
+        </p>
+      )}
+      {calibration?.highAtBoat && calibration.highTideTime && (
+        <p data-testid="high-water-depth" className={noteLine}>
+          High water {withInterval(calibration.highAtBoat)} · {clockTime(calibration.highTideTime, timeZone)}
+          {calibration.deepestDiffers && calibration.deepestSounded && <> · deepest sounded spot {withInterval(calibration.deepestSounded)}</>}
+        </p>
+      )}
+      {calibration?.stationMatchNote && (
+        <p data-testid="tide-match-note" className={noteLine}>
+          {calibration.stationMatchNote}
         </p>
       )}
     </>
@@ -225,6 +294,7 @@ export function AnchorWatchReadings({
         {depthBlock}
         <div className="border-t border-white/10 px-3 py-1.5">{tideBlock}</div>
         {clearance}
+        {calibrationLines}
         {bowWarning}
       </div>
     )
@@ -238,6 +308,7 @@ export function AnchorWatchReadings({
         {adjustAction}
       </div>
       {clearance}
+      {calibrationLines}
       {bowWarning}
     </div>
   )

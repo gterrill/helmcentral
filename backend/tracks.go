@@ -191,6 +191,10 @@ func sampleTracks(settingsPath string) {
 		// The anchor swing trail (ADR 0199) is stored only while a watch is on.
 		recordAnchorTrailPoint(state.Latitude, state.Longitude, now)
 
+		// The local tide calibration (ADR 0274) gathers depth and position on the
+		// same tick, and stores a reading each minute.
+		recordTideCalibrationSample(state, now)
+
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
 		}

@@ -281,6 +281,9 @@ type assistantToolDeps struct {
 	// tileTide is the tide the Depth and Tide tile shows: the configured
 	// station's /api/tide-today body (ADR 0229).
 	tileTide func(ctx context.Context, now time.Time) (tideTodayResponse, error)
+	// calibrateLowWater lays the local tide calibration (ADR 0274) on the
+	// low-water check. nil is no calibration, so the check is the station's.
+	calibrateLowWater func(watch anchorWatchData, active bool) lowWaterCalibrator
 	// tileDepthTrend is the tile's depth trend, the /api/depth-trend body.
 	tileDepthTrend func(ctx context.Context, window string) depthTrendResponse
 }
@@ -388,6 +391,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 			resp, _, err := buildTideToday(settingsPath, now)
 			return resp, err
 		},
+		calibrateLowWater: liveLowWaterCalibrator,
 		tileDepthTrend: func(ctx context.Context, window string) depthTrendResponse {
 			return buildDepthTrend(window)
 		},

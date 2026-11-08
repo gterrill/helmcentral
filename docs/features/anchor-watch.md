@@ -52,7 +52,8 @@ radius. That's where you check how far you've swung and how much room is left
 before the alarm sounds.
 
 On a phone the panel is kept short. The quiet low-water clearance line, the one
-that says you have room, is left out. A shallow-water warning always shows. The
+that says you have room, is left out, and so are the lines under it that name
+where the depth comes from. A shallow-water warning always shows. The
 chart is centred in the part of the screen the panel leaves clear, so the boat
 and anchor aren't hidden under it.
 
@@ -361,6 +362,68 @@ There are two things to know about it:
   the anchor haven't changed at all.
 - **It looks one low ahead:** It only looks as far ahead as the next low tide,
   not a lower one that might follow later in the day.
+
+### Where the depth at low water comes from
+
+The line under the clearance names its source, so you always know which one
+you're reading.
+
+- **Depth based on tide station prediction:** This is the depth now, less the
+  fall the tide station predicts to the next low. It's what you see after you
+  drop the anchor. A station can be a long way off, and the water at your
+  anchorage may rise and fall by a different amount, so this is a first guess.
+- **Locally calibrated depth estimate (4 h of readings):** Once Helmcentral has
+  learned how the tide behaves where you are, this replaces the guess. The
+  figure comes with a margin of error, for example **2.4 m ±0.2**. The hours
+  count up as the readings build.
+
+Helmcentral learns from the moment you press **Drop** until you raise the anchor.
+Every minute it notes the depth and where the boat is, and sets them against
+the station's predicted tide. A boat that swings over the same patch of seabed
+at different heights of tide shows how much of the station's range the water
+here really has. That's why it needs hours at anchor, and why it helps least
+just after the drop.
+
+It switches over by itself, with no fixed number of hours. The calibrated
+estimate takes over when its margin of error is smaller than the clearance you
+set in Settings → Anchor Watch. Until then the station estimate stays on screen
+and the line says why:
+
+- **Calibrating, with the hours so far:** There aren't enough readings yet.
+- **Set a low-water clearance:** The clearance in Settings → Anchor Watch is
+  zero, so there's nothing to judge the calibration against. Set one and it carries on.
+- **Readings too scattered to calibrate yet:** The sounder is noisy, so its
+  readings don't settle. A noisy sounder keeps the margin of error wide for
+  longer, and the estimate stays on the station figure rather than pretend to
+  be sure.
+- **Readings don't fit the station's tide:** The readings disagree so badly with
+  the station that Helmcentral won't use them.
+
+Moving the anchor mark with Adjust keeps the readings, because it's the same
+drop. A new **Drop** starts again from nothing. Readings are kept after you raise
+the anchor, but only the stay you're on is used.
+
+A calibrated estimate can only speak for the ground the boat has crossed. So the
+warning is judged on the most cautious of three figures: the depth where the boat
+lies now, the station estimate, and the shallowest spot the boat has sounded
+(with 0.2 m added, because the boat may never lie on that exact spot at low water). The warning goes off when the
+bottom of the margin of error on that figure is under your draft plus your
+margin. When the shallowest spot is what set it off, the warning says so. The
+line also shows **Shallowest sounded spot** whenever it is 0.2 m or more
+shallower than the depth where you lie.
+
+For the next high tide the line shows **High water**, with its margin of error,
+and the deepest spot sounded when it's 0.2 m or more deeper. This is for
+information only. It never raises a warning.
+
+When the calibrated and station depths for the next low differ by more than your
+margin, the line adds a note such as "The tide here doesn't follow Middle Island
+(11 km away): it runs 64% of its range." It means the station is a poor guide
+for this anchorage, and by how much. Before the calibration is ready there's no
+note.
+
+Mate gives the same figures. Ask it about the depth at low water and it names
+the method, the hours of readings and the margin of error.
 
 ## The rode planner
 

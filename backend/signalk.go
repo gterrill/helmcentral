@@ -1709,6 +1709,15 @@ func validLatLon(lat, lon float64) bool {
 	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
 }
 
+// metersPerDegreeLat is the length of a degree of latitude, for localENMeters.
+const metersPerDegreeLat = 111320.0
+
+// localENMeters is the east and north offset in metres of (lat, lon) from a
+// reference point, on a flat earth that is good for a few kilometres.
+func localENMeters(refLat, refLon, lat, lon float64) (east, north float64) {
+	return (lon - refLon) * metersPerDegreeLat * math.Cos(refLat*math.Pi/180), (lat - refLat) * metersPerDegreeLat
+}
+
 func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 	lat1Rad := lat1 * math.Pi / 180
