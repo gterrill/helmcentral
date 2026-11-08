@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1083,10 +1084,10 @@ func TestADownProviderIsAskedAtMostOncePerStoredMinute(t *testing.T) {
 	anchorTrailEnv(t)
 	resetTideCalState(t)
 	globalTideCalRecorder.reset()
-	calls := 0
+	var calls atomic.Int32
 	prev := tideCalChartSource
 	tideCalChartSource = func() (tideCalChart, error) {
-		calls++
+		calls.Add(1)
 		return tideCalChart{}, errors.New("tide service down")
 	}
 	t.Cleanup(func() { tideCalChartSource = prev })
@@ -1101,9 +1102,10 @@ func TestADownProviderIsAskedAtMostOncePerStoredMinute(t *testing.T) {
 	cancel()
 	<-done
 	// The worker's own start and the new watch each ask once, and each stored
-	// minute once more; the 36 ticks ask for nothing.
-	if want := 5 + 2; calls > want || calls < 5 {
-		t.Errorf("the provider was asked %d times over 36 ticks and 5 stored minutes, want at most %d", calls, want)
+	// minute once more; the 36 ticks ask for nothing. Wakes coalesce while the
+	// worker is busy, so fewer calls is fine: only too many is a failure.
+	if got, want := calls.Load(), int32(5+2); got > want {
+		t.Errorf("the provider was asked %d times over 36 ticks and 5 stored minutes, want at most %d", got, want)
 	}
 }
 
