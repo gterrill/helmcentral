@@ -138,7 +138,7 @@ func TestDepthGuard_FindsANumericDepthAnywhereInTheArguments(t *testing.T) {
 
 func TestDepthGuard_InstructionSaysWhereADepthMayComeFrom(t *testing.T) {
 	_, ins := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", nil)
-	for _, want := range []string{"depth_m", "anchorage_details", "check the chart", assistantCheckLabel} {
+	for _, want := range []string{"depth_m", "anchorage_details", "no charted depth", assistantCheckLabel} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
 		}
@@ -153,5 +153,124 @@ func TestDepthGuard_SentTogetherWithTheShelterCorrection(t *testing.T) {
 	}
 	if !strings.Contains(ins, "shoreline check") || !strings.Contains(ins, "water depth") {
 		t.Errorf("instruction should carry both: %q", ins)
+	}
+}
+
+// Helmcentral holds no chart, so no correction may send the operator to one.
+func TestDepthGuard_NeverTellsTheOperatorToCheckTheChart(t *testing.T) {
+	for name, ins := range map[string]string{
+		"with the tool":    assistantAnchorageDepthInstruction,
+		"without the tool": assistantAnchorageDepthNoToolInstruction,
+		"ruleDepth":        ruleDepth,
+	} {
+		if strings.Contains(ins, "check the chart") {
+			t.Errorf("%s: sends the operator to a chart: %q", name, ins)
+		}
+		for _, want := range []string{"sounder", "unknown", "no charted depth"} {
+			if !strings.Contains(ins, want) {
+				t.Errorf("%s: lacks %q: %q", name, want, ins)
+			}
+		}
+	}
+}
+
+// 2026-11-08: Mate read the sounder through show_tile and was sent back for a
+// depth "with no source". This is the draft from the run trace; the sentence that
+// tripped the check is the "swing is the thing to check" bullet. The boat's own
+// sounder is a source.
+const sounderDepthDraft = "You're reading **4.6 m** right now, and the tide is **falling — 3.68 m and going down**, with the next low of only **0.64 m at 2.45 PM**.\n\nSo the shallowing you're seeing isn't the boat dragging over a shelf — it's the tide going out. Look back at the trend over the last three hours: you were sitting in a steady 7.2–7.4 m for a couple of hours, then it drops sharply from about 11.55 PM last night, dipping to 4.6 m now. That steady background level is roughly your draught plus the tide height above datum; as the water drains away toward this afternoon's low, the depth under the keel shrinks with it.\n\nWorth watching rather than alarming about:\n\n- **The swing is the thing to check.** At this afternoon's low the tide will be down to about 0.64 m, so depth could drop well under what you have now. If the boat swings into a shallower patch as it turns, you'll feel it long before it matters, but keep an eye on where the anchor lies relative to the dropping water.\n- The depth reading is live and fresh (1 second old), so the figure is real — not a sensor dropout.\n\nThe Anchor Watch will be your friend through the low this afternoon; if it's armed, it'll call out if the boat drifts off the swung arc as the water falls. Want me to run through what its current limits are set to?"
+
+// The tile as it read at the time: the sounder at 4.61 m, the tide falling to a
+// low of 0.64 m, and three hours of trend.
+const sounderTileResult = `{"tile":"depth-tide","snapshot":{"depth_m":4.61,"depth_age_s":1.2,` +
+	`"tide":{"current_tide_height_ft":12.07,"high_tide_height_ft":14.4,"low_tide_height_ft":2.1},` +
+	`"depth_trend":{"points":[{"time":"2026-11-07T12:00:00Z","depth_m":7.4},{"time":"2026-11-08T02:00:00Z","depth_m":4.61}]}}}`
+
+func tileCall() []openRouterToolCall { return depthCall("show_tile", `{"tile":"depth-tide"}`) }
+
+// The boat's own sounder, read this turn with no call about another place, is
+// the depth at the boat's position.
+func TestDepthGuard_TheBoatsOwnSounderIsASourceWhenNoOtherPlaceWasAskedAbout(t *testing.T) {
+	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(tileCall(), []string{sounderTileResult})); got != "" {
+		t.Errorf("trace draft after the tile read: trigger = %q, want none", got)
+	}
+	// With no sounder read the same draft is still sent back.
+	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, nil); got != "anchorage depth" {
+		t.Errorf("trace draft with no source: trigger = %q, want anchorage depth", got)
+	}
+	// A tile with no depth, another tile, or an errored call is no sounder read.
+	for name, result := range map[string]string{
+		"no depth":   `{"tile":"depth-tide","snapshot":{"depth_m":null}}`,
+		"errored":    ``,
+		"other tile": `{"tile":"wind","snapshot":{"depth_m":4.61}}`,
+	} {
+		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(tileCall(), []string{result})); got != "anchorage depth" {
+			t.Errorf("%s: trigger = %q, want anchorage depth", name, got)
+		}
+	}
+}
+
+// A call about somewhere else means the draft's depths may be for that place,
+// where the boat's own sounder says nothing.
+func TestDepthGuard_AnyCallAboutAnotherPlaceTakesTheSounderAway(t *testing.T) {
+	cases := []struct {
+		name, tool, args string
+	}{
+		{"find_places", "find_places", `{"query":"Butterfly Bay"}`},
+		{"marina_details", "marina_details", `{"lat":-20,"lon":149}`},
+		{"anchorage_details", "anchorage_details", `{"lat":-20,"lon":149}`},
+		{"save_place", "save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149}`},
+		{"plan_tidal_departure", "plan_tidal_departure", `{}`},
+		{"route_distance", "route_distance", `{}`},
+		{"assess_passage_window", "assess_passage_window", `{}`},
+		{"estimate_passage", "estimate_passage", `{}`},
+		{"read_document", "read_document", `{"document_id":"d1"}`},
+		{"search_documents", "search_documents", `{"query":"anchorages"}`},
+		{"search_web", "search_web", `{"query":"Butterfly Bay depth"}`},
+		{"get_planned_stay", "get_planned_stay", `{}`},
+		{"get_tides at coordinates", "get_tides", `{"lat":-20,"lon":149}`},
+		{"get_wind_forecast at coordinates", "get_wind_forecast", `{"lat":-20,"lon":149}`},
+	}
+	for _, tc := range cases {
+		calls := append(tileCall(), depthCall(tc.tool, tc.args)...)
+		results := []string{sounderTileResult, `{"summary":"ok"}`}
+		if tc.name == "anchorage_details" {
+			results[1] = unknownDepthResult
+		}
+		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, results)); got != "anchorage depth" {
+			t.Errorf("%s: trigger = %q, want anchorage depth", tc.name, got)
+		}
+	}
+	// The same tools without coordinates read the boat's own position.
+	for _, tool := range []string{"get_tides", "get_wind_forecast"} {
+		calls := append(tileCall(), depthCall(tool, `{}`)...)
+		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, []string{sounderTileResult, `{"summary":"ok"}`})); got != "" {
+			t.Errorf("%s with no coordinates: trigger = %q, want none", tool, got)
+		}
+	}
+	// A place call that failed told Mate nothing about a place.
+	calls := append(tileCall(), depthCall("find_places", `{"query":"x"}`)...)
+	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, []string{sounderTileResult, ""})); got != "" {
+		t.Errorf("errored find_places: trigger = %q, want none", got)
+	}
+}
+
+func TestDepthGuard_AStatusReadCountsAsASounderRead(t *testing.T) {
+	calls := depthCall("get_vessel_status", `{}`)
+	cases := []struct {
+		name, text, result, want string
+	}{
+		// An accepted gap: the check cannot tell that a bay with the boat's own
+		// depth is not this one. A depth word and a figure with no place call
+		// in the run is read as about the boat's position.
+		{"another bay's depth after a status read", "Bay X has 4 m of water.", `{"surroundings":{"depth":{"value":12,"unit":"m"}}}`, ""},
+		{"surroundings depth", "At anchor you have 12 m of water right now.", `{"surroundings":{"depth":{"value":12,"unit":"m"}}}`, ""},
+		{"low_water only, no surroundings depth", "At anchor you have 1.3 m of water at the low.", `{"surroundings":{"depth":{"missing":"stale"}},"boat":{"anchor":{"low_water":{"status":"too_shallow","depth_now":{"value":1.9,"unit":"m"}}}}}`, ""},
+		{"no depth anywhere", "At anchor you have 12 m of water right now.", `{"surroundings":{"depth":{"missing":"no depth reading"}},"boat":{"anchor":{"low_water":{"status":"unknown","reason":"no_depth"}}}}`, "anchorage depth"},
+	}
+	for _, tc := range cases {
+		if got, _ := shelterDeps().checkDraft(tc.text, runOf(calls, []string{tc.result})); got != tc.want {
+			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

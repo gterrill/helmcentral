@@ -3,7 +3,7 @@ import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { TideToday } from '@/hooks/use-tide-today'
-import { lowWaterClearanceReasonLabel, underKeelPhrase, type computeLowWaterClearance } from '@/lib/low-water-clearance'
+import { lowWaterClearanceReasonLabel, underKeelPhrase, type LowWaterClearanceResult } from '@/lib/low-water-clearance'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
 import { depthValueText, feetToMeters } from '@/lib/units'
@@ -30,7 +30,12 @@ interface AnchorWatchReadingsProps {
   depthMeters: number | null
   depthLastUpdateAgeS: number | null
   tide: TideToday | null
-  lowWaterClearance: ReturnType<typeof computeLowWaterClearance>
+  /** The server's verdict (ADR 0272); null until the first answer lands. After a failed poll it is the last one, and lowWaterFailed is true. */
+  lowWaterClearance: LowWaterClearanceResult | null
+  /** When the server worked that verdict out, RFC 3339; null until the first answer. */
+  lowWaterWorkedOutAt: string | null
+  /** True when the server could not give a verdict at all, as opposed to giving an unknown one. */
+  lowWaterFailed: boolean
   isImperial: boolean
   /** Card only: the no-WebGL2 Adjust text button, beside the tide. */
   adjustAction?: ReactNode
@@ -45,6 +50,8 @@ export function AnchorWatchReadings({
   depthLastUpdateAgeS,
   tide,
   lowWaterClearance,
+  lowWaterWorkedOutAt,
+  lowWaterFailed,
   isImperial,
   adjustAction,
   noHeadingAtDrop,
@@ -155,30 +162,45 @@ export function AnchorWatchReadings({
   // operator's configured margin. A display warning, not an alarm rule. On
   // the HUD the quiet lines drop out below sm so the panel doesn't cover
   // half a phone's map; the too-shallow alert never does.
-  const quietLine = cn('truncate text-xs', quiet, hud ? 'hidden border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-2')
+  // After a failed poll the last verdict stays, marked as not updated since the
+  // time the server worked it out, and drawn faded. It is a labelled stale
+  // display. Before any good answer there is nothing to show but the failure.
+  const stale = lowWaterFailed && lowWaterClearance !== null
+  const staleSuffix = stale && lowWaterWorkedOutAt !== null ? ` · not updated since ${clockTime(lowWaterWorkedOutAt, timeZone)}` : ''
+  const staleStyle = stale ? 'italic opacity-70' : ''
+  const quietLine = cn('truncate text-xs', quiet, staleStyle, hud ? 'hidden border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-2')
   const clearance = (
     <>
-      {lowWaterClearance.status === 'too_shallow' && (
+      {lowWaterFailed && lowWaterClearance === null && (
+        <p data-testid="low-water-clearance" className={quietLine}>
+          Low-water clearance unavailable
+        </p>
+      )}
+      {lowWaterClearance?.status === 'too_shallow' && (
         <div
           data-testid="low-water-clearance"
           className={cn(
             'truncate text-xs',
+            staleStyle,
             hud
               ? 'border-t border-red-500/40 bg-red-500/20 px-3 py-1.5 text-red-300'
               : 'mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-400',
           )}
         >
           Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at {clockTime(lowWaterClearance.lowTideTime, timeZone)}
+          {staleSuffix}
         </div>
       )}
-      {lowWaterClearance.status === 'ok' && (
+      {lowWaterClearance?.status === 'ok' && (
         <p data-testid="low-water-clearance" className={quietLine}>
           {underKeelPhrase(lowWaterClearance.clearanceM)} at low water · {clockTime(lowWaterClearance.lowTideTime, timeZone)}
+          {staleSuffix}
         </p>
       )}
-      {lowWaterClearance.status === 'unknown' && (
+      {lowWaterClearance?.status === 'unknown' && lowWaterClearance.reason !== 'not_anchored' && (
         <p data-testid="low-water-clearance" className={quietLine}>
           {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
+          {staleSuffix}
         </p>
       )}
     </>

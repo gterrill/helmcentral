@@ -394,7 +394,7 @@ func TestAnchorageDepth_NoDepthSkipsTheChecksAndSaysSo(t *testing.T) {
 			t.Errorf("%s = %+v", name, ck)
 		}
 	}
-	if !strings.Contains(dp.Note, "check the chart") || !strings.Contains(res.Reading, "depth is unknown") {
+	if !strings.Contains(dp.Note, "holds no charted depth") || !strings.Contains(res.Reading, "depth is unknown") {
 		t.Errorf("note %q reading %q", dp.Note, res.Reading)
 	}
 	// The card carries the same section, every key present.

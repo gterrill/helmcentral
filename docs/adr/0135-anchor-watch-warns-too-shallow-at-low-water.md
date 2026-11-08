@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by [ADR 0272](0272-the-low-water-clearance-is-worked-out-on-the-server-and-mate-reads-it.md),
+which moves the arithmetic below from the browser to the backend and has Mate
+read its result. The rules stay as written. Where this record says
+`computeLowWaterClearance`, `useTideToday` or `lib/low-water-clearance.ts`, the
+function now lives in `backend/anchor_low_water.go` and takes the tide the
+server builds.
 
 ## Context
 

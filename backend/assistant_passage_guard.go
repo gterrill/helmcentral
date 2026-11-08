@@ -58,7 +58,7 @@ const (
 	assistantPassageRelativeWindCheckFailedInstruction = "Your draft judges the wind or sea against the course, and the passage check failed this run. Do not call assess_passage_window again with the same arguments: it will fail the same way. Say the check could not run, and take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
 	assistantAnchorageDepthLead                        = "Your draft states a water depth for an anchorage that has no source. " + ruleDepth
 	assistantAnchorageDepthInstruction                 = assistantAnchorageDepthLead + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
-	assistantAnchorageDepthNoToolInstruction           = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and tell the operator to check the chart."
+	assistantAnchorageDepthNoToolInstruction           = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and say the depth there is unknown, because Helmcentral holds no charted depth."
 	assistantAnchorageShelterInstruction               = "Your draft judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (a position the skipper gave, else from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
@@ -259,9 +259,90 @@ func depthSourced(run mateRunRecord) bool {
 	return false
 }
 
+// readOwnDepth reports whether a call that ran read the boat's own depth: the
+// Depth & Tide tile with a depth in its snapshot, or the vessel status with a
+// depth reading or an Anchor Watch low-water check that worked from one.
+func readOwnDepth(c mateRunCall) bool {
+	if !c.ok() {
+		return false
+	}
+	switch c.call.Function.Name {
+	case mateToolShowTile.name:
+		var r mateTileResult
+		if json.Unmarshal([]byte(c.result), &r) != nil || r.Tile != "depth-tide" {
+			return false
+		}
+		var snap map[string]any
+		if json.Unmarshal(r.Snapshot, &snap) != nil {
+			return false
+		}
+		_, ok := snap["depth_m"].(float64)
+		return ok
+	case mateToolGetVesselStatus.name:
+		var r vesselStatusResult
+		if json.Unmarshal([]byte(c.result), &r) != nil {
+			return false
+		}
+		if r.Surroundings.Depth.Value != nil {
+			return true
+		}
+		lw := r.Boat.Anchor.LowWater
+		return lw != nil && lw.DepthNow != nil && lw.DepthNow.Value != nil
+	}
+	return false
+}
+
+// askedAboutAnotherPlace reports whether a call that ran this run was about
+// somewhere other than the boat's own position, so a depth in the draft may be
+// that place's. The calls chosen: the place and marina lookups, the anchorage
+// check, saving a place, tidal departures, route distance, the passage tools,
+// the documents, web search and planned stay (they bring in other places'
+// depths), and the tide and wind forecasts when the call names coordinates (without them
+// they read the boat's own position).
+func askedAboutAnotherPlace(run mateRunRecord) bool {
+	for _, c := range run {
+		if !c.ok() {
+			continue
+		}
+		switch c.call.Function.Name {
+		case mateToolFindPlaces.name, mateToolMarinaDetails.name, mateToolAnchorageDetails.name, mateToolSavePlace.name,
+			mateToolPlanTidalDeparture.name, mateToolRouteDistance.name, mateToolAssessPassageWindow.name, mateToolEstimatePassage.name,
+			mateToolReadDocument.name, mateToolSearchDocuments.name, mateToolSearchWeb.name, mateToolGetPlannedStay.name:
+			return true
+		case mateToolGetTides.name, mateToolGetWindForecast.name:
+			if c.hasNumber("lat") || c.hasNumber("lon") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// boatsOwnDepthSources reports whether the run read the boat's own depth and
+// asked about no other place. Then a depth in the draft is taken to be the depth
+// where the boat is.
+//
+// This is a known gap, accepted: the check cannot tell which place a figure in
+// the draft is about. "Bay X has 4 m of water" passes after a plain
+// get_vessel_status when no place call ran. Matching figures to the ones the
+// read returned was tried and dropped as too fragile (ADR 0272).
+func boatsOwnDepthSources(run mateRunRecord) bool {
+	read := false
+	for _, c := range run {
+		if readOwnDepth(c) {
+			read = true
+			break
+		}
+	}
+	return read && !askedAboutAnotherPlace(run)
+}
+
 // checkDepthDraft is the "anchorage depth" trigger.
 func (d assistantToolDeps) checkDepthDraft(sentences []string, run mateRunRecord, armed func() bool) (trigger, instruction string) {
 	if !statesAnchorageDepth(sentences) || depthSourced(run) {
+		return "", ""
+	}
+	if boatsOwnDepthSources(run) {
 		return "", ""
 	}
 	if !armed() {

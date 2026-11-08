@@ -1575,3 +1575,84 @@ func TestBuildAssistantSystemPrompt_OffersSavePlaceAndPrefersSavedPlaces(t *test
 		}
 	}
 }
+
+// 2026-11-08: asked "Why is it too shallow here?" from the Anchor Watch page,
+// Mate said it had no depth and offered to check whether a watch was running.
+// The page sentence now says the watch's state and where the answer is.
+func TestAssistantScreenSentence_AnchorWatchPageSaysTheWatchAndWhereToAnswerFrom(t *testing.T) {
+	screen := assistantScreenContext{Panel: "anchor-watch", AnchorWatch: "A watch is set (get_vessel_status gives its radius in the operator's units)."}
+	got := assistantScreenSentence(screen)
+	for _, want := range []string{
+		"Anchor Watch page",
+		"A watch is set (get_vessel_status gives its radius in the operator's units).",
+		"get_vessel_status",
+		"anchor.low_water",
+		"current position",
+		"too shallow",
+		"[Anchor Watch settings](/settings/anchor-watch)",
+		"Do not offer to check whether a watch is running",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sentence lacks %q: %q", want, got)
+		}
+	}
+	// The order Mate answers in: depth now, depth at the low, the draft, the clearance.
+	last := -1
+	for _, step := range []string{"depth now", "estimated depth at the next low", "draft", "clearance"} {
+		i := strings.Index(got, step)
+		if i <= last {
+			t.Errorf("%q is out of order in %q", step, got)
+		}
+		last = i
+	}
+	if strings.Contains(strings.ToLower(got), "chart") {
+		t.Errorf("Helmcentral has no chart, yet: %q", got)
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Errorf("a screen sentence ends in a blank line: %q", got)
+	}
+}
+
+func TestAssistantScreenSentence_AnchorWatchPageWithNoWatchSaysSo(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "anchor-watch", AnchorWatch: "No watch is set."})
+	if !strings.Contains(got, "No watch is set.") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestAnchorWatchScreenLine(t *testing.T) {
+	cases := []struct {
+		name    string
+		active  bool
+		loadErr string
+		want    string
+	}{
+		{"set", true, "", "A watch is set (get_vessel_status gives its radius in the operator's units)."},
+		{"none", false, "", "No watch is set."},
+		{"unreadable", false, "anchor_watch.json is unreadable", "The watch could not be read, so whether a watch is set is not known."},
+	}
+	for _, tc := range cases {
+		got := anchorWatchScreenLine(tc.active, tc.loadErr)
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+		if strings.Contains(got, "anchor_watch.json") {
+			t.Errorf("%s: the raw load error reached the prompt: %q", tc.name, got)
+		}
+		if strings.Contains(got, " m ") || strings.Contains(got, " m)") {
+			t.Errorf("%s: a distance in metres reached the prompt: %q", tc.name, got)
+		}
+	}
+}
+
+// Every field blank is still the empty string, and other panels are untouched
+// by the anchor line.
+func TestAssistantScreenSentence_AnchorLineIsOnlyForTheAnchorPage(t *testing.T) {
+	if got := assistantScreenSentence(assistantScreenContext{AnchorWatch: "No watch is set."}); got != "" {
+		t.Errorf("every field blank must stay empty, got %q", got)
+	}
+	got := assistantScreenSentence(assistantScreenContext{Panel: "forecast", AnchorWatch: "No watch is set."})
+	if got != "The operator is looking at the Forecast panel.\n\n" {
+		t.Errorf("got %q", got)
+	}
+}

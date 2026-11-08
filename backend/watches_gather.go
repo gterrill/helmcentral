@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -51,7 +52,7 @@ func gatherWatchReportInput(d assistantToolDeps, store *documentStore, w savedWa
 	if wants[watchSectionPower] || wants[watchSectionAnchor] || wants[watchSectionTanks] || wants[watchSectionWeather] || wants[watchSectionInstruments] || wants[watchSectionAlarms] {
 		if missing := d.vesselStatusMissingDeps(); len(missing) > 0 {
 			in.StatusProblem = "the boat's readings are not wired (" + strings.Join(missing, ", ") + ")"
-		} else if status, err := d.buildVesselStatus(); err != nil {
+		} else if status, err := d.buildVesselStatus(context.Background()); err != nil {
 			in.StatusProblem = firstErrorLine(err)
 		} else {
 			in.Status = &status

@@ -260,7 +260,7 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 		skippedChecks(&s, "the depth is unknown ("+s.Error+")")
 		return s
 	case !s.Known:
-		s.Note = joinSentences(s.Note, "The depth is unknown: check the chart. No depth was given, so the checks that need one were skipped.")
+		s.Note = joinSentences(s.Note, "The depth is unknown: Helmcentral holds no charted depth. No depth was given, so the checks that need one were skipped.")
 		skippedChecks(&s, "the depth is unknown")
 		return s
 	}

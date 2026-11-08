@@ -179,7 +179,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 			{"next_high", tide.HighTideTime, tide.HighTideHeightFt},
 			{"next_low", tide.LowTideTime, tide.LowTideHeightFt},
 		} {
-			if e.when == "" || e.ft == noTideExtremeHeightFt {
+			if e.when == "" || !usableTideHeightFt(e.ft) {
 				missing = append(missing, "tide: no "+strings.TrimPrefix(e.key, "next_")+" tide to come")
 				continue
 			}

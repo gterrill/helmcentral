@@ -308,6 +308,10 @@ against your vessel's draft and the margin you set in Settings → Anchor Watch
 - **Enough water:** When there is enough water, the same line quietly shows the
   clearance you can expect instead.
 
+The clearance is judged the way it's shown, to a tenth of a metre. So 0.46 m counts
+as 0.5 m, and it meets a 0.5 m margin. A clearance below zero means the keel would
+be on the bottom, so it's always too shallow, even with the margin set to 0.
+
 The warning needs three things: a live depth reading, a draft reported by your
 boat's instrument network, and a current tide reading. If any of those is
 missing, it says so rather than guessing at a number. It also reads correctly
@@ -316,14 +320,40 @@ depth readings used here run slightly shallow of the true figure, on the safe
 side. So the warning tends to sound before the boat actually finds bottom, not
 after.
 
-If the tide feed goes quiet, the warning doesn't keep computing against
-whatever it last heard. Once a tide reading is more than half an hour old, or
-the low it was pointing at has already come and gone, the full-page view shows
-**Tide forecast out of date** instead of a number. That stays until the next
-tide update lands.
+Helmcentral reads the tide afresh each time it works the figures out, so it never
+computes against a reading it heard a while ago. When something is missing, the
+line says what:
+
+- **No tide station:** You haven't set up a tide station, so there's no tide to
+  project the depth with.
+- **Tide unavailable:** A station is set up, but Helmcentral couldn't get a usable
+  tide from it, because the tide service couldn't be reached or gave no upcoming low.
+- **Tide forecast out of date:** The low the tide points at has already come and
+  gone. The line stays this way until a new tide reading arrives.
+- **No depth:** The depth reading has stopped for more than two minutes, so
+  Helmcentral won't use the last figure it heard.
+- **No clearance line at all:** The boat isn't anchored or moored, and no anchor
+  watch is set, so there's no anchorage to check.
+
+The figures are worked out every 15 seconds. If a refresh fails, the page keeps the
+last verdict on screen, faded, with "not updated since" and the time it was worked
+out. So a warning never disappears, and it never passes for a current one. If Helmcentral
+hasn't managed to work the figures out even once, the line reads **Low-water
+clearance unavailable**.
+
+Helmcentral works this out on the boat's server, and Mate reads the same result,
+so the page and Mate never give you two different answers. Open Mate from the
+Anchor Watch page and ask something like "Why is it too shallow here?". Mate
+answers for the spot the boat is on now. It gives the depth you have, the depth
+it expects at the next low and the time, less your draft, compared with your
+clearance. When you're short, it links to the Anchor Watch settings so you can
+change the margin. Mate gives these figures when the boat is anchored or a watch is
+set. Helmcentral holds no chart, so Mate never sends you to one for the depth at
+your own boat.
 
 This is a running readout, not an alarm. It doesn't sound and needs no
-silencing, and it updates continuously as the boat swings and the tide moves.
+silencing, and it is worked out again every 15 seconds as the boat swings and the
+tide moves.
 There are two things to know about it:
 
 - **It can flip:** Because it reads the boat's position right now, it can flip

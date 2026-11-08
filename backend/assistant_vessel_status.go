@@ -135,6 +135,41 @@ type vesselStatusAnchor struct {
 	DistanceFromAnchorM *float64 `json:"distance_from_anchor_m,omitempty"`
 	DistanceMissing     string   `json:"distance_missing,omitempty"`
 	Missing             string   `json:"missing,omitempty"`
+	// LowWater is the Anchor Watch's own low-water clearance check for the
+	// boat's current spot. LowWaterMissing says why there is none.
+	LowWater        *vesselStatusLowWater `json:"low_water,omitempty"`
+	LowWaterMissing string                `json:"low_water_missing,omitempty"`
+}
+
+// vesselStatusLowWater is the Anchor Watch's low-water clearance (ADR 0272): the
+// sounder depth at the boat's spot, less the tide's fall to the next low, less
+// the draft, against the margin the operator set in Settings, Anchor Watch.
+// Every figure is a statusValue in metres with a display figure in the
+// operator's units. An unknown has a Reason and a Why, and only the figures that
+// were there.
+type vesselStatusLowWater struct {
+	Status      string       `json:"status"`
+	Reason      string       `json:"reason,omitempty"`
+	Why         string       `json:"why,omitempty"`
+	DepthNow    *statusValue `json:"depth_now,omitempty"`
+	TideFall    *statusValue `json:"tide_fall,omitempty"`
+	DepthAtLow  *statusValue `json:"depth_at_low,omitempty"`
+	Draft       *statusValue `json:"draft,omitempty"`
+	Clearance   *statusValue `json:"clearance,omitempty"`
+	Margin      *statusValue `json:"margin,omitempty"`
+	LowTideTime string       `json:"low_tide_time,omitempty"`
+	Note        string       `json:"note"`
+}
+
+const lowWaterStatusNote = "depth_now is the sounder's reading at the boat's own position, projected to the next low tide by the tide's fall (depth_at_low), less the draft (clearance), compared with the margin the operator set in Settings, Anchor Watch. It is the same check the Anchor Watch page shows."
+
+var lowWaterWhy = map[string]string{
+	lowWaterNoDepth:         "the sounder has no fresh depth reading",
+	lowWaterNoDraft:         "the boat reports no maximum draft",
+	lowWaterNoTideStation:   "no tide station is set up",
+	lowWaterTideUnreachable: "the tide could not be read",
+	lowWaterNoTide:          "the tide has no usable height or upcoming low",
+	lowWaterTideStale:       "the next low the tide names has already passed",
 }
 
 type vesselStatusBoat struct {
@@ -360,6 +395,8 @@ func (d assistantToolDeps) vesselStatusMissingDeps() []string {
 	check("ignoredAlarms", d.ignoredAlarms != nil)
 	check("anomalyReading", d.anomalyReading != nil)
 	check("anchorWatch", d.anchorWatch != nil)
+	check("tileTide", d.tileTide != nil)
+	check("anchorSettings", d.anchorSettings != nil)
 	check("overnight", d.overnight != nil)
 	check("now", d.now != nil)
 	return missing
@@ -372,14 +409,14 @@ func (d assistantToolDeps) executeGetVesselStatus(ctx context.Context, _ json.Ra
 	if missing := d.vesselStatusMissingDeps(); len(missing) > 0 {
 		return "", fmt.Errorf("get_vessel_status: not available (%s not wired)", strings.Join(missing, ", "))
 	}
-	res, err := d.buildVesselStatus()
+	res, err := d.buildVesselStatus(ctx)
 	if err != nil {
 		return "", err
 	}
 	return capToolResultJSON(&res, nil)
 }
 
-func (d assistantToolDeps) buildVesselStatus() (vesselStatusResult, error) {
+func (d assistantToolDeps) buildVesselStatus(ctx context.Context) (vesselStatusResult, error) {
 	now := d.now().UTC()
 	t, err := d.telemetry(now)
 	if err != nil {
@@ -412,7 +449,7 @@ func (d assistantToolDeps) buildVesselStatus() (vesselStatusResult, error) {
 	}
 
 	lat, lon, noPosition := boatPosition(state)
-	if res.Boat, err = d.vesselStatusBoatFor(t, vessel, system, lat, lon, noPosition, now); err != nil {
+	if res.Boat, err = d.vesselStatusBoatFor(ctx, t, vessel, state, system, lat, lon, noPosition, now); err != nil {
 		return vesselStatusResult{}, err
 	}
 	res.Alarms = d.vesselStatusAlarmsFor(alarms)
@@ -669,7 +706,7 @@ func boatPosition(state vesselStateData) (lat, lon float64, missing string) {
 	return state.Latitude, state.Longitude, ""
 }
 
-func (d assistantToolDeps) vesselStatusBoatFor(t telemetryReader, vessel vesselView, system string, lat, lon float64, noPosition string, now time.Time) (vesselStatusBoat, error) {
+func (d assistantToolDeps) vesselStatusBoatFor(ctx context.Context, t telemetryReader, vessel vesselView, state vesselStateData, system string, lat, lon float64, noPosition string, now time.Time) (vesselStatusBoat, error) {
 	out := vesselStatusBoat{Engines: []vesselStatusEngine{}}
 
 	if len(vessel.Engines) == 0 {
@@ -696,7 +733,73 @@ func (d assistantToolDeps) vesselStatusBoatFor(t telemetryReader, vessel vesselV
 			out.Anchor.DistanceMissing = noPosition + ", so the distance from the anchor is unknown"
 		}
 	}
+	// The low-water check is the anchor section's business: it is built (and the
+	// tide read) only when the boat is anchored or moored, or a watch is set, the
+	// same gate the page's endpoint uses. Otherwise it says why it is not there.
+	if lowWaterApplies(state, out.Anchor.Down) {
+		var err error
+		if out.Anchor.LowWater, out.Anchor.LowWaterMissing, err = d.vesselStatusLowWaterFor(ctx, state, system, now); err != nil {
+			return vesselStatusBoat{}, err
+		}
+	} else {
+		out.Anchor.LowWaterMissing = lowWaterNotAnchoredWhy
+	}
 	return out, nil
+}
+
+// vesselStatusLowWaterFor runs the Anchor Watch's low-water check for the boat's
+// spot. It gives the reason there is no check
+// when the margin cannot be read, and an error only when a figure cannot be
+// shown in the operator's units. tileTide and anchorSettings are required
+// dependencies (vesselStatusMissingDeps).
+func (d assistantToolDeps) vesselStatusLowWaterFor(ctx context.Context, state vesselStateData, system string, now time.Time) (*vesselStatusLowWater, string, error) {
+	res, err := buildLowWater(state,
+		func() (tideTodayResponse, error) { return d.tileTide(ctx, now) },
+		func() (float64, error) {
+			s, err := d.anchorSettings()
+			return s.MinClearanceAtLowM, err
+		}, now)
+	if err != nil {
+		return nil, "the low-water clearance could not be worked out: " + firstErrorLine(err), nil
+	}
+	out := &vesselStatusLowWater{Status: res.Status, Reason: res.Reason, Note: lowWaterStatusNote}
+	if res.Reason != "" {
+		out.Why = lowWaterWhy[res.Reason]
+		if res.Detail != "" && !strings.Contains(out.Why, res.Detail) {
+			out.Why += " (" + res.Detail + ")"
+		}
+	}
+	figure := func(si *float64) (*statusValue, error) {
+		if si == nil {
+			return nil, nil
+		}
+		v, err := statusReading("environment.depth.belowTransducer", *si, "m", system, 0)
+		if err != nil {
+			return nil, err
+		}
+		// A worked-out figure has no age of its own.
+		v.AgeSeconds = nil
+		return &v, nil
+	}
+	for _, f := range []struct {
+		dst **statusValue
+		si  *float64
+	}{
+		{&out.DepthNow, res.DepthNowM}, {&out.TideFall, res.TideFallM}, {&out.DepthAtLow, res.DepthAtLowM},
+		{&out.Draft, res.DraftM}, {&out.Clearance, res.ClearanceM}, {&out.Margin, res.MarginM},
+	} {
+		if *f.dst, err = figure(f.si); err != nil {
+			return nil, "", err
+		}
+	}
+	if res.LowTideTime != "" {
+		at, perr := time.Parse(time.RFC3339, res.LowTideTime)
+		if perr != nil {
+			return nil, "", fmt.Errorf("get_vessel_status: the next low tide time %q: %w", res.LowTideTime, perr)
+		}
+		out.LowTideTime = d.boatTime().DayClock(at)
+	}
+	return out, "", nil
 }
 
 // engineStatus judges one engine. An engine whose readings have stopped is off
@@ -1072,7 +1175,10 @@ var mateToolGetVesselStatus = mateTool{
 		Description: "Read one snapshot of the boat as it is now, built from the operator's own roles and equipment: " +
 			"power (house bank charge, voltage and current, solar watts, DC load), every tank with its level and " +
 			"alarm levels, the surroundings (depth, true wind and gust, barometric pressure and its three hour " +
-			"change), the engines and the anchor, the active and ignored alarms, the sensor checks (frozen, " +
+			"change), the engines and the anchor, with the Anchor Watch's own low-water clearance check for the boat's spot " +
+			"(anchor.low_water: the sounder depth now, the tide's fall to the next low, the depth then, the draft, the clearance " +
+			"and the margin the operator set in Settings, Anchor Watch, which can be linked as [Anchor Watch settings](/settings/anchor-watch); " +
+			"Helmcentral has no chart, and the sounder depth is the depth at the boat's own position), the active and ignored alarms, the sensor checks (frozen, " +
 			"impossible and silent sensors), the planned stay with its distance from the boat, and " +
 			"observations: odd things below an alarm, such as the house bank draining faster overnight than usual. " +
 			"Use it for \"status\", \"how's the boat\", \"quick update\" and the like, and copy its figures: values are " +

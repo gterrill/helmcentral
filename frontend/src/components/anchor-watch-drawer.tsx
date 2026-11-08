@@ -20,7 +20,7 @@ import { AnchorWatchMap, type AnchorAdjustPosition } from '@/components/anchor-w
 import { Button } from '@/components/ui/button'
 import { useAnchorAdjustCommit, type AnchorAdjustTarget } from '@/hooks/use-anchor-adjust-commit'
 import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM, type AnchorAdjustRestore } from '@/lib/anchor-adjust'
-import { computeLowWaterClearance } from '@/lib/low-water-clearance'
+import { useAnchorLowWater } from '@/hooks/use-anchor-low-water'
 import { haversineMeters } from '@/lib/geo'
 import { resolveLoaM } from '@/lib/rode-plan'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
@@ -119,12 +119,6 @@ interface AnchorWatchDrawerProps {
   tide: TideToday | null
   anchorConfig: AnchorConfig
   vesselLengthOverallM: number | null
-  // The vessel's maximum design draft (ADR 0135), read from SignalK. Feeds
-  // the low-water clearance warning alongside anchorConfig's own
-  // minClearanceAtLowM margin - null when SignalK publishes none, which
-  // reads as the warning's own "No draft from the boat" state rather than a
-  // silent zero-draft substitution.
-  vesselDraftM: number | null
   // The band picked in the Rode Planner (App.tsx owns the state). Null when
   // there's no explicit pick — the planner falls back to the live seed.
   windBandId: string | null
@@ -189,7 +183,6 @@ export function AnchorWatchDrawer({
   tide,
   anchorConfig,
   vesselLengthOverallM,
-  vesselDraftM,
   windBandId,
   onWindBandChange,
   onUpdateRodeAndConditions,
@@ -222,21 +215,11 @@ export function AnchorWatchDrawer({
     })
   }, [onRadiusChange])
 
-  // Anchor Watch's low-water clearance warning (ADR 0135): projects the
-  // depth at the boat's current position (the live sounder, not the
-  // resolved planning depth) forward to the
-  // next low tide and compares it against the operator's configured margin.
-  const lowWaterClearance = useMemo(
-    () =>
-      computeLowWaterClearance({
-        depthM: depthMeters,
-        tide,
-        draftM: vesselDraftM,
-        marginM: anchorConfig.minClearanceAtLowM,
-        now: new Date(),
-      }),
-    [depthMeters, tide, vesselDraftM, anchorConfig.minClearanceAtLowM],
-  )
+  // Anchor Watch's low-water clearance warning (ADR 0135): the depth at the
+  // boat's current position (the live sounder, not the resolved planning
+  // depth) projected to the next low tide, against the operator's configured
+  // margin. The server works it out (ADR 0272) so Mate quotes the same figures.
+  const { lowWater: lowWaterClearance, workedOutAt: lowWaterWorkedOutAt, failed: lowWaterFailed } = useAnchorLowWater()
 
   // ── Adjust mode (ADR 0136) ────────────────────────────────────────────────
   // Only the Anchor Watch page (this drawer) ever gets Adjust — the
@@ -470,6 +453,8 @@ export function AnchorWatchDrawer({
       depthLastUpdateAgeS={depthLastUpdateAgeS}
       tide={tide}
       lowWaterClearance={lowWaterClearance}
+      lowWaterWorkedOutAt={lowWaterWorkedOutAt}
+      lowWaterFailed={lowWaterFailed}
       isImperial={isImperial}
       noHeadingAtDrop={noHeadingAtDrop}
     />
@@ -531,6 +516,8 @@ export function AnchorWatchDrawer({
               depthLastUpdateAgeS={depthLastUpdateAgeS}
               tide={tide}
               lowWaterClearance={lowWaterClearance}
+              lowWaterWorkedOutAt={lowWaterWorkedOutAt}
+              lowWaterFailed={lowWaterFailed}
               isImperial={isImperial}
               noHeadingAtDrop={noHeadingAtDrop}
               adjustAction={showAdjustTextButton ? (

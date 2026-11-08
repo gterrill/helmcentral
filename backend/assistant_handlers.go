@@ -1183,6 +1183,14 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	pc.WebSearch = mateToolAvailable(toolDeps, "search_web")
 	if p.screen != nil {
 		pc.Screen = *p.screen
+		// The watch is read by the server, never taken from the client.
+		if pc.Screen.Panel == "anchor-watch" && toolDeps.anchorWatch != nil {
+			_, active, loadErr := toolDeps.anchorWatch()
+			if loadErr != "" {
+				log.Printf("assistant: the anchor watch could not be read for the Anchor Watch screen context: %s", loadErr)
+			}
+			pc.Screen.AnchorWatch = anchorWatchScreenLine(active, loadErr)
+		}
 	}
 	// Only a watch still sampling counts: during the end-of-watch turn the
 	// watch is "reporting", and Mate is reading its report, not waiting on it.
