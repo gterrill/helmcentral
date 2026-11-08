@@ -5,88 +5,39 @@
 > releases, including to configuration, stored settings and the HTTP API. Read
 > the release notes before you upgrade.
 >
-> Having said that, It would be really great if some nautical nerds who already
-> have SignalK installed would be willing to give it a whirl. It's at a point now
-> where it is useful and I would love some feedback on the install experience
-> on other platforms.
+> That said, it's useful now, and I'd love to hear from anyone who already runs
+> SignalK and is willing to try it. Feedback on installing it on other
+> platforms would help most.
 
-A dashboard and alarm system for [SignalK](https://signalk.org/). It puts anchor
-watch, tides, weather, tanks, points of interest and electrical
-monitoring on one screen at the helm, drives a wall display on its own, and
-sends alarm notifications to your phone when you are off the boat.
+Helmcentral is a dashboard, alarm system and boat logbook for
+[SignalK](https://signalk.org/). It puts anchor watch, tides, weather, tanks,
+engines and electrical monitoring on one screen at the helm, drives wall
+displays on its own, and sends alarms to your phone when you're off the boat.
+It also keeps the paperwork side of the boat: equipment, spares, maintenance,
+manuals and notes.
 
-Helmcentral runs on the boat as a single binary with the web UI compiled into
-it. It needs no database server or cloud account. If you already have a SignalK
-server, you can install it with one command.
+It runs on the boat as a single program with the web app built in. There's no
+database server to run and no cloud account to sign up for. If you already have
+a SignalK server, one command installs it.
 
 ![The Helmcentral dashboard at anchor](docs/images/dashboard.png)
 
-## Why this exists
+## Why I built it
 
-I spent my working life building software. I now live aboard full time, which
-has shaped how I build software for use on a boat.
+I spent my working life building software, and I now live aboard full time.
+That changes what you want from software on a boat.
 
-A boat has intermittent power and unreliable internet, and the person
-responsible for it is often asleep. Alarms need to keep running when the browser
-is closed, stale readings need to be visible, and failed notifications need to
-be retried.
+Power comes and goes, the internet is patchy, and the person responsible for
+the boat is often asleep. So the alarms have to keep running with every
+browser closed, an old reading has to look old, and a notification that fails
+to send has to be tried again rather than dropped.
 
-Helmcentral runs anchor watch on the server. Alarm rules have mandatory dwell
-and hysteresis, a watchdog monitors the data stream, and failed notifications
-are queued for retry.
-
-The dashboard is designed to be readable in daylight, with a layout you can
-rearrange without editing a config file.
-
----
-
-- **One binary.** The React UI is compiled into the Go binary with `//go:embed`.
-  Linux (x86-64, arm64, armv7, which covers every Raspberry Pi), macOS and
-  Windows. No runtime dependencies.
-- **Alarms on any SignalK path.** Battery voltage, tank level, depth, bilge,
-  engine temperature, wind. Rules name paths from the live delta stream, so
-  alarming on something new needs no code change. Five SignalK severities, with
-  dwell and hysteresis on every rule.
-- **Weather warnings from the first boot.** Thirteen rules are created on first
-  run and ten of them are already on: a barometer ladder reading the three-,
-  twelve- and twenty-four-hour tendency your marine forecast already quotes, and
-  four rules bound to the official warnings in force for your own zone. The
-  three that need local calibration ship switched off and say why.
-- **SignalK notifications.** Helmcentral reads and writes SignalK's
-  `notifications.*` tree. Alarms raised by a Victron GX, an N2K device or
-  another plugin turn up in its list with no per-source integration, and its own
-  rules reach your MFD by the same route.
-- **Notification retries.** ntfy, SMTP, webhook, web push, or
-  SignalK itself. A failed send is queued and retried with backoff from 30
-  seconds out to 30 minutes for up to 24 hours, with every attempt logged.
-- **Connection monitoring.** Losing the SignalK connection raises an alarm.
-  An external service can also monitor a periodic heartbeat sent off the boat.
-- **Configurable layouts.** 21 built-in tiles, custom gauges bound to
-  any path your server publishes, Nearby maps of the points of interest around
-  the vessel, and embed tiles for anything with a URL. Named pages you switch
-  between, persisted server-side.
-- **Wall displays, from pages you already have.** Name a screen, give it a size,
-  a magnification and an orientation, then assign pages to it; `/display/<name>`
-  cycles through them fullscreen with no chrome, on its own. Several screens,
-  each with its own pages: a strip at the helm and a television in the saloon
-  are both wall displays.
-- **Every screen has a URL.** `/forecast`, `/alarms`, `/settings/alarms`,
-  `/dashboard/<page id>`. Send someone a link and it opens where you meant.
-  Back and Forward work, and a tapped alarm notification lands on the Alarms
-  panel.
-- **Mate, a chat assistant on your own key.** Ask a passage-planning question
-  and it answers from the boat's live position, your forecast providers and
-  your tide station, by typing or by voice. You bring an OpenRouter account and
-  pick the model; every reply shows what that reply cost.
-- **The help is in the binary.** The `?` button in the header opens the page
-  for the screen you are on, with no connection needed. Mate reads the same
-  pages when you ask it how something works.
-- **Forecasts with no API key.** Open-Meteo and Open-Meteo Marine are the
-  defaults, so weather, wind and swell work on a fresh install.
-- **Sandboxed plugins for regional data.** Tide, forecast, wave, warning and
-  points-of-interest providers are WASM modules loaded from a directory. No
-  filesystem access, no process access, and no network beyond a per-plugin
-  allowlist.
+That's why anchor watch and alarms run on the server, not in the browser.
+Every alarm rule has a dwell time and a clear point, so a reading hovering on
+the line doesn't chatter. A watchdog raises its own alarm when the instruments
+go quiet, and a heartbeat sent off the boat lets an outside monitor notice when
+the whole server goes down. Failed notifications are queued and retried for up
+to a day.
 
 ## Install
 
@@ -94,39 +45,33 @@ rearrange without editing a config file.
 curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
 ```
 
-Then open `http://<this-machine>:8080/`. On first run Helmcentral searches your
-network for a SignalK server and offers what it finds, so there is nothing to
-edit by hand.
+Then open `http://<this-machine>:8080/`. On first run Helmcentral looks for a
+SignalK server on your network and offers what it finds, so there's nothing to
+edit by hand. Next, tell it which engines, batteries and tanks are yours in
+[Set up your vessel](docs/how-to/set-up-your-vessel.md). Nothing is pre-filled
+for your boat, so the engine, battery and tank tiles stay empty until you do.
 
-Every panel has its own address, so once it is up you can link straight to one:
-
-```
-http://<this-machine>:8080/forecast          # the forecast drawer
-http://<this-machine>:8080/anchor-watch      # anchor watch
-http://<this-machine>:8080/display/flybridge # a wall display, by its name
-```
-
-Docker, manual binaries and upgrade instructions:
+Docker, manual binaries and upgrading:
 [docs/how-to/install.md](docs/how-to/install.md).
 
 Stuck, or not sure it suits your boat? Ask in
 [Discussions](https://github.com/gterrill/helmcentral/discussions).
 
 > [!WARNING]
-> **Authentication is off by default** (`auth.mode: none`). A fresh install's
-> API can control connected equipment, including generator start/stop and CZone
-> switching, with no login. Run it on a trusted boat LAN and do not port-forward
-> it to the internet. Setting `auth.mode: signalk` requires login against your
-> SignalK server's own accounts; see [Configuration](#configuration). For remote
-> access, put it behind a VPN or an authenticating reverse proxy either way.
-
----
+> **Login is off by default** (`auth.mode: none`). On a fresh install, anyone
+> on the network can use the API, and it can control connected equipment,
+> including generator start and stop and CZone switching. Run it on a trusted
+> boat network and don't port-forward it to the internet. Setting
+> `auth.mode: signalk` makes everyone log in with their SignalK account; see
+> [Authentication](#authentication). For access from ashore, put it behind a VPN
+> or an authenticating reverse proxy either way.
 
 ## Contents
 
 - [Requirements](#requirements)
+- [What's optional](#whats-optional)
+- [What it does](#what-it-does)
 - [Configuration](#configuration)
-- [What you get](#what-you-get)
 - [Provider plugins](#provider-plugins)
 - [Documentation](#documentation)
 - [Development](#development)
@@ -136,220 +81,236 @@ Stuck, or not sure it suits your boat? Ask in
 
 ## Requirements
 
-- **Linux, macOS or Windows.** Linux gets a systemd service. The armv7 and arm64
-  builds cover every Raspberry Pi.
-- **A SignalK server** reachable on your network, with these plugins:
-
-  | Plugin | Provides |
-  | --- | --- |
-  | [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) | True wind and other derived navigation data |
-  | [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) | Generator and advanced electrical state (Victron GX devices) |
-  | [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Optional, only for InfluxDB-backed history |
-
-- **A browser on Baseline 2024 or newer**: Chrome/Edge 111+, Firefox 111+,
-  Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
-  out of support, since the shipped CSS is not downlevelled past that floor.
-  A wall panel should be checked with `/display-probe.html` before you mount it;
+- **Linux, macOS or Windows.** Builds cover Linux on x86-64, arm64 and armv7
+  (which covers every Raspberry Pi), plus macOS and Windows. Linux gets a
+  systemd service. There's nothing else to install alongside it.
+- **A SignalK server** on your network, with
+  [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) for
+  true wind and other derived navigation data. If you have a Victron GX, add
+  [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) for
+  generator and detailed electrical state.
+- **A browser that meets Baseline 2024**: Chrome or Edge 111+, Firefox 111+, Safari
+  16.4+ (so iPadOS or iOS 16.4+ on a helm tablet). Older devices aren't
+  supported. Check a wall panel with `/display-probe.html` before you mount it;
   see [Set up a wall display](docs/how-to/set-up-a-wall-display.md).
+- **A tide provider for your region.** Tides have no default, because the
+  available providers use regional station networks rather than a global model.
+  Pick one in Settings. Until you do, Helmcentral tells you which setting is
+  missing.
 
-Telemetry history is in-memory by default. InfluxDB is optional for longer
-retention, and Mate uses it for passage and fuel estimates when it is there.
+## What's optional
+
+The core of Helmcentral (dashboard, alarms, anchor watch, forecast, passages,
+inventory, maintenance, documents) needs only SignalK, the tide provider you pick,
+and an internet connection for the forecast. Everything below is extra, and the
+rest of Helmcentral works without any of it.
+
+| Optional | What it adds | What it needs |
+| --- | --- | --- |
+| [Mate](docs/features/assistant.md) | The chat assistant, Mate's review of each watch report, alarm reviews, proper OCR, summaries, tags and search by meaning in Documents | Your own [OpenRouter](https://openrouter.ai/) account and key. You pay OpenRouter per question; each reply shows what it cost. Off until you turn it on in Settings → Mate |
+| [InfluxDB](https://www.influxdata.com/) with [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Longer history for charts, and Mate's passage time and fuel estimates from your own logged speed and fuel burn | An InfluxDB server. Without it, telemetry history is kept in memory and the passage log is kept in Helmcentral's own database |
+| [Outside assistants](docs/features/outside-assistants.md) | Claude or ChatGPT can read the boat's status, alarms and logs. Read only, and it doesn't use Mate or your OpenRouter key | A token you make in Settings. Claude on a phone and ChatGPT also need a public address, such as Tailscale Funnel |
+| [Offline coastline](docs/features/offline-coastline.md) | Charted coastline and reefs stored aboard, so Mate can judge anchorage shelter and passage distance round the land with no signal | Turning it on, and an internet connection while it downloads |
+| [Your own Overpass server](docs/how-to/run-your-own-overpass-server.md) | Faster place names and Nearby maps that keep working offline | A second service on the boat's server. Without it, Helmcentral uses a public Overpass server |
+| Notification channels | Alarms on your phone or in your email | ntfy, SMTP, a webhook, web push or SignalK itself. Set up the ones you want; none is a paid service |
+| [Login](#authentication) | Everyone logs in with their SignalK account | SignalK security turned on first |
+| WeatherKit | Apple's forecast in place of Open-Meteo | Apple developer keys |
+
+## What it does
+
+**[The dashboard](docs/features/dashboard.md).** You build pages of tiles for
+each job: anchored, under way, an engine watch. Nineteen tiles come built in,
+from Vessel and Wind through Battery & Power, Autopilot and Forecast
+Conditions. You can add gauges for any reading the boat publishes, an
+[Engine Cluster](docs/features/engine-cluster.md) tile per engine, and embed
+tiles for anything with a URL, such as a camera feed. Pages are saved on the
+server, so every screen on the boat sees the same ones. A gauge's coloured
+bands can become an alarm in one step.
+
+**[Wall displays](docs/features/dashboard.md#wall-displays).** Name a screen,
+give it a size and an orientation, and assign pages to it. Then
+`/display/<name>` cycles through them full screen with no menus, on its own.
+A page can show only while a condition holds, such as at anchor. A display
+always renders dark, shows a small status pill rather than full banners, and
+can shift its pixels slowly to spare an OLED panel. A strip at the helm and a
+television in the saloon can each run their own pages.
+
+**[Anchor watch](docs/features/anchor-watch.md).** Drag detection runs on the
+server for your own boat and for nearby AIS targets, with every screen
+switched off. A lost GPS fix never raises a drag alarm; it raises its own
+alarm instead, because the two need different responses. The rode planner
+works out how much to pay out against tide-corrected depth, and shows each
+method's rode in a side view. The anchor map shows other boats' trails while
+the watch is set.
+
+**[Alarms](docs/features/alarms.md).** Rules on any live reading, including
+from gear you add later, with no software update needed. Alarms raised by a
+Victron GX, an engine gateway or another SignalK plugin show up in the same
+list, and Helmcentral's own alarms can go back onto SignalK so a chartplotter
+can react too. A fresh install comes with heavy-weather rules already on: a
+barometer ladder on the three-, twelve- and twenty-four-hour tendency, and
+rules tied to the official marine warnings for your zone. Tank levels have
+their own alarms, and phone and email notifications can carry a chart of the
+reading.
+
+**[Anomaly detection](docs/features/anomaly-detection.md).** Checks for
+trouble a plain threshold misses: a sensor that has frozen or is reporting
+something impossible, alternators still pushing a full house bank, and one
+engine of a pair pulling away from its twin at the same rpm.
+
+**[Forecast](docs/features/forecast.md).** Ten days of weather, wind, waves and
+tide for wherever the boat is, read from its own GPS. Today, the ten-day
+picture and the upper-air pattern each get their own panel. The defaults
+(Open-Meteo and Open-Meteo Marine) need no API key.
+
+**[Watches](docs/features/watches.md).** Regular checks of the boat at times
+you choose. Each one builds a short report in the same shape every time, with
+a list of findings from rules you can read. The morning report at 6.00 AM
+tells you what happened overnight. With Mate on, it adds a few sentences on
+what the report means.
+
+**[Passages](docs/features/passages.md).** The boat's logbook, recorded
+whether or not anyone has a screen open. Every leg with its distance and time,
+what the engines, battery and wind did, and what the nights at anchor cost in
+power and water. You can replay any passage or a whole cruise on the chart,
+[export the replay as a video](docs/how-to/film-a-passage-replay.md), or
+[put it on your blog](docs/how-to/share-a-passage-on-your-blog.md). GPX tracks
+from other apps can be imported.
+
+**[Place names and nearby places](docs/features/place-names.md).** The bay,
+marina or island you're in shows on the position tile and the anchor pin. A
+Nearby map tile shows anchorages, marinas, fuel, ramps, moorings, dive spots,
+walking trails and more around the boat, along with the vessels nearby. The
+default source is OpenStreetMap and needs no key.
+
+**[Inventory](docs/features/inventory-tracking.md).** One record per piece of
+gear, from a bilge pump to a main engine, with where it's stowed, its spares,
+manuals and photos. Bins can carry QR or NFC labels a phone can scan, deck
+plans show where each bin is, and a stocktake walks the boat locker by locker.
+
+**[Maintenance](docs/features/maintenance.md).** Jobs that fall due on running
+hours read live from the engines, on the calendar, or both. Gear with no hour
+meter can use hours you read by hand. One list shows what's due, what's
+overdue and what's done, with the service log kept against the equipment, and
+open jobs for the problems you know about and haven't fixed yet.
+
+**[Documents](docs/features/documents.md) and
+[notes](docs/features/notes-and-the-manual.md).** Manuals, receipts, service
+logs and photos of data plates, kept on the boat and searchable there. Text is
+extracted when you upload. A note takes one step to capture, and a folder of
+notes becomes the boat's own manual.
+
+**[Import](docs/features/import.md).** Equipment, spares, the service log,
+notes and documents come across from YachtWave rather than being retyped.
+
+**[Mate](docs/features/assistant.md)** (optional, see above). A chat assistant
+that answers from the boat's live data. Ask "should we take Tongue Bay or Blue
+Pearl Bay over the next two days" and it looks both up, checks the wind, waves
+and tide for each, and answers in your units and time zone. It works out wind
+angle against your course with arithmetic rather than leaving it to the model.
+It can assess an anchorage or a marina for your stay, measure a leg round the
+islands, summarise your passages, review an alarm when it goes off, and
+remember facts about your boat. It can also propose changes to alarms, the
+maintenance schedule, the inventory and the boat's details, but nothing
+changes until you tap **Apply**. It can't start, stop, switch or steer
+anything. You can type or talk to it (push-to-talk is `Alt+M`).
+
+**The help is built in.** The `?` button in the header opens the help page for
+the screen you're on, with no internet needed. Mate reads the same pages when
+you ask how something works.
+
+**Every screen has its own address**, such as `/forecast`, `/anchor-watch` or
+`/dashboard/<page id>`. You can send someone a link and it opens where you
+meant, Back and Forward work, and tapping an alarm notification opens the
+Alarms panel.
+
+Also included: a Route tile that follows the route SignalK is navigating,
+autopilot control through SignalK's v2 API, and an embedded Windy weather
+map.
+
+Helmcentral doesn't do hazard avoidance, weather routing, live navigation, or
+anything that needs a chart licence. Keep using your chartplotter for those.
 
 ## Configuration
 
-Helmcentral starts with no configuration file, and **secrets are never set in
-files or environment variables**. Start with none configured, then paste SignalK
-credentials, the InfluxDB token, any WeatherKit keys and your OpenRouter key
-into the matching Settings section in the running app, where they are encrypted
-at rest with AES-256-GCM.
+Helmcentral starts with no configuration file. **Secrets never go in files or
+environment variables.** You paste SignalK credentials, the InfluxDB token,
+WeatherKit keys and your OpenRouter key into the matching Settings section in
+the running app, and they're encrypted at rest with AES-256-GCM.
 
-> Back up `data/secrets.key`. Lose it and every stored credential is
-> unrecoverable.
+> Back up the whole `data/` directory and `settings.yaml`. If you lose
+> `data/secrets.key`, every stored credential is unrecoverable. How to copy the
+> database safely while it's running is in
+> [Back this up](docs/reference/configuration.md#back-this-up).
 
 ### Authentication
 
-`auth.mode` defaults to `none`, so upgrading an existing install never locks
-anyone out of a running boat. Setting `auth.mode: signalk` requires login before
-the API and dashboard respond to anything except `/api/health` and the login
-screen.
+`auth.mode` defaults to `none`, so upgrading never locks anyone out of a
+running boat. With `auth.mode: signalk`, the API and dashboard answer nothing
+but `/api/health` and the login screen until you log in.
 
-Helmcentral has no user database of its own. It forwards submitted credentials
-to your SignalK server, mapping SignalK's `readonly`,
-`readwrite` and `admin` levels onto matching Helmcentral permissions. An
-unrecognised role fails closed rather than falling back to something permissive.
+Helmcentral has no user list of its own. It passes the login to your SignalK
+server and maps SignalK's `readonly`, `readwrite` and `admin` levels onto
+matching permissions. A role it doesn't recognise gets no access, rather than
+falling back to something more permissive.
 
-Enable SignalK's security first, then turn on Helmcentral's login from
-Settings → Security. Helmcentral refuses to save this setting unless SignalK
-security is already on, to prevent a lockout after reboot. Disabling login does
-not require SignalK to be reachable.
+Turn on SignalK's security first, then turn on login in Settings → Security.
+Helmcentral won't save the setting until SignalK security is on, so that a
+reboot can't lock you out. Turning login off doesn't need SignalK to be
+reachable.
 
 Every environment variable, state path and startup behaviour:
 [docs/reference/configuration.md](docs/reference/configuration.md).
 
-## What you get
-
-**[The dashboard](docs/features/dashboard.md).** Twenty-one built-in tiles,
-plus gauge tiles that bind to any path your server publishes and embed tiles
-that put any URL in the grid. Arrange them yourself into named pages you switch
-between, persisted server-side. A gauge's coloured band set into an alarm
-severity defines an alarm rule.
-
-**[Anchor watch](docs/features/anchor-watch.md).** Trail sampling and drag
-detection run on the server, even when the browser is closed. A
-lost GNSS fix does not raise a drag alarm. The rode planner does pay-out and swing-radius
-planning against tide-corrected depth before the anchor is down, on a map that
-takes shared pins for hazards.
-
-**[Alarms](docs/features/alarms.md).** Rules on any SignalK path, with mandatory
-dwell and hysteresis, using SignalK's own severity vocabulary in both
-directions. Five transports, none needing a paid subscription. Failed deliveries
-are queued and retried, not dropped.
-
-**[Heavy-weather warning rules](docs/features/alarms.md#the-law-of-storms-barometer-rules),
-already built.** A fresh install comes with a barometer ladder wired to the
-three-, twelve- and twenty-four-hour tendency: 6 mb in three hours warns, 10 mb
-alarms, a 24 mb fall in a day is a weather bomb. Alongside it, four rules bound
-to the official marine warnings in force for your zone, polled every ten
-minutes, including one that fires when the warning feed itself goes quiet so a
-dead provider does not look like a calm sea. Each rule's thresholds, sources and
-default on/off state are on the Alarms page, along with what a rate of fall
-cannot tell you while you are under way.
-
-**[Mate](docs/features/assistant.md), a chat assistant that knows the boat.**
-Ask "should we take Tongue Bay or Blue Pearl Bay over the next two days" and it
-resolves both places, pulls wind, wave and tide for each from the providers you
-have configured, and answers in your units and time zone. It works out wind and
-sea angle against your planned course arithmetically rather than leaving it to
-the model, and with InfluxDB configured it estimates passage time and fuel burn
-from your own logged speed and fuel-rate history. It reads the shipped help
-pages when you ask how Helmcentral itself works. Open it from the sidebar, or from the
-header's sparkle button as a sheet over whatever you are looking at. Voice is
-push-to-talk on `Alt+M`, with an experimental "Hey Mate" mode that is off by
-default and documented with its costs. You bring your own OpenRouter account and
-choose the model; each reply's footer shows what that reply cost. It is
-read-only: it can look things up and explain, and it cannot start, change or
-steer anything.
-
-**[Wall displays](docs/features/dashboard.md#wall-displays).** A display is a
-named screen with its own size, magnification and orientation. Assign a page to
-one in layout mode, set its dwell (5 to 3600 seconds) and a condition (always,
-or a vessel state such as anchored), and `/display/<name>` cycles through that
-screen's pages fullscreen with no chrome. A page belongs to one display, since
-the layout is the page and a 1920x360 strip is not a 55 inch television;
-**Duplicate to** copies one onto another screen to diverge from there. Wall
-pages leave the ordinary page list for their own sidebar group, so the list you
-scan at the helm stays short. A display always renders dark, drops a
-conditional page out of the rotation mid-lap when its condition stops being
-true, and shows a compact status pill for a lost connection or a live alarm
-instead of the full banners. It can shift its own pixels on a slow cycle to
-spare an OLED panel, and a remote or keyboard can step and pause the rotation.
-Four of the built-in tiles (clock, current conditions, forecast, sea state)
-were sized for the narrowest strip's fold. Setup and probing:
-[Set up a wall display](docs/how-to/set-up-a-wall-display.md).
-
-**[Nearby maps](docs/features/dashboard.md#nearby-map).** A tile showing the
-points of interest around the vessel across eleven categories: anchorages, bays,
-islands, marinas, fuel, boat ramps, moorings, historic landmarks, lookouts, dive
-and snorkel spots, and walking trails. Map only, or map with a ranked list of the
-five nearest by distance and bearing, badged to match the markers. Each instance
-keeps its own range and categories, so one page can watch fuel and ramps while
-another watches dive sites. The default provider is OpenStreetMap over Overpass
-and needs no key. Setup: [Add a Nearby map](docs/how-to/add-a-nearby-map.md).
-
-**[Links to anywhere in the app](docs/features/dashboard.md#linking-to-a-page).**
-Every panel, dashboard page and settings section has its own URL, so you can
-send someone `http://boat:8080/forecast` instead of directions. Back and Forward
-move between panels, an unsaved Settings page still asks before you leave it,
-and a tapped alarm notification opens the Alarms panel rather than the
-dashboard.
-
-**[Documents](docs/features/documents.md) and [notes](docs/features/notes-and-the-manual.md).**
-Manuals, receipts, service logs and photos of data plates, kept on the boat and
-searchable from it. Text is extracted and indexed on upload; with Mate on, scans
-get proper OCR, a short summary and suggested tags, and Mate answers from your
-own manuals. Notes capture in one action, and a folder of them becomes the
-boat's own manual.
-
-**[Inventory](docs/features/inventory-tracking.md).** One record per piece of
-gear, from a bilge pump to a main engine, with where it is stowed, its spares,
-its manuals and photos. Bins carry QR or NFC labels a phone can scan, deck plans
-show where each bin is, and a stocktake walks the boat locker by locker.
-
-**[Maintenance](docs/features/maintenance.md).** What every system needs done,
-on running hours read live from the engines, on calendar dates, or both. One
-list of what is due, overdue and done, with the service log kept against the
-equipment it belongs to. Records already in YachtWave
-[import](docs/features/import.md) rather than being retyped.
-
-Other features include a Route tile that follows the route SignalK is navigating,
-autopilot control on SignalK's v2 API, and an
-embedded Windy weather map.
-
-Out of scope: hazard avoidance, weather routing, live
-navigation, or anything requiring a chart licence.
-
 ## Provider plugins
 
 Tides, weather, waves, forecast warnings and points of interest come from
-sandboxed WASM plugins loaded from disk. Install a provider's `.wasm` file in
-its plugin directory, then restart Helmcentral to make it available in Settings.
-There is no need to rebuild Helmcentral.
+plugins loaded from disk. To add a provider, put its `.wasm` file in its
+plugin folder and restart Helmcentral; it then shows up in Settings. There's
+no need to rebuild Helmcentral.
 
-| Category | Bundled reference plugins |
+| Category | Bundled plugins |
 | --- | --- |
 | Tides | `bom` (Australia), `noaa` (US) |
-| Weather | `open-meteo` (worldwide, keyless, default), `weatherkit` (Apple, needs keys) |
+| Weather | `open-meteo` (worldwide, no key, default), `weatherkit` (Apple, needs keys) |
 | Waves | `open-meteo-marine` (default) |
 | Forecast warnings | `bom` (Australia, default), `nws` (US) |
-| Points of interest | `osm-overpass` (worldwide, keyless, default), `google-places` (needs a key, partial category coverage) |
+| Points of interest | `osm-overpass` (worldwide, no key, default), `google-places` (needs a key, covers some categories) |
 
-Plugins run under [Extism](https://extism.org/)/[wazero](https://wazero.io/)
-with no filesystem access, no process access, and network default-deny: a plugin
-reaches only the hosts named in its `allowed_hosts.json` sidecar. The host owns
-all derived data, so a plugin only ever returns raw provider numbers. Distance,
-bearing and ranking for points of interest are computed host-side for the same
-reason. You can write one in any language with an Extism PDK.
-
-**Tides have no default provider.** The available providers use regional station
-networks rather than a global model. Pick `ui.tide_provider` in
-Settings to match your region. Until you do, `/api/tide-today` returns an error
-naming the missing configuration.
+Plugins are WebAssembly modules run under [Extism](https://extism.org/) and
+[wazero](https://wazero.io/). They get no file access and no process access,
+and they can only reach the hosts listed in their `allowed_hosts.json`. A
+plugin returns only the provider's raw numbers; Helmcentral does the
+distances, bearings and ranking itself. You can write one in any language with
+an Extism PDK.
 
 Installing and configuring plugins:
-[docs/reference/plugins.md](docs/reference/plugins.md). Contracts, the sandbox
-model and how to build one: [docs/developers/plugins.md](docs/developers/plugins.md).
+[docs/reference/plugins.md](docs/reference/plugins.md). How to build one:
+[docs/developers/plugins.md](docs/developers/plugins.md).
 
 ## Documentation
 
-Start with [docs/index.md](docs/index.md).
-
-**These pages also ship inside the binary**, so the help is on the boat whether
-or not the boat has a connection. The `?` button in the app's header opens the
-page and heading for whatever screen you are on, as a sheet beside it; the
-sidebar's **Help** item opens the contents page for browsing; every Settings
-section carries its own Help link. Links between help pages stay in the
-sheet with working Back; a link to something outside it, an ADR or an example
-plugin's source, opens on GitHub and needs a connection. Mate answers questions
-about Helmcentral from these same pages.
+Start with [docs/index.md](docs/index.md). The same pages ship inside the
+program, so the help is on the boat whether or not the boat has a connection.
 
 | | |
 | --- | --- |
 | [docs/features/](docs/features/) | What each part does and where it stops |
-| [docs/how-to/](docs/how-to/) | Install, upgrade, wall displays, Mate, develop |
-| [docs/reference/](docs/reference/) | Configuration, plugin contracts, POI categories, engine profiles |
-| [docs/adr/](docs/adr/) | Architecture decisions and their rationale |
+| [docs/how-to/](docs/how-to/) | Install, upgrade, wall displays, Mate, outside assistants, and more |
+| [docs/reference/](docs/reference/) | Configuration, plugins, place categories, engine profiles |
+| [docs/adr/](docs/adr/) | Why it was built the way it was |
 
-Editing a page under `docs/` is the only place to edit it. `make help-stage`
-copies them into `backend/help/` for the embed, and a build without that step
-reports the help as unstaged rather than serving stale pages.
+Edit help pages under `docs/` only. `make help-stage` copies them into
+`backend/help/` for the build, and a build without that step says the help is
+missing rather than serving old pages.
 
 ## Development
 
-Requires Go 1.22 and Node.js 20 or newer. From the repository root, in two
-terminals:
+You need Go (the version in `backend/go.mod`) and Node.js 20 or newer. From the
+repository root, in two terminals:
 
 ```sh
-make help-stage                             # stage docs/ for the embedded help
+make help-stage                             # stage docs/ for the built-in help
 cd backend && go run .                      # API on :8080
 ```
 
@@ -357,24 +318,26 @@ cd backend && go run .                      # API on :8080
 cd frontend && npm install && npm run dev   # Vite dev server on :5173
 ```
 
+Tests:
+
 ```sh
 cd backend && go test -short ./...
 cd frontend && npm test && npm run lint
 ```
 
-Working on this repo in two sessions at once, `make worktree NAME=<short-name>`
-gives the second one its own checkout alongside this directory, with
-`frontend/node_modules` symlinked so tests run straight away. Only one checkout
+If you're working in two sessions at once, `make worktree NAME=<short-name>`
+gives the second its own checkout next to this one, with
+`frontend/node_modules` linked so tests run straight away. Only one checkout
 can run the dev stack, since the ports are fixed.
 
-Docker workflows, the isolated E2E stack and release builds:
+Docker workflows, the isolated end-to-end stack and release builds:
 [docs/developers/development.md](docs/developers/development.md).
 
 ## Architecture
 
 ```
 helmcentral/
-├── backend/          # Go REST API; embeds the built frontend and the help
+├── backend/          # Go API; embeds the built frontend and the help
 ├── frontend/         # React + TypeScript + Vite dashboard
 ├── plugins/          # WASM providers, by category
 ├── packaging/        # systemd unit, plugin build script
@@ -383,77 +346,71 @@ helmcentral/
 └── docker-compose.yml
 ```
 
-- **Backend.** Go with the Echo framework, serving the API and the SPA from one
-  port. Any path it does not recognise as a file serves the app shell, which is
-  what makes deep links work on a fresh load. Endpoint reference:
-  [backend/README.md](backend/README.md).
-- **Frontend.** React and TypeScript, built with Vite, designed for a helm
-  touchscreen.
-- **Ingestion.** One WebSocket subscription to SignalK's delta stream,
-  reassembled into a snapshot tree. It is the only ingestion path. There is no
-  REST fallback or toggle, because a fallback could mask upstream failures
-  monitored by the watchdog. REST is used only for probing
-  during discovery and connection tests.
-- **Storage.** SQLite for secrets, alarm history and tile caches; JSON files for
-  routes and dashboard pages. Telemetry history is an in-memory ring buffer by
-  default, with InfluxDB optional for longer retention.
-- **Startup is fail-fast.** If the secrets store or a plugin-override database
-  cannot be opened, the process exits rather than running degraded.
+- **Backend.** Go and Echo, serving the API and the web app from one port. Any
+  path that isn't a file gets the app, which is what makes links to a screen
+  work on a fresh load. Endpoint reference: [backend/README.md](backend/README.md).
+- **Frontend.** React and TypeScript, built with Vite, made for a touchscreen
+  at the helm.
+- **Data in.** One WebSocket subscription to SignalK's delta stream, built up
+  into a snapshot. There's no REST fallback, because a fallback would hide the
+  very outages the watchdog is there to catch. REST is used only to probe
+  servers during discovery and connection tests.
+- **Storage.** SQLite for secrets, alarm rules and history, documents and
+  notes, inventory, maintenance and Mate's conversations. Settings live in
+  `settings.yaml`, and dashboard pages and the anchor watch in JSON files.
+  Recent telemetry is held in memory, with InfluxDB optional for more.
+- **Startup.** If the secrets store or a plugin-override database can't be
+  opened, the program exits rather than running half-working.
 
-### Why Helmcentral isn't a SignalK plugin
+### Why it isn't a SignalK plugin
 
-SignalK normalizes NMEA 2000 data into a single tree with documented paths and
-standard SI units. Helmcentral uses that translation rather than implementing
-its own NMEA 2000 decoder.
+SignalK turns NMEA 2000 into one tree of documented paths in standard units.
+Helmcentral uses that rather than decoding NMEA 2000 itself.
 
-SignalK runs plugins in-process inside the Node
-runtime, where any plugin can register arbitrary HTTP routes, inject spoofed
-delta updates, read server configuration or crash the event loop. Helmcentral
-runs separately to isolate its alarm processing from those plugins.
+SignalK plugins run inside SignalK's own Node process. Any plugin there can
+add HTTP routes, inject fake readings, read the server's configuration or
+crash the whole server. Helmcentral runs as its own process so that alarms
+keep working when another plugin misbehaves.
 
-NMEA 2000 has no device
-authentication, so any node on the CAN bus can claim an address and broadcast
-any PGN. Application-level security cannot authenticate that source data.
-Commands that can engage an autopilot or switch a CZone breaker need access
-controls. The network boundary between the vessel's bus and the internet also
-needs protection.
+NMEA 2000 has no device authentication: any device on the bus can claim an
+address and send anything. Software can't make that data trustworthy, but it
+can control who sends commands. Engaging an autopilot or switching a CZone
+breaker needs access control, and the boat's network needs a boundary
+between it and the internet.
 
-Helmcentral therefore treats SignalK strictly as a translation layer and owns
-those boundaries itself: a single read-only delta subscription into an isolated
-state snapshot, role resolution downstream of SignalK that fails closed on an
-unrecognised role, and third-party provider code confined to WASM with linear
-memory isolation, host allowlists and hard execution timeouts.
+So Helmcentral treats SignalK as a translator and keeps those boundaries
+itself. It reads SignalK through one subscription into its own snapshot,
+works out roles after SignalK and refuses an unknown one, and runs
+third-party provider code in WebAssembly with its own memory, a host
+allowlist and a hard time limit.
 
 ## Roadmap
 
-- **Guided first-run setup**, walking through engines, battery banks and tanks
-  from what the boat is already reporting, so a new install reaches a working
-  dashboard without hand configuration.
-- **Automatic backups** to a drive or network share of your choosing, including
-  the key that unlocks stored credentials.
-- **RFID stocktakes**, walking the boat with a reader rather than opening
-  lockers. Designed and documented, not yet built:
+- **Guided first-run setup** that walks through engines, battery banks and
+  tanks using what the boat already reports.
+- **Automatic backups** to a drive or network share you choose, including the
+  key that unlocks stored credentials.
+- **RFID stocktakes**, walking the boat with a reader instead of opening
+  lockers. Designed but not built yet:
   [docs/features/inventory-tracking.md](docs/features/inventory-tracking.md#rfid-tags).
-- **`auth.mode: signalk` as the default.** Delegated login is implemented and
-  opt-in, but stays off by default for this release so upgrading an existing
-  install cannot lock anyone out of a running boat. A later major version can
-  flip the default once operators have had a release to opt in deliberately.
-- **mDNS-based SignalK discovery**, now viable for native installs since the
-  container networking that ruled it out no longer applies.
+- **Login on by default.** It's built and you can turn it on, but it stays off
+  by default for now so that an upgrade can't lock anyone out. A later major
+  version will turn it on once people have had a release to opt in.
+- **Finding SignalK by mDNS** for native installs.
 
 ## Contributing
 
-Questions, install help, ideas and photos of Helmcentral on your own boat go in
+Questions, install help, ideas and photos of Helmcentral on your boat go in
 [Discussions](https://github.com/gterrill/helmcentral/discussions). Issues are
-for bugs and changes ready to be worked on.
+for bugs and changes ready to work on.
 
-Issues and pull requests are welcome. CI runs `go vet`, the Go and frontend test
-suites, lint, and a full cross-platform release build on every PR, so run those
-locally first (see [Development](#development)).
+Pull requests are welcome. CI runs `go vet`, the Go and frontend tests, lint
+and a full cross-platform release build on every PR, so run those locally
+first (see [Development](#development)).
 
-If a change turns on a non-obvious trade-off, add an ADR alongside it in
-[docs/adr/](docs/adr/). If it changes what an operator sees, update the affected
-page under [docs/](docs/) too.
+If a change rests on a trade-off that isn't obvious, add an ADR for it in
+[docs/adr/](docs/adr/). If it changes what someone sees on the boat, update
+the matching page under [docs/](docs/) too.
 
 ## License
 
