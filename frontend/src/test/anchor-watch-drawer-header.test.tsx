@@ -3,6 +3,7 @@ import { render, screen, within, fireEvent, act } from '@testing-library/react'
 import { toast } from 'sonner'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { TideToday } from '@/hooks/use-tide-today'
+import type { LowWaterClearanceResult } from '@/lib/low-water-clearance'
 import { formatTimeOfDay } from '@/lib/vessel-time'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
@@ -88,6 +89,13 @@ vi.mock('@/lib/webgl', () => ({
   hasWebGL2: () => mockHasWebGL2,
 }))
 
+// ADR 0272: the server works the low-water verdict out; the page reads it.
+const TOO_SHALLOW: LowWaterClearanceResult = { status: 'too_shallow', depthAtLowM: 1.39, clearanceM: 0.19, lowTideTime: '2026-11-08T04:45:00Z' }
+const CLEARS: LowWaterClearanceResult = { status: 'ok', depthAtLowM: 3.39, clearanceM: 2.19, lowTideTime: '2026-11-08T04:45:00Z' }
+let mockLowWater: { lowWater: LowWaterClearanceResult | null; workedOutAt: string | null; failed: boolean } = { lowWater: null, workedOutAt: null, failed: false }
+vi.mock('@/hooks/use-anchor-low-water', () => ({ useAnchorLowWater: () => mockLowWater }))
+beforeEach(() => { mockLowWater = { lowWater: null, workedOutAt: null, failed: false } })
+
 function makeTide(overrides: Partial<TideToday> = {}): TideToday {
   const now = Date.now()
   return {
@@ -154,7 +162,6 @@ const baseProps = {
     minClearanceAtLowM: 0.5,
   },
   vesselLengthOverallM: null,
-  vesselDraftM: null,
   hasGpsFix: true,
   windBandId: null,
   onWindBandChange: () => undefined,
@@ -321,20 +328,24 @@ describe('AnchorWatchDrawer header — tide context', () => {
 
 describe('AnchorWatchDrawer header — low-water clearance moved in', () => {
   it('renders the low-water clearance line inside the map panel', () => {
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: TOO_SHALLOW, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
+    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} tide={makeTide()} />)
 
     expect(within(hud()).getByTestId('low-water-clearance')).toBeInTheDocument()
     expect(screen.queryByTestId('anchor-watch-header')).not.toBeInTheDocument()
   })
 
   it('hides the quiet ok/unknown clearance lines below sm but never the too-shallow alert', () => {
-    const { rerender } = render(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: CLEARS, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide()} />)
     expect(within(hud()).getByTestId('low-water-clearance').className).toMatch(/\bhidden\b.*\bsm:block\b/)
 
-    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={null} tide={makeTide()} />)
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'no_draft' }, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
+    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide()} />)
     expect(within(hud()).getByTestId('low-water-clearance').className).toMatch(/\bhidden\b.*\bsm:block\b/)
 
-    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: TOO_SHALLOW, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
+    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={2} tide={makeTide()} />)
     expect(within(hud()).getByTestId('low-water-clearance').className).not.toMatch(/\bhidden\b/)
   })
 })
@@ -383,7 +394,8 @@ describe('AnchorWatchDrawer header — fallback card when there is no map', () =
 
   it('keeps the card, with depth, tide and clearance, when the browser has no WebGL2', () => {
     mockHasWebGL2 = false
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: TOO_SHALLOW, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
+    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} tide={makeTide()} />)
 
     const card = screen.getByTestId('anchor-watch-header')
     expect(card).toHaveTextContent('Depth')

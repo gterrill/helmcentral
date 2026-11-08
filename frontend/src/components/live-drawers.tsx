@@ -81,7 +81,7 @@ export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<Alarm
 const ANCHOR_DRAWER_FIELDS = [
   'latitude', 'longitude', 'gnssCriticalAlert', 'headingTrue', 'depth', 'depthLastUpdateAgeS',
   'currentDriftKts', 'currentSetDeg', 'currentDriftImpactKts', 'windSpeedApparentKts', 'maxGustKts',
-  'vesselLengthOverallM', 'vesselDraftM',
+  'vesselLengthOverallM',
 ] as const
 
 /**
@@ -105,7 +105,7 @@ const ANCHOR_DRAWER_FIELDS = [
 export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: Omit<AnchorWatchDrawerProps,
   'aisCollisionAlarms' | 'vesselLat' | 'vesselLon' | 'hasGpsFix' | 'vesselHeadingDeg' | 'depthMeters' | 'depthLastUpdateAgeS'
   | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'distanceMeters' | 'bearingDeg' | 'anchorState'
-  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'
+  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM'
   | 'anchorLat' | 'anchorLon' | 'radiusMeters' | 'bowOffsetM' | 'bowOffsetApplied' | 'bowOffsetReason' | 'headingAtSetDeg'
   | 'placeName' | 'saveDepth' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
@@ -176,7 +176,6 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       windSpeedApparentKts={v.windSpeedApparentKts}
       maxGustKts={v.maxGustKts}
       vesselLengthOverallM={v.vesselLengthOverallM}
-      vesselDraftM={v.vesselDraftM}
       aisCollisionAlarms={aisCollisionAlarms}
     />
   )

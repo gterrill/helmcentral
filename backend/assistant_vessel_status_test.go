@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -89,6 +90,10 @@ func statusTestDeps(t *testing.T) assistantToolDeps {
 		anchorWatch: func() (anchorWatchData, bool, string) { return anchorWatchData{}, false, "" },
 		overnight:   func(time.Time) (overnightResult, string) { return overnightResult{}, "influxdb not configured" },
 		documents:   func() *documentStore { return nil },
+		tileTide: func(context.Context, time.Time) (tideTodayResponse, error) {
+			return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+		},
+		anchorSettings: func() (anchorageBoatSettings, error) { return anchorageBoatSettings{MinClearanceAtLowM: 0.5}, nil },
 	}
 }
 
@@ -819,5 +824,152 @@ func TestStatusReading_RoundsDisplayByUnit(t *testing.T) {
 		if got.Display == nil || got.DisplayUnit != c.wantUnit || !near(got.Display, c.want, 1e-9) {
 			t.Errorf("%s %s: display = %v %s, want %v %s", c.path, c.system, got.Display, got.DisplayUnit, c.want, c.wantUnit)
 		}
+	}
+}
+
+// ── low-water clearance in the anchor section ───────────────────────────
+
+// lowWaterStatusDeps is statusTestDeps with what the Anchor Watch's low-water
+// check reads: a draft on the vessel state, the tide the tile reads and the
+// operator's margin. The depth is 1.9 m, so at a fall of 0.61 m to the 1.00 PM
+// low the 1.2 m draft leaves 0.1 m: under the 0.5 m margin.
+func lowWaterStatusDeps(t *testing.T) assistantToolDeps {
+	t.Helper()
+	d := statusTestDeps(t)
+	d.vesselState = func() (vesselStateData, error) {
+		return vesselStateData{
+			Status: "anchored", Depth: 1.9, DepthLastUpdateAge: 2, DraftM: 1.2,
+			Latitude: -18.2231125, Longitude: 146.21240833333334, PositionLastUpdateAge: 1,
+		}, nil
+	}
+	d.tileTide = func(_ context.Context, now time.Time) (tideTodayResponse, error) {
+		return tideTodayResponse{
+			Datetime: now.Format(time.RFC3339), CurrentTideHeightFt: 3, TideDirection: "Falling",
+			LowTideTime: now.Add(time.Hour).Format(time.RFC3339), LowTideHeightFt: 1,
+			HighTideTime: now.Add(7 * time.Hour).Format(time.RFC3339), HighTideHeightFt: 5,
+		}, nil
+	}
+	d.anchorSettings = func() (anchorageBoatSettings, error) {
+		return anchorageBoatSettings{MinClearanceAtLowM: 0.5}, nil
+	}
+	return d
+}
+
+func TestVesselStatus_AnchorLowWaterClearance(t *testing.T) {
+	lw := runStatus(t, lowWaterStatusDeps(t)).Boat.Anchor.LowWater
+	if lw == nil {
+		t.Fatal("no low_water in the anchor section")
+	}
+	if lw.Status != "too_shallow" || lw.Reason != "" {
+		t.Errorf("status = %q reason %q", lw.Status, lw.Reason)
+	}
+	for name, want := range map[string]float64{"depth_now": 1.9, "tide_fall": 0.6, "depth_at_low": 1.3, "draft": 1.2, "clearance": 0.1, "margin": 0.5} {
+		v := map[string]*statusValue{"depth_now": lw.DepthNow, "tide_fall": lw.TideFall, "depth_at_low": lw.DepthAtLow, "draft": lw.Draft, "clearance": lw.Clearance, "margin": lw.Margin}[name]
+		if v == nil || v.Display == nil || !near(v.Display, want, 0.001) || v.DisplayUnit != "m" || v.Value == nil || v.AgeSeconds != nil {
+			t.Errorf("%s = %+v, want display %v m with an SI value and no age", name, v, want)
+		}
+	}
+	if lw.LowTideTime != "Wed 28 Oct 1.00 PM" {
+		t.Errorf("low_tide_time = %q", lw.LowTideTime)
+	}
+	if lw.Note == "" {
+		t.Error("the figures carry no note saying what they are")
+	}
+}
+
+func TestVesselStatus_AnchorLowWaterInTheOperatorsUnits(t *testing.T) {
+	d := lowWaterStatusDeps(t)
+	d.displayUnits = func() (string, error) { return "imperial", nil }
+	lw := runStatus(t, d).Boat.Anchor.LowWater
+	if lw == nil || lw.Clearance == nil || lw.Clearance.DisplayUnit != "ft" || !near(lw.Clearance.Display, 0.3, 0.001) {
+		t.Fatalf("clearance in feet: %+v", lw)
+	}
+	if !near(lw.Clearance.Value, 0.1, 0.01) || lw.Clearance.Unit != "m" {
+		t.Errorf("the SI value stays in metres: %+v", lw.Clearance)
+	}
+}
+
+func TestVesselStatus_AnchorLowWaterUnknownSaysWhat(t *testing.T) {
+	d := lowWaterStatusDeps(t)
+	d.vesselState = func() (vesselStateData, error) {
+		return vesselStateData{Status: "anchored", Depth: 1.9, DepthLastUpdateAge: 2, DraftM: -1,
+			Latitude: -18.2231125, Longitude: 146.21240833333334, PositionLastUpdateAge: 1}, nil
+	}
+	lw := runStatus(t, d).Boat.Anchor.LowWater
+	if lw == nil || lw.Status != "unknown" || lw.Reason != "no_draft" || lw.Why == "" {
+		t.Fatalf("no draft: %+v", lw)
+	}
+	if lw.Clearance != nil || lw.DepthAtLow != nil || lw.LowTideTime != "" {
+		t.Errorf("an unknown carries a verdict: %+v", lw)
+	}
+	if lw.DepthNow == nil {
+		t.Error("the depth that was read is still given")
+	}
+
+	d = lowWaterStatusDeps(t)
+	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+	}
+	lw = runStatus(t, d).Boat.Anchor.LowWater
+	if lw == nil || lw.Reason != "no_tide_station" || !strings.Contains(lw.Why, "no tide station is set up") {
+		t.Errorf("no tide: %+v", lw)
+	}
+}
+
+func TestVesselStatus_AnchorLowWaterDependenciesAreRequiredAndUnreadableSettingsAreAbsentWithAReason(t *testing.T) {
+	for _, name := range []string{"tileTide", "anchorSettings"} {
+		d := lowWaterStatusDeps(t)
+		if name == "tileTide" {
+			d.tileTide = nil
+		} else {
+			d.anchorSettings = nil
+		}
+		if _, _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), name+" not wired") {
+			t.Errorf("%s unwired: err = %v, want one naming it as a missing dependency", name, err)
+		}
+	}
+
+	d := lowWaterStatusDeps(t)
+	d.anchorSettings = func() (anchorageBoatSettings, error) { return anchorageBoatSettings{}, errors.New("settings are unreadable") }
+	a := runStatus(t, d).Boat.Anchor
+	if a.LowWater != nil || !strings.Contains(a.LowWaterMissing, "settings are unreadable") {
+		t.Errorf("settings unreadable: %+v", a)
+	}
+}
+
+func TestVesselStatus_AnchorLowWaterIsGivenWhenAnchoredEvenWithoutAWatch(t *testing.T) {
+	a := runStatus(t, lowWaterStatusDeps(t)).Boat.Anchor
+	if a.Down || a.LowWater == nil {
+		t.Errorf("the check is about the boat's own spot, whatever the watch: %+v", a)
+	}
+}
+
+// Under way with no watch there is no anchorage to check, so the tide is not
+// read and the section says why it is absent.
+func TestVesselStatus_AnchorLowWaterIsLeftOutUnderWayWithNoWatch(t *testing.T) {
+	d := lowWaterStatusDeps(t)
+	under := d.vesselState
+	d.vesselState = func() (vesselStateData, error) {
+		st, err := under()
+		st.Status = "motoring"
+		return st, err
+	}
+	tideCalls := 0
+	d.tileTide = func(ctx context.Context, now time.Time) (tideTodayResponse, error) {
+		tideCalls++
+		return tideTodayResponse{}, errors.New("must not be read")
+	}
+	a := runStatus(t, d).Boat.Anchor
+	if a.LowWater != nil || a.LowWaterMissing != "the boat is not anchored and no anchor watch is set" || tideCalls != 0 {
+		t.Errorf("under way, no watch: low_water %+v missing %q, tide read %d times", a.LowWater, a.LowWaterMissing, tideCalls)
+	}
+
+	// A watch that is set brings it back, whatever the navigation state says.
+	d.anchorWatch = func() (anchorWatchData, bool, string) {
+		return anchorWatchData{Lat: -18.2226, Lon: 146.2125, RadiusMeters: 45, SetAt: vesselStatusTestNow.Add(-time.Hour)}, true, ""
+	}
+	a = runStatus(t, d).Boat.Anchor
+	if a.LowWater == nil || tideCalls != 1 {
+		t.Errorf("under way, watch set: low_water %+v, tide read %d times", a.LowWater, tideCalls)
 	}
 }

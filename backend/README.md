@@ -62,6 +62,7 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/tide-today` - Current and upcoming tide conditions
 - `GET /api/tracks?since=<RFC3339>` - Incremental self track updates sampled by the server
 - `GET /api/anchor-watch/trails/ais?since=<cursor>` - During an anchor watch, the AIS tracks the server recorded within 500 m of the anchor, stored after the cursor; no tracks without a watch
+- `GET /api/anchor-watch/low-water` - The low-water clearance at the boat's own spot: `status` (`ok`, `too_shallow`, `unknown` with a `reason`) and the figures in metres
 - `GET /api/routes/active` - The route SignalK is navigating (name and waypoints read from its route resource) and its next point
 
 ## Configuration

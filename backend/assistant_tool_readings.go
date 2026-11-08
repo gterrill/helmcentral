@@ -40,7 +40,8 @@ const (
 	// anchorage_details description and in the passage-check guard's correction.
 	ruleDepth = ruleDepthArg + " Without it the tool uses the depth of a saved place within 0.1 nm and says which figure it used (its label). " +
 		"State a depth only from the depth section or a figure the operator gave you, and offer to keep the operator's figure with save_place. " +
-		"When depth.known is false the depth is unknown: say so and tell the operator to check the chart. " +
+		"At the boat's own position the depth is the sounder's: read it with get_vessel_status or show_tile and say it is the sounder's reading. " +
+		"For a place elsewhere, when depth.known is false the depth there is unknown: say so, because Helmcentral holds no charted depth. " +
 		"The clearance, rode and swing checks are each ok, a named problem (too_shallow, short) or skipped with the reason: " +
 		"say a skipped check was skipped and why, never that it passed, and say a problem plainly."
 

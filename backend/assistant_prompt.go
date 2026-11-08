@@ -437,6 +437,26 @@ type assistantScreenContext struct {
 	// the sentence only.
 	WatchRunID string `json:"watch_run_id"`
 	WatchName  string `json:"watch_name"`
+	// AnchorWatch is a line saying whether an anchor watch is set, read by the
+	// server for the turn (anchorWatchScreenLine). It is never taken from the
+	// client. Only meaningful when Panel=="anchor-watch".
+	AnchorWatch string `json:"-"`
+}
+
+// anchorWatchScreenLine says in a sentence whether an anchor watch is set, for
+// the Anchor Watch page's screen context, so Mate never asks the operator, or
+// offers to check, what the page already shows. The radius is left to
+// get_vessel_status. A load error is not put in the prompt; the caller logs it.
+func anchorWatchScreenLine(active bool, loadErr string) string {
+	switch {
+	case loadErr != "":
+		return "The watch could not be read, so whether a watch is set is not known."
+	case active:
+		// No figure here: a radius in metres in the prompt would reach an
+		// imperial operator as metres. The tool gives it in their units.
+		return "A watch is set (get_vessel_status gives its radius in the operator's units)."
+	}
+	return "No watch is set."
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -664,6 +684,17 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 		label = "Settings"
 	case !known:
 		label = panel
+	}
+	if panel == "anchor-watch" {
+		state := ""
+		if line := strings.TrimSpace(screen.AnchorWatch); line != "" {
+			state = " " + line
+		}
+		return "The operator is on the Anchor Watch page." + state + " Questions about depth, \"too shallow\", the water under the keel or \"here\" " +
+			"are about the boat's current position, not the swing circle or another place. Call get_vessel_status and answer from its " +
+			"anchor.low_water figures, in this order: the depth now, the estimated depth at the next low (with its time), less the draft, " +
+			"compared with the operator's clearance (the margin they set). When it is too shallow, end by linking " +
+			"[Anchor Watch settings](/settings/anchor-watch). Do not offer to check whether a watch is running: this sentence says.\n\n"
 	}
 	return fmt.Sprintf("The operator is looking at the %s panel.\n\n", label)
 }

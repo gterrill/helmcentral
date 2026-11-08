@@ -2,6 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 
+// The low-water verdict comes from the server (ADR 0272); this file is not about it.
+vi.mock('@/hooks/use-anchor-low-water', () => ({ useAnchorLowWater: () => ({ lowWater: null, workedOutAt: null, failed: false }) }))
+
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
@@ -67,7 +70,6 @@ const baseProps = {
     minClearanceAtLowM: 0.5,
   },
   vesselLengthOverallM: null,
-  vesselDraftM: null,
   hasGpsFix: true,
   windBandId: null,
   onWindBandChange: () => undefined,

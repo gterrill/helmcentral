@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The low-water clearance line on Anchor Watch is stricter and says more.** It's
+  now judged to a tenth of a metre as shown, so 0.46 m meets a 0.5 m margin, and
+  a clearance below zero always reads too shallow, even with the margin at 0.
+  A missing tide reads **No tide station** when none is set up and **Tide
+  unavailable** when one is set up but can't be read. If a refresh fails, the
+  last verdict stays on screen, faded, with "not updated since" and the time,
+  instead of vanishing or passing for a current one. When the boat isn't
+  anchored or moored and no watch is set, the line is left out.
 - **The rode planner now shows only what you need at the moment of anchoring.**
   It answers how much to pay out, whether what's out is enough, and what to set
   the alarm to. The line under each tab that repeated your depth, wind and
@@ -48,6 +56,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate can now explain "Too shallow at low water" from the Anchor Watch page.**
+  Asked "Why is it too shallow here?", it used to say it had no depth and send
+  you to a chart, which Helmcentral doesn't have, and it offered to check
+  whether a watch was running when the page already showed one. Now it works
+  through the same figures the page shows, for the spot the boat is on: the
+  depth you have, the depth it expects at the next low and the time, less your
+  draft, compared with your clearance. When you're short, it links to the Anchor
+  Watch settings so you can change the clearance you want. A depth Mate reads
+  from your own sounder is no longer held back as unsourced, and for a place
+  elsewhere with no depth saved, it says the depth is unknown instead of telling
+  you to check a chart. If the sounder has been silent for two minutes, the
+  clearance line says **No depth** rather than using the last figure it heard.
 - **Paying out the Catenary Method's Pay Out figure now reads Scope OK.** The
   badge used to compare your rode with the exact recommendation, so a
   recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m read

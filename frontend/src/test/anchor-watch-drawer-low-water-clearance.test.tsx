@@ -1,11 +1,19 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
-import type { TideToday } from '@/hooks/use-tide-today'
+import type { LowWaterClearanceResult } from '@/lib/low-water-clearance'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-// ADR 0135: the depth at the boat's current position, projected to the next
-// low tide, against the operator's configured margin. Same coverage shape
-// as anchor-watch-tile.test.tsx's own "low water clearance" describe block.
+// Times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
+// ADR 0135, ADR 0272: the depth at the boat's current position, projected to
+// the next low tide, against the operator's configured margin. The server works
+// the verdict out (backend/anchor_low_water_test.go holds the rules); this
+// covers how the page words each verdict it is given.
+let mockLowWater: { lowWater: LowWaterClearanceResult | null; workedOutAt: string | null; failed: boolean } = { lowWater: null, workedOutAt: null, failed: false }
+vi.mock('@/hooks/use-anchor-low-water', () => ({ useAnchorLowWater: () => mockLowWater }))
+
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
@@ -24,27 +32,6 @@ vi.mock('react-map-gl/maplibre', async () => {
     Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
   }
 })
-
-// The drawer computes `now` itself (`new Date()`, live at render time — see
-// ADR 0135), so datetime/low_tide_time below are built relative to the real
-// clock rather than a fixed calendar date: a hardcoded date would eventually
-// (or immediately, depending when the suite runs) fall foul of the 30-minute
-// staleness rule or the "low already passed" rule this same ADR adds.
-function makeTide(overrides: Partial<TideToday> = {}): TideToday {
-  const now = Date.now()
-  return {
-    datetime: new Date(now - 5 * 60 * 1000).toISOString(),
-    current_tide_height_ft: 3,
-    tide_direction: 'Falling',
-    high_tide_time: new Date(0).toISOString(),
-    high_tide_height_ft: 5,
-    low_tide_time: new Date(now + 60 * 60 * 1000).toISOString(),
-    low_tide_height_ft: 1,
-    station_name: 'Test Station',
-    provider: 'test',
-    ...overrides,
-  }
-}
 
 const baseProps = {
   vesselLat: -25.2939,
@@ -93,7 +80,6 @@ const baseProps = {
     minClearanceAtLowM: 0.5,
   },
   vesselLengthOverallM: null,
-  vesselDraftM: null as number | null,
   hasGpsFix: true,
   windBandId: null,
   onWindBandChange: () => undefined,
@@ -103,45 +89,98 @@ const baseProps = {
   onPlanningDepthChange: () => Promise.resolve(),
 }
 
+const LOW = '2026-11-08T04:45:00Z'
+const WORKED = '2026-11-08T04:31:00Z'
+
 describe('AnchorWatchDrawer low water clearance', () => {
-  it('names the missing input when draft is unavailable (the baseProps default)', () => {
+  beforeEach(() => { mockLowWater = { lowWater: null, workedOutAt: null, failed: false } })
+
+  it('shows nothing until the server has answered', () => {
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    expect(screen.queryByTestId('low-water-clearance')).not.toBeInTheDocument()
+  })
+
+  it('names the missing input when there is no draft', () => {
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'no_draft' }, workedOutAt: WORKED, failed: false }
     render(<AnchorWatchDrawer {...baseProps} />)
 
     expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No draft from the boat')
   })
 
   it('names no_depth when there is no live depth reading', () => {
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={null} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'no_depth' }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} depthMeters={null} />)
 
     expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No depth')
   })
 
-  it('names no_tide when there is no tide station', () => {
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={5} vesselDraftM={1.2} tide={null} />)
-
+  it('names a missing tide station and an unavailable tide apart', () => {
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'no_tide_station' }, workedOutAt: WORKED, failed: false }
+    const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
     expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('No tide station')
+    unmount()
+
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'tide_unreachable' }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
+    expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('Tide unavailable')
+  })
+
+  it('shows no clearance line when the boat is not anchored and no watch is set', () => {
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'not_anchored' }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    expect(screen.queryByTestId('low-water-clearance')).not.toBeInTheDocument()
   })
 
   it('shows a quiet clearance line when the depth at low water clears the margin', () => {
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: { status: 'ok', depthAtLowM: 3.39, clearanceM: 2.19, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
 
     const readout = screen.getByTestId('low-water-clearance')
-    expect(readout).toHaveTextContent('under keel at low water')
+    expect(readout).toHaveTextContent('2.2 m under keel at low water')
     expect(readout).not.toHaveTextContent('Too shallow')
   })
 
   it('warns when the projected depth at low water is under the configured margin', () => {
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+    mockLowWater = { lowWater: { status: 'too_shallow', depthAtLowM: 1.39, clearanceM: 0.19, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
 
     const readout = screen.getByTestId('low-water-clearance')
     expect(readout).toHaveTextContent('Too shallow at low water')
     expect(readout).toHaveTextContent('0.2 m under keel')
   })
 
-  it('shows "Tide forecast out of date" when the tide reading is more than 30 minutes old', () => {
-    const staleTide = makeTide({ datetime: new Date(Date.now() - 40 * 60 * 1000).toISOString() })
-    render(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={1.2} tide={staleTide} />)
+  it('shows "Tide forecast out of date" when the server says the tide is stale', () => {
+    mockLowWater = { lowWater: { status: 'unknown', reason: 'tide_stale' }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
 
     expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('Tide forecast out of date')
+  })
+
+  // A live warning is neither hidden nor shown as current when a poll fails.
+  it('keeps "too shallow" visible, marked as not updated since, after one failed poll', () => {
+    mockLowWater = { lowWater: { status: 'too_shallow', depthAtLowM: 1.39, clearanceM: 0.19, lowTideTime: LOW }, workedOutAt: WORKED, failed: true }
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    const readouts = screen.getAllByTestId('low-water-clearance')
+    expect(readouts).toHaveLength(1)
+    expect(readouts[0]).toHaveTextContent('Too shallow at low water')
+    expect(readouts[0]).toHaveTextContent('not updated since 4.31 AM')
+    expect(readouts[0].className).toMatch(/opacity-70/)
+  })
+
+  it('does not mark a current verdict as stale', () => {
+    mockLowWater = { lowWater: { status: 'too_shallow', depthAtLowM: 1.39, clearanceM: 0.19, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    expect(screen.getByTestId('low-water-clearance')).not.toHaveTextContent('not updated since')
+  })
+
+  it('says so when the server could not give a verdict at all, rather than showing nothing', () => {
+    mockLowWater = { lowWater: null, workedOutAt: null, failed: true }
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('Low-water clearance unavailable')
   })
 })
