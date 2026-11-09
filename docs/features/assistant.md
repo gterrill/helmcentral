@@ -8,9 +8,9 @@ Ask it something like:
 > We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first
 > over the next two days?
 
-and it looks both places up and checks wind and tide for each. Then it comes
-back with a short answer and a comparison table, in the units and time zone the
-rest of the dashboard uses.
+It looks up both places and checks wind and tide for each. Then it comes back
+with a short answer and a comparison table, in the units and time zone the rest
+of the dashboard uses.
 
 The answer appears as Mate writes it, rather than after the whole reply is
 ready. While it's still looking something up, you see what it's doing
@@ -22,7 +22,8 @@ sails…") that changes every few seconds.
 A new conversation opens with a short list of what Mate can check, so you can
 see what to ask about. The list covers position and wind, instrument history,
 watching a reading for a few minutes, nearby vessels, forecasts and tides,
-passage estimates, your passages and season, places, equipment and maintenance, and your documents.
+passage estimates, your passages and season, places, equipment and
+maintenance, and your documents.
 
 Mate answers one question at a time in each conversation. Here is how that
 works:
@@ -30,7 +31,7 @@ works:
 - **Send is greyed out:** It stays greyed out until the answer is in or you
   stop it.
 - **A question that arrives mid-answer:** Suppose a question arrives by voice,
-  from Help or from a selection while the sheet is still answering. It waits in
+  from Help or from a selection, while the sheet is still answering. It waits in
   the box, with "Mate is still answering the last question." above it, and you
   send it once the answer is in.
 - **A question from another device:** One that reaches Mate from another device
@@ -61,8 +62,8 @@ conversation" button. Its "Open in Mate" button hands that thread to the full
 panel and takes you there, for when a question turns into a longer working
 session.
 
-Both always open on a fresh, blank conversation. Neither resumes the thread
-that was last active, and nothing is saved until you send a question, so
+Both always open on a fresh, blank conversation. Neither resumes the last
+active thread, and nothing is saved until you send a question, so
 opening Mate and changing your mind leaves nothing behind. The one exception
 is a reply that's already being written when you close and reopen the sheet
 mid-answer, which keeps arriving as it was.
@@ -73,7 +74,7 @@ recent conversations. You can also type to find a conversation by any word in
 it, not just its title. A match inside a conversation shows a line of the
 matching text under the title.
 
-On a phone the panel has no list down the side. Press **Chats** at the top of
+On a phone, the panel has no list down the side. Press **Chats** at the top of
 the panel to open that same quick list, and **New** beside it to start a blank
 conversation.
 
@@ -95,11 +96,13 @@ On request, it can look up more than that. Here is what it can do:
   provider is down or no tide provider is configured, it says which one failed.
   It never invents a forecast for a place it couldn't find, or a tide time from
   a provider that returned nothing.
-- **Wind and sea angle:** When it plans a passage leg, it works out the wind
-  and sea angle against your planned course by calculation, not by eye. That
-  way a following sea and a head sea are called correctly.
+- **Wind and sea angle:** When it plans a passage leg, it calculates the wind
+  and sea angle against your planned course rather than judging it by eye. That
+  way, it calls a following sea and a head sea correctly.
 - **A fair-tide departure:** See the next section.
-- **Places you've named:** Give it a position for a spot the map doesn't name and it offers to save it, then finds it by name from then on. See [Places you give Mate](place-names.md#places-you-give-mate).
+- **Places you've named:** Give it a position for a spot the map doesn't name,
+  and it offers to save it, then finds it by name from then on. See
+  [Places you give Mate](place-names.md#places-you-give-mate).
 - **An anchorage:** See "Assessing an anchorage" below.
 - **A marina:** See "Checking a marina" below.
 - **Passage time and fuel:** See "Passage estimates" below.
@@ -115,7 +118,7 @@ and what you see when a lookup fails or isn't set up.
 
 ### Positions you type
 
-When you type a position into a message, Helmcentral works out the decimal
+When you type a position into a message, Helmcentral calculates the decimal
 figures itself and tells Mate to use them, so Mate doesn't do the sum. A
 position worked out by a model can land a few tenths of a mile off, and the
 shelter check and passage estimate would then use the wrong spot. Mate keeps
@@ -182,7 +185,8 @@ When you're choosing where to anchor, Mate can look an anchorage over for the
 time you'll be there. Ask about a bay or a position, and say when you'll arrive
 and when you'll leave. If you don't say when you'll leave, Mate assumes 8.00 AM
 local time at the anchorage, the first one at least six hours after you arrive,
-and tells you that's what it assumed. A stay can be up to seven days. Here's what Mate reads for you:
+and tells you that's what it assumed. A stay can be up to seven days. Here's
+what Mate reads for you:
 
 - **Shelter:** It reads the charted coastline and reefs around the spot. Then it
   reports the compass arcs the spot is sheltered, partly sheltered and exposed
@@ -192,33 +196,32 @@ and tells you that's what it assumed. A stay can be up to seven days. Here's wha
 - **The forecast over your stay:** The wind, gusts, wind direction and waves
   every three hours from the hour nearest your arrival to the hour nearest your
   departure. Each row says whether the spot is sheltered, partly sheltered or
-  exposed from that wind, and each day says
-  which of those the wind was for most of it. Mate uses these to tell you which
-  hours put the boat on a lee shore.
-- **The tide:** The height at the time you arrive, each high and low water
-  through your stay, and the range between the highest and the lowest. If fewer
+  exposed from that wind, and each day says which of those the wind was for
+  most of it. Mate uses these to tell you which hours put the boat on a lee
+  shore.
+- **The tide:** The height when you arrive, each high and low water during
+  your stay, and the range between the highest and lowest. If fewer
   than two high or low waters fall inside your stay, the range also uses the one
   before you arrive and the one after you leave, and Mate says so. If the tide
   prediction ends before you leave, the card says when it ends.
 - **Depth, swing and clearance:** The water at the anchorage, and what it means
   for your stay. Mate works out the water under the keel at the lowest low water
   of your stay, the chain you need at the highest high water, and how far the
-  boat swings on that much chain. The next section says where the depth comes
-  from and how each check is worked out.
+  boat swings on that much chain. The next section explains where the depth
+  comes from and how each check is worked out.
 - **What the map records nearby:** Anything within a nautical mile that
   OpenStreetMap lists as a restricted area, a public mooring, an anchorage area,
   a seabed area or the bay the spot is in. A restricted area that prohibits
   anchoring is a no-go. Mate says that first instead of recommending the
   anchorage. A marine park is listed with a reminder to check its zoning,
-  because the map doesn't say whether the zone allows anchoring. Public
-  moorings come with the biggest vessel they take, in metres, and their class,
-  where the map has them. A mooring with neither is listed as having its details
-  not tagged.
+  because the map doesn't say whether the zone allows anchoring. Public moorings
+  list the largest vessel they take and their class, where the map shows them. A
+  mooring with neither is listed as "Details not tagged".
 
 Helmcentral keeps each map lookup for six hours, so asking again about the
-same spot, with a different arrival or leave time, answers faster. Asking again
-about the same position within six hours reuses the earlier lookup. If the map server fails, Mate says so.
-It never fills in with an older lookup.
+same spot with a different arrival or departure time answers faster. Asking
+again about the same position within six hours reuses the earlier lookup. If the
+map server fails, Mate says so. It never fills in with an older lookup.
 
 The map is kept up by volunteers, so Mate treats anything it doesn't list as
 unknown, never as missing. An empty list means nothing is mapped, not that
@@ -237,7 +240,8 @@ from one of two places, and Mate always says which one it used:
   you've given that place a depth, Mate uses it. It reads "from saved place
   Butterfly Bay (charted 2026-11-01)". If several saved places are within that
   distance, the nearest one that has a depth counts. A nearer place with no
-  depth doesn't get in the way. See [Places you give Mate](place-names.md#places-you-give-mate).
+  depth doesn't count. See
+  [Places you give Mate](place-names.md#places-you-give-mate).
 
 Depths are in metres at chart datum, the same datum the tide table uses. If
 Mate has neither, it tells you the depth is unknown, tells you to check the
@@ -248,37 +252,37 @@ With a depth, Mate makes three checks over your stay:
 - **Water under the keel at low water:** The depth plus the height of the lowest
   low water in your stay, less your boat's draft. Mate compares it with the
   clearance you want at low water, to the nearest tenth of a metre as the card
-  shows it, which you set under **Settings → Anchor Watch**.
-  The draft comes from your boat's instruments. If they don't report it, Mate
-  skips this check and says the draft isn't reported. It never assumes one.
+  shows it, which you set under **Settings → Anchor Watch**. The draft comes
+  from your boat's instruments. If they don't report it, Mate skips this check
+  and says the draft isn't reported. It never assumes one.
 - **Chain needed at high water:** The depth plus the highest high water in your
   stay, plus the height of the bow roller, worked out by the ratio method: five
   times that, or seven times from 20 knots of wind. Mate compares it with the
-  chain you have aboard and says either that it's enough or how many metres short
-  it is. The wind is the strongest gust in any hour of the forecast between your
-  arrival and your departure, rounded up to the anchor rode planner's wind band.
-  If the forecast ends before your stay does, Mate still checks, and says the wind
-  was only checked up to the time the forecast ends. The same goes for the tide.
-  If the tide prediction ends before your stay does, the water, chain and swing
-  checks each say a lower or higher water may follow. The card shows when the
-  prediction ends. If you've set the catenary method under
-  **Settings → Anchor Watch**, Mate skips this check and the swing, and says why.
-  The catenary method needs the sea state and the seabed, and Helmcentral doesn't
-  know either for a stay that hasn't begun. Set the method to ratio to have Mate
-  check the chain.
+  chain you have aboard and says either that it's enough or how many metres
+  short it is. The wind is the strongest gust in any hour of the forecast
+  between your arrival and your departure, rounded up to the anchor rode
+  planner's wind band. If the forecast ends before your stay does, Mate still
+  checks and says the wind was only checked up to the time the forecast ends.
+  The same goes for the tide. If the tide prediction ends before your stay does,
+  the water, chain and swing checks each say a lower or higher water may follow.
+  The card shows when the prediction ends. If you've set the catenary method
+  under **Settings → Anchor Watch**, Mate skips this check and the swing, and
+  says why. The catenary method needs the sea state and the seabed, and
+  Helmcentral doesn't know either for a stay that hasn't begun. Set the method
+  to ratio to have Mate check the chain.
 - **Swing:** How far the boat swings around the anchor on that much chain. It's
   the same figure the anchor rode planner gives: the chain, plus the distance
-  from the bow to the GPS, plus the length of the boat. If you're short of chain,
+  from the bow to the GPS, plus the boat length. If you're short of chain,
   Mate works the swing out for all the chain you have aboard and says so, since
   that's the circle the boat will make. The length is the one in
   **Settings → Anchor Watch** or, if that's blank, the one your boat reports or
   your vessel particulars hold.
 
-A check that needs something Helmcentral doesn't have is skipped, and the card and
-Mate both say what was missing. That might be the tide, the forecast, the draft,
-the boat's length or one of the anchor settings. A skipped check is never shown as
-passed. If a check finds a problem, such as less water under the keel than you
-want or not enough chain, Mate says so plainly.
+If a check needs something Helmcentral doesn't have, Mate skips it, and the card
+and Mate both say what's missing. That might be the tide, the forecast, the
+draft, the boat's length or one of the anchor settings. A skipped check is never
+shown as passed. If a check finds a problem, such as less water under the keel
+than you want or not enough chain, Mate says so plainly.
 
 If Mate's answer states a depth for an anchorage that has neither of those
 sources, it's sent back to look the anchorage up and answer again. When the
@@ -297,21 +301,20 @@ If the coastline can't be read, Mate tells you why and doesn't guess. If the
 forecast, the tide or the map lookup fails, that part says what went wrong and
 shows nothing. Mate tells you it wasn't checked instead of filling it in from
 memory. If Mate's first answer calls an anchorage exposed or sheltered from
-a wind without having read the coastline, it's sent back to read it and answer
+a wind without reading the coastline, it's sent back to read it and answer
 again.
 
 Under the answer, Mate shows an anchorage card. Here's what's on it:
 
 - **The top:** The anchorage's name, then your arrival and departure in local
   time at the anchorage.
-- **Shelter:** A compass ring of 36 spokes, one for every 10° of wind
-  direction. The colour of a spoke says how sheltered you are from wind coming
-  from that direction. Blue is sheltered, amber is partly sheltered, red is
-  exposed and grey is reef. A spoke's length is how far the wind has run over
-  water, up to 15 nm, so a short spoke is land close by on that side. A thin
-  band just outside the ring repeats the colour of all 36 directions, so a
-  sheltered side with no spoke to see still shows. Beside it are the arcs in
-  words.
+- **Shelter:** A compass ring of 36 spokes, one for every 10° of wind direction.
+  The colour of a spoke says how sheltered you are from wind coming from that
+  direction. Blue is sheltered, amber is partly sheltered, red is exposed and
+  grey is reef. A spoke's length shows how far the wind has run over water, up
+  to 15 nm, so a short spoke means land is close by on that side. A thin band
+  just outside the ring repeats the colour of all 36 directions, so a sheltered
+  side with no spoke to see still shows. Beside it are the arcs in words.
 - **Forecast:** A table of the three-hourly rows. Each row has the time, the
   wind and gust in knots, the direction it's from, a badge for the shelter from
   that wind, and the waves. Wave heights follow your distance units. Below it is
@@ -330,25 +333,26 @@ Under the answer, Mate shows an anchorage card. Here's what's on it:
 - **Map:** Folded away until you tap **Map**. It shows the same spokes drawn out
   over satellite imagery in the same colours. It also shows the moorings
   labelled with their size limit, restricted areas shaded, and anchorage and
-  seabed areas outlined. When Mate has a depth, a dashed circle shows how far the
-  boat swings around the anchorage. The OpenSeaMap layer draws the marks, as on the anchor
-  watch map, and the satellite button turns the imagery off. Place names show
-  on the map: bays and straits, islands, peaks, towns and marinas. A key in the bottom-left
-  corner says what each shelter colour means. It doesn't move
-  when you scroll the conversation past it: use two fingers, or hold ⌘ (Ctrl on
-  Windows or Linux) while you scroll, to pan and zoom it. If the map's too
-  small to read, tap the full screen button. It opens the map across the whole
-  screen, with zoom buttons, and there one finger drags it and a pinch zooms it.
-  It opens where you had panned and zoomed the card. An active alarm still
-  shows at the top there. Close it to come back to the card, which keeps the
-  view you left in full screen. A browser without WebGL2 shows a line saying so.
+  seabed areas outlined. When Mate has a depth, a dashed circle shows how far
+  the boat swings around the anchorage. The OpenSeaMap layer draws the marks, as
+  on the anchor watch map, and the satellite button turns off the imagery. Place
+  names show on the map: bays and straits, islands, peaks, towns and marinas. A
+  key in the bottom-left corner says what each shelter colour means. It doesn't
+  move when you scroll the conversation past it: use two fingers, or hold ⌘
+  (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If the map's
+  too small to read, tap the full screen button. It opens the map across the
+  whole screen, with zoom buttons, and you can drag it with one finger and pinch
+  to zoom. It opens where you had panned and zoomed the card. An active alarm
+  still shows at the top there. Close it to come back to the card, which keeps
+  the view you left in full screen. A browser without WebGL2 shows a line saying
+  so.
 - **The bottom:** When the forecast was fetched, when the coastline was
   downloaded and "OpenStreetMap · data as of" the date the map was last updated.
-  If the map server doesn't give a date, the card leaves it out. A part that
-  couldn't be checked shows its error in place of its figures.
+  If the map server doesn't give a date, the card leaves it out. If a part
+  couldn't be checked, it shows its error in place of its figures.
 
 The card is a snapshot of what Mate read at the time, so it looks the same when
-you open the conversation again. Ask about two anchorages and you get two cards.
+you reopen the conversation. Ask about two anchorages, and you get two cards.
 If Mate looks up the same anchorage twice in one answer, only the later card is
 kept, because that's the one the answer is built on.
 
@@ -366,8 +370,8 @@ the same coastline, when you ask for it by name.
 
 ### Checking a marina
 
-When you're deciding where to stop, Mate can look a marina over. Ask about a
-marina by name and it finds the marina on the chart, then reads what
+When you're deciding where to stop, Mate can look up a marina. Ask about a
+marina by name, and it finds the marina on the chart, then reads what
 OpenStreetMap records about it and the things mapped beside it. Here's what you
 get back:
 
@@ -382,8 +386,8 @@ get back:
   machines within about a kilometre, with opening hours where they're mapped.
   Only places with a name are listed.
 - **Your boat against the limits:** If the marina has a maximum draught or
-  maximum length mapped, Mate compares it with your boat's draft and length
-  overall and says whether you're within it. A limit your boat is over is a
+  length mapped, Mate compares it with your boat's draft and overall length and
+  says whether you're within it. A limit your boat is over is a
   no-go, and Mate says that first instead of recommending the marina.
 
 The map is kept up by volunteers, so Mate treats anything it doesn't list as
@@ -399,23 +403,24 @@ Under the answer, Mate shows a marina card. Here's what's on it:
 - **The top:** The marina's name, then its berths, power and fee on one line,
   with a badge for your draft and another for your length. A badge turns red
   when your boat is over the mapped limit. It stays plain when you're within
-  it. It's grey, and says so, when no limit is mapped or your boat's figure
-  isn't set, because neither of those means you fit.
+  it. It's grey and says so when no limit is mapped or your boat's figure isn't
+  set, because neither means you fit.
 - **The map:** The marina drawn over satellite imagery, with its outline, each
   pontoon labelled with its arm name, and a dot for each facility. The
   entrance beacons and buoys come from the OpenSeaMap layer, the same one the
   anchor watch map uses. Shops and services ashore are hidden until you tap the
   shop button on the map, and the satellite button turns the imagery off. A
-  name shared by facilities close together, such as two fuel docks on one wharf,
+  name shared by nearby facilities, such as two fuel docks on one wharf,
   is written once, and every dot stays. Place names show too: bays and straits,
   islands, peaks and towns. The marina's own name isn't repeated on the map. The
   map doesn't move when you scroll the conversation past it: use two fingers,
-  or hold ⌘ (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If the map's too
-  small to read, tap the full screen button. It opens the map across the whole
-  screen, with zoom buttons, and there one finger drags it and a pinch zooms it.
-  It opens where you had panned and zoomed the card. An active alarm still
-  shows at the top there. Close it to come back to the card, which keeps the
-  view you left in full screen. If the marina has no outline or pontoons mapped, the card has no map.
+  or hold ⌘ (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If
+  the map's too small to read, tap the full screen button. It opens the map
+  across the whole screen, with zoom buttons, and you can drag it with one
+  finger and pinch to zoom. It opens where you had panned and zoomed the card.
+  An active alarm still shows at the top there. Close it to come back to the
+  card, which keeps the view you left in full screen. If the marina has no
+  outline or pontoons mapped, the card has no map.
 - **Facilities:** Fuel, haul-out, ramp and the rest, one chip each. A fuel
   dock the map doesn't give a fuel type for reads "Fuel · type unknown".
 - **Folded sections:** The entrance marks, the pontoon arms, and the shops and
@@ -425,17 +430,17 @@ Under the answer, Mate shows a marina card. Here's what's on it:
   each document you've saved for this marina, such as its own berth map. Each
   title is a link to that document's page. The line only appears when there is
   one.
-- **The bottom:** The marina's website and phone number as links when the map
+- **The bottom:** The marina's website and phone number, linked when the map
   has them. Below them is "OpenStreetMap · data as of" and the date the map was
   last updated. If the map server doesn't give a date, the card leaves it out.
 
 The card is a snapshot of what Mate read at the time, so it looks the same when
-you open the conversation again, even if the map has changed since. Ask about
-two marinas and you get two cards. Only a website that's a normal web address
+you reopen the conversation, even if the map has changed since. Ask about two
+marinas, and you get two cards. Only a website that's a normal web address
 becomes a link.
 
-It needs the OpenStreetMap place-names plugin, which is the default, and an
-internet connection. If the place-names plugin doesn't support it, or no marina
+It needs the OpenStreetMap place-names plugin (the default) and an internet
+connection. If the place-names plugin doesn't support it, or no marina
 is charted within 500 m of the position, Mate tells you that and doesn't describe
 the marina from memory.
 
@@ -446,7 +451,7 @@ Many marinas publish their own map or berth plan, and you can keep it in
 Documents so that Mate reads it whenever you ask about that marina. Here's how
 it works:
 
-- **Finding the map:** Ask Mate for a marina's own map, for example "get me the
+- **Finding the map:** Ask Mate for a marina's own map, for example, "get me the
   Coral Sea Marina map". If web search is on, Mate looks for the marina's map
   page or PDF and gives you the link. If web search is off, Mate says so and
   points you to the marina's website when the map has one.
@@ -460,11 +465,11 @@ it works:
   document's page, or ask Mate to ("link that to Coral Sea Marina Resort") and
   tap **Apply** on the card it shows you.
 - **Using it:** The next time Mate looks at that marina, it sees the documents
-  linked to it, up to three, and reads them for berth numbers and the layout.
+  linked to it (up to three) and reads them for berth numbers and the layout.
   The marina card shows them under "In Documents:".
 
-Two marinas with exactly the same name share their documents, because the tag is
-the only link. Remove the tag from a document to unlink it.
+Two marinas with the same name share their documents, because the tag is the
+only link. Remove the tag from a document to unlink it.
 
 ### Passage estimates
 
@@ -498,9 +503,9 @@ about five kilometres of you since it first showed up on your own instruments.
 So a boat that arrived before you did reads as "in range" for less time than
 it has actually been there.
 
-Ask "when did we last see Solaris" and Mate also answers for a boat that has
-since moved on, from the record of past encounters. Your boat's own data logger
-can be set up to record other vessels' position history and not just your own,
+Ask "when did we last see Solaris", and Mate also answers for a boat that has
+since moved on, from the record of past encounters. Your boat's data logger can
+be set up to record other vessels' position history, not just your own,
 though most boats leave this off. If yours does, Mate reads that vessel's own
 track and gives a tighter answer for how long it has been sitting at its
 current spot.
@@ -509,7 +514,7 @@ current spot.
 
 Ask Mate about a season, a cruise, a trip or where you've been, and it tells the
 story from the [Passages](passages.md) page. It reads the passages you've
-recorded there, so it works however long ago they were. Try "Summarise our
+recorded there, so it works no matter how long ago they were. Try "Summarise our
 cruising season" or "How far did we go in August?". Mate gives you:
 
 - **The route:** Where you left, then each place you reached in order, using
@@ -522,10 +527,10 @@ cruising season" or "How far did we go in August?". Mate gives you:
   next one starting.
 
 Mate takes places only from your passages. If a passage has no name for where it
-started or finished, Mate leaves that place out of the route and says so. If one passage finished at a
-place and the next left from a differently named one, it tells you both names
-and doesn't pick one. It doesn't work out which way you were heading,
-or what region a place is in.
+started or finished, Mate leaves that place out of the route and says so. If one
+passage finished at a place and the next left from a differently named one, it
+tells you both names and doesn't pick one. It doesn't work out which way you
+were heading, or what region a place is in.
 
 When you give Mate dates, such as "August", it means those days on the boat's
 clock, in the time zone the Passages page shows for each passage. Mate quotes
@@ -545,23 +550,24 @@ you rated **Lively**, or which ones mention a particular bay.
 There are things the log can't tell Mate, and it says so:
 
 - **Fuel:** Passages that came from an imported track, or from before
-  Helmcentral logged your fuel rate, have no fuel figure. Mate adds up the passages that have one and tells you how
-  many it left out.
+  Helmcentral logged your fuel rate, have no fuel figure. Mate adds up the
+  passages that have one and tells you how many it left out.
 - **How you stayed:** The log doesn't record whether you were at anchor, on a
   mooring or in a marina, so Mate doesn't split stays that way.
-- **Engine hours:** Mate gives the time you were under way, which isn't the same
-  as engine hours.
+- **Engine hours:** Mate shows the time you were under way, which isn't the
+  same as engine hours.
 
 If the Passages page is empty, or has nothing in the dates you asked about, Mate
 says that. It doesn't go looking for passages in the instrument history.
 
 To look at what a reading did on one passage, ask Mate. It finds the passage in
 your log, then reads the history for that passage's start and end. That needs a
-history log, as described under [When a reading looks wrong](#when-a-reading-looks-wrong).
+history log, as described under
+[When a reading looks wrong](#when-a-reading-looks-wrong).
 
 ### A status update
 
-Ask "how's the boat?", "quick update" or "status" and Mate gives you a short
+Ask "how's the boat?", "quick update" or "status", and Mate gives you a short
 report with the figures already worked out. It reads them from the equipment and
 the roles you've set up, so it doesn't have to hunt for the right reading. The
 report has four headings and then a few things worth a look:
@@ -569,15 +575,15 @@ report has four headings and then a few things worth a look:
 - **Power:** The house bank's charge, voltage and current, the solar watts and the
   DC load.
 - **Tanks:** Each tank's level, with the warn and alarm levels set for it. A tank
-  that is in warn or alarm says so.
+  in warn or alarm says so.
 - **Outside:** Depth, true wind with its gust over the last ten minutes, and the
-  pressure with how far it has moved in the last three hours. The three hour
+  pressure with how far it has moved in the last three hours. The three-hour
   change appears once Helmcentral has about three hours of pressure readings, and
   it starts again after a restart.
 - **Boat:** Whether each engine is running or off, and whether the anchor watch
   is set. An engine whose readings have stopped without it being keyed off shows
-  as unknown, not off. It also lists the alarms active and ignored, and your planned stay
-  with how far it is from the boat.
+  as unknown, not off. It also lists active and ignored alarms, and your
+  planned stay with how far it is from the boat.
 - **Worth a look:** At most three things. They come from the sensor checks, which
   catch a frozen, impossible or silent sensor. They also come from readings Mate
   couldn't get, and from the house bank draining faster than usual overnight.
@@ -599,7 +605,7 @@ A reading that can't be right, such as a charge above 100 percent or a negative
 solar figure, is left out the same way. A tank whose warn and alarm levels don't
 make a sensible pair is shown with a note that its alarm isn't running.
 
-Figures are given the way an instrument shows them: solar and load in whole
+Figures are shown as an instrument would show them: solar and load in whole
 watts, volts to two places, and wind, current, depth, temperature and levels to
 one. When a reading is missing, Mate says which one and why, and doesn't guess
 at the cause.
@@ -612,7 +618,8 @@ gap with an older figure or an estimate.
 The overnight check needs three things. Your house bank must be chosen under
 **Settings → SignalK → Roles**. InfluxDB must be set up. And there must be at
 least four recent nights at anchor, with no shore power or charging after 10.00
-PM, for Mate to compare. Each night is measured from 10.00 PM to dawn, boat time. Without them Mate leaves that check out and tells you why.
+PM, for Mate to compare. Each night is measured from 10.00 PM to dawn, boat
+time. Without them, Mate leaves that check out and tells you why.
 
 The overnight check is a question for you and never an alarm, so nothing is sent
 to your phone. Mate doesn't yet notice a sensor reading differently from its
@@ -625,11 +632,11 @@ you'd expect it on a tile), ask Mate before you go hunting for it yourself. It
 checks the live instrument connection directly. It looks at whether the
 connection is up at all, which feeds are updating and which have gone quiet,
 and the value and age of anything you name. Ask "why is the exhaust temperature
-not showing" or "is the depth reading working" and it answers from that check
+not showing" or "is the depth reading working", and it answers from that check
 rather than guessing.
 
 With a history log configured for the boat, Mate goes further. Ask "when did
-the tank levels stop updating" and it does three things:
+the tank levels stop updating", and it does three things:
 
 - **Last recorded time:** It finds the last recorded time for each one.
 - **The feed behind it:** It names the specific feed behind a reading if that
@@ -639,29 +646,30 @@ the tank levels stop updating" and it does three things:
 
 Sometimes a reading was only recorded for a short stretch, such as an engine
 that has been running for twenty minutes. Then Mate looks at it minute by
-minute, so a brief spike still shows. Without a history log configured, Mate can still tell you
-what's live right now, but it can't look further back.
+minute, so a brief spike still shows. Without a history log configured, Mate
+can still tell you what's live right now, but it can't look further back.
 
 Some faults only show up over time: an engine load that jumps for a second
 every few minutes, or a voltage that dips when something cycles on. Ask Mate to
-keep an eye on it, for example "watch port and starboard engine load for five
+keep an eye on it, for example, "watch port and starboard engine load for five
 minutes and tell me if port spikes". It starts a watch and tells you when it
 will report back. See [Watching a reading](#watching-a-reading) below. For a
 check on a schedule instead, see [Watches](watches.md).
 
 ### Maintenance
 
-Mate can read your maintenance schedule and service log. Ask "what's overdue", "when was the generator last serviced" or "is the
-schedule for the main engine complete". Mate looks up the rules, their status
+Mate can read your maintenance schedule and service log. Ask "what's overdue",
+"when was the generator last serviced" or "is the schedule for the main engine
+complete". Mate looks up the rules, their status
 today and the history behind them.
 
-For a review, it lines your rules up against two things: the manufacturer's
-recommended services on the item's profile, and the manuals in your library.
-Then it names what's missing or different. If an item's running hours aren't being
-read, it says the hours are unknown rather than guess.
+For a review, it compares your rules against two things: the manufacturer's
+recommended services on the item's profile and the manuals in your library.
+Then it names what's missing or different. If an item's running hours aren't
+being read, it says the hours are unknown rather than guessing.
 
-It can also propose changes to the schedule as a card under its reply. Nothing
-changes until you tap **Apply**. See [Maintenance](maintenance.md) and
+It can also propose schedule changes as a card under its reply. Nothing changes
+until you tap **Apply**. See [Maintenance](maintenance.md) and
 [Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
 
 ### Inventory
@@ -678,32 +686,57 @@ moved onto it, and it applies all of them or none. You still tap **Apply**, and
 Mate won't say anything is done until you have.
 
 Mate can't see pictures, so when a card sets a deck's plan, it shows you the
-picture and you check it's the right one. A plan has to be a JPEG or PNG. If the
-drawing in your documents is a PDF, Mate asks you to upload a picture of that
-page instead.
+picture, and you check that it's the right one. A plan has to be a JPEG or PNG.
+If the drawing in your documents is a PDF, Mate asks you to upload a picture of
+that page instead.
 
 ### Alarms
 
-Mate can read every alarm the boat is watching, and it can propose a new one or a change to one you already have. Say what you want to be told about, such as "tell me if the house bank drops below 50%" or "warn me if the fridge goes above 8 degrees", and Mate checks the alarms you already have first. If one already watches that reading, it proposes changing that alarm instead of adding a second one.
+Mate can read every alarm the boat is watching, and it can propose a new one or
+a change to one you already have. Say what you want to be told about, such as
+"tell me if the house bank drops below 50%" or "warn me if the fridge goes above
+8 degrees", and Mate checks the alarms you already have first. If one already
+watches that reading, it proposes changing that alarm instead of adding a second
+one.
 
-The card under its reply names the alarm in a few words, such as House Bank Low, and says in a sentence what it does: how serious it is, the level it fires at, the level it clears at, and how long the reading has to hold before it goes off. The levels are in the units you use on the boat, so a battery reads in percent, a temperature in degrees Celsius and a speed in knots. For an alarm that fires above or below a level, Mate always sets a clear point a little past it so that the alarm doesn't chatter, and it tells you what it chose. If the boat doesn't report a unit for a reading, Mate can't tell what a number on it means, so it asks you to set that level in the Alarms drawer. You can ask for different numbers before you tap **Apply**.
+The card under its reply names the alarm in a few words, such as House Bank Low,
+and says in a sentence what it does: how serious it is, the level it fires at,
+the level it clears at, and how long the reading has to hold before it goes off.
+The levels use the units you use on the boat: a battery reads in percent, a
+temperature in degrees Celsius and a speed in knots. For an alarm that fires
+above or below a level, Mate always sets a clear point a little past it so that
+the alarm doesn't chatter, and it tells you what it chose. If the boat doesn't
+report a unit for a reading, Mate can't tell what a number on it means, so it
+asks you to set that level in the Alarms drawer. You can ask for different
+numbers before you tap **Apply**.
 
-Mate won't say an alarm is set until you've tapped **Apply**. After that the alarm is watching straight away and shows in the Alarms drawer like one you made yourself.
+Mate won't say an alarm is set until you've tapped **Apply**. After that, the
+alarm is watching straight away and shows in the Alarms drawer like one you made
+yourself.
 
 Some alarms aren't Mate's to change:
 
-- Tank alarms: They come from each tank's own levels. Mate changes those on the tank's equipment item, where you'd change them yourself.
-- Gauge zones: A coloured band on a gauge raises its own alarm. You edit the band on the gauge, so Mate can't.
-- Built-in alarms: The ones that came with Helmcentral can be changed, switched off or removed like your own. The card says when it's one of them, and one you remove stays gone.
+- **Tank alarms:** They come from each tank's own levels. Mate changes those on
+  the tank's equipment item, where you'd change them yourself.
+- **Gauge zones:** A coloured band on a gauge raises its own alarm. You edit the
+  band on the gauge, so Mate can't.
+- **Built-in alarms:** The ones that came with Helmcentral can be changed,
+  switched off or removed like your own. The card says when it's one of them,
+  and once you remove it, it stays gone.
 
-If you ask "what should I be monitoring?", Mate looks at what the boat actually reports and what has no alarm yet. It suggests a few readings that matter, at most three, with the level it would use and why, and each one comes as a card you can tap. It won't suggest an alarm on something the boat doesn't measure. See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for doing it by hand.
+If you ask "what should I be monitoring?", Mate looks at what the boat actually
+reports and what has no alarm yet. It suggests a few readings that matter, at
+most three, with the level it would use and why, and each one comes as a card
+you can tap. It won't suggest an alarm on something the boat doesn't measure.
+See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for doing it
+by hand.
 
 ### The boat's details
 
-Mate can read the boat's details on **Settings → Vessel**: the owner and
+Mate can read the boat's details in **Settings → Vessel**: the owner and
 insurance, the home marina and berth, the storm delegate, and the hull and
-registration. It can also propose filling in or correcting them, as the same
-kind of card with **Apply**. Ask "the insurer is now Pantaenius, policy
+registration. It can also propose filling in or correcting them with the same
+kind of card and **Apply**. Ask "the insurer is now Pantaenius, policy
 PY-1234", or give it an answer while it fills in a form, and it offers to keep
 it.
 
@@ -728,14 +761,15 @@ you ask, and how Helmcentral's own features work.
   document's Details page and ask "what period does this cover?", and Mate reads
   that document to answer rather than asking which source you mean.
 - **How Helmcentral works:** For a question about Helmcentral itself, Mate reads
-  the in-app help, the same pages the Help button opens. It answers from what
-  they say rather than from a general impression of what a 500mb chart usually
-  shows. Ask "what does the upper air chart on the forecast panel actually show"
-  and it reads the help's own [Forecast](forecast.md) page and quotes it back.
+  the in-app help, the same pages the Help button opens. It answers based on
+  what they say, rather than a general impression of what a 500mb chart usually
+  shows. Ask "what does the upper air chart on the forecast panel actually
+  show", and it reads the help's own [Forecast](forecast.md) page and quotes it
+  back.
 
 ### Active alarms
 
-Mate can also see the alarms that are active. Ask "investigate the alarm" and it
+Mate can also see active alarms. Ask "investigate the alarm", and it
 starts from the alarm itself, including the reading that tripped it, rather than
 from the device name on the card. Then it checks that reading's live state and
 history. It tells you what the reading was when the alarm was raised, apart from
@@ -745,29 +779,34 @@ what it is now.
 
 Every alarm card in the Alarms drawer has an **Ask Mate** button, and so does
 each row in the drawer's History, including alarms that have already cleared.
-Tap it and Mate opens on a new conversation with a question already asked, such
-as "Why did House Bank Low go off?". Mate knows which alarm you mean, so you can
+Tap it, and Mate opens a new conversation with a question already asked, such as
+"Why did House Bank Low go off?" Mate knows which alarm you mean, so you can
 follow up with "is that normal?" or "what about last night?" without naming it
 again.
 
 Mate starts by looking up that alarm and then tells you:
 
-- What tripped it: The reading against the level the alarm fires at, and where it clears and how long it had to hold, in your units.
-- Whether the reading looks real: Whether the sensor is still reporting, how the reading moved in the half hour either side of the alarm, and whether other alarms went off or cleared within 15 minutes. It gives these as evidence and doesn't guess at a cause.
-- How often it happens: How many times that alarm was raised in the last week.
+- **What tripped it:** The reading against the level the alarm fires at, and
+  where it clears and how long it had to hold, in your units.
+- **Whether the reading looks real:** Whether the sensor is still reporting, how
+  the reading moved in the half hour either side of the alarm, and whether other
+  alarms went off or cleared within 15 minutes. It gives these as evidence and
+  doesn't guess at a cause.
+- **How often it happens:** How many times that alarm was raised in the last
+  week.
 
 Under the answer is a chart of the reading around the time the alarm went off.
 Mate doesn't reword the alarm itself. The card keeps its own title and message.
-If the level looks wrong for the way your boat behaves, for example the alarm
+If the level looks wrong for the way your boat behaves, for example, the alarm
 trips every night at the same point, Mate says so with the figures and offers a
 card to change the alarm. Nothing changes until you tap **Apply**.
 
 Some parts can be missing, and Mate says so when they are. An alarm raised by
 another instrument on the network has no level of its own to quote. A collision
-alarm has no reading behind it. Without InfluxDB there is no history to
+alarm has no reading behind it. Without InfluxDB, there is no history to
 chart. Mate doesn't group a reading with related ones, so it can't tell you
 what the other sensors on the same item did unless you ask it to check them.
-The button isn't on the banner across the top. Tap **View** there and the
+The button isn't on the banner across the top. Tap **View** there, and the
 buttons are on the cards.
 
 ### Reviewing an alarm when it goes off
@@ -778,7 +817,7 @@ jersey. Mate reads the same things as when you tap **Ask Mate**. It writes a
 short review in a new conversation named after the alarm. Then it sends the
 first sentence to your phone as a message that begins "Mate on". That message
 has a link when you've set an Address for links in Settings. The alarm card
-links to the conversation too.
+also links to the conversation.
 
 Mate says what the reading is doing and whether you're needed now, uses the name
 of the instrument when it has one and doesn't guess at a cause. It can suggest
@@ -806,7 +845,7 @@ decided it ("Wind 27 kn from SE, ahead · Cape Bowling Green → Cape Upstart").
 gust reads the same way ("Gusts 32 kn from SE, ahead").
 
 The grading uses your [passage limits](../how-to/set-passage-limits.md): a
-no-go wind, and if you want it, a no-go wave height. You set these separately
+no-go wind and, if you want, a no-go wave height. You set these separately
 for wind ahead, abeam and astern of your course. That's why the same twenty
 knots can be a go on a downwind leg and a no-go on a beat.
 
@@ -818,8 +857,8 @@ knots can be a go on a downwind leg and a no-go on a beat.
   cell. Mate also gets, for each leg, the range of wind direction and speed and
   how many hours the leg runs with the wind ahead, abeam and astern. So a leg
   that is astern for five and a half hours and ahead for the first half hour out
-  of a creek is described that way, not as a beat.
-  On a very long itinerary Mate may get only the verdicts.
+  of a creek is described that way, not as a beat. On a very long itinerary,
+  Mate may get only the verdicts.
 - **No limits set:** Until you set the limits, Mate says so and doesn't grade
   the trip.
 
@@ -840,16 +879,17 @@ available or Mate doesn't know which way the flood runs on that leg. An hour
 with no wave height in the forecast is never treated as a flat calm.
 
 "Not checked: wave direction" means the forecast had a wave height but not the
-direction it was coming from, and your wave limits don't all agree about it. Mate
-compares the height with the limit for each sector. If all three sectors have a
-limit and give the same answer, it uses that answer. Otherwise it can't tell which
-limit applies, so it leaves the check out rather than guess. When the forecast has a wave period, the card shows it beside the
-height, for example "Waves 1.8 m · 6 s abeam". Wind
-against tide is judged on the direction and timing of the stream from the tide
-station's high and low water, not on its speed.
+direction it was coming from, and your wave limits don't all agree about it.
+Mate compares the height with the limit for each sector. If all three sectors
+have a limit and give the same answer, it uses that answer. Otherwise, it can't
+tell which limit applies, so it leaves the check out rather than guess. When the
+forecast has a wave period, the card shows it beside the height, for example,
+"Waves 1.8 m · 6 s abeam". Wind against tide is judged on the direction and
+timing of the stream from the tide station's high and low water, not on its
+speed.
 
 The card shows how old the forecast was when Mate checked it, and says so once
-that's more than six hours. For a fresh answer, ask again.
+it's more than six hours old. For a fresh answer, ask again.
 
 ### What you did with the plan
 
@@ -877,7 +917,7 @@ You don't have to fill it in. Helmcentral fills it in for you, and adds
 - **Left blank:** It doesn't guess when it can't tell. If the boat set out on
   the plan but turned back, or the track can't be read, the card stays blank,
   because "Stayed" would be wrong. A newer card for the same day and the same
-  first leg also takes over from an older one.
+  first leg also replaces an older one.
 
 Your own choice always wins, and Helmcentral never changes it. Cards saved
 before this was added have no line. A read-only screen shows the same words
@@ -885,7 +925,7 @@ without the menu.
 
 ## Charting what the boat logged
 
-Mate can draw a chart of any reading your boat logs, so you can see a change
+Mate can draw a chart of any reading your boat logs so that you can see a change
 rather than read a summary of it:
 
 > Show the starboard alternator current against house bank state of charge
@@ -907,9 +947,9 @@ The chart appears under the answer. It can be drawn in two ways:
 
 You can ask for the readings Helmcentral already knows by their job. These are
 house bank state of charge, current and voltage, each alternator's current, and
-each engine's RPM, load and coolant temperature. Any other logged reading works by
-name too. Mate needs you to say which dates to compare, because it doesn't guess
-when a change was made.
+each engine's RPM, load and coolant temperature. Any other logged reading works
+by name too. Mate needs you to say which dates to compare, because it doesn't
+guess when a change was made.
 
 Here is how the chart handles the details:
 
@@ -941,9 +981,9 @@ readings:
   for directions. For wind, a stronger wind counts for more than a light one in
   the same hour. The note under the chart says which method was used.
 - **No average when there isn't one:** Sometimes the wind blew from opposite
-  ways in equal measure, or was too light to have a direction. Then Mate says
-  there is no average direction and leaves that stretch blank. It doesn't invent
-  one.
+  directions in equal measure, or was too light to have a direction. Then Mate
+  says there is no average direction and leaves that stretch blank. It doesn't
+  invent one.
 
 Ask "how has the wind been trending this week?" and Mate draws true wind speed
 and true wind direction in two panels. Ask "where has the wind been coming
@@ -952,7 +992,7 @@ from?" and it draws a wind rose instead:
 > Show me where the wind has come from since Sunday.
 
 The wind rose is a card under the answer. Each petal points to a compass
-direction the wind blew from, and its length is how much of the time it blew
+direction the wind blew from, and its length shows how much of the time it blew
 from there. The petal is split into bands by wind speed, from light to strong,
 in your units.
 
@@ -963,7 +1003,7 @@ in your units.
 - **Averages, gusts and the strongest wind:** The card gives the mean speed and
   the strongest gust with its time. Each petal is built from averages over short
   stretches of time, and the card says how long they are.
-- **Your choice of detail:** Ask for 8, 16 or 32 compass sectors, or for your
+- **Your choice of detail:** Ask for 8, 16 or 32 compass sectors or for your
   own speed bands, such as "bands every 10 knots".
 
 The wind rose uses the true wind the boat logs. If the direction or speed was
@@ -974,34 +1014,34 @@ dates means asking Mate again.
 ## Showing a tile
 
 Ask "what's our depth?" or "what's the tide doing?" and Mate answers in words
-first, with the key figure, then puts the Depth & Tide tile under the answer. It's
-the same tile you have on the dashboard, in the same units.
+first, with the key figure, then puts the Depth & Tide tile under the answer.
+It's the same tile you have on the dashboard, in the same units.
 
-- **The newest answer:** While you have the chat open and Mate has just answered,
-  the tile is live and marked **Live**, so it keeps up with the boat. It stays live
-  until you ask something else.
-- **Older answers:** Once you ask again, or when you reopen a chat from the Chats
-  list or reload the page, the tile shows the readings as they were when Mate answered, with the time they were
-  taken, for example 2.03 PM. That way the picture still matches the words beside
-  it.
-- **Missing readings:** If the sounder has no depth, or no tide station is set up,
-  the tile shows a dash where it would on the dashboard, and Mate says which
+- **The newest answer:** While you have the chat open and Mate has just
+  answered, the tile is live and marked **Live**, so it keeps up with the boat.
+  It stays live until you ask something else.
+- **Older answers:** Once you ask again, or when you reopen a chat from the
+  Chats list or reload the page, the tile shows the readings as they were when
+  Mate answered, with the time they were taken, for example, 2.03 PM. That way
+  the picture still matches the words beside it.
+- **Missing readings:** If the sounder has no depth, or no tide station is set
+  up, the tile shows a dash where it would on the dashboard, and Mate says which
   reading is missing. It doesn't fill the gap from an earlier reading.
-- **Read only:** You can look at the tile but not tap through or change anything
+- **Read-only:** You can look at the tile but not tap through or change anything
   on it.
 
-Mate leaves the tile out when it wouldn't add anything. If you ask "is the sounder
-working?", it checks the readings and tells you. Depth & Tide is the only tile Mate
-can show for now.
+Mate leaves the tile out when it wouldn't add anything. If you ask "is the
+sounder working?", it checks the readings and tells you. Depth & Tide is the
+only tile Mate can show for now.
 
 ## Watching a reading
 
-A watch follows up to six live readings once a second for between one and
-thirty minutes. While it runs, a line above the composer says what Mate is
-watching and when it ends. For example: "Watching Port engine load and Starboard
-engine load · ends 2.35 PM", with a **Stop** button. The end time is on the boat's
-clock, the same time Mate gives you. You can keep asking other questions in the
-same conversation meanwhile, or leave the page altogether.
+A watch follows up to six live readings once a second for between one and thirty
+minutes. While it runs, a line above the composer says what Mate is watching and
+when it ends. For example: "Watching Port engine load and Starboard engine load
+· ends 2.35 PM", with a **Stop** button. The end time is on the boat's clock,
+the same time Mate gives you. You can keep asking other questions in the same
+conversation meanwhile, or leave the page altogether.
 
 When the time is up, a "Watch finished" line appears in the conversation and
 Mate explains what it saw:
@@ -1016,7 +1056,7 @@ Mate explains what it saw:
   that way, and Mate says so.
 
 If the chat is open, you see the answer arrive. If it isn't, the answer is there
-next time you open the conversation. The answer costs the same as any other
+the next time you open the conversation. The answer costs the same as any other
 reply and shows in its footer.
 
 The watch is also kept on the [Watches](watches.md) page, as a one-off watch
@@ -1037,10 +1077,10 @@ Limits:
 - Mate doesn't interrupt you during a watch. If something needs your attention
   right away, that's what alarms are for.
 - Restarting Helmcentral doesn't lose a watch in progress. It picks up where it
-  left off and shows the time it was down as a gap. **Stop** cancels the watch
+  left off and shows the downtime as a gap. **Stop** cancels the watch
   with no report, and so does deleting the conversation.
-- If Mate has been switched off by the time a watch ends, nothing is sent and no
-  answer appears.
+- If Mate has been switched off by the time a watch ends, nothing is sent, and
+  no answer appears.
 
 ## Documents
 
@@ -1060,8 +1100,8 @@ for how much of a document Mate reads and when.
 When an answer draws on something specific it found this way, it cites the
 source as a small icon next to the text instead of describing it in a sentence.
 Tap or click the icon to open that manual, receipt or note directly, and hover
-or press it to see its title. A citation to something that has since been
-removed from the library shows as a faded, broken icon rather than vanishing.
+or press it to see its title. A citation to something removed from the
+library shows as a faded, broken icon rather than vanishing.
 
 That one search covers everything in the library at once: uploaded manuals,
 your own captured notes, receipts, and photos of a data plate. There's no
@@ -1086,15 +1126,15 @@ Insurers and marinas send the same PDF again and again: owner, boat, policy
 number, which marina, and who looks after the boat when you're away. Attach the
 blank PDF to a message in Mate and ask it to fill it in. Mate reads the form and
 takes what it needs from what Helmcentral already holds about the boat and its
-owner. It asks you in a single message for anything that's missing. Then it
-fills the form in and shows it under its reply as a card.
+owner. It asks you in a single message for anything missing. Then it fills
+in the form and shows it under its reply as a card.
 
-What Mate fills from is on **Settings, Vessel**. That page holds the owner's
-name, phone and email, the insurer and policy number, the home marina and
-berth, and the storm delegate (the person who prepares the boat when you're
-away). It also holds the boat's length and beam, next to the hull details
-already there. The boat's name and its
-length and draft come from the live instruments when they're connected.
+What Mate fills from is in **Settings → Vessel**. That page holds the owner's
+name, phone and email, the insurer and policy number, the home marina and berth,
+and the storm delegate (the person who prepares the boat when you're away). It
+also holds the boat's length and beam, alongside the hull details already there.
+The boat's name and draft come from the live instruments when they're
+connected. Its length can come from either, and Mate says so if the two differ.
 
 Nothing is pre-filled, and Mate never makes up a value to fill a gap. When you
 give it answers in the chat that belong in that record, it offers to save them,
@@ -1108,7 +1148,7 @@ Mate works with two kinds of PDF:
   tick inside a box. It can tell which box belongs to which marina or option by
   the words beside it.
 
-Both come back as a new PDF, and the blank you attached is left alone.
+Both come back as a new PDF, and the blank you attached is unchanged.
 
 The card under Mate's reply is where you check the result. Here is what its
 buttons do:
@@ -1127,16 +1167,16 @@ Limits:
 
 - **Signatures stay yours.** Mate never fills a signature line or a signature
   field. It leaves the date alone too, unless you tell it to put in today's.
-- **Plain text only.** On a flat form the answers are written in one plain font,
-  in Latin letters. A name with characters it can't write is refused, and Mate
-  tells you which.
+- **Plain text only.** On a flat form, the answers are written in one plain
+  font, in Latin letters. A name with characters it can't write is refused, and
+  Mate tells you which.
 - **It needs text to read.** A form that's a scan or a photograph has no text
   for Mate to find the blanks by, so it can't fill it in. A flat form whose tick
   boxes it can't find is read for its text only, and Mate asks you what to tick
   instead of guessing.
 - **A blank with no words next to it** (a row of small boxes for single letters,
-  a cell under a heading) can't be named. Mate fills what it can and tells you
-  what is left for you to write in by hand.
+  a cell under a heading) can't be named. Mate fills in what it can and tells
+  you what you still need to write by hand.
 - **Check it before you send it.** Mate puts in only what you or the record gave
   it, but you're the one who signs.
 
@@ -1159,18 +1199,18 @@ reading.
 
 There's also "Listen for Hey Mate", an experimental always-on mode. Say "Hey
 Mate" followed by your question, or say "Hey Mate" alone and Mate waits about
-eight seconds for the question to follow. It's off by default, and it has real
+eight seconds for the question. It's off by default, and it has real
 costs:
 
 - **The microphone stays open:** It keeps the microphone open the whole time the
   app is on screen, and it uses more battery than push-to-talk.
-- **Audio goes to Google:** On Chrome the audio stream goes to Google
+- **Audio goes to Google:** On Chrome, the audio stream goes to Google
   continuously, rather than only when you ask something.
 - **Mishearing:** It mishears ordinary conversation as "Hey Mate" from time to
   time, which comes with always listening.
 - **Hidden tabs:** It pauses automatically when the browser tab is hidden.
 
-Voice needs the app opened over **https**, with microphone permission granted,
+Voice needs the app opened over **HTTPS**, with microphone permission granted,
 in **Safari** or **Chrome** (Firefox has no speech recognition to use). See
 [Talk to Mate](../how-to/talk-to-mate.md) for how to turn each of these on,
 reach that address, and what to do when the microphone button won't light up.
@@ -1179,29 +1219,29 @@ reach that address, and what to do when the microphone button won't light up.
 
 Every question sends three things to OpenRouter, and from there to whichever
 model you've chosen: your position, the question text itself, and whatever
-forecast or tide data Mate decided to look up. This only happens when you ask something and Mate
-is switched on. There are two exceptions, and both only happen while Mate is
-switched on. When a watch you asked for ends, its summary of the readings goes to
-the model so Mate can explain it. And every report from a scheduled
-[watch](watches.md) goes to the model so Mate can review it: the report's
-figures, its findings and your **What to look out for** text.
+forecast or tide data Mate decided to look up. This only happens when you ask
+something and Mate is switched on. There are two exceptions, and both only
+happen while Mate is switched on. When a watch you asked for ends, its summary
+of the readings goes to the model so Mate can explain it. And every report from
+a scheduled [watch](watches.md) goes to the model so Mate can review it: the
+report's figures, its findings and your **What to look out for** text.
 
 A document you attach to a question, or one Mate reads through its own library
 search, is sent the same way, as text, since it was already read once when it
 was indexed. Separately, uploading or reindexing a document while Mate is
 switched on sends that document's own content for OCR and summarising. That
-happens whether or not you go on to ask a question about it. See [Documents](documents.md) for
-what that costs and what leaves the boat at that point, not just when you ask
-Mate about one.
+happens whether or not you go on to ask a question about it. See
+[Documents](documents.md) for what that costs and what leaves the boat at that
+point, not just when you ask Mate about one.
 
 With Web search switched on, a search also sends Mate's search words to
-OpenRouter and the search service behind it. These might be a place name, a
-part number or a question about a rule. Nothing is searched unless Mate decides it needs to, and
-nothing at all while the switch is off.
+OpenRouter and the search service behind it. These might be a place name, a part
+number or a question about a rule. Nothing is searched unless Mate decides it
+needs to, and nothing at all while the switch is off.
 
-A voice question additionally sends your speech to whichever engine your
-browser uses to turn it into text. That's Apple's dictation for Safari
-(on-device on recent hardware), or Google's speech service for Chrome. That happens before the
+A voice question additionally sends your speech to whichever engine your browser
+uses to turn it into text. That's Apple's dictation for Safari (on-device on
+recent hardware), or Google's speech service for Chrome. That happens before the
 question ever reaches Mate, and it happens for every voice question,
 push-to-talk included, not only "Hey Mate".
 
@@ -1211,14 +1251,14 @@ so check the one you pick if that matters to you.
 
 Settings offers two routing modes:
 
-1. A fixed model id, chosen from a tool-capable model list fetched from
+1. A fixed model ID, chosen from a tool-capable model list fetched from
 	OpenRouter.
 2. OpenRouter Auto (`openrouter/auto`), with optional routing constraints:
-	allowed model patterns, excluded model ids, and a cost tier cap (`low`,
+	allowed model patterns, excluded model IDs, and a cost tier cap (`low`,
 	`medium`, `high`, `xhigh`, `max`).
 
 Auto routing only applies when the model is set to OpenRouter Auto. For any
-other model id, those routing constraints are ignored.
+other model ID, those routing constraints are ignored.
 
 Documents are read and labelled by a separate model, set under Settings → Mate →
 Document indexing. You pick it the same way as the Mate model: from a list of
@@ -1237,7 +1277,7 @@ Mate answers from your boat first: live instruments, the forecast and tides, the
 help and your documents. Some questions need information from outside the boat,
 such as a harbour's opening hours, a recent notice, what a fault code means or a
 replacement for a part. Switch on **Web search** in Settings → Mate, and Mate
-can look those up on the web through OpenRouter.
+can look those up online through OpenRouter.
 
 It's off by default. Each search costs a small extra amount on your OpenRouter
 account on top of the reply itself, so Mate only searches when your documents
@@ -1247,9 +1287,9 @@ new tab. Open them to check what a page actually says before you rely on it,
 especially for safety, regulations or anything about the boat.
 
 Under the switch, **Search model** picks which OpenRouter model carries the
-search. Results come from the same search service whichever model you choose, so
-a cheap one is fine, and the default is a cheap one. Web search needs a model
-chosen, so Settings won't save with the switch on and the model blank.
+search. Results come from the same search service no matter which model you
+choose, so a cheap one is fine, and the default is cheap. Web search needs a
+model chosen, so Settings won't save with the switch on and the model blank.
 
 Anyone can write a web page, so Mate treats what it reads there as information
 to weigh, never as instructions. It won't change your maintenance list or any
@@ -1281,13 +1321,13 @@ Pin sparingly. Only a handful of notes and a few thousand characters between
 them reach Mate. When you go over that, the prompt says outright how many notes
 it left out, rather than cutting one off mid-sentence.
 
-It works the other way too. Sometimes an answer is worth keeping, such as a procedure Mate has just walked
-you through or a figure it worked out. **Save as note** under that answer keeps
-it without retyping. Mate doesn't write the note. Your
-tap creates it, it lands unfiled like any other capture, and you file or edit it
-afterwards. Mate never writes anything itself. The same goes for the
-maintenance schedule, the inventory, your alarms and the boat's details: Mate proposes, and
-your tap on **Apply** makes the change.
+It works the other way too. Sometimes an answer is worth keeping, such as a
+procedure Mate has just walked you through or a figure it worked out. **Save as
+note** under that answer keeps it without retyping. Mate doesn't write the note.
+Your tap creates it, it lands unfiled like any other capture, and you file or
+edit it afterwards. Mate never writes anything itself. The same goes for the
+maintenance schedule, the inventory, your alarms and the boat's details: Mate
+proposes, and your tap on **Apply** makes the change.
 
 Mate is also always told which manuals exist. For each one, it's told the names
 of its top-level sections ("Operations Manual (Before Leaving, Getting
@@ -1300,7 +1340,7 @@ same document search as everything else in the library (see
 ## Remembering earlier conversations
 
 A new conversation starts without the old one in front of it, so Mate looks back
-for itself. It searches your past conversations for that equipment or topic and
+on its own. It searches your past conversations for that equipment or topic and
 reads what was said, in two situations:
 
 - **Before advising on your equipment:** Mate does this before it advises on a
@@ -1324,32 +1364,32 @@ conversation, Mate no longer knows what was in it.
 
 ## Facts Mate keeps
 
-Searching old conversations finds what was said, but only if Mate thinks to look.
-For the things you never want to explain twice, Mate has a short list of facts
-about your boat. Every conversation starts with the whole list in front of Mate,
-and so does every [watch](watches.md) review and every alarm review. The list is
-separate from your standing notes, which you write yourself.
+Searching old conversations finds what was said, but only if Mate thinks to
+look. For the things you never want to explain twice, Mate has a short list of
+facts about your boat. Every conversation starts with the whole list in front of
+Mate, and so does every [watch](watches.md) review and every alarm review. The
+list is separate from your standing notes, which you write yourself.
 
-A kept fact is one plain sentence that stays true, such as "the fuel polisher has
-no sampling port on its discharge manifold". Mate doesn't keep where you are, a
-tank level, a reading or the weather. Those change, and the boat can measure
-them, so a kept copy would only go stale.
+A kept fact is one plain sentence that stays true, such as "the fuel polisher
+has no sampling port on its discharge manifold". Mate doesn't keep where you
+are, a tank level, a reading or the weather. Those change, and the boat can
+measure them, so a kept copy would only go stale.
 
 A fact is kept in one of two ways:
 
 - **You ask:** Say "remember that" and state the fact. Mate keeps it with its
-  reply and shows a card under it with an **Undo** button. The fact has to be
+  reply and shows a card under it with an **Undo** button. The fact must match
   what you said. If Mate words it differently enough that it no longer matches
   your message, it shows a card to tap instead. A fact that comes from anything
-  but your own message, such as Mate's own conclusion or a document's text, always
-  waits for a tap. If the reply fails or you stop it, nothing is kept.
+  but your own message, such as Mate's own conclusion or a document's text,
+  always waits for a tap. If the reply fails or you stop it, nothing is kept.
 - **Mate offers:** If Mate works out something worth keeping, it shows a card
-  with **Remember this** and **Dismiss**. Mate never keeps a fact of its own making
-  without your tap, whatever the model decides.
+  with **Remember this** and **Dismiss**. Mate never keeps a fact of its own
+  making without your tap, no matter what the model decides.
 
-**Undo** removes the fact, and the card then reads *Undone*, also after a reload.
-If the fact has been rewritten since Mate kept it, Undo leaves it alone and says
-so. Someone who can open Settings can remove it there.
+**Undo** removes the fact, and the card then reads *Undone*, also after a
+reload. If the fact has been rewritten since Mate kept it, Undo leaves it alone
+and says so. Someone who can open Settings can remove it there.
 
 If a new fact contradicts one already kept, Mate shows a card with the old
 fact and the new one and offers to replace it. That card always waits for your
@@ -1374,11 +1414,11 @@ of carrying on as though no facts were kept.
 
 Sometimes a conversation settles something about your boat, such as a fitting
 you showed Mate isn't there, a part number or a procedure that worked. You can
-save that as a note. Press **Summarise to note** beside the microphone in the message
-box. Mate writes a short summary and shows it to you for review. Nothing is
-saved until you press **Save**.
+save that as a note. Press **Summarise to note** beside the microphone in the
+message box. Mate writes a short summary and shows it to you for review. Nothing
+is saved until you press **Save**.
 
-The summary has up to three parts, and leaves out any that is empty:
+The summary has up to three parts, and leaves out any that are empty:
 
 - **What we established**: facts about your boat, above all from your own photos
   and observations.
@@ -1389,7 +1429,7 @@ It carries only what the conversation settled about your boat, not general
 advice Mate gave that nobody confirmed. Where you corrected Mate, your
 correction is what is written down. The note ends with a link back to the
 conversation. Mate also suggests the equipment the note is about. Those items
-are ticked, and the note is linked to each one you leave ticked, so it turns up
+are ticked, and the note links to each one you leave ticked, so it appears
 on that equipment's record as well as in document search.
 
 A conversation keeps one note. Once it has one, the button reads **Update
@@ -1402,15 +1442,15 @@ the whole conversation, instead of making a second note.
 - **Cost:** The summary uses Mate's chat model, so each press costs one answer's
   worth of tokens.
 
-See
-[Keep what a Mate conversation worked out](../how-to/keep-what-a-mate-conversation-worked-out.md).
+See [Keep what a Mate conversation worked
+out](../how-to/keep-what-a-mate-conversation-worked-out.md).
 
 ## Conversations and cost
 
 Questions and answers are kept as conversations you can return to, list or
 delete, like a chat app. Starting a new conversation clears the context Mate
-carries forward. So a fresh question about a different part of the coast
-doesn't get answered in light of yesterday's passage. The sheet and the full panel share
+carries forward. So a fresh question about a different part of the coast doesn't
+get answered in light of yesterday's passage. The sheet and the full panel share
 the same conversations, so a question asked from the sheet is still there if you
 later open the full Mate panel.
 
@@ -1420,62 +1460,63 @@ tool-round count alongside it (`$0.056 · 1 tool round`), which is one extra
 round trip to the model before the answer comes back. So the running cost of
 asking questions is on the screen every time you ask one. Hover over the footer
 (or long-press on a touchscreen) to see which model answered and how many
-tokens the question and answer used between them.
+tokens the question and answer used.
 
-Sometimes part of what Mate sent to the model is served from the provider's
-cache, instead of being read afresh. When that happens, the footer adds the
+Sometimes part of what Mate sends to the model comes from the provider's
+cache instead of being read afresh. When that happens, the footer adds the
 count, for example `$0.012 · 9,820 cached`. Those tokens are billed at a
 fraction of the usual price, so a high figure on a follow-up question is a good
-sign. Nothing is shown when none were cached. Follow-up questions in one
+sign. Nothing is shown when none are cached. Follow-up questions in one
 conversation stay with the same provider, which is what lets the cache be
 reused.
 
 ## How long Mate keeps looking
 
 Mate can make a lot of lookups for one question. A passage with several legs
-needs places, routes, wind and tides for each, and Mate keeps going for as long
-as it's finding something new. It stops looking in one of these cases:
+needs places, routes, wind and tides for each, and Mate keeps going as long
+as it finds something new. It stops looking in one of these cases:
 
 - **Nothing new:** If two rounds in a row bring nothing it hasn't already asked
   for, or only lookups that failed, Mate has run out of ideas. It stops looking
   and answers with what it has.
-- **Too many rounds:** After 30 rounds of lookups it answers with what it has,
+- **Too many rounds:** After 30 rounds of lookups, it answers with what it has,
   however well they were going.
-- **Too long:** After 10 minutes of lookups it answers with what it has.
+- **Too long:** After 10 minutes of lookups, it answers with what it has.
 
 Whichever it is, Mate gets its own 2 minutes to write the answer. That time
 doesn't come out of the 10 minutes, so a long search never leaves Mate with no
 time to say what it found. If Mate has already started writing its answer when
-the 10 minutes run out, it carries on and finishes within those 2 minutes
-rather than starting again. When Mate has been told to wrap up like this, it says
-what it couldn't check. Stopping a question with the stop button ends it at once.
+the 10 minutes run out, it carries on and finishes within those 2 minutes rather
+than starting again. When Mate has been told to wrap up like this, it says what
+it couldn't check. Stopping a question with the stop button ends it at once.
 
 ### When Mate doesn't answer
 
 If Mate runs out of time before it can write an answer, or something goes wrong,
 your question stays in the conversation with a plain line beneath it. For
-example: "Mate stopped before answering: it ran out of time after 11 rounds."
-It stays there when you close the conversation and open it again. The error
-behind it is in **Run details**, under the line. A question you stopped yourself shows "You stopped Mate before it
-answered."
+example: "Mate stopped before answering: it ran out of time after 11 rounds." It
+stays there when you close and reopen the conversation. The error behind it is
+in **Run details**, under the line. A question you stopped yourself shows "You
+stopped Mate before it answered."
 
 ### Run details
 
 Under every answer, and under a line like that, **Run details** shows what Mate
-did. For a question that got no answer it also gives the error. For each round it gives when the round started, how long the model took to
-reply, the tokens used, the cost, and whether the round found anything new.
-Under each round are the lookups it made, how long each took and how big the
-answer was. A place search also says whether the answer was already in memory
-or had to be looked up. Each round says what it was: lookups, a draft sent back for
-correction, the answer, the final answer, or cut off by time. A draft that was
-sent back shows its text under that round, with the check that stopped it, so you
-can read what Mate wrote before it was withdrawn. Details saved before this was
-kept show the round without the text. The top of the details says how the run ended
-and what limits it was given.
+did. For a question with no answer, it also shows the error. For each round, it
+gives when the round started, how long the model took to reply, the tokens used,
+the cost, and whether the round found anything new. Under each round are the
+lookups it made, how long each took and how big the answer was. A place search
+also says whether the answer was already in memory or had to be looked up. Each
+round says what it was: lookups, a draft sent back for correction, the answer,
+the final answer, or cut off by time. A draft sent back shows its text under
+that round, along with the check that stopped it, so you can read what Mate
+wrote before it was withdrawn. Details saved before this was kept show the round
+without the text. The top of the details says how the run ended and what limits
+it was given.
 
-Helmcentral keeps the details of an answer for a week, unless you've rated the
-answer, when they stay as long as the rating does. The details of a question
-that got no answer are kept for 30 days.
+Helmcentral keeps an answer's details for a week, unless you've rated it.
+Then they stay as long as the rating does. Helmcentral keeps the details of a
+question with no answer for 30 days.
 
 To have Helmcentral also write a line to its log for every round of every run,
 turn on **Verbose run log** in Settings → Mate. It's meant for working out why
@@ -1484,7 +1525,7 @@ writes why to the log, whatever this is set to.
 
 ## Rating an answer
 
-Under each answer Mate gives you in the chat there's a thumbs-up and a
+Under each answer Mate gives you in the chat, there's a thumbs-up and a
 thumbs-down. Tap one when an answer was right or wrong. A short note field opens
 beneath it, asking what was good or what was wrong, and Save note keeps what you
 typed. Tap the thumb you chose again to take the rating back, or the other thumb
@@ -1497,7 +1538,7 @@ what Mate got right and must keep getting right.
   the rating stays with the answer. Reopen the conversation later, and a rated
   answer still shows its thumb and note, which you can change or take back.
 - **Older answers:** Older answers you never rated aren't offered for rating,
-  and one more than seven days old can't be newly rated. That way a rating
+  and one more than seven days old can't be newly rated. That way, a rating
   always reflects how the answer looked when you asked.
 
 Alongside each answer, Helmcentral keeps three things. It keeps which lookups
@@ -1507,16 +1548,16 @@ working from. The lookups of
 answers you rated are kept. For answers you never rated, they're cleared after
 seven days.
 
-Rating an answer doesn't change how Mate behaves today. The ratings are kept on
-the boat so that a later improvement to Mate can be checked against answers you
-judged good and poor. Nothing changes in how Mate works without you approving
-it.
+Rating an answer doesn't change how Mate behaves today. The ratings stay on
+the boat so a later improvement to Mate can be checked against answers you
+judged good and poor. Nothing changes in how Mate works without your
+approval.
 
 ## What it is not
 
 It's not a navigational authority. It reasons from the forecast and tide
 providers you've configured and from what it can find about a place by name. It
-states its assumptions about shelter and exposure, for example "I am assuming
+states its assumptions about shelter and exposure, for example, "I am assuming
 Blue Pearl Bay is open to the north-west, correct me if not." Check that
 assumption against your own chart before you act on it. Weather models and tide
 predictions are both approximations before a chat model summarises them.
@@ -1526,11 +1567,12 @@ off, it says so plainly rather than pretending to work.
 
 It can look things up, explain how Helmcentral works, watch readings for a few
 minutes and report back. It can also propose changes to the maintenance
-schedule, the inventory, your alarms and the boat's details, which you apply or dismiss. It
-can't start anything on the boat, change any other setting or steer. Nothing it proposes takes effect without your tap, whether you typed the
+schedule, the inventory, your alarms and the boat's details, which you apply or
+dismiss. It can't start anything on the boat, change any other setting or steer.
+Nothing it proposes takes effect without your tap, whether you typed the
 question or said it.
 
-A proposal card is applied by tapping it, never by speaking.
+Apply a proposal card by tapping it, never by speaking.
 
 ## When it can't run, or can't listen
 
