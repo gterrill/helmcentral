@@ -107,12 +107,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   elsewhere with no depth saved, it says the depth is unknown instead of telling
   you to check a chart. If the sounder has been silent for two minutes, the
   clearance line says **No depth** rather than using the last figure it heard.
-- **Paying out the Catenary Method's Pay Out figure now reads Scope OK.** The
-  badge used to compare your rode with the exact recommendation, so a
-  recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m read
-  Scope Low. It now judges your rode against the Pay Out figure the Catenary
-  Method shows. A rode shorter than that figure reads Scope Low or Scope
-  Insufficient as before.
+- **Paying out the Catenary Method's Pay Out figure now reads "Enough rode".**
+  The rode badge used to compare your rode with the exact recommendation, so a
+  recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m still
+  said you were short. It now judges your rode against the Pay Out figure
+  shown on the tab you have open. A rode shorter than that figure reads, for
+  example, "Short by 5 m".
 
 ## [0.62.0] - 2026-11-07
 
