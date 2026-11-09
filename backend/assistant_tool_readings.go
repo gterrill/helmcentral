@@ -24,7 +24,8 @@ const (
 	rulePlannedStay = ruleForecastHorizon + " Use its lat and lon for get_wind_forecast and get_tides."
 
 	ruleTides = "These are predicted, not observed: weather and air pressure move the real tide. Heights are metres on the provider's tide-table datum, " +
-		"which is not charted depth. The result's reading names the station and how far it is from the place asked about."
+		"which is not charted depth. The result's height_datum says what they are measured from, and when it is mean_sea_level its datum_note applies: say so, " +
+		"never give such a height as a depth or as a height above chart datum. The result's reading names the station and how far it is from the place asked about."
 
 	ruleShelter = "This is an estimate from charted shoreline, not a survey. It cannot see wind bending round headlands, gusts down valleys " +
 		"or swell wrapping round a point, so say it is an estimate. Local knowledge may add what the chart can't show (swell wrapping round a point, gusts down valleys, holding) " +
@@ -78,7 +79,25 @@ var passageLimitsSentence = fmt.Sprintf("Marginal is worked out as %.0f%% of no-
 // readingTides depends on which station answered and how far it is.
 func readingTides(st assistantStationInfo, timeBasis string) string {
 	return fmt.Sprintf("The station is %s, %.1f nm from the place asked about, bearing %03d°T, so times and heights at the place can differ. "+
-		"Times are local to the station (%s).", st.Name, st.DistanceNm, st.BearingDeg, timeBasis)
+		"Times are local to the station (%s).", st.Name, floatOrZero(st.DistanceNm), intOrZero(st.BearingDeg), timeBasis)
+}
+
+// readingTidesFor is readingTides for a resolved tide: a modelled tide is for
+// the place itself, so no station or distance is named.
+func readingTidesFor(st assistantResolvedTideStation) string {
+	if st.followsPos {
+		return fmt.Sprintf("The tide is modelled for the place asked about, not taken from a station. Times are local to the place (%s).", st.timeBasis)
+	}
+	return readingTides(st.info, st.timeBasis)
+}
+
+// tideDatumNoteFor is the note a result carries when its heights are not from
+// chart datum, and empty when they are.
+func tideDatumNoteFor(datum string) string {
+	if datum == tideDatumMeanSeaLevel {
+		return tideDatumNote
+	}
+	return ""
 }
 
 // readingShelter depends on how old the coastline is.
@@ -176,4 +195,18 @@ func readingAnchorageFeatures(prohibited []string, truncated bool, cachedAt time
 	}
 	parts = append(parts, "Anything not listed is UNKNOWN, not absent.")
 	return strings.Join(parts, " ")
+}
+
+func floatOrZero(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func intOrZero(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

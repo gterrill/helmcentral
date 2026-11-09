@@ -29,6 +29,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   circle, the part the boat hasn't crossed since the drop is shaded, and the part
   it has crossed is clear, so you can see how much of the circle the depth
   estimate can speak for.
+- **Tides now work anywhere there's sea, with nothing to set up.** Until you
+  choose a tide provider, tides come from a worldwide model that follows the
+  boat's position (the anchor's, while an anchor watch is set, so the figures
+  stay put as the boat swings), so a boat in the Mediterranean or the Caribbean gets a tide
+  on the Depth & Tide tile and the forecast. The model's heights are measured
+  from mean sea level, not chart datum, so they're often negative and they
+  include surge and air pressure. Wherever heights show, they say "from mean sea
+  level", and Mate says so when it quotes them. Anchor Watch can't work out the
+  depth at chart datum from them, so Save depth explains why instead of saving a
+  wrong figure. The tide line, the low-water clearance and the rode at high
+  water still work, because they only use how far the water rises and falls. If
+  you've already chosen the Australian or US provider, nothing changes. If you
+  want published predictions on chart datum, choose that provider in Settings
+  under Plugins. The new plugin file, `open-meteo.wasm`, comes in the plugin
+  bundle, so re-fetch the bundle as in the [install guide](docs/how-to/install.md)
+  and restart. Until you do, the tide section says the tide plugin isn't installed.
+- **A tide below chart datum now shows.** A minus tide from a NOAA station, such as
+  -0.6 ft, used to be blanked on the Depth & Tide tile and treated as no reading
+  elsewhere. It shows everywhere now, and Save depth uses it. Only a tide with no
+  reading at all is left blank.
 
 ### Changed
 

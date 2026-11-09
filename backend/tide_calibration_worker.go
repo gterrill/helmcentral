@@ -245,7 +245,7 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 		return nil, err
 	}
 	e := &tideCalFitEntry{setAtMs: setAtMs, lat: watch.Lat, lon: watch.Lon, stationName: chart.Station.Name}
-	if e.stationIsPoint = tideCalStationIsPoint(chart.Station); e.stationIsPoint {
+	if e.stationIsPoint = chart.PositionBased; e.stationIsPoint {
 		// A position has no station: no name, no distance.
 		e.stationName = ""
 	} else if lat, lon := chart.Station.Lat, chart.Station.Lon; lat != 0 || lon != 0 {

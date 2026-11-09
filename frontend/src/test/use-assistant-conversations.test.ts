@@ -7,7 +7,7 @@ import { passageDecisionSaved } from '@/lib/passage-decisions-api'
 // ADR 0093: conversation list + thread state for the assistant panel. The
 // wire shape is snake_case (Conversation/Message); the hook maps it to the
 // camelCase fields the rest of the frontend expects, the way
-// use-tide-chart.ts / use-weather-forecast.ts do it.
+// use-configured-tide-chart.ts / use-weather-forecast.ts do it.
 
 const conversationApi = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 'c1',

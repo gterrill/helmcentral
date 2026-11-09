@@ -220,7 +220,7 @@ func TestTideToday_ReportsAZeroMetreLowWithoutBeingOverwritten(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if payload.LowTideHeightFt != 0 {
+	if payload.LowTideHeightFt == nil || *payload.LowTideHeightFt != 0 {
 		t.Fatalf("expected the real 0.0 m low to be reported as 0, got %v", payload.LowTideHeightFt)
 	}
 	// RFC3339 (the wire format) only carries second precision, so compare at
@@ -272,8 +272,8 @@ func TestTideToday_ReportsSentinelWhenNoFutureLowExists(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if payload.LowTideHeightFt != -1 {
-		t.Fatalf("expected the -1 sentinel when no future low exists, got %v", payload.LowTideHeightFt)
+	if payload.LowTideHeightFt != nil {
+		t.Fatalf("expected null when no future low exists, got %v", *payload.LowTideHeightFt)
 	}
 }
 

@@ -280,7 +280,7 @@ type assistantToolDeps struct {
 	overnight func(now time.Time) (overnightResult, string)
 	// tileTide is the tide the Depth and Tide tile shows: the configured
 	// station's /api/tide-today body (ADR 0229).
-	tileTide func(ctx context.Context, now time.Time) (tideTodayResponse, error)
+	tileTide func(ctx context.Context, state vesselStateData, now time.Time) (tideTodayResponse, error)
 	// calibrateLowWater lays the local tide calibration (ADR 0274) on the
 	// low-water check. nil is no calibration, so the check is the station's.
 	calibrateLowWater func(watch anchorWatchData, active bool) lowWaterCalibrator
@@ -382,13 +382,13 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		anchorSettings:             anchorSettingsFromSettingsFile(settingsPath),
 		vesselView:                 func() (vesselView, error) { return loadVesselView(settingsPath) },
 		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
-		tileTide: func(ctx context.Context, now time.Time) (tideTodayResponse, error) {
+		tileTide: func(ctx context.Context, state vesselStateData, now time.Time) (tideTodayResponse, error) {
 			// The tide service takes no context, so a cancelled turn is
 			// caught before the read and not during it.
 			if err := ctx.Err(); err != nil {
 				return tideTodayResponse{}, err
 			}
-			resp, _, err := buildTideToday(settingsPath, now)
+			resp, _, err := buildTideToday(settingsPath, now, func() tideBoatFix { return tideBoatFixOf(state, nil) })
 			return resp, err
 		},
 		calibrateLowWater: liveLowWaterCalibrator,
@@ -814,14 +814,16 @@ func trimTailToFit[T any](rows []T, over int) []T {
 }
 
 type assistantStationInfo struct {
-	Name       string  `json:"name"`
-	ID         string  `json:"id"`
-	State      string  `json:"state,omitempty"`
-	Timezone   string  `json:"timezone,omitempty"`
-	Lat        float64 `json:"lat"`
-	Lon        float64 `json:"lon"`
-	DistanceNm float64 `json:"distance_nm"`
-	BearingDeg int     `json:"bearing_deg"`
+	Name     string  `json:"name"`
+	ID       string  `json:"id"`
+	State    string  `json:"state,omitempty"`
+	Timezone string  `json:"timezone,omitempty"`
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	// DistanceNm and BearingDeg are left out for a modelled tide: the point is the
+	// place, so no station is a distance or bearing from it.
+	DistanceNm *float64 `json:"distance_nm,omitempty"`
+	BearingDeg *int     `json:"bearing_deg,omitempty"`
 }
 
 func roundTo2(value float64) float64 { return math.Round(value*100) / 100 }
@@ -836,8 +838,12 @@ func (d assistantToolDeps) resolveTideStation(lat, lon float64) (assistantResolv
 		return assistantResolvedTideStation{}, err
 	}
 
+	followsPos := tideProviderPositionBased(provider)
 	station, ok := nearestStation(provider, lat, lon)
 	if !ok {
+		if followsPos {
+			return assistantResolvedTideStation{}, fmt.Errorf("tide provider %q: there is no usable position to take the tide from", providerID)
+		}
 		return assistantResolvedTideStation{}, fmt.Errorf("tide provider %q has no stations", providerID)
 	}
 
@@ -866,21 +872,29 @@ func (d assistantToolDeps) resolveTideStation(lat, lon float64) (assistantResolv
 		loc, timeBasis = z.Loc, z.Name
 	}
 
+	info := assistantStationInfo{
+		Name:     station.Name,
+		ID:       station.StationID,
+		State:    station.State,
+		Timezone: station.Timezone,
+		Lat:      station.Lat,
+		Lon:      station.Lon,
+	}
+	// The point of a position-based tide is the place, rounded for the cache:
+	// there is no station to be a distance or bearing from it.
+	if !followsPos {
+		nm := roundTo1(haversineMeters(lat, lon, station.Lat, station.Lon) / metersPerNauticalMile)
+		brg := int(math.Round(bearingDeg(lat, lon, station.Lat, station.Lon)))
+		info.DistanceNm, info.BearingDeg = &nm, &brg
+	}
 	return assistantResolvedTideStation{
 		providerID: providerID,
 		chart:      res,
 		loc:        loc,
 		timeBasis:  timeBasis,
-		info: assistantStationInfo{
-			Name:       station.Name,
-			ID:         station.StationID,
-			State:      station.State,
-			Timezone:   station.Timezone,
-			Lat:        station.Lat,
-			Lon:        station.Lon,
-			DistanceNm: roundTo1(haversineMeters(lat, lon, station.Lat, station.Lon) / metersPerNauticalMile),
-			BearingDeg: int(math.Round(bearingDeg(lat, lon, station.Lat, station.Lon))),
-		},
+		datum:      tideProviderHeightDatum(provider),
+		followsPos: followsPos,
+		info:       info,
 	}, nil
 }
 

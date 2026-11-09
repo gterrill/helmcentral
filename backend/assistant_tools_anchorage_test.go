@@ -157,7 +157,7 @@ func TestAnchorageDetails_AssessesTheStay(t *testing.T) {
 	if len(tide.Extremes) != 3 || tide.RangeM == nil || *tide.RangeM != 2.4 || tide.RangeNote != anchorageTideRangeInWindow {
 		t.Errorf("tide extremes %d, range %v, note %q", len(tide.Extremes), tide.RangeM, tide.RangeNote)
 	}
-	if tide.Station.Name != "Shute Harbour" || tide.Station.DistanceNm <= 0 {
+	if tide.Station.Name != "Shute Harbour" || tide.Station.DistanceNm == nil || *tide.Station.DistanceNm <= 0 {
 		t.Errorf("station = %+v", tide.Station)
 	}
 

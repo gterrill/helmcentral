@@ -2,6 +2,7 @@ import type { HullType } from '@/config/app-config'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
+import { CHART_DATUM, normaliseTideDatum, type TideCapture, type TideDatum } from '@/lib/tide-datum'
 import { feetToMeters, toDisplayDistance } from '@/lib/units'
 
 /**
@@ -26,6 +27,10 @@ export interface PlanningDepthDatum {
    * reading accompanied it (e.g. no tide station configured yet, or the
    * station hadn't reported). Never the tide right now. */
   tideHeightFt: number | null
+  /** What tideHeightFt is measured from (ADR 0273). Left out, it is the datum of
+   * the tide it is compared with. Set, it must match that tide's: a rise taken
+   * between a height from mean sea level and one from chart datum is no rise. */
+  tideDatum?: TideDatum
 }
 
 export interface RodePlanInput {
@@ -63,24 +68,31 @@ export interface RodePlan {
 }
 
 /**
- * useTideToday NEVER returns null — it returns defaultTide with -1
- * sentinels for "the station hasn't reported yet", so `tide === null` never
- * fires and the real check is `current_tide_height_ft >= 0`. This is the one
- * place that check lives; every caller that needs "the tide right now, or
- * nothing" (the two anchor-drop capture sites and the planner's Depth input,
- * plus this module's own live-datum construction below) shares it rather
- * than re-deriving the sentinel rule.
+ * The tide height right now, or null when there is none. useTideToday never
+ * returns null: before the station has reported it returns defaultTide, whose
+ * heights are null. Any number is a reading, a minus tide below chart datum
+ * included.
  */
 export function tideHeightFtOrNull(tide: TideToday | null): number | null {
-  if (tide === null) return null
-  return tide.current_tide_height_ft >= 0 ? tide.current_tide_height_ft : null
+  return tide?.current_tide_height_ft ?? null
+}
+
+/**
+ * The tide right now as one value to record with a depth: its height and the
+ * datum it is measured from, or null when there is no reading. One value, so a
+ * datum is never recorded without a height.
+ */
+export function tideCapture(tide: TideToday | null): TideCapture | null {
+  const ft = tideHeightFtOrNull(tide)
+  return ft === null || tide === null ? null : { ft, datum: normaliseTideDatum(tide.height_datum) }
 }
 
 export interface PlanningDepthInputs {
   isAnchored: boolean
   liveDepthM: number | null
   planningDepthM: number | null
-  planningTideHeightFt: number | null
+  /** The tide stamped on the recorded planning depth, or null when none was. */
+  planningTide: TideCapture | null
   tide: TideToday | null
 }
 
@@ -99,10 +111,20 @@ export interface PlanningDepthInputs {
 export function resolvePlanningDepth(inputs: PlanningDepthInputs): PlanningDepthDatum | null {
   if (inputs.isAnchored) {
     if (inputs.planningDepthM === null) return null
-    return { depthM: inputs.planningDepthM, tideHeightFt: inputs.planningTideHeightFt }
+    return { depthM: inputs.planningDepthM, tideHeightFt: inputs.planningTide?.ft ?? null, tideDatum: inputs.planningTide?.datum ?? CHART_DATUM }
   }
   if (inputs.liveDepthM === null) return null
   return { depthM: inputs.liveDepthM, tideHeightFt: tideHeightFtOrNull(inputs.tide) }
+}
+
+/**
+ * True when the depth was saved against a tide from one datum and the tide now
+ * on screen is from another. No rise can be worked out then, and that is a
+ * different thing from having no tide station.
+ */
+export function planningTideDatumDiffers(datum: PlanningDepthDatum | null, tide: TideToday | null): boolean {
+  if (datum === null || tide === null || datum.tideHeightFt === null || datum.tideDatum === undefined) return false
+  return datum.tideDatum !== normaliseTideDatum(tide.height_datum)
 }
 
 /**
@@ -123,8 +145,9 @@ export function resolvePlanningDepth(inputs: PlanningDepthInputs): PlanningDepth
  */
 export function maxExpectedDepthM(datum: PlanningDepthDatum | null, tide: TideToday | null): number | null {
   if (datum === null || tide === null) return null
-  if (datum.tideHeightFt === null || datum.tideHeightFt < 0) return null
-  if (tide.high_tide_height_ft < 0) return null
+  const tideDatum = normaliseTideDatum(tide.height_datum)
+  if (datum.tideHeightFt === null || tide.high_tide_height_ft === null) return null
+  if (datum.tideDatum !== undefined && datum.tideDatum !== tideDatum) return null
 
   const riseFt = tide.high_tide_height_ft - datum.tideHeightFt
   const riseM = feetToMeters(Math.max(0, riseFt))

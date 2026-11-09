@@ -75,8 +75,12 @@ type assistantTidalCandidate struct {
 }
 
 type assistantTidalDepartureResult struct {
-	Station        assistantStationInfo      `json:"station"`
-	Provider       string                    `json:"provider"`
+	Station  assistantStationInfo `json:"station"`
+	Provider string               `json:"provider"`
+	// HeightDatum and Modelled are as for get_tides: what the tide's heights are
+	// measured from, and whether it is modelled for the place with no station.
+	HeightDatum    string                    `json:"height_datum"`
+	Modelled       bool                      `json:"modelled"`
 	TimeBasis      string                    `json:"time_basis"`
 	CourseDeg      float64                   `json:"course_deg"`
 	FloodSetDeg    float64                   `json:"flood_set_deg"`
@@ -277,6 +281,8 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 	result := assistantTidalDepartureResult{
 		Station:        st.info,
 		Provider:       st.providerID,
+		HeightDatum:    st.datum,
+		Modelled:       st.followsPos,
 		TimeBasis:      st.timeBasis,
 		CourseDeg:      course,
 		FloodSetDeg:    floodSet,

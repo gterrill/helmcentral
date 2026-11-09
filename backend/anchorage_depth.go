@@ -283,6 +283,9 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 	tideErr := ""
 	if tide.section.Error != "" {
 		tideErr = "the tide section failed (" + tide.section.Error + ")"
+	} else if corrects, why := tideCorrectsChartDepth(tide.datum); !corrects {
+		// These checks add the tide's heights to a depth at chart datum.
+		tideErr = why
 	} else if low, high = tideStayWaters(tide.sorted, stay); low == nil {
 		tideErr = "the tide gives no water height inside the stay"
 	}

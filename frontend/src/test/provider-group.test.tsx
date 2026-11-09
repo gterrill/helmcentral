@@ -11,15 +11,48 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 // silently pre-selected a hardcoded provider before settings ever loaded,
 // and would then get written back to settings.yaml on the next unrelated
 // save even though nothing was actually configured. Unlike weather/wave/
-// forecast-warnings (which do have an "active if unset" default), tide must
-// show NO provider active until either the server reports one configured,
-// or the operator picks one themselves.
+// forecast-warnings, tide now has an "active if unset" default too (ADR 0273):
+// the global open-meteo plugin. It is only the card shown active; nothing is
+// written back to settings until the operator picks a provider.
 describe('ProviderGroup tide provider default', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('shows no tide provider active when none is configured', async () => {
+  it('shows the default tide provider active when none is configured', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ui: {} }) })),
+    )
+
+    render(
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <ProviderGroup
+            loading={false}
+            error={null}
+            kind="tide plugins"
+            emptyMessage="No plugin installed."
+            type="tide"
+            providers={[
+              { id: 'bom', name: 'Bureau of Meteorology', description: 'Australian tide data' },
+              { id: 'noaa', name: 'NOAA', description: 'US tide data' },
+              { id: 'open-meteo', name: 'Open-Meteo', description: 'Global modelled tide', default: true },
+            ]}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Bureau of Meteorology')).toBeTruthy()
+    })
+
+    expect(screen.getAllByText('Active')).toHaveLength(1)
+    expect(screen.getAllByText('Inactive')).toHaveLength(2)
+  })
+
+  it('shows no tide provider active when the default plugin is not installed', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true, json: async () => ({ ui: {} }) })),
@@ -48,7 +81,6 @@ describe('ProviderGroup tide provider default', () => {
     })
 
     expect(screen.queryByText('Active')).toBeNull()
-    expect(screen.getAllByText('Inactive')).toHaveLength(2)
   })
 
   it('defaults weather to open-meteo active when unconfigured', async () => {

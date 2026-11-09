@@ -57,7 +57,8 @@ anchor:
 
 ui:
   # Provider names must match a plugin installed under <state dir>/plugins/.
-  # The released plugin bundle ships: tides bom/noaa, weather
+  # The released plugin bundle ships: tides open-meteo (the default when this is
+  # left blank; follows the boat, heights from mean sea level)/bom/noaa, weather
   # open-meteo/weatherkit, waves open-meteo-marine, poi osm-overpass/
   # google-places, warnings bom/nws.
   tide_provider: noaa

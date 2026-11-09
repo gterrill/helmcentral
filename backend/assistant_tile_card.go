@@ -152,7 +152,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 		zoneNote = "Tide times in display are boat time (" + zoneLabel + "); the snapshot keeps the tide service's own strings."
 	}
 
-	tide, terr := d.tileTide(ctx, now)
+	tide, terr := d.tileTide(ctx, state, now)
 	if terr != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return nil, nil, nil, "", cerr
@@ -165,21 +165,28 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 		if system != "imperial" {
 			unit, perFt, decimals = "m", 1/metersToFeet, 2
 		}
-		// The tile draws a dash for any current height under zero, so a
-		// negative height is a missing reading here too.
-		if tide.CurrentTideHeightFt >= 0 {
-			display["tide_now"] = fmt.Sprintf("%s %s %s", fixed(tide.CurrentTideHeightFt*perFt, decimals), unit, strings.ToLower(tide.TideDirection))
+		// Heights from mean sea level are said to be, so a card never reads
+		// as a depth or a chart-datum height.
+		msl := tide.HeightDatum == tideDatumMeanSeaLevel
+		from := ""
+		if msl {
+			from = " from mean sea level"
+		}
+		// A height of any size is a reading, a minus tide included. Only null
+		// is none.
+		if tide.CurrentTideHeightFt != nil && finite(*tide.CurrentTideHeightFt) {
+			display["tide_now"] = fmt.Sprintf("%s %s%s %s", fixed(*tide.CurrentTideHeightFt*perFt, decimals), unit, from, strings.ToLower(tide.TideDirection))
 		} else {
 			missing = append(missing, "tide: no current tide height")
 		}
 		for _, e := range []struct {
 			key, when string
-			ft        float64
+			ft        *float64
 		}{
 			{"next_high", tide.HighTideTime, tide.HighTideHeightFt},
 			{"next_low", tide.LowTideTime, tide.LowTideHeightFt},
 		} {
-			if e.when == "" || !usableTideHeightFt(e.ft) {
+			if e.when == "" || e.ft == nil || !finite(*e.ft) {
 				missing = append(missing, "tide: no "+strings.TrimPrefix(e.key, "next_")+" tide to come")
 				continue
 			}
@@ -191,7 +198,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 			if loc != nil {
 				when = boatClock(at, loc) + " " + boat.qualify(boat.Label(at))
 			}
-			display[e.key] = fmt.Sprintf("%s %s at %s", fixed(e.ft*perFt, decimals), unit, when)
+			display[e.key] = fmt.Sprintf("%s %s%s at %s", fixed(*e.ft*perFt, decimals), unit, from, when)
 		}
 	}
 
@@ -214,10 +221,14 @@ func tideUnavailableSentence(err error) string {
 	var te *tideTodayError
 	if errors.As(err, &te) {
 		switch te.reason {
-		case tideNotSetUp:
+		case tideNoStation:
 			return "no tide station is set up"
+		case tideNoPlugin:
+			return "the tide plugin isn't installed: update the plugin bundle, or choose a tide provider in Settings"
 		case tideUnreachable:
 			return "the tide service could not be reached"
+		case tideNoPosition:
+			return "the tide follows the boat's position and the boat has no position fix"
 		case tideSettingsUnreadable:
 			return "the tide settings could not be read"
 		}

@@ -8,7 +8,7 @@ the plugin into the right folder and restart.
 
 | Category | Directory | Override | Bundled plugins |
 | --- | --- | --- | --- |
-| Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `bom` (Australia), `noaa` (US) |
+| Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `open-meteo` (worldwide, keyless, **default**, follows the boat), `bom` (Australia), `noaa` (US) |
 | Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
 | Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**, mirror set from the plugin's own settings, see below), `google-places` (needs a key, partial category coverage) |
@@ -91,24 +91,32 @@ Open the gear icon on a provider's card in Settings to reach settings like
 this. Leaving one blank reverts to the plugin's own default. A change takes
 effect on the plugin's very next call.
 
-## Why tides have no default
+## The default tide provider
 
-Weather and waves default to Open-Meteo and Open-Meteo Marine. Both services
-are free, keyless and worldwide, so a new installation gets a working forecast
-dashboard without any configuration.
+Weather, waves and tides all default to an Open-Meteo plugin. Each service is
+free, keyless and worldwide, so a new installation gets a working dashboard
+without any configuration.
 
-Tides have no equivalent global service. Tide predictions depend on physical
-water-level stations rather than a global weather model, so there is no free
-API with worldwide coverage to default to. `bom` covers Australia and `noaa`
-covers the United States, with nothing beyond those.
+The tide plugin, `open-meteo`, is a model of sea level, not a tide table. It
+follows the boat's position, so there is no station to choose, and it works
+anywhere there's sea. Three things are different from `bom` and `noaa`:
 
-Helmcentral ships no coordinate-based fallback. A global model standing in for
-real station observations would show tide times that look authoritative but
-are wrong for local waters, which is worse than an honest gap.
+- **Heights are from mean sea level.** They're often negative, and they aren't
+  heights above chart datum. Helmcentral labels them "from mean sea level"
+  wherever they show.
+- **They include more than the tide.** Surge and air pressure move the modelled
+  sea level too, so it can drift from a published table.
+- **Some things need chart datum.** The depth at chart datum that Anchor Watch
+  saves to a place can't be worked out from these heights, and Anchor Watch says
+  so. The low-water clearance, the tide line and the rode needed at high water
+  only use how far the water rises and falls, so they work as before.
 
-Pick `ui.tide_provider` in Settings for your region. Until you do, the
-forecast page's tide section shows an explicit error naming what's missing
-rather than a guessed prediction.
+Where `bom` or `noaa` has a station near you, that station is the better
+source. Choose it in Settings under Plugins, then pick your station. An install
+that already chose a provider keeps it.
+
+If you remove the `open-meteo` plugin and haven't chosen another, the tide
+section says the tide plugin is missing and names `plugins/tides`.
 
 ## Building your own
 

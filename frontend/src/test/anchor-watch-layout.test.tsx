@@ -88,7 +88,7 @@ const baseProps = {
   onWindBandChange: () => undefined,
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null,
-  planningTideHeightFt: null,
+  planningTide: null,
   onPlanningDepthChange: () => Promise.resolve(),
   bowOffsetApplied: true,
   bowOffsetM: 2,

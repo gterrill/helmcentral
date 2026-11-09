@@ -15,25 +15,32 @@ func TestComputeDatumDepth(t *testing.T) {
 	cases := []struct {
 		name                        string
 		depthM, tideFt, transducerM float64
+		noTide                      bool
 		source                      string
 		wantM                       float64
 		wantReasonContains          string
 	}{
 		{name: "sounder adds transducer, takes off tide", depthM: 4.0, tideFt: 3.2808399, transducerM: 0.5, source: planningDepthFromSounder, wantM: 3.5},
 		{name: "zero tide is a known tide", depthM: 4.0, tideFt: 0, transducerM: 0.5, source: planningDepthFromSounder, wantM: 4.5},
+		{name: "exactly minus one foot is a real reading", depthM: 4.0, tideFt: -1, transducerM: 0.5, source: planningDepthFromSounder, wantM: 4.0 + 0.5 + 1/metersToFeet},
+		{name: "a NOAA minus tide below chart datum is a real reading", depthM: 4.0, tideFt: -0.6, transducerM: 0.5, source: planningDepthFromSounder, wantM: 4.0 + 0.5 + 0.6/metersToFeet},
 		{name: "negative tide is a real reading", depthM: 4.0, tideFt: -0.4, transducerM: 0.5, source: planningDepthFromSounder, wantM: 4.0 + 0.5 + 0.4/metersToFeet},
 		{name: "operator figure takes no transducer offset", depthM: 4.0, tideFt: 3.2808399, transducerM: 0, source: planningDepthFromOperator, wantM: 3.0},
 		{name: "operator figure ignores a set transducer", depthM: 4.0, tideFt: 0, transducerM: 0.5, source: planningDepthFromOperator, wantM: 4.0},
 		{name: "sounder, transducer unset", depthM: 4.0, tideFt: 2, transducerM: 0, source: planningDepthFromSounder, wantReasonContains: "Settings → Anchor Watch"},
 		{name: "no planning depth", depthM: -1, tideFt: 2, transducerM: 0.5, source: planningDepthFromSounder, wantReasonContains: "depth was recorded"},
 		{name: "legacy zero planning depth", depthM: 0, tideFt: 2, transducerM: 0.5, source: "", wantReasonContains: "depth was recorded"},
-		{name: "tide unknown", depthM: 4.0, tideFt: -1, transducerM: 0.5, source: planningDepthFromSounder, wantReasonContains: "tide"},
+		{name: "tide unknown", depthM: 4.0, noTide: true, transducerM: 0.5, source: planningDepthFromSounder, wantReasonContains: "tide"},
 		{name: "source unknown is not guessed", depthM: 4.0, tideFt: 2, transducerM: 0.5, source: "", wantReasonContains: "sounder or typed"},
-		{name: "sounder wins over transducer when depth missing", depthM: -1, tideFt: -1, transducerM: 0, source: planningDepthFromSounder, wantReasonContains: "depth was recorded"},
+		{name: "sounder wins over transducer when depth missing", depthM: -1, noTide: true, transducerM: 0, source: planningDepthFromSounder, wantReasonContains: "depth was recorded"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reason := computeDatumDepth(tc.depthM, tc.tideFt, tc.source, tc.transducerM)
+			var tide *float64
+			if !tc.noTide {
+				tide = &tc.tideFt
+			}
+			got, reason := computeDatumDepth(tc.depthM, tide, tc.source, tc.transducerM, "")
 			if tc.wantReasonContains != "" {
 				if got != nil || !strings.Contains(reason, tc.wantReasonContains) {
 					t.Fatalf("want no value and reason containing %q, got %v %q", tc.wantReasonContains, got, reason)

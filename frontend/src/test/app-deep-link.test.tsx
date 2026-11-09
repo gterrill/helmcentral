@@ -132,8 +132,8 @@ vi.mock('@/hooks/use-tide-settings', () => ({
   }),
 }))
 
-vi.mock('@/hooks/use-tide-chart', () => ({
-  useTideChart: () => ({
+vi.mock('@/hooks/use-configured-tide-chart', () => ({
+  useConfiguredTideChart: () => ({
     chart: null,
     loading: false,
     error: null,

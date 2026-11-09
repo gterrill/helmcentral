@@ -578,7 +578,7 @@ func TestLowWaterEndpointCarriesTheCalibration(t *testing.T) {
 	good := func() (vesselStateData, error) {
 		return vesselStateData{Status: "anchored", Depth: 2.9, DepthLastUpdateAge: 2, DraftM: 1.2}, nil
 	}
-	tide := func(now time.Time) (tideTodayResponse, error) {
+	tide := func(_ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		r := *lwTide(nil)
 		r.Datetime = now.Add(-5 * time.Minute).Format(time.RFC3339)
 		r.LowTideTime = now.Add(time.Hour).Format(time.RFC3339)
@@ -909,9 +909,6 @@ func TestChartsAreToldApartByContent(t *testing.T) {
 // A station that is a position, as a position-based provider names it, is a
 // source like any other, and has no station to name or measure to.
 func TestAPositionIsASourceAndHasNoStation(t *testing.T) {
-	if !tideCalStationIsPoint(tideStation{StationID: "-23.20,150.95"}) || tideCalStationIsPoint(tideStation{StationID: "mi"}) || tideCalStationIsPoint(tideStation{StationID: "540000"}) {
-		t.Error("a position and a catalog station were not told apart")
-	}
 	resetTideCalState(t)
 	store := newTestPassageStore(t)
 	curve := loadKeppelCurve(t)
@@ -923,6 +920,7 @@ func TestAPositionIsASourceAndHasNoStation(t *testing.T) {
 	chart := tideCalChart{
 		tideChartResult: tideChartResult{Station: tideStation{StationID: "-23.20,150.95", Name: "Boat's position"}, Extremes: []tideExtremePoint(curve)},
 		Source:          "open-meteo/-23.20,150.95",
+		PositionBased:   true,
 	}
 	e, err := tideCalFitNow(keppelWatch(), store, chart)
 	if err != nil || e.fit == nil {

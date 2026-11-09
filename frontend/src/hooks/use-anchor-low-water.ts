@@ -54,6 +54,8 @@ const REASONS: readonly LowWaterClearanceReason[] = [
   'no_depth',
   'no_draft',
   'no_tide_station',
+  'no_position',
+  'no_plugin',
   'tide_unreachable',
   'no_tide',
   'tide_stale',

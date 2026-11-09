@@ -125,10 +125,17 @@ type anchorageTideSection struct {
 }
 
 type AnchorageTideBody struct {
-	Reading   string               `json:"reading"`
-	Station   assistantStationInfo `json:"station"`
-	Provider  string               `json:"provider"`
-	TimeBasis string               `json:"time_basis"`
+	Reading  string               `json:"reading"`
+	Station  assistantStationInfo `json:"station"`
+	Provider string               `json:"provider"`
+	// HeightDatum and DatumNote are as for get_tides: what every height here is
+	// measured from, and for mean_sea_level what that means for quoting them.
+	HeightDatum string `json:"height_datum"`
+	DatumNote   string `json:"datum_note,omitempty"`
+	// Modelled is true when the tide is worked out for the place itself, not
+	// read from a station: Station then names the point and has no distance.
+	Modelled  bool   `json:"modelled"`
+	TimeBasis string `json:"time_basis"`
 	// AtArrival is nil, with HeightNote saying why, when arrival is outside
 	// the predicted extremes: the height is never read off the nearest one.
 	AtArrival  *anchorageTideHeight `json:"at_arrival"`
@@ -149,6 +156,9 @@ type anchorageTideOut struct {
 	// endsAt is when the prediction ends, set only when that is before the
 	// stay does. The note and the depth checks both read it.
 	endsAt time.Time
+	// datum is what the sorted heights are measured from. The depth checks add
+	// them to a depth at chart datum, so they need chart datum.
+	datum string
 }
 
 type anchorageMooringSize struct {
@@ -603,7 +613,8 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 		}
 	}
 	body := &AnchorageTideBody{
-		Reading: readingTides(st.info, st.timeBasis), Station: st.info, Provider: st.providerID, TimeBasis: st.timeBasis,
+		Reading: readingTidesFor(st), Station: st.info, Provider: st.providerID, TimeBasis: st.timeBasis,
+		HeightDatum: st.datum, DatumNote: tideDatumNoteFor(st.datum), Modelled: st.followsPos,
 	}
 
 	var endsAt time.Time
@@ -665,7 +676,7 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 	} else {
 		body.RangeNote = "Fewer than two high or low waters are predicted around the stay, so there is no range."
 	}
-	return anchorageTideOut{section: anchorageTideSection{AnchorageTideBody: body}, sorted: sorted, endsAt: endsAt}
+	return anchorageTideOut{section: anchorageTideSection{AnchorageTideBody: body}, sorted: sorted, endsAt: endsAt, datum: st.datum}
 }
 
 // ── features ─────────────────────────────────────────────────────────────

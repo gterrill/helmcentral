@@ -93,16 +93,16 @@ Stuck, or not sure it suits your boat? Ask in
   16.4+ (so iPadOS or iOS 16.4+ on a helm tablet). Older devices aren't
   supported. Check a wall panel with `/display-probe.html` before you mount it;
   see [Set up a wall display](docs/how-to/set-up-a-wall-display.md).
-- **A tide provider for your region.** Tides have no default, because the
-  available providers use regional station networks rather than a global model.
-  Pick one in Settings. Until you do, Helmcentral tells you which setting is
-  missing.
+- **Nothing to choose for tides.** They come from a worldwide model that follows
+  the boat, with heights from mean sea level rather than chart datum. Where a
+  station network covers you (Australia or the US), pick that provider in
+  Settings for published predictions on chart datum.
 
 ## What's optional
 
 The core of Helmcentral (dashboard, alarms, anchor watch, forecast, passages,
-inventory, maintenance, documents) needs only SignalK, the tide provider you pick,
-and an internet connection for the forecast. Everything below is extra, and the
+inventory, maintenance, documents) needs only SignalK and an internet
+connection for the forecast and tides. Everything below is extra, and the
 rest of Helmcentral works without any of it.
 
 | Optional | What it adds | What it needs |
@@ -271,7 +271,7 @@ no need to rebuild Helmcentral.
 
 | Category | Bundled plugins |
 | --- | --- |
-| Tides | `bom` (Australia), `noaa` (US) |
+| Tides | `open-meteo` (worldwide, no key, follows the boat, default), `bom` (Australia), `noaa` (US) |
 | Weather | `open-meteo` (worldwide, no key, default), `weatherkit` (Apple, needs keys) |
 | Waves | `open-meteo-marine` (default) |
 | Forecast warnings | `bom` (Australia, default), `nws` (US) |

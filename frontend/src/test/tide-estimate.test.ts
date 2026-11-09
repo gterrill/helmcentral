@@ -47,8 +47,8 @@ describe('nextTideExtreme', () => {
 // <tomorrow>", a fake "High · <now>"). Both helpers now drop a missing
 // extreme instead of passing it through.
 describe('tideExtremesByTime / nextTideExtreme — missing extremes are dropped', () => {
-  it('drops an extreme whose height is the -1 sentinel', () => {
-    const tide: TideToday = { ...baseTide, low_tide_height_ft: -1, low_tide_time: '' }
+  it('drops an extreme whose height is null', () => {
+    const tide: TideToday = { ...baseTide, low_tide_height_ft: null, low_tide_time: '' }
     const extremes = tideExtremesByTime(tide)
     expect(extremes).toHaveLength(1)
     expect(extremes[0].isHigh).toBe(true)
@@ -68,24 +68,25 @@ describe('tideExtremesByTime / nextTideExtreme — missing extremes are dropped'
     expect(extremes[0].isHigh).toBe(false)
   })
 
-  it('keeps a real extreme below -1 ft rather than dropping it (not the sentinel)', () => {
+  it('keeps a real extreme below -1 ft, and exactly -1 ft, rather than dropping them', () => {
     const tide: TideToday = { ...baseTide, low_tide_height_ft: -1.4 }
     const extremes = tideExtremesByTime(tide)
     expect(extremes).toHaveLength(2)
+    expect(tideExtremesByTime({ ...baseTide, low_tide_height_ft: -1 })).toHaveLength(2)
   })
 
   it('returns an empty list when both extremes are missing', () => {
-    const tide: TideToday = { ...baseTide, high_tide_time: '', high_tide_height_ft: -1, low_tide_time: '', low_tide_height_ft: -1 }
+    const tide: TideToday = { ...baseTide, high_tide_time: '', high_tide_height_ft: null, low_tide_time: '', low_tide_height_ft: null }
     expect(tideExtremesByTime(tide)).toHaveLength(0)
   })
 
   it('nextTideExtreme is null when both extremes are missing', () => {
-    const tide: TideToday = { ...baseTide, high_tide_time: '', high_tide_height_ft: -1, low_tide_time: '', low_tide_height_ft: -1 }
+    const tide: TideToday = { ...baseTide, high_tide_time: '', high_tide_height_ft: null, low_tide_time: '', low_tide_height_ft: null }
     expect(nextTideExtreme(tide)).toBeNull()
   })
 
   it('nextTideExtreme is the one real extreme when the other is missing', () => {
-    const tide: TideToday = { ...baseTide, low_tide_time: '', low_tide_height_ft: -1 }
+    const tide: TideToday = { ...baseTide, low_tide_time: '', low_tide_height_ft: null }
     expect(nextTideExtreme(tide)?.isHigh).toBe(true)
   })
 })
@@ -106,16 +107,16 @@ describe('estimateDepthAtNextTurn', () => {
     expect(estimateDepthAtNextTurn(null, baseTide)).toBeNull()
   })
 
-  it('returns null when the current tide height is the -1 sentinel', () => {
-    expect(estimateDepthAtNextTurn(4, { ...baseTide, current_tide_height_ft: -1 })).toBeNull()
+  it('returns null when the current tide height is null', () => {
+    expect(estimateDepthAtNextTurn(4, { ...baseTide, current_tide_height_ft: null })).toBeNull()
   })
 
-  it('returns null when the falling target (low) height is the -1 sentinel', () => {
-    expect(estimateDepthAtNextTurn(4, { ...baseTide, low_tide_height_ft: -1 })).toBeNull()
+  it('returns null when the falling target (low) height is null', () => {
+    expect(estimateDepthAtNextTurn(4, { ...baseTide, low_tide_height_ft: null })).toBeNull()
   })
 
-  it('returns null when the rising target (high) height is the -1 sentinel', () => {
-    const rising: TideToday = { ...baseTide, tide_direction: 'Rising', high_tide_height_ft: -1 }
+  it('returns null when the rising target (high) height is null', () => {
+    const rising: TideToday = { ...baseTide, tide_direction: 'Rising', high_tide_height_ft: null }
     expect(estimateDepthAtNextTurn(4, rising)).toBeNull()
   })
 

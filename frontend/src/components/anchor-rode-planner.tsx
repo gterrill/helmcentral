@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { TideToday } from '@/hooks/use-tide-today'
+import type { TideCapture } from '@/lib/tide-datum'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import {
@@ -12,8 +13,10 @@ import {
   deployedScopeBadge,
   maxExpectedDepthM,
   planningFigureM,
+  planningTideDatumDiffers,
   rawDepthFromPlanningFigureM,
   resolveLoaM,
+  tideCapture,
   resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
@@ -62,13 +65,14 @@ export interface AnchorRodePlannerProps {
   // reading. Both null when nothing has been recorded (legacy record, or no
   // reading was available at the moment of drop).
   planningDepthM: number | null
-  planningTideHeightFt: number | null
+  /** The tide stamped on the planning depth (ADR 0273), or null when none was. */
+  planningTide: TideCapture | null
   // Routes to a PATCH when anchored, to React state when not (App.tsx
   // decides which). Returns a promise so persistPlanningDepth below can
   // revert the local depth input on a failed PATCH, the same way handlePersist
   // does for rode/sea state/seabed — the non-anchored, React-state path can't
   // actually reject, but the contract is uniform either way.
-  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
+  onPlanningDepthChange: (depthM: number, tide: TideCapture | null) => Promise<void>
   windSpeedApparentKts: number | null
   maxGustKts: Record<GustWindow, number | null>
   tide: TideToday | null
@@ -108,7 +112,7 @@ export function AnchorRodePlanner({
   seabedType,
   depthM,
   planningDepthM,
-  planningTideHeightFt,
+  planningTide,
   onPlanningDepthChange,
   windSpeedApparentKts,
   maxGustKts,
@@ -180,9 +184,9 @@ export function AnchorRodePlanner({
     isAnchored,
     liveDepthM: depthM,
     planningDepthM,
-    planningTideHeightFt,
+    planningTide,
     tide,
-  }), [isAnchored, depthM, planningDepthM, planningTideHeightFt, tide])
+  }), [isAnchored, depthM, planningDepthM, planningTide, tide])
 
   // The dropdown starts on whichever band the live seed (1h gust, else
   // apparent) falls in, and stays there until the operator picks another —
@@ -398,9 +402,9 @@ export function AnchorRodePlanner({
 
   // The actual write, shared by the debounced call below and by a Retry
   // action's immediate re-attempt — mirrors commitRodeAndConditions above.
-  const commitPlanningDepth = useCallback((nextDepthM: number, tideHeightFt: number | null) => {
+  const commitPlanningDepth = useCallback((nextDepthM: number, tide: TideCapture | null) => {
     const attempt = ++depthAttemptRef.current
-    onPlanningDepthChange(nextDepthM, tideHeightFt).catch((error: unknown) => {
+    onPlanningDepthChange(nextDepthM, tide).catch((error: unknown) => {
       // A newer attempt has already started (whatever its own outcome) —
       // the operator has typed over this rejected figure since, so it
       // reverts nothing and offers no Retry of its own; the newer
@@ -421,7 +425,7 @@ export function AnchorRodePlanner({
                 // between this toast appearing and Retry actually being
                 // clicked.
                 if (attempt !== depthAttemptRef.current) return
-                commitPlanningDepth(nextDepthM, tideHeightFt)
+                commitPlanningDepth(nextDepthM, tide)
               },
             }
           : undefined,
@@ -433,7 +437,7 @@ export function AnchorRodePlanner({
     // Stamped with the tide right now, at the moment it was entered —
     // useTideToday never returns null, so tideHeightFtOrNull is the one
     // place the -1-sentinel-to-null rule lives (ADR 0063).
-    const tideHeightFt = tideHeightFtOrNull(tide)
+    const stamp = tideCapture(tide)
     if (isInactive) {
       // No PATCH target when inactive — the planning depth lives in
       // App.tsx's React state (a pre-drop what-if), a valid destination
@@ -441,12 +445,12 @@ export function AnchorRodePlanner({
       // debouncing a write that has nothing to 404 against. It cannot
       // reject (a plain setState), but commitPlanningDepth's contract is
       // uniform either way.
-      commitPlanningDepth(nextDepthM, tideHeightFt)
+      commitPlanningDepth(nextDepthM, stamp)
       return
     }
     if (depthDebounceRef.current) clearTimeout(depthDebounceRef.current)
     depthDebounceRef.current = setTimeout(() => {
-      commitPlanningDepth(nextDepthM, tideHeightFt)
+      commitPlanningDepth(nextDepthM, stamp)
     }, 800)
   }, [isInactive, commitPlanningDepth, tide])
 
@@ -498,7 +502,11 @@ export function AnchorRodePlanner({
       const riseApplies = maxExpectedDepthM({ depthM: 0, tideHeightFt: tideHeightFtOrNull(tide) }, tide) !== null
       return riseApplies ? 'Type it from the bow roller, at high tide' : 'Type it from the bow roller'
     }
-    return isDepthTideCorrected ? 'From the bow roller, at high tide' : 'From the bow roller, no tide station'
+    if (isDepthTideCorrected) return 'From the bow roller, at high tide'
+    // The depth was saved against another tide source, so the rise to high
+    // water can't be worked out. That isn't a missing station.
+    if (planningTideDatumDiffers(resolvedDepth, tide)) return 'From the bow roller. Saved on a different tide source, so no rise is added'
+    return 'From the bow roller, no tide station'
   })()
 
   if (!open) {

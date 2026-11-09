@@ -32,7 +32,7 @@ describe('useAnchorWatch mutation failures', () => {
         },
       } as Response)
       await act(async () => {
-        if (operation === 'Drop') await result.current.setAnchorHere(-22, 150, { planningDepthM: null, planningTideHeightFt: null })
+        if (operation === 'Drop') await result.current.setAnchorHere(-22, 150, { planningDepthM: null, planningTide: null })
         else await result.current.clearAnchor()
       })
       expect(toast.error).toHaveBeenLastCalledWith(title, {
@@ -74,7 +74,7 @@ describe('useAnchorWatch bow-offset request shape', () => {
     fetchMock.mockClear()
 
     await act(async () => {
-      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: 5, planningTideHeightFt: 2 })
+      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: 5, planningTide: { ft: 2, datum: 'chart_datum' } })
     })
 
     expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({
@@ -104,7 +104,7 @@ describe('useAnchorWatch planning-depth capture', () => {
     fetchMock.mockClear()
 
     await act(async () => {
-      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: 6.4, planningTideHeightFt: 1.8 })
+      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: 6.4, planningTide: { ft: 1.8, datum: 'chart_datum' } })
     })
 
     const [, init] = fetchMock.mock.calls[0]
@@ -113,20 +113,20 @@ describe('useAnchorWatch planning-depth capture', () => {
     expect(body.planning_tide_height_ft).toBe(1.8)
   })
 
-  it('setAnchorHere posts -1 sentinels when there is no reading, rather than omitting the fields', async () => {
+  it('setAnchorHere posts -1 for no depth and null for no tide, rather than omitting the fields', async () => {
     const fetchMock = vi.mocked(fetch)
     const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
     await act(async () => {
-      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: null, planningTideHeightFt: null })
+      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: null, planningTide: null })
     })
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(init!.body as string)
     expect(body.planning_depth_m).toBe(-1)
-    expect(body.planning_tide_height_ft).toBe(-1)
+    expect(body.planning_tide_height_ft).toBeNull()
   })
 })
 
@@ -150,7 +150,7 @@ describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDept
     ['updateRadius', (r) => r.updateRadius(40)],
     ['adjustAnchor', (r) => r.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })],
     ['updateRodeAndConditions', (r) => r.updateRodeAndConditions(30, 'calm', 'sand')],
-    ['updatePlanningDepth', (r) => r.updatePlanningDepth(5, 1)],
+    ['updatePlanningDepth', (r) => r.updatePlanningDepth(5, { ft: 1, datum: 'chart_datum' })],
   ]
 
   it.each(calls)('%s throws on a non-OK response and leaves state unchanged', async (_name, call) => {
@@ -217,7 +217,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
     fetchMock.mockClear()
 
     await act(async () => {
-      await result.current.updatePlanningDepth(8, 2.1)
+      await result.current.updatePlanningDepth(8, { ft: 2.1, datum: 'chart_datum' })
     })
 
     expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({ method: 'PATCH' }))
@@ -231,11 +231,11 @@ describe('useAnchorWatch updatePlanningDepth', () => {
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {
-      await result.current.updatePlanningDepth(8, 2.1)
+      await result.current.updatePlanningDepth(8, { ft: 2.1, datum: 'chart_datum' })
     })
 
     expect(result.current.planningDepthM).toBe(8)
-    expect(result.current.planningTideHeightFt).toBe(2.1)
+    expect(result.current.planningTide?.ft).toBe(2.1)
   })
 })
 
@@ -558,7 +558,7 @@ describe('useAnchorWatch loaded', () => {
     expect(result.current.loaded).toBe(false)
 
     await act(async () => {
-      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: null, planningTideHeightFt: null })
+      await result.current.setAnchorHere(-21.1, 149.2, { planningDepthM: null, planningTide: null })
     })
 
     expect(result.current.loaded).toBe(true)
@@ -568,7 +568,7 @@ describe('useAnchorWatch loaded', () => {
     ['updateRadius', (r: ReturnType<typeof useAnchorWatch>) => r.updateRadius(25)],
     ['adjustAnchor', (r: ReturnType<typeof useAnchorWatch>) => r.adjustAnchor({ lat: -21.2, lon: 149.3, radiusMeters: 40 })],
     ['updateRodeAndConditions', (r: ReturnType<typeof useAnchorWatch>) => r.updateRodeAndConditions(30, 'calm', 'sand')],
-    ['updatePlanningDepth', (r: ReturnType<typeof useAnchorWatch>) => r.updatePlanningDepth(5, 1)],
+    ['updatePlanningDepth', (r: ReturnType<typeof useAnchorWatch>) => r.updatePlanningDepth(5, { ft: 1, datum: 'chart_datum' })],
     ['clearAnchor', (r: ReturnType<typeof useAnchorWatch>) => r.clearAnchor()],
   ])('flips loaded true on a successful %s while the initial GET is still in flight', async (_name, call) => {
     const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {

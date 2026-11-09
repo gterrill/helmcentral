@@ -533,7 +533,7 @@ func TestSetAnchorWatch_StoresThePlanningDepthAndTide(t *testing.T) {
 }
 
 // Test 10: with neither field sent and no prior watch, planning_depth_m and
-// planning_tide_height_ft default to the -1 "not captured" sentinel, never 0
+// planning_tide_height_ft default to "not captured" (-1 for the depth, null for the tide), never 0
 // - 0 is a valid depth/tide reading on its own and must not be confused
 // with "nothing was recorded".
 func TestSetAnchorWatch_PlanningDepthDefaultsToSentinelWhenOmitted(t *testing.T) {
@@ -550,8 +550,8 @@ func TestSetAnchorWatch_PlanningDepthDefaultsToSentinelWhenOmitted(t *testing.T)
 	if got, _ := resp["planning_depth_m"].(float64); got != -1 {
 		t.Fatalf("expected planning_depth_m -1 when omitted, got %v", resp["planning_depth_m"])
 	}
-	if got, _ := resp["planning_tide_height_ft"].(float64); got != -1 {
-		t.Fatalf("expected planning_tide_height_ft -1 when omitted, got %v", resp["planning_tide_height_ft"])
+	if v, present := resp["planning_tide_height_ft"]; !present || v != nil {
+		t.Fatalf("expected planning_tide_height_ft null when omitted, got %v", v)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestPatchAnchorWatch_CarriesPlanningDepthThrough(t *testing.T) {
 	if reloaded.PlanningDepthM != 6.2 {
 		t.Fatalf("expected reloaded PlanningDepthM 6.2, got %v", reloaded.PlanningDepthM)
 	}
-	if reloaded.PlanningTideHeightFt != 1.4 {
+	if reloaded.PlanningTideHeightFt == nil || *reloaded.PlanningTideHeightFt != 1.4 {
 		t.Fatalf("expected reloaded PlanningTideHeightFt 1.4, got %v", reloaded.PlanningTideHeightFt)
 	}
 }
@@ -654,7 +654,7 @@ func TestPatchAnchorWatch_UpdatesPlanningDepthAndPersists(t *testing.T) {
 	if reloaded.PlanningDepthM != 8.5 {
 		t.Fatalf("expected reloaded PlanningDepthM 8.5, got %v", reloaded.PlanningDepthM)
 	}
-	if reloaded.PlanningTideHeightFt != 0.9 {
+	if reloaded.PlanningTideHeightFt == nil || *reloaded.PlanningTideHeightFt != 0.9 {
 		t.Fatalf("expected reloaded PlanningTideHeightFt 0.9, got %v", reloaded.PlanningTideHeightFt)
 	}
 
@@ -665,8 +665,8 @@ func TestPatchAnchorWatch_UpdatesPlanningDepthAndPersists(t *testing.T) {
 	if got, _ := clearResp["planning_depth_m"].(float64); got != -1 {
 		t.Fatalf("expected planning_depth_m -1 after clearing, got %v", clearResp["planning_depth_m"])
 	}
-	if got, _ := clearResp["planning_tide_height_ft"].(float64); got != -1 {
-		t.Fatalf("expected planning_tide_height_ft -1 after clearing (a half-cleared pair is not a thing), got %v", clearResp["planning_tide_height_ft"])
+	if v, present := clearResp["planning_tide_height_ft"]; !present || v != nil {
+		t.Fatalf("expected planning_tide_height_ft null after clearing (a half-cleared pair is not a thing), got %v", v)
 	}
 }
 
@@ -1011,7 +1011,7 @@ func TestPatchAnchorWatch_RejectsTideStampWithoutItsDepth(t *testing.T) {
 	if depth != 8.5 {
 		t.Fatalf("expected planning_depth_m to remain 8.5 after the rejected patch, got %v", depth)
 	}
-	if tide != 0.9 {
+	if tide == nil || *tide != 0.9 {
 		t.Fatalf("expected planning_tide_height_ft to remain 0.9 after the rejected patch, got %v", tide)
 	}
 }
@@ -1129,7 +1129,7 @@ func TestPatchAnchorWatch_ConcurrentPatchesDoNotLoseUpdates(t *testing.T) {
 		if final.PlanningDepthM != planningDepth {
 			t.Fatalf("trial %d: expected planning_depth_m %v to land, got %v (lost update)", trial, planningDepth, final.PlanningDepthM)
 		}
-		if final.PlanningTideHeightFt != planningTide {
+		if final.PlanningTideHeightFt == nil || *final.PlanningTideHeightFt != planningTide {
 			t.Fatalf("trial %d: expected planning_tide_height_ft %v to land, got %v (lost update)", trial, planningTide, final.PlanningTideHeightFt)
 		}
 	}

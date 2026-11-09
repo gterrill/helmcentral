@@ -104,41 +104,49 @@ type weatherHourlyCloudData struct {
 
 type tideTodayData struct {
 	Datetime            time.Time
-	CurrentTideHeightFt float64
+	CurrentTideHeightFt *float64
 	TideDirection       string
 	HighTideTime        time.Time
-	HighTideHeightFt    float64
+	HighTideHeightFt    *float64
 	LowTideTime         time.Time
-	LowTideHeightFt     float64
+	LowTideHeightFt     *float64
 	TidalPhase          string
 	DoubleHighToday     bool
 	DoubleLowToday      bool
 }
 
+// tideTodayResponse carries a height in feet, or null when there is none: no
+// upcoming high or low of that kind, or no current reading. Null is the whole
+// signal. A height of any size, negative included, is a reading, on either
+// datum.
 type tideTodayResponse struct {
-	Datetime            string  `json:"datetime"`
-	CurrentTideHeightFt float64 `json:"current_tide_height_ft"`
-	TideDirection       string  `json:"tide_direction"`
-	HighTideTime        string  `json:"high_tide_time"`
-	HighTideHeightFt    float64 `json:"high_tide_height_ft"`
-	LowTideTime         string  `json:"low_tide_time"`
-	LowTideHeightFt     float64 `json:"low_tide_height_ft"`
-	StationName         string  `json:"station_name,omitempty"`
-	Provider            string  `json:"provider,omitempty"`
-	TidalPhase          string  `json:"tidal_phase,omitempty"`
-	DoubleHighToday     bool    `json:"double_high_today,omitempty"`
-	DoubleLowToday      bool    `json:"double_low_today,omitempty"`
+	Datetime            string   `json:"datetime"`
+	CurrentTideHeightFt *float64 `json:"current_tide_height_ft"`
+	TideDirection       string   `json:"tide_direction"`
+	HighTideTime        string   `json:"high_tide_time"`
+	HighTideHeightFt    *float64 `json:"high_tide_height_ft"`
+	LowTideTime         string   `json:"low_tide_time"`
+	LowTideHeightFt     *float64 `json:"low_tide_height_ft"`
+	StationName         string   `json:"station_name,omitempty"`
+	Provider            string   `json:"provider,omitempty"`
+	// HeightDatum is what every height above is measured from: chart_datum, or
+	// mean_sea_level for a source whose heights are not a depth correction.
+	HeightDatum     string `json:"height_datum,omitempty"`
+	TidalPhase      string `json:"tidal_phase,omitempty"`
+	DoubleHighToday bool   `json:"double_high_today,omitempty"`
+	DoubleLowToday  bool   `json:"double_low_today,omitempty"`
 }
 
 type tideTodayETagData struct {
-	CurrentTideHeightFt float64   `json:"current_tide_height_ft"`
+	CurrentTideHeightFt *float64  `json:"current_tide_height_ft"`
 	TideDirection       string    `json:"tide_direction"`
 	HighTideTime        time.Time `json:"high_tide_time"`
-	HighTideHeightFt    float64   `json:"high_tide_height_ft"`
+	HighTideHeightFt    *float64  `json:"high_tide_height_ft"`
 	LowTideTime         time.Time `json:"low_tide_time"`
-	LowTideHeightFt     float64   `json:"low_tide_height_ft"`
+	LowTideHeightFt     *float64  `json:"low_tide_height_ft"`
 	StationName         string    `json:"station_name,omitempty"`
 	Provider            string    `json:"provider,omitempty"`
+	HeightDatum         string    `json:"height_datum,omitempty"`
 	TidalPhase          string    `json:"tidal_phase,omitempty"`
 	DoubleHighToday     bool      `json:"double_high_today,omitempty"`
 	DoubleLowToday      bool      `json:"double_low_today,omitempty"`
@@ -256,15 +264,11 @@ func respondJSONWithETag(c echo.Context, status int, etag string, payload any) e
 	return c.JSON(status, payload)
 }
 
-// noTideExtremeHeightFt is what tideToday reports for HighTideHeightFt or
-// LowTideHeightFt when no future extreme of that kind turns up in the
-// provider's list - the same -1 "not published" convention useTideToday
-// (frontend) and this file's other weather sentinels already use. A bare 0
-// used to stand in for this and was indistinguishable from a real 0.0 m
-// extreme, both to the code that filled it in (see the found-flags below)
-// and to a frontend reader that took height 0 as "there is a low, at chart
-// datum, right now" and warned about it.
-const noTideExtremeHeightFt = -1.0
+// tideFeet is a height in metres as feet, for the tide response.
+func tideFeet(heightM float64) *float64 {
+	ft := heightM * metersToFeet
+	return &ft
+}
 
 // tideTodayError is a failure to build the tide, with the HTTP status the
 // handler reports it under. Mate's tile cards read the tide through the same
@@ -281,19 +285,26 @@ type tideFailure string
 
 const (
 	tideSettingsUnreadable tideFailure = "settings"
-	tideNotSetUp           tideFailure = "not_set_up"
-	tideUnreachable        tideFailure = "unreachable"
+	// tideNoPlugin: the tide plugin in force (the default, or the chosen one) is
+	// not installed in plugins/tides.
+	tideNoPlugin tideFailure = "no_plugin"
+	// tideNoStation: a station provider with no station chosen yet.
+	tideNoStation   tideFailure = "no_station"
+	tideUnreachable tideFailure = "unreachable"
+	// tideNoPosition: the provider follows the boat's position and the boat has
+	// no usable one.
+	tideNoPosition tideFailure = "no_position"
 )
 
 func (e *tideTodayError) Error() string { return e.message }
 
 func tideToday(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	response, etagData, err := buildTideToday(settingsPath, time.Now().UTC())
+	response, etagData, err := buildTideToday(settingsPath, time.Now().UTC(), tideBoatFixNow)
 	if err != nil {
 		var te *tideTodayError
 		if errors.As(err, &te) {
-			return c.JSON(te.status, map[string]string{"error": te.message})
+			return c.JSON(te.status, map[string]string{"error": te.message, "reason": string(te.reason)})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -304,64 +315,70 @@ func tideToday(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
-// configuredTideChart reads the tide chart of the provider and station set in
-// Settings, with the provider's id and the provider itself. Every failure is a
-// *tideTodayError that says which part of the setup is wrong.
-func configuredTideChart(settingsPath string) (tideChartResult, string, tideProvider, error) {
+// configuredTideChart is the tide the operator's settings call for: the
+// provider in force (blank means the default), and then its saved station, or
+// for a provider that follows a position the point the boat() fix gives. It is
+// the one place that choice is made, for the tile, the chart, low-water and Mate.
+func configuredTideChart(uiMap map[string]any, boat func() tideBoatFix) (tideProvider, string, tideChartResult, *tideTodayError) {
+	provider, configuredProvider, resolveErr := resolveTideProviderFromUI(uiMap)
+	if resolveErr != nil {
+		return nil, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPlugin, message: resolveErr.Error()}
+	}
+
+	var result tideChartResult
+	var fetchErr error
+	if tideProviderPositionBased(provider) {
+		// No station to choose: the tide is at the point the caller's fix gives.
+		fix := boat()
+		if fix.Err != nil {
+			return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPosition, message: fmt.Sprintf("tide provider %q follows the boat's position, and there is none to use: %v", configuredProvider, fix.Err)}
+		}
+		result, fetchErr = fetchBoatTide(provider, fix)
+	} else {
+		configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
+		if configuredStation == "" {
+			return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoStation, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
+		}
+		result, fetchErr = provider.FetchTideChart(configuredStation)
+	}
+	if fetchErr != nil {
+		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
+		return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
+	}
+	return provider, configuredProvider, result, nil
+}
+
+// buildTideToday is the /api/tide-today body at now: the configured provider
+// and station, the current height and the next high and low. boat gives the
+// fix to use, and is called only for a provider that follows the boat.
+func buildTideToday(settingsPath string, now time.Time, boat func() tideBoatFix) (tideTodayResponse, tideTodayETagData, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
-		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusInternalServerError, reason: tideSettingsUnreadable, message: fmt.Sprintf("failed to read settings: %v", err)}
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusInternalServerError, reason: tideSettingsUnreadable, message: fmt.Sprintf("failed to read settings: %v", err)}
 	}
 
 	uiMap, _ := settings["ui"].(map[string]any)
 
-	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
-	if configuredProvider == "" {
-		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"}
+	provider, configuredProvider, result, terr := configuredTideChart(uiMap, boat)
+	if terr != nil {
+		return tideTodayResponse{}, tideTodayETagData{}, terr
 	}
-
-	provider, ok := getTideProvider(configuredProvider)
-	if !ok {
-		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)}
-	}
-
-	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
-	if configuredStation == "" {
-		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
-	}
-
-	result, fetchErr := provider.FetchTideChart(configuredStation)
-	if fetchErr != nil {
-		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
-		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
-	}
-	return result, configuredProvider, provider, nil
-}
-
-// buildTideToday is the /api/tide-today body at now: the configured provider
-// and station, the current height and the next high and low.
-func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tideTodayETagData, error) {
-	result, configuredProvider, _, err := configuredTideChart(settingsPath)
-	if err != nil {
-		return tideTodayResponse{}, tideTodayETagData{}, err
-	}
+	heightDatum := tideProviderHeightDatum(provider)
 
 	tidalPhase := classifyTidalPhase(result.Extremes, now)
 	doubleHigh, doubleLow := hasDoubleTide(result.Extremes, result.Station, now)
 	// HighTideTime/LowTideTime start at the zero time.Time, not `now` or some
 	// other invented instant (code-review finding: the old `now`/`now+24h`
 	// defaults survived to the response whenever no future extreme of that
-	// kind existed, alongside the correct -1 height sentinel - an operator
+	// kind existed, alongside a missing height - an operator
 	// reads a time as real regardless of what the height next to it says, so
 	// the frontend showed a fabricated "Low <tomorrow>"/"High · <now>"). The
 	// zero value is never a real extreme time, and IsZero() below turns it
 	// into an empty string in the response rather than formatting it.
 	state := tideTodayData{
 		Datetime:            now,
-		CurrentTideHeightFt: result.CurrentHeightM * metersToFeet,
+		CurrentTideHeightFt: tideFeet(result.CurrentHeightM),
 		TideDirection:       result.Direction,
-		HighTideHeightFt:    noTideExtremeHeightFt,
-		LowTideHeightFt:     noTideExtremeHeightFt,
 		TidalPhase:          tidalPhase,
 		DoubleHighToday:     doubleHigh,
 		DoubleLowToday:      doubleLow,
@@ -370,8 +387,8 @@ func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tide
 	// Explicit found flags, not a `== 0` check on the height: a real 0.0 m
 	// extreme (the tide sitting exactly at chart datum) is valid data, and
 	// treating it as "not found yet" let the *next* extreme in the list
-	// overwrite it. The frontend's -1 sentinel (useTideToday) fills
-	// HighTideHeightFt/LowTideHeightFt above for whichever one never turns up.
+	// overwrite it. A height that never turns up
+	// stays nil, and goes out as null.
 	foundHigh := false
 	foundLow := false
 	for _, extreme := range result.Extremes {
@@ -380,11 +397,11 @@ func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tide
 		}
 		if extreme.High && !foundHigh {
 			state.HighTideTime = extreme.Time
-			state.HighTideHeightFt = extreme.HeightM * metersToFeet
+			state.HighTideHeightFt = tideFeet(extreme.HeightM)
 			foundHigh = true
 		} else if !extreme.High && !foundLow {
 			state.LowTideTime = extreme.Time
-			state.LowTideHeightFt = extreme.HeightM * metersToFeet
+			state.LowTideHeightFt = tideFeet(extreme.HeightM)
 			foundLow = true
 		}
 		if foundHigh && foundLow {
@@ -403,8 +420,8 @@ func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tide
 	if !state.LowTideTime.IsZero() {
 		lowTideTimeStr = state.LowTideTime.Format(time.RFC3339)
 	}
-	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: highTideTimeStr, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: lowTideTimeStr, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
-	etagData := tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
+	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: highTideTimeStr, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: lowTideTimeStr, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, HeightDatum: heightDatum, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
+	etagData := tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, HeightDatum: heightDatum, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
 	return response, etagData, nil
 }
 

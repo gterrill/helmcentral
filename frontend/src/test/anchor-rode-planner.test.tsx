@@ -34,7 +34,7 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
     // depthM once the Depth cell wires up (ADR 0063) — same value as depthM
     // so every pre-existing expected figure in this file survives unchanged.
     planningDepthM: 5,
-    planningTideHeightFt: 2,
+    planningTide: { ft: 2, datum: 'chart_datum' },
     onPlanningDepthChange: vi.fn().mockResolvedValue(undefined),
     windSpeedApparentKts: 12,
     maxGustKts: { '10m': null, '30m': null, '1h': 20, '24h': null },
@@ -96,7 +96,7 @@ const bandedWindKts = resolvePlanningWindBand(
 )!.planKts
 
 const expectedPlanInput: RodePlanInput = {
-  // baseProps() has anchorState: 'set' with planningDepthM: 5, planningTideHeightFt: 2
+  // baseProps() has anchorState: 'set' with planningDepthM: 5, planningTide: { ft: 2, datum: 'chart_datum' }
   // — resolvePlanningDepth (ADR 0063) resolves that to this same datum.
   depth: { depthM: 5, tideHeightFt: 2 },
   isAnchored: true,
@@ -398,7 +398,7 @@ describe('AnchorRodePlanner — reverts local state on a failed save', () => {
     const onPlanningDepthChange = vi.fn()
       .mockRejectedValueOnce(new Error('Connection lost'))
       .mockResolvedValue(undefined)
-    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTideHeightFt: 2, onPlanningDepthChange })
+    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTide: { ft: 2, datum: 'chart_datum' }, onPlanningDepthChange })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     fireEvent.change(screen.getByLabelText(/depth/i), { target: { value: '8' } })
@@ -421,7 +421,7 @@ describe('AnchorRodePlanner — reverts local state on a failed save', () => {
 
   it('reverts the Depth input to the server-resolved figure on a failed PATCH, with Retry', async () => {
     const onPlanningDepthChange = vi.fn().mockRejectedValue(new Error('Connection lost'))
-    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTideHeightFt: 2, onPlanningDepthChange })
+    renderPlanner({ anchorState: 'set', planningDepthM: 5, planningTide: { ft: 2, datum: 'chart_datum' }, onPlanningDepthChange })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     const before = screen.getByLabelText(/depth/i).getAttribute('value')
@@ -895,7 +895,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
   })
 
   it('shows the tide+bow corrected planning figure computed from the recorded planning depth, not the live sounder, while anchored', () => {
-    renderPlanner({ depthM: 99, planningDepthM: 5, planningTideHeightFt: 2 })
+    renderPlanner({ depthM: 99, planningDepthM: 5, planningTide: { ft: 2, datum: 'chart_datum' } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     // datum {depthM: 5, tideHeightFt: 2}, tide (high 5) -> rise 3ft/3.28084,
@@ -906,7 +906,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
   })
 
   it('renders an empty input and names the reason when anchored with nothing recorded — never a live-depth fallback', () => {
-    renderPlanner({ depthM: 42, planningDepthM: null, planningTideHeightFt: null })
+    renderPlanner({ depthM: 42, planningDepthM: null, planningTide: null })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(depthInput().value).toBe('')
@@ -919,7 +919,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
   })
 
   it('asks for the depth when anchored with nothing recorded and no tide station', () => {
-    renderPlanner({ depthM: 42, planningDepthM: null, planningTideHeightFt: null, tide: { ...tide, current_tide_height_ft: -1, high_tide_height_ft: -1 } })
+    renderPlanner({ depthM: 42, planningDepthM: null, planningTide: null, tide: { ...tide, current_tide_height_ft: null, high_tide_height_ft: null } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.getByText('Type it from the bow roller')).toBeInTheDocument()
@@ -938,7 +938,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
   })
 
   it('shows the no-tide-station caption when the datum carries no tide stamp', () => {
-    renderPlanner({ planningDepthM: 5, planningTideHeightFt: null })
+    renderPlanner({ planningDepthM: 5, planningTide: null })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     // No tide stamp on the datum -> maxExpectedDepthM is null -> figure is
@@ -968,7 +968,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
       expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
       const [depthMArg, tideArg] = onPlanningDepthChange.mock.calls[0]
       expect(depthMArg).toBeCloseTo(expectedRawDepthM, 6)
-      expect(tideArg).toBe(2)
+      expect(tideArg).toEqual({ ft: 2, datum: 'chart_datum' })
     })
 
     it('converts a typed feet value to metres under imperial, then inverts to the raw depth before persisting', () => {
@@ -996,7 +996,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
       expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
       const [depthMArg, tideArg] = onPlanningDepthChange.mock.calls[0]
       expect(depthMArg).toBeCloseTo(expectedRawDepthM, 6)
-      expect(tideArg).toBe(2)
+      expect(tideArg).toEqual({ ft: 2, datum: 'chart_datum' })
     })
 
     it('clears both the sea-state and depth debounce timers on unmount, so a stray PATCH cannot fire after Raise', () => {
@@ -1033,7 +1033,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
 
     it('shows the refusal caption when anchored with nothing recorded', () => {
       const onPlanningDepthChange = vi.fn().mockResolvedValue(undefined)
-      renderPlanner({ onPlanningDepthChange, depthM: 42, planningDepthM: null, planningTideHeightFt: null })
+      renderPlanner({ onPlanningDepthChange, depthM: 42, planningDepthM: null, planningTide: null })
       fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
       fireEvent.change(depthInput(), { target: { value: '1' } })

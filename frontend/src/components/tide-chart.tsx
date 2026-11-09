@@ -5,7 +5,7 @@ import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, 
 
 import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
-import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
+import type { TideChart as TideChartData } from '@/lib/tide-chart-map'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { classifyTidePhase } from '@/lib/tide-phase'
 import { formatAxisTime, formatTimeOfDay } from '@/lib/vessel-time'

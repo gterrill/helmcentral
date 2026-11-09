@@ -139,7 +139,7 @@ func TestTides_StationBearingIsTrueFromThePlaceAsked(t *testing.T) {
 			t.Errorf("bearing to %v,%v = %d, want %d", c.lat2, c.lon2, got, c.want)
 		}
 	}
-	got := readingTides(assistantStationInfo{Name: "X", DistanceNm: 3.2, BearingDeg: 5}, "UTC")
+	got := readingTides(assistantStationInfo{Name: "X", DistanceNm: ptr(3.2), BearingDeg: ptr(5)}, "UTC")
 	if !strings.Contains(got, "3.2 nm from the place asked about, bearing 005°T") {
 		t.Errorf("reading: %s", got)
 	}

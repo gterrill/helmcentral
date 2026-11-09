@@ -5,7 +5,7 @@ import { Tile } from '@/components/ui/tile'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { acknowledgeAlarm, useAnchorDragAlarm, type AlarmState, useAisCollisionAlarms } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
-import { tideHeightFtOrNull } from '@/lib/rode-plan'
+import { tideCapture } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { FORECAST_REFRESH_SECONDS, TRAIL_POLL_MS } from '@/config/app-config'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
@@ -154,7 +154,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     if (lat === null || lon === null || gnssCritical) return
     void setAnchorHere(lat, lon, {
       planningDepthM: depthMeters,
-      planningTideHeightFt: tideHeightFtOrNull(tide),
+      planningTide: tideCapture(tide),
     })
   }, [lat, lon, gnssCritical, setAnchorHere, depthMeters, tide])
 

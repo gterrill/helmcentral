@@ -489,6 +489,17 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		}
 	}
 
+	// A provider that follows a position has no station to save. An unchanged
+	// station (left from an earlier provider) is not a new save.
+	if next.UI.TideStationID != "" && next.UI.TideStationID != current.UI.TideStationID {
+		if p, _, perr := resolveTideProviderFromUI(map[string]any{"tide_provider": next.UI.TideProvider}); perr == nil && tideProviderPositionBased(p) {
+			return &settingsValidationError{
+				Field:   "ui.tide_station_id",
+				Message: fmt.Sprintf("tide provider %q follows the boat's position, so it has no station to save", p.ID()),
+			}
+		}
+	}
+
 	if t := next.Anchor.TransducerDepthM; math.IsNaN(t) || t < 0 || t > maxTransducerDepthM {
 		return &settingsValidationError{
 			Field:   "anchor.transducer_depth_m",

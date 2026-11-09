@@ -1,3 +1,4 @@
+import { isMeanSeaLevel } from '@/lib/tide-datum'
 import { Anchor } from 'lucide-react'
 import { memo, useState, type ReactNode } from 'react'
 
@@ -140,9 +141,15 @@ function TideBlock({ card }: { card: AnchorageCard }) {
   const t = card.tide
   return (
     <Block title="Tide" testId="anchorage-tide" error={t.error}>
-      <p className="min-w-0 truncate text-xs text-muted-foreground" title={`${t.station}, ${distanceText(t.distanceNm * METRES_PER_NM, ui.distanceUnits)} away`}>
-        {t.station}, {Number(t.distanceNm.toFixed(1))} nm from the anchorage
-      </p>
+      {t.modelled ? (
+        <p className="min-w-0 truncate text-xs text-muted-foreground" title={t.station}>
+          {t.station}, modelled for the anchorage
+        </p>
+      ) : (
+        <p className="min-w-0 truncate text-xs text-muted-foreground" title={`${t.station}, ${distanceText(t.distanceNm * METRES_PER_NM, ui.distanceUnits)} away`}>
+          {t.station}, {Number(t.distanceNm.toFixed(1))} nm from the anchorage
+        </p>
+      )}
       <p data-testid="anchorage-tide-arrival" className="text-xs tabular-nums text-foreground">
         {t.heightAtArrivalM !== null
           ? `At arrival ${lengthText(t.heightAtArrivalM, ui.distanceUnits)}${t.direction ? `, ${t.direction.toLowerCase()}` : ''}`
@@ -165,7 +172,11 @@ function TideBlock({ card }: { card: AnchorageCard }) {
         {t.rangeM !== null ? `Range ${lengthText(t.rangeM, ui.distanceUnits)}. ` : ''}
         {t.rangeNote}
       </p>
-      <p className="text-xs text-muted-foreground">Predicted on the tide table's datum, not charted depth. Times are local to the anchorage.</p>
+      {isMeanSeaLevel(t.heightDatum) ? (
+        <p data-testid="anchorage-tide-datum" className="text-xs text-muted-foreground">Heights are from mean sea level, not chart datum or charted depth, so they are often negative. Times are local to the anchorage.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">Predicted on the tide table's datum, not charted depth. Times are local to the anchorage.</p>
+      )}
     </Block>
   )
 }
@@ -259,7 +270,7 @@ function DepthBlock({ card }: { card: AnchorageCard }) {
           </li>
         ))}
       </ul>
-      <p className="text-xs text-muted-foreground">Depth is metres at chart datum, from your figure or a saved place, never the map. Tide heights are taken on the same datum.</p>
+      <p className="text-xs text-muted-foreground">Depth is metres at chart datum, from your figure or a saved place, never the map. {isMeanSeaLevel(card.tide.heightDatum) ? 'The tide here is from mean sea level, so no check adds it to a depth at chart datum.' : 'Tide heights are taken on the same datum.'}</p>
     </Block>
   )
 }

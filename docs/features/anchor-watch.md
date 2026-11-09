@@ -299,6 +299,16 @@ Watch. A depth you typed into the rode planner is taken as depth below the
 surface, so it needs no transducer depth, only the tide. A tide below chart datum
 counts as a real reading.
 
+The tide has to be measured from chart datum for this to work. The worldwide
+tide model Helmcentral uses until you choose a provider gives heights from mean
+sea level instead, so it can't tell you the depth at chart datum. The line says
+that, and there's nothing to save. Choose the Australian or US tide provider in
+Settings under Plugins if it covers your waters, and drop the anchor again. The
+rode planner, the tide line and the low-water clearance only use how far the
+water rises and falls, so they work with either. While a watch is set, the
+worldwide model takes its tide for the anchor position, so the figures stay put
+as the boat swings.
+
 The transducer depth is used here only. The rode planner and the low-water
 clearance check don't use it yet.
 
@@ -342,9 +352,11 @@ computes against a reading it heard a while ago. When something is missing, the
 line says what:
 
 - **No tide station:** You haven't set up a tide station, so there's no tide to
-  project the depth with.
+  project the depth with. The worldwide model has no station, so for it this
+  shows when its plugin isn't installed.
 - **Tide unavailable:** A station is set up, but Helmcentral couldn't get a usable
   tide from it, because the tide service couldn't be reached or gave no upcoming low.
+  The worldwide model also reads this way when the boat has no position fix.
 - **Tide forecast out of date:** The low the tide points at has already come and
   gone. The line stays this way until a new tide reading arrives.
 - **No depth:** The depth reading has stopped for more than two minutes, so

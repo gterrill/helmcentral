@@ -3,15 +3,17 @@
 // The compiled .wasm fixtures under backend/testdata/tide_plugins/ are built
 // from the TinyGo sources under backend/testdata/tide_plugins/src/<name>/
 // using the tinygo/tinygo:latest (0.41.1) Docker image. To regenerate all
-// four fixtures, run from the repo root:
+// six fixtures, run from the repo root:
 //
 //	docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 //	  cd backend/testdata/tide_plugins/src &&
 //	  go mod tidy &&
-//	  tinygo build -o /src/backend/testdata/tide_plugins/valid.wasm     -target wasip1 -buildmode c-shared ./valid &&
-//	  tinygo build -o /src/backend/testdata/tide_plugins/httpfetch.wasm -target wasip1 -buildmode c-shared ./httpfetch &&
-//	  tinygo build -o /src/backend/testdata/tide_plugins/panicker.wasm  -target wasip1 -buildmode c-shared ./panicker &&
-//	  tinygo build -o /src/backend/testdata/tide_plugins/shadow.wasm    -target wasip1 -buildmode c-shared ./shadow
+//	  tinygo build -o /src/backend/testdata/tide_plugins/valid.wasm         -target wasip1 -buildmode c-shared ./valid &&
+//	  tinygo build -o /src/backend/testdata/tide_plugins/httpfetch.wasm     -target wasip1 -buildmode c-shared ./httpfetch &&
+//	  tinygo build -o /src/backend/testdata/tide_plugins/panicker.wasm      -target wasip1 -buildmode c-shared ./panicker &&
+//	  tinygo build -o /src/backend/testdata/tide_plugins/shadow.wasm        -target wasip1 -buildmode c-shared ./shadow &&
+//	  tinygo build -o /src/backend/testdata/tide_plugins/positionbased.wasm -target wasip1 -buildmode c-shared ./positionbased &&
+//	  tinygo build -o /src/backend/testdata/tide_plugins/baddatum.wasm      -target wasip1 -buildmode c-shared ./baddatum
 //	"
 //
 // This requires network access inside the container (to fetch

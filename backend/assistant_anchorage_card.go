@@ -79,9 +79,14 @@ type anchorageCardExtreme struct {
 }
 
 type anchorageCardTide struct {
-	Error          string                 `json:"error"`
-	Station        string                 `json:"station"`
-	DistanceNm     float64                `json:"distance_nm"`
+	Error      string  `json:"error"`
+	Station    string  `json:"station"`
+	DistanceNm float64 `json:"distance_nm"`
+	// HeightDatum is what every height here is measured from (chart_datum or
+	// mean_sea_level); Modelled is true when the tide is for the anchorage
+	// itself and no station is named.
+	HeightDatum    string                 `json:"height_datum"`
+	Modelled       bool                   `json:"modelled"`
 	TimeBasis      string                 `json:"time_basis"`
 	HeightAtArrive *float64               `json:"height_at_arrival_m"`
 	Direction      string                 `json:"direction"`
@@ -205,7 +210,8 @@ func buildAnchorageCard(p anchorageParts) anchorageCardPayload {
 	if t := p.tide; t.Error != "" {
 		card.Tide.Error = t.Error
 	} else {
-		card.Tide.Station, card.Tide.DistanceNm, card.Tide.TimeBasis = t.Station.Name, t.Station.DistanceNm, t.TimeBasis
+		card.Tide.Station, card.Tide.DistanceNm, card.Tide.TimeBasis = t.Station.Name, floatOrZero(t.Station.DistanceNm), t.TimeBasis
+		card.Tide.HeightDatum, card.Tide.Modelled = t.HeightDatum, t.Modelled
 		if t.AtArrival != nil {
 			h := t.AtArrival.HeightM
 			card.Tide.HeightAtArrive, card.Tide.Direction = &h, t.AtArrival.Direction

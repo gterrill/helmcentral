@@ -14,13 +14,12 @@ import { useSettingsFormContext } from '@/components/settings/settings-form-cont
 // place-names card still opens the right (poi) settings modal.
 export type ProviderGroupDomain = ProviderDomain | 'place-names'
 
-// Weather/wave/forecast-warnings/place-names default to "active" when
-// nothing has been configured yet, matching this app's existing hardcoded
-// frontend fallback (`useState('open-meteo')` etc. in the old
-// signalk-settings-panel.tsx) so a fresh install still shows one card
-// active per group. Tide intentionally has NO default (old code:
-// `useState('')`) - it can show zero active cards until the operator picks
-// one. This asymmetry is deliberate, not a bug.
+// Every group defaults to an "active" card when nothing has been configured
+// yet, matching the backend's own default for it, so a fresh install shows one
+// card active per group. Tide used to have none (it showed zero active cards
+// until the operator picked one); ADR 0273 gave it the global open-meteo
+// plugin, so a fresh install has a tide before anyone opens Settings. An
+// install that chose BOM or NOAA keeps it.
 const DEFAULT_ACTIVE_PROVIDER: Partial<Record<ProviderGroupDomain, string>> = {
   weather: 'open-meteo',
   wave: 'open-meteo-marine',
@@ -65,6 +64,8 @@ export interface ProviderGroupInfo {
   id: string
   name: string
   description: string
+  /** The provider the server uses when none is saved. */
+  default?: boolean
 }
 
 interface ProviderGroupProps {
@@ -93,7 +94,9 @@ export function ProviderGroup({ type, providers, loading, error, kind, emptyMess
 
   const settingsKey = SETTINGS_KEY_BY_DOMAIN[type]
   const configuredId = settings.ui?.[settingsKey]
-  const activeId = configuredId && configuredId !== '' ? configuredId : DEFAULT_ACTIVE_PROVIDER[type]
+  // Tide's default is marked in the provider list by the server; the others are named here.
+  const marked = type === 'tide' ? (providers as Array<{ id: string; default?: boolean }>).find((p) => p.default)?.id : undefined
+  const activeId = configuredId && configuredId !== '' ? configuredId : marked ?? DEFAULT_ACTIVE_PROVIDER[type]
 
   const handleActivate = (id: string) => {
     // Saves at once, outside the page's draft, so the Save bar never opens

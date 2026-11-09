@@ -65,6 +65,7 @@ build() {
 
 build tides             tide-plugins/bom                     bom
 build tides             tide-plugins/noaa                    noaa
+build tides             tide-plugins/open-meteo              open-meteo
 build weather           weather-plugins/open-meteo           open-meteo
 build weather           weather-plugins/weatherkit           weatherkit
 build waves             wave-plugins/open-meteo-marine       open-meteo-marine

@@ -44,7 +44,7 @@ function for its category:
 
 | Category | Fetch exports | Returns |
 | --- | --- | --- |
-| Tides | `search_stations`, `fetch_tide_chart` | Raw station and tide-extreme data |
+| Tides | `search_stations`, `fetch_tide_chart`; optional `position_based`, `height_datum` | Raw station and tide-extreme data |
 | Weather | `fetch_forecast` | Current + multi-day + hourly, all SI units |
 | Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature |
 | Points of interest | `fetch_poi(lat, lon, radius_m, categories, limit)` | Raw features per category (id, name, position, optional detail/source URL), plus which categories were truncated or unsupported |
@@ -288,7 +288,7 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 
 Available example directories:
 
-- `docs/examples/tide-plugins/bom`, `docs/examples/tide-plugins/noaa`
+- `docs/examples/tide-plugins/bom`, `docs/examples/tide-plugins/noaa`, `docs/examples/tide-plugins/open-meteo`
 - `docs/examples/weather-plugins/open-meteo`, `docs/examples/weather-plugins/weatherkit`
 - `docs/examples/wave-plugins/open-meteo-marine`
 - `docs/examples/poi-plugins/osm-overpass`, `docs/examples/poi-plugins/google-places`
@@ -304,11 +304,17 @@ and
 cover the two points-of-interest examples, including Google's category
 mapping and billing.
 
-A coordinate-based tide provider (of the kind Helmcentral used to bundle,
-before it was removed as an unsafe global fallback - see
-[Provider plugins](../reference/plugins.md#why-tides-have-no-default)) can be
-built by having `search_stations` return a single synthetic station for the
-requested coordinates.
+A coordinate-based tide provider is built the way
+`docs/examples/tide-plugins/open-meteo` is. It exports `position_based`
+returning `true`, and its `search_stations` returns an empty list. The host
+then passes `"<lat>,<lon>"` (rounded to the nearest 0.05 degree) to `fetch_tide_chart` in
+place of a station id. A plugin whose heights aren't above chart datum also
+exports `height_datum` returning `mean_sea_level`, so the host never works a
+depth at chart datum out of them. Both exports are optional, and a plugin
+without them is station-based on chart datum. A `height_datum` the host doesn't
+know stops the plugin loading. See
+[Provider plugins](../reference/plugins.md#the-default-tide-provider) for what
+the operator sees.
 
 Once built, install it the same way as any plugin - see
 [Provider plugins](../reference/plugins.md#installing-a-plugin).

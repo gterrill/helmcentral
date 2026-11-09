@@ -39,19 +39,26 @@ type anchorWatchData struct {
 	// numbers: PlanningDepthM/PlanningTideHeightFt is seeded from the live
 	// sounder at the instant the anchor goes down, and the operator can
 	// freely edit it afterwards - editing overwrites the pair in place,
-	// there is no separate capture underneath it to fall back to. -1 is
-	// "not captured", matching HeadingAtSetDeg above. Read predicate is >0
-	// for depth and >=0 for tide (never != -1), so a pre-existing
-	// anchor_watch.json with these fields absent decodes to 0 and reads
-	// correctly as "not captured" - no migration.
-	PlanningDepthM       float64 `json:"planning_depth_m"`
-	PlanningTideHeightFt float64 `json:"planning_tide_height_ft"`
+	// there is no separate capture underneath it to fall back to. A depth of
+	// -1 or less is "not captured", matching HeadingAtSetDeg above. A tide
+	// height of nil (null, or absent) is "not captured", and any number is a
+	// reading, negative included, on either datum. A watch file written before
+	// that holds -1 for none: loadAnchorWatch reads it as nil, which is the one
+	// place that rule lives (dropLegacyTideMarker).
+	PlanningDepthM       float64  `json:"planning_depth_m"`
+	PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
 	// PlanningDepthSource says who the depth came from: "sounder" when it was
 	// seeded from the live reading at the drop, "operator" when it was typed in
 	// the rode planner, "" when that cannot be known (no depth, or a watch
 	// stored before this field). Only a sounder figure is read below the
 	// transducer; see computeDatumDepth.
 	PlanningDepthSource string `json:"planning_depth_source"`
+	// PlanningTideDatum is what PlanningTideHeightFt was measured from:
+	// "mean_sea_level" when the tide source gave heights from mean sea level
+	// (ADR 0273), "" for chart datum, which is what a watch stored before the
+	// field existed holds. A mean-sea-level height is real even when negative,
+	// so the "-1 means not captured" rule above applies to chart datum only.
+	PlanningTideDatum string `json:"planning_tide_datum,omitempty"`
 	// PlaceName is resolved once from the anchor position (place_name.go's
 	// resolveAndPinAnchorWatchPlaceName), then pinned for the life of this
 	// watch so it stops drifting as the boat swings - see docs/adr/0056.
@@ -160,6 +167,13 @@ func anchorWatchFilePath() string {
 // shape for its own corrupt-file case. Every returned error names path, so
 // whatever reports it (main.go, GET /api/anchor-watch) doesn't have to guess
 // which file was the problem.
+// dropLegacyTideMarker reads the -1 ft that older anchor watch files hold for
+// "no tide height" as none. A height saved since carries its datum, always
+// written, so a real -1.0 ft reading is told from the old marker by that.
+func (a *anchorWatchData) dropLegacyTideMarker() {
+	a.PlanningTideHeightFt = legacyTideMarker(a.PlanningTideHeightFt, a.PlanningTideDatum)
+}
+
 func loadAnchorWatch() error {
 	path := anchorWatchFilePath()
 	data, err := os.ReadFile(path)
@@ -179,6 +193,7 @@ func loadAnchorWatch() error {
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return fmt.Errorf("parsing anchor watch state (%s): %w", path, err)
 	}
+	loaded.dropLegacyTideMarker()
 	if err := loaded.validateLoaded(); err != nil {
 		return fmt.Errorf("invalid anchor watch state (%s): %w", path, err)
 	}
@@ -261,12 +276,13 @@ func setAnchorWatch(c echo.Context) error {
 	anchorLifecycleMu.Lock()
 	defer anchorLifecycleMu.Unlock()
 	var body struct {
-		Lat                  float64  `json:"lat"`
-		Lon                  float64  `json:"lon"`
-		RadiusMeters         *float64 `json:"radius_meters"`
-		ApplyBowOffset       *bool    `json:"apply_bow_offset"`
-		PlanningDepthM       *float64 `json:"planning_depth_m"`
-		PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
+		Lat                  float64       `json:"lat"`
+		Lon                  float64       `json:"lon"`
+		RadiusMeters         *float64      `json:"radius_meters"`
+		ApplyBowOffset       *bool         `json:"apply_bow_offset"`
+		PlanningDepthM       *float64      `json:"planning_depth_m"`
+		PlanningTideHeightFt optionalFloat `json:"planning_tide_height_ft"`
+		PlanningTideDatum    *string       `json:"planning_tide_datum"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -280,8 +296,9 @@ func setAnchorWatch(c echo.Context) error {
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
 	}
-	if body.PlanningTideHeightFt != nil && *body.PlanningTideHeightFt < -1 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft must be -1 or greater"})
+	setTideFt, setTideDatum, msg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
+	if msg != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
 	radius := defaultAnchorWatchRadiusMeters
@@ -310,8 +327,9 @@ func setAnchorWatch(c echo.Context) error {
 	seaState := "calm"
 	seabedType := "sand"
 	planningDepthM := -1.0
-	planningTideHeightFt := -1.0
+	var planningTideHeightFt *float64
 	planningDepthSource := ""
+	planningTideDatum := ""
 	if current != nil {
 		// set_at is the session's identity rather than a "last written"
 		// stamp. Clients compare it against the session their map view was
@@ -337,8 +355,9 @@ func setAnchorWatch(c echo.Context) error {
 			planningDepthM = current.PlanningDepthM
 			planningDepthSource = current.PlanningDepthSource
 		}
-		if current.PlanningTideHeightFt >= 0 {
+		if current.PlanningTideHeightFt != nil {
 			planningTideHeightFt = current.PlanningTideHeightFt
+			planningTideDatum = current.PlanningTideDatum
 		}
 	}
 	if body.PlanningDepthM != nil {
@@ -350,8 +369,9 @@ func setAnchorWatch(c echo.Context) error {
 			planningDepthSource = planningDepthFromSounder
 		}
 	}
-	if body.PlanningTideHeightFt != nil {
-		planningTideHeightFt = *body.PlanningTideHeightFt
+	if body.PlanningTideHeightFt.Present {
+		planningTideHeightFt = setTideFt
+		planningTideDatum = setTideDatum
 	}
 
 	lat, lon := body.Lat, body.Lon
@@ -409,6 +429,7 @@ func setAnchorWatch(c echo.Context) error {
 		PlanningDepthM:       planningDepthM,
 		PlanningTideHeightFt: planningTideHeightFt,
 		PlanningDepthSource:  planningDepthSource,
+		PlanningTideDatum:    planningTideDatum,
 	}
 
 	// A drop starts a fresh swing trail. It goes first, before the new watch
@@ -603,14 +624,15 @@ func patchAnchorWatch(c echo.Context) error {
 	}
 
 	var body struct {
-		Lat                  *float64 `json:"lat"`
-		Lon                  *float64 `json:"lon"`
-		RadiusMeters         *float64 `json:"radius_meters"`
-		RodeDeployedM        *float64 `json:"rode_deployed_m"`
-		SeaState             *string  `json:"sea_state"`
-		SeabedType           *string  `json:"seabed_type"`
-		PlanningDepthM       *float64 `json:"planning_depth_m"`
-		PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
+		Lat                  *float64      `json:"lat"`
+		Lon                  *float64      `json:"lon"`
+		RadiusMeters         *float64      `json:"radius_meters"`
+		RodeDeployedM        *float64      `json:"rode_deployed_m"`
+		SeaState             *string       `json:"sea_state"`
+		SeabedType           *string       `json:"seabed_type"`
+		PlanningDepthM       *float64      `json:"planning_depth_m"`
+		PlanningTideHeightFt optionalFloat `json:"planning_tide_height_ft"`
+		PlanningTideDatum    *string       `json:"planning_tide_datum"`
 		// Restore is Undo's own escape hatch from the "placed by hand in
 		// Adjust" defaults below (code-review finding): Undo re-sends the
 		// pre-Adjust position as another position-changing PATCH, and without
@@ -626,7 +648,7 @@ func patchAnchorWatch(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 	if body.Lat == nil && body.Lon == nil && body.RadiusMeters == nil && body.RodeDeployedM == nil && body.SeaState == nil && body.SeabedType == nil &&
-		body.PlanningDepthM == nil && body.PlanningTideHeightFt == nil {
+		body.PlanningDepthM == nil && !body.PlanningTideHeightFt.Present {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if (body.Lat == nil) != (body.Lon == nil) {
@@ -661,8 +683,9 @@ func patchAnchorWatch(c echo.Context) error {
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
 	}
-	if body.PlanningTideHeightFt != nil && *body.PlanningTideHeightFt < -1 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft must be -1 or greater"})
+	patchTideFt, patchTideDatum, tideMsg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
+	if tideMsg != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": tideMsg})
 	}
 	if body.Restore != nil {
 		// restore only ever makes sense alongside the position it is
@@ -681,7 +704,7 @@ func patchAnchorWatch(c echo.Context) error {
 	// positive planning_depth_m must arrive with its tide stamp in the same
 	// request. -1 (clearing the pair) is exempt — see the apply step below,
 	// which clears the stamp too.
-	if body.PlanningDepthM != nil && *body.PlanningDepthM > 0 && body.PlanningTideHeightFt == nil {
+	if body.PlanningDepthM != nil && *body.PlanningDepthM > 0 && !body.PlanningTideHeightFt.Present {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft is required when setting planning_depth_m"})
 	}
 	// The other half of the pair rule: a tide stamp with no depth in the
@@ -690,7 +713,7 @@ func patchAnchorWatch(c echo.Context) error {
 	// instant — the same datum-mixing error above, arriving from the other
 	// direction. There is no clear case to exempt here, unlike above:
 	// clearing the stamp only ever happens by clearing the depth.
-	if body.PlanningTideHeightFt != nil && body.PlanningDepthM == nil {
+	if body.PlanningTideHeightFt.Present && body.PlanningDepthM == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m is required when setting planning_tide_height_ft"})
 	}
 
@@ -724,6 +747,7 @@ func patchAnchorWatch(c echo.Context) error {
 		PlanningDepthM:       current.PlanningDepthM,
 		PlanningTideHeightFt: current.PlanningTideHeightFt,
 		PlanningDepthSource:  current.PlanningDepthSource,
+		PlanningTideDatum:    current.PlanningTideDatum,
 		PlaceName:            current.PlaceName,
 	}
 
@@ -751,9 +775,11 @@ func patchAnchorWatch(c echo.Context) error {
 			updated.PlanningDepthSource = ""
 			// Clearing the depth clears its stamp with it — a half-cleared
 			// pair is not a thing.
-			updated.PlanningTideHeightFt = -1
-		} else if body.PlanningTideHeightFt != nil {
-			updated.PlanningTideHeightFt = *body.PlanningTideHeightFt
+			updated.PlanningTideHeightFt = nil
+			updated.PlanningTideDatum = ""
+		} else if body.PlanningTideHeightFt.Present {
+			updated.PlanningTideHeightFt = patchTideFt
+			updated.PlanningTideDatum = patchTideDatum
 		}
 	}
 	// No else branch: the validation above rejects a lone

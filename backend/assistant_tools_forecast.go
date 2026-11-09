@@ -380,9 +380,16 @@ type assistantTideExtreme struct {
 type assistantGetTidesResult struct {
 	// Reading names the station, its distance and bearing from the place asked
 	// about, and its time zone.
-	Reading   string                 `json:"reading"`
-	Station   assistantStationInfo   `json:"station"`
-	Provider  string                 `json:"provider"`
+	Reading  string               `json:"reading"`
+	Station  assistantStationInfo `json:"station"`
+	Provider string               `json:"provider"`
+	// HeightDatum is chart_datum or mean_sea_level: what every height_m here is
+	// measured from. DatumNote is set for mean_sea_level and says what that
+	// means for how the figures may be quoted.
+	HeightDatum string `json:"height_datum"`
+	DatumNote   string `json:"datum_note,omitempty"`
+	// Modelled is true when the tide is worked out for the place with no station.
+	Modelled  bool                   `json:"modelled"`
 	Now       assistantTideNow       `json:"now"`
 	TimeBasis string                 `json:"time_basis"`
 	Extremes  []assistantTideExtreme `json:"extremes"`
@@ -402,6 +409,10 @@ type assistantResolvedTideStation struct {
 	loc        *time.Location
 	timeBasis  string
 	info       assistantStationInfo
+	// datum is what the chart's heights are measured from; followsPos is true
+	// when the tide is the place's own, not a station's, so no distance applies.
+	datum      string
+	followsPos bool
 }
 
 // toAssistantTideExtreme renders one predicted high or low water in loc.
@@ -453,9 +464,12 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 	}
 
 	result := assistantGetTidesResult{
-		Reading:  readingTides(stationInfo, timeBasis),
-		Station:  stationInfo,
-		Provider: providerID,
+		Reading:     readingTidesFor(st),
+		Station:     stationInfo,
+		Provider:    providerID,
+		HeightDatum: st.datum,
+		DatumNote:   tideDatumNoteFor(st.datum),
+		Modelled:    st.followsPos,
 		Now: assistantTideNow{
 			Time:      boatDayClock(localNow, loc),
 			HeightM:   res.CurrentHeightM,

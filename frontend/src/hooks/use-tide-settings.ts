@@ -8,13 +8,12 @@ export interface TideSettings {
   tideAutoStation: boolean
 }
 
-// tideProvider starts empty, not a hardcoded provider id: tides are
-// WASM-plugin-only with no built-in default (see backend/tide_providers.go),
-// so silently substituting a fake "default" here would mask an unconfigured
-// install exactly the way backend/weather_tide.go's tideToday deliberately
-// does not - it surfaces "no tide provider configured" instead. Consumers
-// (e.g. ForecastTideSection) already gate on `loading` before reading
-// tideProvider, so an empty initial/fallback value is safe.
+// tideProvider is the saved setting and starts empty: blank means the
+// backend's default provider (ADR 0273, defaultTideProviderID). The default's
+// id is not copied here: the provider list marks it (`default`), and the
+// configured chart names the provider that answered. This is the saved value
+// and the settings form round-trips it. Consumers already gate on `loading`
+// before reading tideProvider, so an empty initial value is safe.
 const defaultTideSettings: TideSettings = {
   tideProvider: '',
   tideStationId: '',

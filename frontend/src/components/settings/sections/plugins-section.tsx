@@ -3,6 +3,8 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { ProviderGroup } from '@/components/settings/provider-group'
+import { useSettingsFormContext } from '@/components/settings/settings-form-context'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
 import { usePlaceNameProviders } from '@/hooks/use-place-name-providers'
@@ -28,6 +30,11 @@ export function PluginsSection({ draft, onChange }: PluginsSectionProps) {
   const forecastWarnings = useForecastWarningsProviders()
   const placeNames = usePlaceNameProviders()
   const poi = usePOIProviders()
+  const { settings } = useSettingsFormContext()
+  const savedTide = settings.ui?.tide_provider ?? ''
+  const activeTide = tide.providers.find((p) => (savedTide === '' ? p.default === true : p.id === savedTide))
+  const followsBoat = activeTide?.position_based === true
+  const meanSeaLevel = isMeanSeaLevel(activeTide?.height_datum)
 
   return (
     <SettingsLayout title="Plugins">
@@ -61,7 +68,7 @@ export function PluginsSection({ draft, onChange }: PluginsSectionProps) {
 
       <FormSection
         title="Tide"
-        description="Tide heights and times for the station below: the Depth & Tide tile, the Forecast panel's tide chart, the tide line and low-water clearance warning in Anchor Watch, and the rode planner's depth at high water. Mate's tide and fair-tide departure answers use the station nearest the place you ask about."
+        description="Tide heights and times: the Depth & Tide tile, the Forecast panel's tide chart, the tide line and low-water clearance warning in Anchor Watch, and the rode planner's depth at high water. A station-based provider uses the station below, and Mate's tide and fair-tide departure answers use the station nearest the place you ask about. A provider that follows the boat's position has no station to choose."
       >
         <ProviderGroup
           type="tide"
@@ -72,6 +79,12 @@ export function PluginsSection({ draft, onChange }: PluginsSectionProps) {
           emptyMessage="No tide plugin installed."
         />
 
+        {followsBoat ? (
+          <div className="border-t border-border pt-4 text-sm text-muted-foreground" data-testid="tide-follows-boat">
+            <p>Tides follow the boat's position, so there is no station to choose.</p>
+            {meanSeaLevel && <p className="mt-1">{MEAN_SEA_LEVEL_NOTE}</p>}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-4 border-t border-border pt-4 md:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="tide-station-id">Tide Station Id</FieldLabel>
@@ -101,6 +114,7 @@ export function PluginsSection({ draft, onChange }: PluginsSectionProps) {
             <FieldLabel>Auto-update tide station as vessel moves</FieldLabel>
           </Field>
         </div>
+        )}
       </FormSection>
 
       <FormSection

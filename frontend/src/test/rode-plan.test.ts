@@ -189,16 +189,18 @@ describe('tideHeightFtOrNull', () => {
     expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: 2.5 }))).toBe(2.5)
   })
 
-  it('returns null on the -1 sentinel, not -1 itself', () => {
-    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: -1 }))).toBeNull()
+  it('returns null when the tide has no reading', () => {
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: null }))).toBeNull()
   })
 
   it('returns null when there is no tide object at all', () => {
     expect(tideHeightFtOrNull(null)).toBeNull()
   })
 
-  it('treats exactly 0 as a valid reading, not "unset" (the real check is >= 0, not !== -1)', () => {
+  it('treats exactly 0, and exactly -1 ft, as valid readings', () => {
     expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: 0 }))).toBe(0)
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: -1 }))).toBe(-1)
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: -0.6 }))).toBe(-0.6)
   })
 })
 
@@ -216,10 +218,10 @@ describe('resolvePlanningDepth', () => {
       isAnchored: true,
       liveDepthM: 99,
       planningDepthM: 6,
-      planningTideHeightFt: 1.5,
+      planningTide: { ft: 1.5, datum: 'chart_datum' },
       tide,
     })
-    expect(result).toEqual({ depthM: 6, tideHeightFt: 1.5 })
+    expect(result).toEqual({ depthM: 6, tideHeightFt: 1.5, tideDatum: 'chart_datum' })
   })
 
   it('rule 2: not anchored uses the live sounder, tide-stamped from right now', () => {
@@ -227,7 +229,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: false,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toEqual({ depthM: 5, tideHeightFt: 3 })
@@ -238,7 +240,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: true,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toBeNull()
@@ -249,19 +251,19 @@ describe('resolvePlanningDepth', () => {
       isAnchored: false,
       liveDepthM: null,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toBeNull()
   })
 
-  it('the live datum has no tide stamp when the tide station has no reading (sentinel -1)', () => {
+  it('the live datum has no tide stamp when the tide station has no reading (null)', () => {
     const result = resolvePlanningDepth({
       isAnchored: false,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
-      tide: makeTide({ current_tide_height_ft: -1 }),
+      planningTide: null,
+      tide: makeTide({ current_tide_height_ft: null }),
     })
     expect(result).toEqual({ depthM: 5, tideHeightFt: null })
   })
@@ -298,9 +300,9 @@ describe('maxExpectedDepthM', () => {
     expect(maxExpectedDepthM({ depthM: 5, tideHeightFt: null }, makeTide())).toBeNull()
   })
 
-  it('returns null when the high-tide forecast has no reading (sentinel -1)', () => {
+  it('returns null when the high-tide forecast has no reading (null)', () => {
     const datum = { depthM: 5, tideHeightFt: 2 }
-    expect(maxExpectedDepthM(datum, makeTide({ high_tide_height_ft: -1 }))).toBeNull()
+    expect(maxExpectedDepthM(datum, makeTide({ high_tide_height_ft: null }))).toBeNull()
   })
 
   // The datum-mixing regression: the bug this whole change fixes was mixing a
@@ -758,7 +760,7 @@ describe('ratioMethod', () => {
     const result = ratioMethod({
       ...baseInput,
       windKts: 15,
-      tide: makeTide({ current_tide_height_ft: -1 }),
+      tide: makeTide({ current_tide_height_ft: null }),
     })
     expect(result).not.toBeNull()
     expect(result!.recommendedRodeM).toBeCloseTo((5 + 1) * 5, 6)

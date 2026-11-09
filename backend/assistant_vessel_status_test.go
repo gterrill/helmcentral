@@ -90,8 +90,8 @@ func statusTestDeps(t *testing.T) assistantToolDeps {
 		anchorWatch: func() (anchorWatchData, bool, string) { return anchorWatchData{}, false, "" },
 		overnight:   func(time.Time) (overnightResult, string) { return overnightResult{}, "influxdb not configured" },
 		documents:   func() *documentStore { return nil },
-		tileTide: func(context.Context, time.Time) (tideTodayResponse, error) {
-			return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+		tileTide: func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
+			return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured"}
 		},
 		anchorSettings: func() (anchorageBoatSettings, error) { return anchorageBoatSettings{MinClearanceAtLowM: 0.5}, nil },
 	}
@@ -842,11 +842,11 @@ func lowWaterStatusDeps(t *testing.T) assistantToolDeps {
 			Latitude: -18.2231125, Longitude: 146.21240833333334, PositionLastUpdateAge: 1,
 		}, nil
 	}
-	d.tileTide = func(_ context.Context, now time.Time) (tideTodayResponse, error) {
+	d.tileTide = func(_ context.Context, _ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		return tideTodayResponse{
-			Datetime: now.Format(time.RFC3339), CurrentTideHeightFt: 3, TideDirection: "Falling",
-			LowTideTime: now.Add(time.Hour).Format(time.RFC3339), LowTideHeightFt: 1,
-			HighTideTime: now.Add(7 * time.Hour).Format(time.RFC3339), HighTideHeightFt: 5,
+			Datetime: now.Format(time.RFC3339), CurrentTideHeightFt: ptr(3.0), TideDirection: "Falling",
+			LowTideTime: now.Add(time.Hour).Format(time.RFC3339), LowTideHeightFt: ptr(1.0),
+			HighTideTime: now.Add(7 * time.Hour).Format(time.RFC3339), HighTideHeightFt: ptr(5.0),
 		}, nil
 	}
 	d.anchorSettings = func() (anchorageBoatSettings, error) {
@@ -907,8 +907,8 @@ func TestVesselStatus_AnchorLowWaterUnknownSaysWhat(t *testing.T) {
 	}
 
 	d = lowWaterStatusDeps(t)
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
-		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured"}
 	}
 	lw = runStatus(t, d).Boat.Anchor.LowWater
 	if lw == nil || lw.Reason != "no_tide_station" || !strings.Contains(lw.Why, "no tide station is set up") {
@@ -955,7 +955,7 @@ func TestVesselStatus_AnchorLowWaterIsLeftOutUnderWayWithNoWatch(t *testing.T) {
 		return st, err
 	}
 	tideCalls := 0
-	d.tileTide = func(ctx context.Context, now time.Time) (tideTodayResponse, error) {
+	d.tileTide = func(ctx context.Context, _ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		tideCalls++
 		return tideTodayResponse{}, errors.New("must not be read")
 	}

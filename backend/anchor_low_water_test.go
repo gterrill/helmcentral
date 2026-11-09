@@ -24,12 +24,12 @@ var lwNow = time.Date(2026, 9, 26, 14, 0, 0, 0, time.UTC)
 func lwTide(mutate func(*tideTodayResponse)) *tideTodayResponse {
 	t := &tideTodayResponse{
 		Datetime:            "2026-09-26T13:45:00Z",
-		CurrentTideHeightFt: 3,
+		CurrentTideHeightFt: ptr(3.0),
 		TideDirection:       "Falling",
 		HighTideTime:        "2026-09-26T20:00:00Z",
-		HighTideHeightFt:    5,
+		HighTideHeightFt:    ptr(5.0),
 		LowTideTime:         "2026-09-26T14:20:00Z",
-		LowTideHeightFt:     1,
+		LowTideHeightFt:     ptr(1.0),
 		StationName:         "Test Station",
 		Provider:            "test",
 	}
@@ -107,7 +107,7 @@ func TestLowWater_TheClearanceIsJudgedAsDisplayed(t *testing.T) {
 
 func TestLowWater_FallClampsToZeroWhenAlreadyBelowTheNextLow(t *testing.T) {
 	got := computeLowWaterClearance(lwInput(func(in *lowWaterInput) {
-		in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt, t.LowTideHeightFt = 0.5, 1 })
+		in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt, t.LowTideHeightFt = ptr(0.5), ptr(1.0) })
 	}))
 	if got.Status != lowWaterOK {
 		t.Fatalf("got %+v", got)
@@ -130,11 +130,11 @@ func TestLowWater_UnknownNamesWhatIsMissing(t *testing.T) {
 		{"draft sentinel -1", func(in *lowWaterInput) { in.DraftM = floatPtr(-1) }, lowWaterNoDraft},
 		{"zero draft", func(in *lowWaterInput) { in.DraftM = floatPtr(0) }, lowWaterNoDraft},
 		{"no tide", func(in *lowWaterInput) { in.Tide = nil }, lowWaterNoTide},
-		{"current height is the -1 sentinel", func(in *lowWaterInput) {
-			in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt = -1 })
+		{"current height is none", func(in *lowWaterInput) {
+			in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt = nil })
 		}, lowWaterNoTide},
-		{"next low height is the -1 sentinel", func(in *lowWaterInput) {
-			in.Tide = lwTide(func(t *tideTodayResponse) { t.LowTideHeightFt = -1 })
+		{"next low height is none", func(in *lowWaterInput) {
+			in.Tide = lwTide(func(t *tideTodayResponse) { t.LowTideHeightFt = nil })
 		}, lowWaterNoTide},
 		{"next low is exactly now", func(in *lowWaterInput) {
 			in.Tide = lwTide(func(t *tideTodayResponse) { t.LowTideTime = lwNow.Format(time.RFC3339) })
@@ -172,10 +172,12 @@ func TestLowWater_NegativeHeightsAreRealData(t *testing.T) {
 		{"negative current and low", -0.4, -0.9, 0.5},
 		{"next low below -1 ft", 3, -1.2, 4.2},
 		{"current and low below -1 ft", -1.5, -1.9, 0.4},
+		{"exactly minus one foot is a reading", -1, -2, 1},
+		{"a NOAA minus tide below chart datum", -0.6, -1.2, 0.6},
 	}
 	for _, tc := range cases {
 		got := computeLowWaterClearance(lwInput(func(in *lowWaterInput) {
-			in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt, t.LowTideHeightFt = tc.current, tc.low })
+			in.Tide = lwTide(func(t *tideTodayResponse) { t.CurrentTideHeightFt, t.LowTideHeightFt = ptr(tc.current), ptr(tc.low) })
 		}))
 		if got.Status == lowWaterUnknown {
 			t.Errorf("%s: unknown (%s)", tc.name, got.Reason)
@@ -284,7 +286,7 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 	margin := func() (float64, error) { return 0.5, nil }
 
 	noStation := func() (tideTodayResponse, error) {
-		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured"}
 	}
 	got, err := buildLowWater(state, noStation, margin, nil, lwNow)
 	if err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoTideStation || got.Detail != "no tide station is set up" {
@@ -307,7 +309,7 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 
 func serveLowWaterForTest(t *testing.T, state func() (vesselStateData, error), watch bool, margin func() (float64, error), tideCalls *int) (int, map[string]any) {
 	t.Helper()
-	tide := func(now time.Time) (tideTodayResponse, error) {
+	tide := func(_ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		*tideCalls++
 		r := *lwTide(nil)
 		r.Datetime = now.Add(-5 * time.Minute).Format(time.RFC3339)

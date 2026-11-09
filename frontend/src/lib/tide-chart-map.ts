@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
-
-import { useApiQuery } from '@/lib/api-query'
 import type { TideStation } from '@/hooks/use-tide-stations'
+import { normaliseTideDatum, type TideDatum } from '@/lib/tide-datum'
+
+// The tide chart payload as the browser holds it, and its mapping. Kept out of
+// the hooks so a test that mocks a hook still gets the real mapping.
 
 export interface TideExtremePoint {
   time: string
@@ -14,6 +15,8 @@ export interface TideChart {
   extremes: TideExtremePoint[]
   currentHeightM: number
   direction: string
+  /** What heightM is measured from; chart datum when the server says nothing. */
+  heightDatum?: TideDatum
   // Optional: populated by the backend's centralized classifyTidalPhase/
   // hasDoubleTide (see backend/tide_providers.go), so every provider gets
   // identical values. Absent/empty when the backend can't resolve a phase
@@ -46,16 +49,26 @@ interface TideChartApi {
   tidal_phase?: string
   double_high_today?: boolean
   double_low_today?: boolean
+  height_datum?: string
+  provider?: string
+  provider_name?: string
+  position_based?: boolean
 }
 
-interface MappedTideChart {
+export interface MappedTideChart {
   chart: TideChart
   isCached: boolean
   updatedAt: string | null
   ttlSeconds: number | null
+  /** Who answered, for the "Data:" line. */
+  providerName: string
+  /** The id of the provider that answered. */
+  providerId: string
+  /** True when the tide follows a position, so there is no station to choose. */
+  positionBased: boolean
 }
 
-function mapTideChart(data: TideChartApi): MappedTideChart {
+export function mapTideChart(data: TideChartApi): MappedTideChart {
   const chart: TideChart = {
     station: {
       stationId: data.station?.station_id ?? '',
@@ -74,6 +87,7 @@ function mapTideChart(data: TideChartApi): MappedTideChart {
       : [],
     currentHeightM: typeof data.current_height_m === 'number' ? data.current_height_m : 0,
     direction: data.direction || '—',
+    heightDatum: normaliseTideDatum(data.height_datum),
     tidalPhase: typeof data.tidal_phase === 'string' && data.tidal_phase !== '' ? data.tidal_phase : undefined,
     doubleHighToday: typeof data.double_high_today === 'boolean' ? data.double_high_today : undefined,
     doubleLowToday: typeof data.double_low_today === 'boolean' ? data.double_low_today : undefined,
@@ -83,30 +97,8 @@ function mapTideChart(data: TideChartApi): MappedTideChart {
     isCached: Boolean(data.cached),
     updatedAt: typeof data.updated_at === 'string' ? data.updated_at : null,
     ttlSeconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : null,
-  }
-}
-
-export function useTideChart(provider: string, stationId: string, refreshIntervalSeconds = 3600) {
-  const params = new URLSearchParams({ provider, station_id: stationId })
-  const { data, error, isLoading, refetch } = useApiQuery<MappedTideChart>({
-    queryKey: ['/api/tide-chart', { provider, stationId }],
-    path: `/api/tide-chart?${params.toString()}`,
-    refetchInterval: refreshIntervalSeconds * 1000,
-    enabled: !!provider && !!stationId,
-    select: mapTideChart,
-  })
-
-  useEffect(() => {
-    if (error) console.error('Error fetching tide chart:', error)
-  }, [error])
-
-  return {
-    chart: data?.chart ?? null,
-    loading: isLoading,
-    error: error ? error.message || 'Failed to load tide chart' : null,
-    isCached: data?.isCached ?? false,
-    updatedAt: data?.updatedAt ?? null,
-    ttlSeconds: data?.ttlSeconds ?? null,
-    refetch,
+    providerName: data.provider_name || data.provider || '',
+    providerId: data.provider || '',
+    positionBased: data.position_based === true,
   }
 }
