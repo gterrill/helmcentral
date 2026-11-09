@@ -120,11 +120,27 @@ describe('the anchor watch records the datum of the tide it was dropped on', () 
     expect(body.planning_tide_datum).toBe('mean_sea_level')
   })
 
-  it('sends no datum for a chart-datum drop, so the request is as it always was', async () => {
+  it('sends chart_datum with a chart-datum height on the drop, a minus tide of -1 ft included', async () => {
     const fetchMock = stubFetch()
-    await setAnchorHere(-21, 149, { planningDepthM: 5, planningTide: { ft: 3, datum: 'chart_datum' } })
+    await setAnchorHere(-21, 149, { planningDepthM: 5, planningTide: { ft: -1, datum: 'chart_datum' } })
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.planning_tide_height_ft).toBe(-1)
+    expect(body.planning_tide_datum).toBe('chart_datum')
+  })
+
+  it('sends no datum when it sends no tide height', async () => {
+    const fetchMock = stubFetch()
+    await setAnchorHere(-21, 149, { planningDepthM: 5, planningTide: null })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.planning_tide_height_ft).toBeNull()
     expect('planning_tide_datum' in body).toBe(false)
+  })
+
+  it('sends chart_datum when the planner edits the depth on a chart-datum tide', async () => {
+    const fetchMock = stubFetch()
+    await updatePlanningDepth(5, { ft: -1, datum: 'chart_datum' })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body).toEqual({ planning_depth_m: 5, planning_tide_height_ft: -1, planning_tide_datum: 'chart_datum' })
   })
 
   it('sends the datum when the planner edits the depth', async () => {

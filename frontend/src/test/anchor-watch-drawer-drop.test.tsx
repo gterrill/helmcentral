@@ -120,9 +120,10 @@ vi.mock('@/hooks/use-app-config', () => ({
 
 describe('Anchor watch drawer drop button', () => {
   // The seeded vessel state carries no depth, so this is the "no sounder at
-  // drop" case (ADR 0063) — the drop still goes out, with the planning depth
-  // and tide as the server's -1 "not read" rather than silently omitted.
-  it('drops anchor from drawer when no watch is active, capturing null depth/tide when there is no sounder reading', async () => {
+  // drop" case (ADR 0063) — the drop still goes out with the planning depth as
+  // -1 "not read". The mocked tide here is a real -1 ft reading, so it goes out
+  // with its datum.
+  it('drops anchor from drawer when no watch is active, capturing -1 depth when there is no sounder reading, and the tide with its datum', async () => {
     landWatch('none')
     render(<App />)
 
@@ -131,7 +132,7 @@ describe('Anchor watch drawer drop button', () => {
     fireEvent.click(dropButtons[dropButtons.length - 1])
 
     await waitFor(() => expect(writes('POST')).toEqual([
-      { lat: ANCHOR.lat, lon: ANCHOR.lon, apply_bow_offset: true, planning_depth_m: -1, planning_tide_height_ft: -1 },
+      { lat: ANCHOR.lat, lon: ANCHOR.lon, apply_bow_offset: true, planning_depth_m: -1, planning_tide_height_ft: -1, planning_tide_datum: 'chart_datum' },
     ]))
   })
 

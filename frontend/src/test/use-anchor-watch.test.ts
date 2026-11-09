@@ -223,7 +223,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/anchor-watch', expect.objectContaining({ method: 'PATCH' }))
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(init!.body as string)
-    expect(body).toEqual({ planning_depth_m: 8, planning_tide_height_ft: 2.1 })
+    expect(body).toEqual({ planning_depth_m: 8, planning_tide_height_ft: 2.1, planning_tide_datum: 'chart_datum' })
   })
 
   it('replaces state with the server echo rather than updating optimistically', async () => {
