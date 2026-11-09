@@ -11,6 +11,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Anchor Watch learns the tide where you're anchored.** From the moment you drop
+  the anchor it notes the depth and your position every minute and works out how
+  the water here differs from the tide station's prediction. Until it's sure, the
+  low-water line reads **Depth based on tide station prediction**. Once the margin
+  of error is smaller than your clearance setting it reads **Locally calibrated
+  depth estimate** with the hours of readings and a figure like **2.4 m ±0.2**.
+  The too-shallow warning is now judged on the bottom of that margin, and on the
+  shallowest spot the boat has sounded, which the line names when it sets the
+  warning. It also shows the depth at the next high, and when the tide here
+  doesn't follow the station it says how much of the station's range it runs.
+  A noisy sounder keeps the estimate on the station figure and the line says the
+  readings are too scattered. Mate quotes the same method and margin of error.
+
 ### Changed
 
 - **The low-water clearance line on Anchor Watch is stricter and says more.** It's

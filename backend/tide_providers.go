@@ -141,6 +141,16 @@ func resolveTideProvider(settingsPath string) (tideProvider, string, error) {
 	return provider, configuredProvider, nil
 }
 
+// cosineTideHeight is the height between two consecutive extremes at t, on the
+// half cosine that joins them. t outside them is held at the nearer extreme.
+func cosineTideHeight(prev, next *tideExtremePoint, t time.Time) float64 {
+	progress := 0.0
+	if total := next.Time.Sub(prev.Time).Seconds(); total > 0 {
+		progress = math.Max(0, math.Min(1, t.Sub(prev.Time).Seconds()/total))
+	}
+	return (prev.HeightM+next.HeightM)/2 + (prev.HeightM-next.HeightM)/2*math.Cos(math.Pi*progress)
+}
+
 // interpolateTideNow cosine-interpolates the current tide height and
 // direction between the extremes that bracket `now`. It is shared by all
 // tide providers.
@@ -180,14 +190,7 @@ func interpolateTideNow(extremes []tideExtremePoint, now time.Time) (heightM flo
 		return last.HeightM, direction
 	}
 
-	totalSeconds := next.Time.Sub(prev.Time).Seconds()
-	progress := 0.0
-	if totalSeconds > 0 {
-		progress = now.Sub(prev.Time).Seconds() / totalSeconds
-	}
-	progress = math.Max(0, math.Min(1, progress))
-
-	heightM = (prev.HeightM+next.HeightM)/2 + (prev.HeightM-next.HeightM)/2*math.Cos(math.Pi*progress)
+	heightM = cosineTideHeight(prev, next, now)
 
 	direction = "Falling"
 	if next.HeightM > prev.HeightM {

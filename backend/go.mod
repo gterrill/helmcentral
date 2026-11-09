@@ -39,6 +39,7 @@ require (
 	github.com/tidwall/rtree v1.10.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
+	gonum.org/v1/gonum v0.16.0
 )
 
 require (

@@ -5,7 +5,10 @@
 Accepted (2026-11-08). Amends [ADR 0135](0135-anchor-watch-warns-too-shallow-at-low-water.md):
 the arithmetic moves from the browser to the backend, and Mate reads its result.
 Every rule in ADR 0135 about which inputs count, in what order and when the tide
-is stale carries over unchanged.
+is stale carries over unchanged. Amended by
+[ADR 0274](0274-the-anchor-watch-learns-the-local-tide-from-its-own-sounder.md):
+once the sounder's own readings have narrowed enough, the depth at the next low
+comes from them, with an interval, in place of the tide station's prediction.
 
 ## Context
 

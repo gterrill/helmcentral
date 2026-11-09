@@ -625,6 +625,8 @@ func main() {
 	go runMCPActivityPruner(streamCtx, globalOutsideAssistantStore)
 
 	go startTrackPoller(streamCtx, trackPollInterval)
+	// The local tide calibration (ADR 0274) is fitted here, off the poll tick.
+	startTideCalibrationWorker(streamCtx)
 	go startTideAutoUpdater(streamCtx, 30*time.Minute)
 	// Sweeps expired sessions once at startup and hourly thereafter
 	// (docs/adr/0040). Runs regardless of auth.mode — a mode:none boat can

@@ -196,6 +196,9 @@ func createPassageSchema(db *sql.DB) error {
 	if err := createAISAnchorTrackSchema(db); err != nil {
 		return err
 	}
+	if err := createTideCalibrationSchema(db); err != nil {
+		return err
+	}
 	if err := createInsetViewSchema(db); err != nil {
 		return err
 	}

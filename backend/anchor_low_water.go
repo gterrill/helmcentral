@@ -73,6 +73,21 @@ type lowWaterClearance struct {
 	ClearanceM  *float64 `json:"clearance_m,omitempty"`
 	MarginM     *float64 `json:"margin_m,omitempty"`
 	LowTideTime string   `json:"low_tide_time,omitempty"`
+	// While a calibration is ready (Calibration.Ready, ADR 0274) DepthAtLowM is
+	// the depth the sounder's own readings at this anchorage point to, with the
+	// half width of its 95% interval below. Otherwise it is the station's
+	// prediction applied to the depth now, and has no interval.
+	// DepthAtLowHalfWidthM is that half-width, in metres.
+	DepthAtLowHalfWidthM *float64 `json:"depth_at_low_half_width_m,omitempty"`
+	// CautiousSource says which figure the verdict rests on once calibrated:
+	// "boat_now", "station" or "shallowest_sounded".
+	CautiousSource string `json:"cautious_source,omitempty"`
+	// VerdictClearanceM is the clearance of the figure the verdict rests on, with
+	// the half width of its interval when it has one (the station estimate has
+	// none): what the warning should show, which is not always the headline.
+	VerdictClearanceM *float64             `json:"verdict_clearance_m,omitempty"`
+	VerdictHalfWidthM *float64             `json:"verdict_half_width_m,omitempty"`
+	Calibration       *lowWaterCalibration `json:"calibration,omitempty"`
 	// WorkedOutAt is when the server worked this out, RFC 3339, set by the
 	// endpoint so the page can say how old a verdict is when a later poll fails.
 	WorkedOutAt string `json:"worked_out_at,omitempty"`
@@ -155,7 +170,7 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 // unknown with the reason in words. An unreadable margin setting is an error:
 // the check has nothing to compare against, and a default would pass for the
 // operator's own figure.
-func buildLowWater(state vesselStateData, tide func() (tideTodayResponse, error), margin func() (float64, error), now time.Time) (lowWaterClearance, error) {
+func buildLowWater(state vesselStateData, tide func() (tideTodayResponse, error), margin func() (float64, error), calibrate lowWaterCalibrator, now time.Time) (lowWaterClearance, error) {
 	marginM, err := margin()
 	if err != nil {
 		return lowWaterClearance{}, fmt.Errorf("the clearance wanted at low water could not be read: %w", err)
@@ -189,6 +204,13 @@ func buildLowWater(state vesselStateData, tide func() (tideTodayResponse, error)
 	if terr != nil {
 		out.Detail = detail
 	}
+	// The local calibration (ADR 0274) lays on a station verdict; with no
+	// verdict there is nothing for it to refine, and the reason stands.
+	if calibrate != nil && out.Status != lowWaterUnknown {
+		if res := calibrate(*in.Tide, marginM, now); res != nil {
+			out = applyCalibration(out, res, marginM)
+		}
+	}
 	return out, nil
 }
 
@@ -205,8 +227,9 @@ const lowWaterNotAnchoredWhy = "the boat is not anchored and no anchor watch is 
 // getAnchorLowWater is GET /api/anchor-watch/low-water.
 func getAnchorLowWater(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	watch, active, _ := currentAnchorWatch()
 	return serveAnchorLowWater(c, fetchSignalKVesselState,
-		func() bool { _, active, _ := currentAnchorWatch(); return active },
+		func() bool { return active },
 		func(now time.Time) (tideTodayResponse, error) {
 			resp, _, err := buildTideToday(settingsPath, now)
 			return resp, err
@@ -214,10 +237,10 @@ func getAnchorLowWater(c echo.Context) error {
 		func() (float64, error) {
 			s, err := anchorSettingsFromSettingsFile(settingsPath)()
 			return s.MinClearanceAtLowM, err
-		})
+		}, liveLowWaterCalibrator(watch, active))
 }
 
-func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, error), watchSet func() bool, tide func(time.Time) (tideTodayResponse, error), margin func() (float64, error)) error {
+func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, error), watchSet func() bool, tide func(time.Time) (tideTodayResponse, error), margin func() (float64, error), calibrate lowWaterCalibrator) error {
 	state, err := vesselState()
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("the boat's state is unavailable: %v", err)})
@@ -228,7 +251,7 @@ func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, er
 		// No tide is built and no margin read: there is nothing to check.
 		return c.JSON(http.StatusOK, lowWaterClearance{Status: lowWaterUnknown, Reason: lowWaterNotAnchored, WorkedOutAt: now.Format(time.RFC3339)})
 	}
-	out, err := buildLowWater(state, func() (tideTodayResponse, error) { return tide(now) }, margin, now)
+	out, err := buildLowWater(state, func() (tideTodayResponse, error) { return tide(now) }, margin, calibrate, now)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

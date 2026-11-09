@@ -248,7 +248,7 @@ func TestLowWater_BuildReadsTheBoatTheTideAndTheMargin(t *testing.T) {
 	state := vesselStateData{Depth: 4, DepthLastUpdateAge: 2, DraftM: 1.2}
 	tide := func() (tideTodayResponse, error) { return *lwTide(nil), nil }
 	margin := func() (float64, error) { return 0.5, nil }
-	got, err := buildLowWater(state, tide, margin, lwNow)
+	got, err := buildLowWater(state, tide, margin, nil, lwNow)
 	if err != nil || got.Status != lowWaterOK {
 		t.Fatalf("got %+v, %v", got, err)
 	}
@@ -258,22 +258,22 @@ func TestLowWater_BuildReadsTheBoatTheTideAndTheMargin(t *testing.T) {
 	// does not, and an unknown age is no depth.
 	edge := state
 	edge.DepthLastUpdateAge = 120
-	if got, err = buildLowWater(edge, tide, margin, lwNow); err != nil || got.Status != lowWaterOK {
+	if got, err = buildLowWater(edge, tide, margin, nil, lwNow); err != nil || got.Status != lowWaterOK {
 		t.Errorf("120 s old depth: got %+v, %v", got, err)
 	}
 	edge.DepthLastUpdateAge = 121
-	if got, err = buildLowWater(edge, tide, margin, lwNow); err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoDepth {
+	if got, err = buildLowWater(edge, tide, margin, nil, lwNow); err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoDepth {
 		t.Errorf("121 s old depth: got %+v, %v", got, err)
 	}
 	edge.DepthLastUpdateAge = -1
-	if got, err = buildLowWater(edge, tide, margin, lwNow); err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoDepth {
+	if got, err = buildLowWater(edge, tide, margin, nil, lwNow); err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoDepth {
 		t.Errorf("unknown depth age: got %+v, %v", got, err)
 	}
 
 	// The -1 sentinels never pass as readings.
 	none := state
 	none.Depth, none.DraftM = -1, -1
-	got, _ = buildLowWater(none, tide, margin, lwNow)
+	got, _ = buildLowWater(none, tide, margin, nil, lwNow)
 	if got.Reason != lowWaterNoDepth {
 		t.Errorf("no depth: got %+v", got)
 	}
@@ -286,7 +286,7 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 	noStation := func() (tideTodayResponse, error) {
 		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
 	}
-	got, err := buildLowWater(state, noStation, margin, lwNow)
+	got, err := buildLowWater(state, noStation, margin, nil, lwNow)
 	if err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoTideStation || got.Detail != "no tide station is set up" {
 		t.Errorf("no station: got %+v, %v", got, err)
 	}
@@ -294,13 +294,13 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 	down := func() (tideTodayResponse, error) {
 		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideUnreachable, message: "provider failed"}
 	}
-	got, err = buildLowWater(state, down, margin, lwNow)
+	got, err = buildLowWater(state, down, margin, nil, lwNow)
 	if err != nil || got.Reason != lowWaterTideUnreachable || got.Detail != "the tide service could not be reached" {
 		t.Errorf("unreachable: got %+v, %v", got, err)
 	}
 
 	badMargin := func() (float64, error) { return 0, errors.New("settings are unreadable") }
-	if _, err := buildLowWater(state, func() (tideTodayResponse, error) { return *lwTide(nil), nil }, badMargin, lwNow); err == nil {
+	if _, err := buildLowWater(state, func() (tideTodayResponse, error) { return *lwTide(nil), nil }, badMargin, nil, lwNow); err == nil {
 		t.Error("an unreadable margin setting must be an error, not a default")
 	}
 }
@@ -316,7 +316,7 @@ func serveLowWaterForTest(t *testing.T, state func() (vesselStateData, error), w
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/anchor-watch/low-water", nil)
-	if err := serveAnchorLowWater(echo.New().NewContext(req, rec), state, func() bool { return watch }, tide, margin); err != nil {
+	if err := serveAnchorLowWater(echo.New().NewContext(req, rec), state, func() bool { return watch }, tide, margin, nil); err != nil {
 		t.Fatal(err)
 	}
 	var body map[string]any
@@ -403,7 +403,7 @@ func TestLowWater_BuildDoesNotReadTheTideWithoutADepthOrADraft(t *testing.T) {
 		"no depth": {Depth: -1, DepthLastUpdateAge: 2, DraftM: 1.2},
 		"no draft": {Depth: 4, DepthLastUpdateAge: 2, DraftM: -1},
 	} {
-		got, err := buildLowWater(state, tide, margin, lwNow)
+		got, err := buildLowWater(state, tide, margin, nil, lwNow)
 		if err != nil || got.Status != lowWaterUnknown {
 			t.Errorf("%s: got %+v, %v", name, got, err)
 		}

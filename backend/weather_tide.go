@@ -304,35 +304,46 @@ func tideToday(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
-// buildTideToday is the /api/tide-today body at now: the configured provider
-// and station, the current height and the next high and low.
-func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tideTodayETagData, error) {
+// configuredTideChart reads the tide chart of the provider and station set in
+// Settings, with the provider's id and the provider itself. Every failure is a
+// *tideTodayError that says which part of the setup is wrong.
+func configuredTideChart(settingsPath string) (tideChartResult, string, tideProvider, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
-		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusInternalServerError, reason: tideSettingsUnreadable, message: fmt.Sprintf("failed to read settings: %v", err)}
+		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusInternalServerError, reason: tideSettingsUnreadable, message: fmt.Sprintf("failed to read settings: %v", err)}
 	}
 
 	uiMap, _ := settings["ui"].(map[string]any)
 
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
 	if configuredProvider == "" {
-		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"}
+		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"}
 	}
 
 	provider, ok := getTideProvider(configuredProvider)
 	if !ok {
-		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)}
+		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)}
 	}
 
 	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 	if configuredStation == "" {
-		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
+		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
 	}
 
 	result, fetchErr := provider.FetchTideChart(configuredStation)
 	if fetchErr != nil {
 		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
-		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
+		return tideChartResult{}, "", nil, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
+	}
+	return result, configuredProvider, provider, nil
+}
+
+// buildTideToday is the /api/tide-today body at now: the configured provider
+// and station, the current height and the next high and low.
+func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tideTodayETagData, error) {
+	result, configuredProvider, _, err := configuredTideChart(settingsPath)
+	if err != nil {
+		return tideTodayResponse{}, tideTodayETagData{}, err
 	}
 
 	tidalPhase := classifyTidalPhase(result.Extremes, now)
