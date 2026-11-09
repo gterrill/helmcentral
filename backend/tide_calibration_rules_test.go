@@ -1238,3 +1238,36 @@ func TestTheVerdictCarriesTheClearanceOfTheFigureBehindIt(t *testing.T) {
 	lwFloat(t, "shallowest clearance", sh.VerdictClearanceM, 1.5+tideCalCautionM-1.2, 1e-9)
 	lwFloat(t, "shallowest half width", sh.VerdictHalfWidthM, 0.3, 1e-9)
 }
+
+func TestNoReadingIsStoredFromAnAlertedOrStaleFix(t *testing.T) {
+	store := anchorTrailEnv(t)
+	withKeppelChart(t)
+	dropAnchor(t, -23.1847, 150.9322)
+	t0 := time.Date(2026, 11, 8, 1, 0, 0, 0, time.UTC)
+	stale := vesselStatusFreshAge.Seconds() + 5
+	cases := []struct {
+		name string
+		pos  float64
+		gnss bool
+		want int
+	}{
+		{"good fix", 1, false, 2},
+		{"gnss critical alert", 1, true, 0},
+		{"stale position", stale, false, 0},
+		{"unknown position", -1, false, 0},
+	}
+	for i, c := range cases {
+		globalTideCalRecorder.reset()
+		before := len(storedFor(t, store))
+		state := vesselStateData{GNSSCriticalAlert: c.gnss, PositionLastUpdateAge: c.pos, Depth: 4.0, DepthLastUpdateAge: 1, Latitude: -23.1847, Longitude: 150.9322}
+		start := t0.Add(time.Duration(i*10) * time.Minute)
+		for m := 0; m < 3; m++ {
+			for s := 0; s < 60; s += 10 {
+				recordTideCalibrationSample(state, start.Add(time.Duration(m)*time.Minute+time.Duration(s)*time.Second))
+			}
+		}
+		if got := len(storedFor(t, store)) - before; got != c.want {
+			t.Errorf("%s: %d readings stored, want %d", c.name, got, c.want)
+		}
+	}
+}
