@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-11-09
+
 ### Added
 
 - **Anchor Watch learns the tide where you're anchored.** From the moment you drop
@@ -21,6 +23,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   follows the boat's position and has no station. Once the margin
   of error is smaller than your clearance setting it reads **Locally calibrated
   depth estimate** with the hours of readings and a figure like **2.4 m ±0.2**.
+  With the clearance at 0 there's nothing to judge the margin by, so it stays on
+  the prediction and asks you to set a clearance.
   The too-shallow warning is now judged on the bottom of that margin, and on the
   shallowest spot the boat has sounded, which the line names when it sets the
   warning. It also shows the depth at the next high, and when the tide here
@@ -44,8 +48,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   water still work, because they only use how far the water rises and falls. If
   you've already chosen the Australian or US provider, nothing changes. If you
   want published predictions on chart datum, choose that provider in Settings
-  under Plugins. The new plugin file, `open-meteo.wasm`, comes in the plugin
-  bundle, so re-fetch the bundle as in the [install guide](docs/how-to/install.md)
+  under Plugins. The new plugin file, `tides/open-meteo.wasm` (not the weather
+  plugin of the same name), comes in the plugin bundle, so re-fetch the bundle
+  as in the [install guide](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/install.md)
   and restart. Until you do, the tide section says the tide plugin isn't installed.
 - **A tide below chart datum now shows.** A minus tide from a NOAA station, such as
   -0.6 ft, used to be blanked on the Depth & Tide tile and treated as no reading
@@ -71,9 +76,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   place of Scope OK, Low or Insufficient. It judges against the method on the tab
   you have open, and shows nothing when there's no recommendation yet. The **Apply as alarm radius** button is now **Set alarm
   to** and the radius, for example "Set alarm to 65 m". The Depth caption reads
-  "From the bow roller, at high tide" or "From the bow roller, no tide station",
-  and the tabs are called Catenary and
-  Ratio. The warning that asks you to set the boat length is still there.
+  "From the bow roller, at high tide" or "From the bow roller, no tide station".
+  A depth saved on a different tide source from the one in use now reads
+  "Saved on a different tide source, so no rise is added", and the plan leaves
+  out the rise to high water. The tabs are called Catenary and Ratio. The warning that asks you to set the boat length is still there.
 - **A radar guard-zone alarm can now be stopped with "Stop showing".** It used
   to be one of the alarms that can never be hidden. It's now an ordinary alarm
   from another device on your network. It still reads "Radar Guard Zone 1", but
@@ -109,7 +115,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   elsewhere with no depth saved, it says the depth is unknown instead of telling
   you to check a chart. If the sounder has been silent for two minutes, the
   clearance line says **No depth** rather than using the last figure it heard.
-- **Paying out the Catenary Method's Pay Out figure now reads "Enough rode".**
+- **Paying out the Catenary tab's Pay Out figure now reads "Enough rode".**
   The rode badge used to compare your rode with the exact recommendation, so a
   recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m still
   said you were short. It now judges your rode against the Pay Out figure
@@ -3327,7 +3333,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.62.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/gterrill/helmcentral/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/gterrill/helmcentral/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/gterrill/helmcentral/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/gterrill/helmcentral/compare/v0.59.0...v0.60.0
