@@ -749,6 +749,7 @@ func TestAnchorageDepth_MeanSeaLevelTideSkipsTheChecksThatNeedChartDatum(t *test
 }
 
 func TestTidePositionFromState_RefusesTheSentinelPairAndAnError(t *testing.T) {
+	withAnchorWatch(t, nil)
 	if _, _, err := tidePositionFromState(vesselStateData{Latitude: -1, Longitude: -1}, nil); err == nil {
 		t.Error("-1,-1 is not a position")
 	}
@@ -770,15 +771,33 @@ func TestTidePoint_ABoatUnderWayStaysOnOneCacheEntry(t *testing.T) {
 
 // ── the anchor watch's point ───────────────────────────────────────────
 
+// withAnchorWatch sets the anchor watch, with no load error, for one test and
+// puts both back afterwards: the tide's point comes from the watch, so a watch
+// or load error left by an earlier test would otherwise decide it.
 func withAnchorWatch(t *testing.T, w *anchorWatchData) {
 	t.Helper()
 	anchorWatchMu.Lock()
-	prev := anchorWatchState
-	anchorWatchState = w
+	prev, prevErr := anchorWatchState, anchorWatchLoadErr
+	anchorWatchState, anchorWatchLoadErr = w, ""
 	anchorWatchMu.Unlock()
 	t.Cleanup(func() {
 		anchorWatchMu.Lock()
-		anchorWatchState = prev
+		anchorWatchState, anchorWatchLoadErr = prev, prevErr
+		anchorWatchMu.Unlock()
+	})
+}
+
+// withAnchorWatchLoadErr sets the anchor watch's load error for one test, under
+// the lock currentAnchorWatch reads it with, and puts it back afterwards.
+func withAnchorWatchLoadErr(t *testing.T, msg string) {
+	t.Helper()
+	anchorWatchMu.Lock()
+	prev := anchorWatchLoadErr
+	anchorWatchLoadErr = msg
+	anchorWatchMu.Unlock()
+	t.Cleanup(func() {
+		anchorWatchMu.Lock()
+		anchorWatchLoadErr = prev
 		anchorWatchMu.Unlock()
 	})
 }
@@ -1129,9 +1148,7 @@ func TestTideCalSource_StationProviderKeepsItsSavedStationWhateverTheAnchorDoes(
 
 func TestTidePosition_AnUnreadableWatchFileIsAnExplicitErrorNotTheBoatsFix(t *testing.T) {
 	withAnchorWatch(t, nil)
-	prev := anchorWatchLoadErr
-	anchorWatchLoadErr = "reading anchor watch state: permission denied"
-	t.Cleanup(func() { anchorWatchLoadErr = prev })
+	withAnchorWatchLoadErr(t, "reading anchor watch state: permission denied")
 	_, _, err := tidePositionFromState(vesselStateData{Latitude: 45.43, Longitude: 12.34}, nil)
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("got %v", err)
@@ -1302,9 +1319,7 @@ func TestTideBoatFixNow_WithAWatchSetTheVesselStateIsNotRead(t *testing.T) {
 	}
 	// An unreadable watch file is still an explicit error, with no read.
 	withAnchorWatch(t, nil)
-	prevErr := anchorWatchLoadErr
-	anchorWatchLoadErr = "permission denied"
-	t.Cleanup(func() { anchorWatchLoadErr = prevErr })
+	withAnchorWatchLoadErr(t, "permission denied")
 	if fix = tideBoatFixNow(); fix.Err == nil {
 		t.Fatal("an unreadable watch file is an error")
 	}

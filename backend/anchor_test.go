@@ -489,8 +489,14 @@ func patchAnchorWatchForTest(t *testing.T, body map[string]any) (int, map[string
 func resetAnchorWatchState(t *testing.T) {
 	t.Helper()
 	anchorWatchMu.Lock()
+	prev := anchorWatchState
 	anchorWatchState = nil
 	anchorWatchMu.Unlock()
+	t.Cleanup(func() {
+		anchorWatchMu.Lock()
+		anchorWatchState = prev
+		anchorWatchMu.Unlock()
+	})
 }
 
 // Test 9: POST persists the planning_depth_m / planning_tide_height_ft pair
