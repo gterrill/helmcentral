@@ -33,12 +33,16 @@ func figureOf(p tideCalPrediction) *lowWaterFigure {
 // lowWaterCalibration is the calibration's part of the answer. The figures are
 // there only when it is ready: a calibration that is not ready gives its reason
 // and how many hours of readings it has, and nothing to quote. The fields tagged
-// "-" are for Mate and never reach the page.
+// "-" are for Mate and never reach the page: the page shows the share of range
+// and the high at the boat, and not the deepest spot or the match note.
 type lowWaterCalibration struct {
 	Ready           bool    `json:"ready"`
 	NotReady        string  `json:"not_ready,omitempty"`
 	NotReadyDetail  string  `json:"not_ready_detail,omitempty"`
 	HoursOfReadings float64 `json:"hours_of_readings"`
+	// ReadyAt is when the calibration is projected to be ready, RFC 3339, only
+	// for too_few_readings and only when the projection could be made.
+	ReadyAt string `json:"ready_at,omitempty"`
 	// StationIsPoint is set when the tide comes from a position model and not a
 	// tide station, so Mate calls it the tide model.
 	StationIsPoint bool `json:"-"`
@@ -50,27 +54,28 @@ type lowWaterCalibration struct {
 
 	// The next high, the boat's cell and the deepest cell sounded. There is no
 	// verdict on it.
-	HighTideTime string `json:"high_tide_time,omitempty"`
+	HighTideTime string `json:"-"`
 	// HighNotAvailable is why there is no high-water figure while the low stands:
 	// a reason code, with its detail for Mate.
 	HighNotAvailable       string          `json:"high_not_available,omitempty"`
 	HighNotAvailableDetail string          `json:"-"`
-	HighAtBoat             *lowWaterFigure `json:"high_at_boat,omitempty"`
-	DeepestSounded         *lowWaterFigure `json:"deepest_sounded,omitempty"`
-	DeepestDiffers         bool            `json:"deepest_differs,omitempty"`
+	HighAtBoat             *lowWaterFigure `json:"-"`
+	DeepestSounded         *lowWaterFigure `json:"-"`
+	DeepestDiffers         bool            `json:"-"`
 
 	// When the calibrated and station depths for the low differ by more than the
 	// margin, what the tide here does instead.
-	StationMatchNote string `json:"station_match_note,omitempty"`
+	StationMatchNote string `json:"-"`
 
 	// For Mate: k is the share of the station's tide range the water here runs,
 	// with the half-width of its 95% interval, and TideMinutesLater how many
 	// minutes later the tide here runs than the station's (negative: earlier).
 	// That is the fit's offset with its sign turned: the fit reads the station's
 	// curve at t + offset, so a positive offset is a tide that runs earlier.
-	K                  *float64 `json:"-"`
+	// The page shows k and the timing too, as "83% of range, 8 min earlier".
+	K                  *float64 `json:"k,omitempty"`
 	KHalfWidth         *float64 `json:"-"`
-	TideMinutesLater   *int     `json:"-"`
+	TideMinutesLater   *int     `json:"later_min,omitempty"`
 	StationName        string   `json:"-"`
 	StationDistanceM   *float64 `json:"-"`
 	StationDepthAtLowM *float64 `json:"-"`
@@ -111,6 +116,9 @@ func applyCalibration(out lowWaterClearance, res *calibrationResult, marginM flo
 	out.Calibration = cal
 	if res.Err != nil {
 		cal.NotReady, cal.NotReadyDetail = res.Err.Code, res.Err.Detail
+		if !res.Err.ReadyAt.IsZero() {
+			cal.ReadyAt = res.Err.ReadyAt.Format(time.RFC3339)
+		}
 		return out
 	}
 	est := res.Est
@@ -129,9 +137,15 @@ func applyCalibration(out lowWaterClearance, res *calibrationResult, marginM flo
 	cal.ShallowestSounded = figureOf(shallow)
 	if est.HighHere != nil {
 		cal.HighTideTime = est.HighHere.At.Format(time.RFC3339)
+		// The verdict's one high is the calibrated one.
+		out.HighTideTime, out.DepthAtHighM, out.DepthAtHighHalfWidthM = cal.HighTideTime, floatPtr(est.HighHere.ValueM), floatPtr(est.HighHere.HalfWidthM)
 		cal.HighAtBoat, cal.DeepestSounded = figureOf(*est.HighHere), figureOf(*est.HighDeepest)
 		cal.DeepestDiffers = est.DeepestApart
-	} else if est.HighUnavailable != nil {
+	} else {
+		// No calibrated high: the station's high is not offered beside a local low.
+		out.HighTideTime, out.DepthAtHighM = "", nil
+	}
+	if est.HighHere == nil && est.HighUnavailable != nil {
 		cal.HighNotAvailable, cal.HighNotAvailableDetail = est.HighUnavailable.Code, est.HighUnavailable.Detail
 	}
 
@@ -177,6 +191,14 @@ func applyCalibration(out lowWaterClearance, res *calibrationResult, marginM flo
 	out.DepthAtLowM = floatPtr(here.ValueM)
 	out.DepthAtLowHalfWidthM = floatPtr(here.HalfWidthM)
 	out.ClearanceM = floatPtr(here.ValueM - *out.DraftM)
+	// Which way the tide is going here: the local high or the local low, whichever
+	// comes first. With no local high to compare with, the station's direction stands.
+	if est.HighHere != nil {
+		out.TideDirection = "Falling"
+		if est.HighHere.At.Before(here.At) {
+			out.TideDirection = "Rising"
+		}
+	}
 
 	if math.Abs(here.ValueM-stationDepth) > marginM {
 		cal.StationMatchNote = stationMatchNote(res.StationName, res.StationDistanceM, res.StationIsPoint, fit.K)

@@ -621,8 +621,8 @@ func TestLowWaterEndpointCarriesTheCalibration(t *testing.T) {
 		body.Calibration.Shallowest.ValueM != 2.1 || body.Calibration.Shallowest.HalfWidthM != 0.2 || !body.Calibration.Differs {
 		t.Errorf("%s", rec.Body.String())
 	}
-	// k, the offset and the station's distance are Mate's, not the page's.
-	for _, key := range []string{`"method"`, `"k"`, `"offset_min"`, `"station_distance_m"`, `"station_name"`, `"low_at_boat_m"`} {
+	// The offset and the station's distance are Mate's, not the page's.
+	for _, key := range []string{`"method"`, `"deepest_sounded"`, `"deepest_differs"`, `"station_match_note"`, `"offset_min"`, `"station_distance_m"`, `"station_name"`, `"low_at_boat_m"`} {
 		if strings.Contains(rec.Body.String(), key) {
 			t.Errorf("the page's answer carries %s: %s", key, rec.Body.String())
 		}
@@ -1360,5 +1360,218 @@ func TestAMinuteStoredDuringTheStayLoadIsKeptAndNotBlocked(t *testing.T) {
 	tideCalStayMu.Unlock()
 	if n != len(rs)+2 {
 		t.Errorf("the stay holds %d minutes, want %d", n, len(rs)+2)
+	}
+}
+
+// ── the page's calibration line ─────────────────────────────────────────
+
+func TestReadyProjectionScalesTheShrinkingPartAgainstWhatRoomIsLeft(t *testing.T) {
+	first := time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC)
+	last := first.Add(3 * time.Hour) // the end of the fit's data
+	f := &tideCalFit{FirstAt: first, LastAt: last}
+	now := last.Add(time.Minute)
+	// 3 h in, half width twice the margin, nothing that does not shrink: four
+	// times the readings, 9 h more, counted from the fit's last reading.
+	if at := f.projectReady(0.8, 0, 0.4, now); !at.Equal(last.Add(9 * time.Hour)) {
+		t.Errorf("ready at %v", at)
+	}
+	// 0.2 m of the 0.8 m is ensemble disagreement and never shrinks: 0.6 m has to
+	// come down to 0.2 m, nine times the readings, 24 h more from the last reading,
+	// which is just under a day from now.
+	if at := f.projectReady(0.8, 0.2, 0.4, now); !at.Equal(last.Add(24 * time.Hour)) {
+		t.Errorf("with a floor: ready at %v", at)
+	}
+	// A floor at or over the margin means more readings never get there.
+	if at := f.projectReady(0.8, 0.4, 0.4, now); !at.IsZero() {
+		t.Error("projected with a floor at the margin")
+	}
+	for name, c := range map[string][3]float64{
+		"no half width": {0, 0, 0.4},
+		"no margin":     {0.8, 0, 0},
+		"infinite":      {math.Inf(1), 0, 0.4},
+		"nan":           {math.NaN(), 0, 0.4},
+		"nan floor":     {0.8, math.NaN(), 0.4},
+	} {
+		if at := f.projectReady(c[0], c[1], c[2], now); !at.IsZero() {
+			t.Errorf("%s: projected", name)
+		}
+	}
+	if at := (&tideCalFit{FirstAt: first, LastAt: first}).projectReady(0.8, 0, 0.4, now); !at.IsZero() {
+		t.Error("projected with no hours")
+	}
+}
+
+// halfWidthFor is the half width that puts the projection `more` hours past the
+// fit's last reading, for a fit of `hours` hours, a margin of 0.4 and no floor.
+func halfWidthFor(hours, more float64) float64 {
+	return 0.4 * math.Sqrt(1+more/hours)
+}
+
+func TestReadyProjectionOnlyGivesATimeBetweenTenMinutesAndADayAhead(t *testing.T) {
+	first := time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC)
+	last := first.Add(3 * time.Hour)
+	f := &tideCalFit{FirstAt: first, LastAt: last}
+
+	if at := f.projectReady(halfWidthFor(3, 3), 0, 0.4, last); at.IsZero() || at.Sub(last).Round(time.Minute) != 3*time.Hour {
+		t.Errorf("3 h ahead: %v", at)
+	}
+	if at := f.projectReady(halfWidthFor(3, 5.0/60), 0, 0.4, last); !at.IsZero() {
+		t.Errorf("5 min ahead: %v", at)
+	}
+	if at := f.projectReady(halfWidthFor(3, 30), 0, 0.4, last); !at.IsZero() {
+		t.Errorf("30 h ahead: %v", at)
+	}
+	// The window is measured from the request time, not from the last reading: 3 h
+	// after the last reading is already behind a request made 2 h 55 min later.
+	if at := f.projectReady(halfWidthFor(3, 3), 0, 0.4, last.Add(175*time.Minute)); !at.IsZero() {
+		t.Errorf("under 10 min from now: %v", at)
+	}
+	// Half width equal to the margin: nothing left to narrow, but not ready.
+	if at := f.projectReady(0.4, 0, 0.4, last); !at.IsZero() {
+		t.Errorf("half width at the margin: %v", at)
+	}
+	// 10 h of readings with the room used up but for 0.001 m: about 2.5 million
+	// hours, which must not be turned into a duration.
+	big := &tideCalFit{FirstAt: first, LastAt: first.Add(10 * time.Hour)}
+	if at := big.projectReady(1.0, 0.499, 0.5, big.LastAt); !at.IsZero() {
+		t.Errorf("overflow input: %v", at)
+	}
+}
+
+func TestPredictSeparatesTheDisagreementThatDoesNotShrink(t *testing.T) {
+	cell := tideCalCell{}
+	mk := func(off int, seabed float64) *tideCalMember {
+		return &tideCalMember{K: 0.5, OffsetMin: off, Sigma: 0.1, Inflation: 1, TQ: 2, VarK: 0.0001,
+			Cells: map[tideCalCell]*tideCalCellStat{cell: {SeabedM: seabed, HBar: 1, NEff: 50}}}
+	}
+	f := &tideCalFit{Members: []*tideCalMember{mk(0, 1.0), mk(5, 1.3)}, Curve: tideCurve{
+		{Time: time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC), High: false, HeightM: 1},
+		{Time: time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC), High: true, HeightM: 3},
+	}}
+	p, err := f.predict(cell, time.Date(2026, 11, 8, 6, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.StaticM < 0.29 || p.StaticM > 0.31 || p.HalfWidthM <= p.StaticM {
+		t.Errorf("static %v of half width %v", p.StaticM, p.HalfWidthM)
+	}
+}
+
+func TestStationHighAtTheBoatComesWithTheLow(t *testing.T) {
+	now := time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC)
+	cur, low, high := 4.0, 1.0, 10.0
+	out := computeLowWaterClearance(lowWaterInput{
+		MarginM: 0.5, Now: now, DepthM: floatPtr(3), DraftM: floatPtr(1),
+		Tide: &tideTodayResponse{CurrentTideHeightFt: &cur, LowTideHeightFt: &low, LowTideTime: now.Add(4 * time.Hour).Format(time.RFC3339),
+			HighTideHeightFt: &high, HighTideTime: now.Add(10 * time.Hour).Format(time.RFC3339)},
+	})
+	if out.DepthAtHighM == nil || math.Abs(*out.DepthAtHighM-(3+6/metersToFeet)) > 1e-9 || out.HighTideTime != now.Add(10*time.Hour).Format(time.RFC3339) {
+		t.Errorf("%+v", out)
+	}
+	// A high that has passed gives nothing.
+	out = computeLowWaterClearance(lowWaterInput{
+		MarginM: 0.5, Now: now, DepthM: floatPtr(3), DraftM: floatPtr(1),
+		Tide: &tideTodayResponse{CurrentTideHeightFt: &cur, LowTideHeightFt: &low, LowTideTime: now.Add(4 * time.Hour).Format(time.RFC3339),
+			HighTideHeightFt: &high, HighTideTime: now.Add(-time.Hour).Format(time.RFC3339)},
+	})
+	if out.DepthAtHighM != nil || out.HighTideTime != "" {
+		t.Errorf("a passed high: %+v", out)
+	}
+}
+
+func TestPageGetsKAndTheTimingAndTheProjectedReadyTime(t *testing.T) {
+	got := applyStation(2.0, readyEstimate(2.4, 0.2, 2.4, 0.2), 0.5)
+	b, err := json.Marshal(got.Calibration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["k"] != 0.85 || m["later_min"] != float64(-5) {
+		t.Errorf("k / later_min: %s", b)
+	}
+	if _, ok := m["k_half_width"]; ok {
+		t.Errorf("k half width reached the page: %s", b)
+	}
+	if _, ok := m["ready_at"]; ok {
+		t.Errorf("a ready calibration has a ready_at: %s", b)
+	}
+
+	at := time.Date(2026, 11, 8, 8, 40, 0, 0, time.UTC)
+	e := tideCalErr(tideCalTooFewReadings, "")
+	e.ReadyAt = at
+	nr := applyStation(2.0, &calibrationResult{HoursOfReadings: 3, Err: e}, 0.5)
+	if nr.Calibration.ReadyAt != at.Format(time.RFC3339) {
+		t.Errorf("ready_at = %q", nr.Calibration.ReadyAt)
+	}
+}
+
+func TestOneHighAndTheDirectionComeFromTheServer(t *testing.T) {
+	now := time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC)
+	cur, low, high := 4.0, 1.0, 10.0
+	tide := &tideTodayResponse{CurrentTideHeightFt: &cur, LowTideHeightFt: &low, LowTideTime: now.Add(4 * time.Hour).Format(time.RFC3339),
+		HighTideHeightFt: &high, HighTideTime: now.Add(10 * time.Hour).Format(time.RFC3339), TideDirection: "Falling"}
+	st := computeLowWaterClearance(lowWaterInput{MarginM: 0.5, Now: now, DepthM: floatPtr(3), DraftM: floatPtr(1), Tide: tide})
+	if st.TideDirection != "Falling" {
+		t.Errorf("station direction = %q", st.TideDirection)
+	}
+
+	// Calibrated: the local high (1 h from now) comes before the local low, so the
+	// tide here is rising whatever the station says, and the verdict's one high is
+	// the calibrated one, with its half width.
+	res := readyEstimate(2.4, 0.2, 2.4, 0.2)
+	res.Est.LowHere.At = now.Add(5 * time.Hour)
+	res.Est.HighHere = &tideCalPrediction{ValueM: 5.1, HalfWidthM: 0.3, At: now.Add(time.Hour)}
+	res.Est.HighDeepest = res.Est.HighHere
+	got := applyCalibration(st, res, 0.5)
+	if got.TideDirection != "Rising" || got.HighTideTime != now.Add(time.Hour).Format(time.RFC3339) ||
+		got.DepthAtHighM == nil || *got.DepthAtHighM != 5.1 || got.DepthAtHighHalfWidthM == nil || *got.DepthAtHighHalfWidthM != 0.3 {
+		t.Errorf("%+v", got)
+	}
+	b, _ := json.Marshal(got.Calibration)
+	for _, key := range []string{`"high_tide_time"`, `"high_at_boat"`} {
+		if strings.Contains(string(b), key) {
+			t.Errorf("the page gets a second high, %s: %s", key, b)
+		}
+	}
+
+	// With no calibrated high there is no high on the verdict, and nothing to
+	// compare the low with, so the station's direction stands.
+	res2 := readyEstimate(2.4, 0.2, 2.4, 0.2)
+	res2.Est.HighUnavailable = tideCalErr(tideCalNoUpcomingHigh, "")
+	res2.Est.LowHere.At = now.Add(5 * time.Hour)
+	st.TideDirection = "Rising"
+	got2 := applyCalibration(st, res2, 0.5)
+	if got2.TideDirection != "Rising" || got2.HighTideTime != "" || got2.DepthAtHighM != nil {
+		t.Errorf("%+v", got2)
+	}
+}
+
+func TestStationHighNeverReadsShallowerThanNow(t *testing.T) {
+	// Already above the next high's forecast height (the turn is just passing): the
+	// depth at the high is the depth now, as the low's fall clamps at zero.
+	now := time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC)
+	cur, low, high := 9.0, 1.0, 8.5
+	out := computeLowWaterClearance(lowWaterInput{
+		MarginM: 0.5, Now: now, DepthM: floatPtr(3), DraftM: floatPtr(1),
+		Tide: &tideTodayResponse{CurrentTideHeightFt: &cur, LowTideHeightFt: &low, LowTideTime: now.Add(4 * time.Hour).Format(time.RFC3339),
+			HighTideHeightFt: &high, HighTideTime: now.Add(10 * time.Minute).Format(time.RFC3339)},
+	})
+	if out.DepthAtHighM == nil || *out.DepthAtHighM != 3 {
+		t.Errorf("%+v", out.DepthAtHighM)
+	}
+}
+
+func TestVerdictNamesTheTideStationItRestsOn(t *testing.T) {
+	now := time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC)
+	cur, low := 4.0, 1.0
+	out := computeLowWaterClearance(lowWaterInput{
+		MarginM: 0.5, Now: now, DepthM: floatPtr(3), DraftM: floatPtr(1),
+		Tide: &tideTodayResponse{StationName: "Middle Island", CurrentTideHeightFt: &cur, LowTideHeightFt: &low, LowTideTime: now.Add(4 * time.Hour).Format(time.RFC3339)},
+	})
+	if out.TideStationName != "Middle Island" {
+		t.Errorf("station = %q", out.TideStationName)
 	}
 }

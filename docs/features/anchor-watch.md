@@ -37,10 +37,15 @@ it. The panel in the top-left corner of the map shows the readings. At the top
 is the live depth under the keel, because on the hook that matters more than
 how far off the anchor you've swung.
 
-Under the depth, you'll see the tide and which way it's moving. Below that is
-one line with the next high or low, its height and time, and the depth to
-expect once it turns. The tide station the figures come from is named beside
-the **Tide** label.
+Under the depth, you'll see the tide and which way it's moving. The tide
+station the figures come from is named beside the **Tide** label. Below that,
+once Anchor Watch has a low-water figure for you, are two more lines. The first
+gives the next high and the next low at your boat, each with its time and the
+depth you can expect, and the clearance under the keel after the low. The
+second, labelled **Calibration**, says how far to trust those figures (see
+[Where the depth at low water comes from](#where-the-depth-at-low-water-comes-from)).
+Without a low-water figure, the panel keeps the single line with the station's
+next high or low, its height and time.
 
 The low-water clearance warning sits in the same panel, so everything about the
 water you're anchored in reads from one place. If the depth hasn't updated
@@ -83,21 +88,21 @@ under the boat arrow.
   bright yellow where it is now, in a few steps along the whole stay. The oldest
   part stays solid, so a long swing never fades out of sight.
 
-## The shaded swing circle
+## The sounded ground
 
-Inside the swing circle, the ground your boat hasn't crossed since the anchor
-went down is shaded, and the ground it has crossed is clear. The shading is one
-colour and says nothing about depth. It's there so you can see at a glance how
-much of the circle has been sounded, which is the part the low-water estimate
-can speak for.
+Inside the swing circle, the ground your boat has crossed since the anchor went
+down is tinted cyan. The tint is one colour and says nothing about depth. It's
+there so you can see at a glance how much of the circle has been sounded, which
+is the part the low-water estimate can speak for. It sits under the gold trail
+and the alarm ring, and stands out against sand, mud and satellite imagery.
 
-- **A new drop:** The whole circle is shaded at first, because nothing has been
-  sounded yet. A square clears each minute the boat swings over it, in squares
-  about 2.5 m on a side. Small gaps between crossed squares are filled in, so
-  the picture doesn't speckle.
+- **A new drop:** There's no tint at first, because nothing has been sounded
+  yet. A square fills in each minute the boat swings over it, in squares about
+  2.5 m on a side. Small gaps between crossed squares are filled in, so the
+  picture doesn't speckle.
 - **Correcting the anchor:** The stay's readings are kept, so the squares you
-  had cleared are redrawn around the corrected position straight away.
-- **While you adjust:** The shading is hidden until you save or cancel.
+  had crossed are redrawn around the corrected position straight away.
+- **While you adjust:** The tint is hidden until you save or cancel.
 
 ## AIS targets on the map
 
@@ -380,8 +385,8 @@ against your vessel's draft and the margin you set in Settings → Anchor Watch
 - **Too shallow:** When the water left at that point would be less than your
   margin, the full-page Anchor Watch view shows a shallow-water warning in the
   map panel. It names the shortfall and the time of the next low.
-- **Enough water:** When there is enough water, the same line quietly shows the
-  clearance you can expect instead.
+- **Enough water:** When there is enough water, the low on the tide line shows
+  the clearance you can expect instead, for example **1.3 m under keel**.
 
 The clearance is judged the way it's shown, to a tenth of a metre. So 0.46 m counts
 as 0.5 m, and it meets a 0.5 m margin. A clearance below zero means the keel would
@@ -441,21 +446,34 @@ There are two things to know about it:
 
 ### Where the depth at low water comes from
 
-The line under the clearance names its source, so you always know which one
-you're reading.
+The tide lines in the map panel read like this when the calibration is ready:
 
-- **Depth based on tide station prediction:** This is the depth now, less the
-  fall the tide station predicts to the next low. It's what you see after you
-  drop the anchor. A station can be a long way off, and the water at your
-  anchorage may rise and fall by a different amount, so this is a first guess.
-- **Depth based on tide model prediction:** The same first guess, when your tide
-  provider is the worldwide model that follows the boat's position and has no
-  station. The readout under the clearance, the "set by" note on the warning
-  and the reasons below say "tide model" where they would say "tide station".
-- **Locally calibrated depth estimate (4 h of readings):** Once Helmcentral has
-  learned how the tide behaves where you are, this replaces the guess. The
-  figure comes with a margin of error, for example **2.4 m ±0.2**. The hours
-  count up as the readings build.
+    High 9.24 AM · 5.7 m / Low 3.53 PM · 2.5 m · 1.3 m under keel
+    Calibration  83% of range · 8 min earlier · 12 h of readings
+
+The first line is the depth at your boat at the next high and the next low, in
+the order they come, and the clearance under the keel after the low. A margin of
+error such as **±0.2** shows only when it's 0.1 or more, so you never see **±0.0**.
+The **Calibration** line says what those figures rest on:
+
+- **Share of range:** How much of the station's tide range the water here
+  really has, for example **83% of range**.
+- **Earlier or later:** How many minutes sooner or later the tide turns here than
+  at the station. It's left out when the difference is under a minute.
+- **Hours of readings:** How long Helmcentral has been learning from your
+  sounder.
+
+Before the calibration is ready, the same first line shows the tide station's
+prediction. The high is the station's time with the depth at your boat marked
+**est.**, and the low is the depth now less the fall the station predicts. A
+station can be a long way off, and the water at your anchorage may rise and fall
+by a different amount, so this is a first guess. When your tide provider is the
+worldwide model that follows the boat's position and has no station, the "set
+by" note on the warning and the reasons below say "tide model" where they would
+say "tide station".
+
+Once Helmcentral has learned how the tide behaves where you are, the calibrated
+figures replace the guess, each with its margin of error.
 
 Helmcentral learns from the moment you press **Drop** until you raise the anchor.
 Every minute it notes the depth and where the boat is, and sets them against
@@ -467,9 +485,14 @@ just after the drop.
 It switches over by itself, with no fixed number of hours. The calibrated
 estimate takes over when its margin of error is smaller than the clearance you
 set in Settings → Anchor Watch. Until then the station estimate stays on screen
-and the line says why:
+and the **Calibration** line says why:
 
-- **Calibrating, with the hours so far:** There aren't enough readings yet.
+- **Calibration in progress:** There aren't enough readings yet. The line gives
+  a time such as **ready at ~6.40 PM** when Helmcentral can work one out, with
+  the weekday in front if that's tomorrow. It only gives a time when the guess is
+  between 10 minutes and 24 hours away. Otherwise it gives the hours so far.
+  It's a guess from how fast the margin of error is shrinking, and it's worked
+  out again each time the calibration is recalculated.
 - **Set a low-water clearance:** The clearance in Settings → Anchor Watch is
   zero, so there's nothing to judge the calibration against. Set one and it carries on.
 - **Readings too scattered to calibrate yet:** The sounder is noisy, so its
@@ -490,18 +513,12 @@ lies now, the station estimate, and the shallowest spot the boat has sounded
 (with 0.2 m added, because the boat may never lie on that exact spot at low water). The warning goes off when the
 bottom of the margin of error on that figure is under your draft plus your
 margin. When the shallowest spot is what set it off, the warning says so. The
-line also shows **Shallowest sounded spot** whenever it is 0.2 m or more
+panel also shows **Shallowest sounded spot** whenever it is 0.2 m or more
 shallower than the depth where you lie.
 
-For the next high tide the line shows **High water**, with its margin of error,
-and the deepest spot sounded when it's 0.2 m or more deeper. This is for
-information only. It never raises a warning.
-
-When the calibrated and station depths for the next low differ by more than your
-margin, the line adds a note such as "The tide here doesn't follow Middle Island
-(11 km away): it runs 64% of its range." It means the station is a poor guide
-for this anchorage, and by how much. Before the calibration is ready there's no
-note.
+The high on the tide line is for information only. It never raises a warning.
+When the share of range is well under 100%, the station is a poor guide for this
+anchorage, and the figure says by how much.
 
 Mate gives the same figures. Ask it about the depth at low water and it names
 the method, the hours of readings and the margin of error.

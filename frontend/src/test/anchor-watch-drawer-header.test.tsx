@@ -247,6 +247,36 @@ describe('AnchorWatchDrawer header — tide context', () => {
     expect(hud()).toHaveTextContent('Falling')
   })
 
+  it('shows the direction the server worked out, not the station\'s', () => {
+    const cal = { ready: true, hoursOfReadings: 4, k: 0.8, tideMinutesLater: -8, shallowestDiffers: false, shallowestSounded: { depthM: 2, halfWidthM: 0.1 } }
+    const base = { status: 'ok' as const, depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, cautiousSource: 'boat_now' as const }
+    // The station says Falling, but the server found the local high before the local low.
+    mockLowWater = {
+      lowWater: { ...base, lowTideTime: '2026-11-08T04:45:00Z', calibration: cal, tideDirection: 'Rising' },
+      workedOutAt: '2026-11-08T04:31:00Z', failed: false,
+    }
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Falling' })} />)
+    expect(hud()).toHaveTextContent('Rising')
+    expect(hud()).not.toHaveTextContent('Falling')
+
+    mockLowWater = {
+      lowWater: { ...base, lowTideTime: '2026-11-08T02:00:00Z', calibration: cal, tideDirection: 'Falling' },
+      workedOutAt: '2026-11-08T04:31:00Z', failed: false,
+    }
+    rerender(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Rising' })} />)
+    expect(hud()).toHaveTextContent('Falling')
+  })
+
+  it('uses the live station direction, not the verdict\'s, once the verdict is stale', () => {
+    mockLowWater = {
+      lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: '2026-11-08T04:45:00Z', tideDirection: 'Rising' },
+      workedOutAt: '2026-11-08T04:31:00Z', failed: true,
+    }
+    render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Falling' })} />)
+    expect(hud()).toHaveTextContent('Falling')
+    expect(hud()).not.toHaveTextContent('Rising')
+  })
+
   it('shows Rising with the rising arrow', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Rising' })} />)
 
@@ -335,10 +365,10 @@ describe('AnchorWatchDrawer header — low-water clearance moved in', () => {
     expect(screen.queryByTestId('anchor-watch-header')).not.toBeInTheDocument()
   })
 
-  it('hides the quiet ok/unknown clearance lines below sm but never the too-shallow alert', () => {
+  it('keeps the tide figures on a phone, hides the quiet unknown line below sm, and never hides the too-shallow alert', () => {
     mockLowWater = { lowWater: CLEARS, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
     const { rerender } = render(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide()} />)
-    expect(within(hud()).getByTestId('low-water-clearance').className).toMatch(/\bhidden\b.*\bsm:block\b/)
+    expect(within(hud()).getByTestId('low-water-tide').className).not.toMatch(/\bhidden\b/)
 
     mockLowWater = { lowWater: { status: 'unknown', reason: 'no_draft' }, workedOutAt: '2026-11-08T04:31:00Z', failed: false }
     rerender(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide()} />)

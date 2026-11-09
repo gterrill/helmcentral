@@ -11,6 +11,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The Anchor Watch tide panel is shorter and easier to read.** Under the depth
+  you now get the tide and its direction, then one line with the next high and
+  the next low at your boat, each with its time and depth, and the clearance
+  under the keel after the low. A third line, **Calibration**, says how much of
+  the station's range the water here runs, how many minutes earlier or later the
+  tide turns, and how many hours of readings sit behind it. While it's still
+  learning, it says **Calibration in progress** with a guess at when it will be
+  ready. A margin of error only shows when it's 0.1 or more, so **±0.0** is gone.
+  The separate method line, the high-water line and the tide-match note are gone,
+  because the new lines say the same thing.
+- **Sounded ground is easier to see on the Anchor Watch map.** The ground your
+  boat has crossed is now tinted cyan inside the swing circle. Before, the ground
+  you hadn't crossed was darkened, which was hard to see on satellite imagery and
+  hidden under the gold trail.
+
 ### Added
 
 - **Anchor Watch shows where nearby boats have anchored.** Once a boat near you has

@@ -81,6 +81,9 @@ type tideCalError struct {
 	// HoursUsed is how long the readings that reached the fit span, when the fit
 	// failed after the readings were filtered.
 	HoursUsed float64
+	// ReadyAt is when a calibration short of readings is projected to be ready,
+	// zero when it could not be projected.
+	ReadyAt time.Time
 }
 
 func (e *tideCalError) Error() string {
@@ -629,7 +632,11 @@ func finishMember(s *tideCalSolution, rows []tideCalRow, cells []tideCalCell, ce
 type tideCalPrediction struct {
 	ValueM     float64
 	HalfWidthM float64
-	At         time.Time
+	// StaticM is the part of HalfWidthM that more readings do not narrow: how far
+	// another offset the readings cannot rule out puts the figure from the best
+	// fit's. The rest of the interval shrinks as readings come.
+	StaticM float64
+	At      time.Time
 }
 
 func (p tideCalPrediction) BottomM() float64 { return p.ValueM - p.HalfWidthM }
@@ -656,7 +663,9 @@ func (f *tideCalFit) predict(cell tideCalCell, t time.Time) (tideCalPrediction, 
 			best = p
 			continue
 		}
-		best.HalfWidthM = math.Max(best.HalfWidthM, math.Abs(p.ValueM-best.ValueM)+p.HalfWidthM)
+		if w := math.Abs(p.ValueM-best.ValueM) + p.HalfWidthM; w > best.HalfWidthM {
+			best.HalfWidthM, best.StaticM = w, math.Abs(p.ValueM-best.ValueM)
+		}
 	}
 	return best, nil
 }
@@ -762,10 +771,57 @@ func (f *tideCalFit) estimate(lowAt, highAt time.Time, marginM float64, now time
 		// narrow the interval slowly: the sounder is the problem.
 		return nil, tideCalErr(tideCalTooScattered, "")
 	default:
-		return nil, tideCalErr(tideCalTooFewReadings, "")
+		e := tideCalErr(tideCalTooFewReadings, "")
+		e.ReadyAt = f.projectReady(est.LowHere.HalfWidthM, est.LowHere.StaticM, marginM, now)
+		return nil, e
 	}
 	est.HighUnavailable = est.predictHigh(highAt)
 	return est, nil
+}
+
+// A projected ready time is shown only inside this window ahead of the request.
+// Sooner than tideCalReadyMinAhead it is about to be wrong by more than its own
+// distance, and past tideCalReadyMaxAhead the guess is too loose to quote.
+const (
+	// tideCalReadyMinAhead: under 10 minutes away the guess is noise.
+	tideCalReadyMinAhead = 10 * time.Minute
+	// tideCalReadyMaxAhead: past a day the guess is too loose to give a clock time.
+	tideCalReadyMaxAhead = 24 * time.Hour
+)
+
+// projectReady guesses when a calibration short of readings will be ready, as a
+// time strictly between tideCalReadyMinAhead and tideCalReadyMaxAhead after now,
+// and the zero time otherwise. The projection counts from the end of the data the
+// fit used. Readiness is the 95% half-width on the next-low prediction falling
+// under the margin. Two of its terms narrow with the square root of the readings:
+// the cell's own scatter and the uncertainty in k. The third, how far an offset
+// the readings cannot yet rule out puts the figure from the best fit's (staticM),
+// does not, so only the rest is projected, against the room the margin leaves
+// once it is taken out. If staticM alone reaches the margin, or nothing is left to
+// narrow, no number of readings is a promise. The hours needed are the hours so
+// far times (narrowing part / room) squared. It is a guess and is recomputed on
+// every fit.
+func (f *tideCalFit) projectReady(halfWidthM, staticM, marginM float64, now time.Time) time.Time {
+	hours := f.Hours()
+	for _, v := range []float64{hours, halfWidthM, marginM} {
+		if !finite(v) || v <= 0 {
+			return time.Time{}
+		}
+	}
+	if !finite(staticM) || staticM < 0 || staticM >= marginM || halfWidthM <= marginM {
+		return time.Time{}
+	}
+	ratio := (halfWidthM - staticM) / (marginM - staticM)
+	more := hours*ratio*ratio - hours
+	// Checked before any conversion to a duration, which overflows past ~2.5e6 h.
+	if !finite(more) || more > tideCalReadyMaxAhead.Hours()+hours+now.Sub(f.LastAt).Hours() {
+		return time.Time{}
+	}
+	at := f.LastAt.Add(time.Duration(more * float64(time.Hour)))
+	if !at.After(now.Add(tideCalReadyMinAhead)) || !at.Before(now.Add(tideCalReadyMaxAhead)) {
+		return time.Time{}
+	}
+	return at
 }
 
 // predictHigh fills the high-water figures, or says why it can't.

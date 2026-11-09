@@ -8,6 +8,10 @@ anchorage instead of the tide station's prediction. The server still holds the
 one calculation, the page and Mate still read it, and every rule in ADR 0272
 about inputs, staleness, rounding and the gate carries over.
 
+Amended 2026-11-10 (see the last section): the page reads the calibration as one
+tide panel and tints the ground the boat has crossed, instead of shading what it
+has not.
+
 It builds on position-based tide providers working through the source identity
 below. A provider with no stations, which names its "station" by the boat's
 rounded position, is one source like any other: the calibration needs no station
@@ -159,12 +163,11 @@ No hard-coded hours or metres. The calibration is ready when the 95% half-width
 on the next-low prediction for the boat's own cell is narrower than the
 operator's low-water clearance margin. With the margin at zero there is nothing
 to judge by, and no threshold stands in: the reason is `no_clearance_set`. Until
-then the line uses the station
-estimate, labelled "Depth based on tide station prediction", and says why the
-calibration is not ready:
+then the panel uses the station
+estimate and says why the calibration is not ready:
 
-- `too_few_readings`: the interval is wide because the readings are few; the
-  line shows the hours so far.
+- `too_few_readings`: the interval is wide because the readings are few. The
+  server projects when it will be ready (see the amendment).
 - `readings_too_scattered`: one reading's own 95% scatter is wider than the
   margin, so more readings narrow the interval only slowly. A noisy sounder
   keeps the interval wide and says so.
@@ -172,9 +175,8 @@ calibration is not ready:
   readings show no tide, the latest minute is stale, the tide curve or the store
   is the problem.
 
-Once ready, the line reads "Locally calibrated depth estimate (4 h of
-readings)" with the figure and its interval, for example "2.4 m ±0.2". The
-hours count up.
+Once ready, the panel shows the calibrated figures with their interval, for
+example "2.4 m ±0.2", and the hours of readings count up.
 
 ### 7. The verdict
 
@@ -205,7 +207,8 @@ warning on it.
 ### 9. The tide-match note
 
 Once calibrated, when the calibrated and station depths for the next low differ
-by more than the margin, the tide line says so: "The tide here doesn't follow
+by more than the margin, the answer carries a note for Mate (the page no longer
+prints it; the Calibration line's share of range says the same): "The tide here doesn't follow
 Middle Island (11 km away): it runs 64% of its range." The distance is from the
 station's coordinates (the provider's chart, or its station list when a
 station-based chart has none) to the anchor, and is left out if neither has them.
@@ -225,8 +228,9 @@ and a `calibration` block: ready or the reason it is not, hours of readings used
 tide here as a percentage of the station's with its interval, how many minutes
 later the tide here runs than the station's (negative means earlier), the shallowest sounded spot, the next high and the deepest sounded
 spot (each a value with its half width), the station's name and distance, and
-the tide-match note. The tide percentage, minutes later, station name and distance are
-Mate's alone; the page does not receive them. On the wire, each interval figure
+the tide-match note. The station name and distance are
+Mate's alone; the page does not receive them. The page does receive k and the
+minutes later, since the amendment. On the wire, each interval figure
 is `{value_m, half_width_m}`. Figures are in the
 operator's units and times are boat-time labels, as elsewhere in the tool.
 None of the calibration's figures is given until it is ready. The Anchor Watch
@@ -283,10 +287,10 @@ place and a transducer offset setting.
 
 ## The map shows what has been sounded
 
-The Anchor Watch map shades the swing circle in one colour and leaves clear
-every 2.5 m cell the boat has recorded a minute in during this stay. The shade
-carries no depth: it only says how much of the circle the calibration can speak
-for. Every recorded minute's cell counts, whether or not the fit used it.
+The Anchor Watch map tints, in one colour, every 2.5 m cell the boat has
+recorded a minute in during this stay (amended 2026-11-10: it first shaded the
+cells not crossed). The tint carries no depth: it only says how much of the
+circle the calibration can speak for. Every recorded minute's cell counts, whether or not the fit used it.
 
 The worker publishes the cells before it asks for the tide chart, so they appear
 whether or not the fit succeeds. The stay keeps its distinct cells as minutes
@@ -301,7 +305,8 @@ shades nothing if the answer's origin is not the anchor it is drawing. For
 display only, the map also treats an uncrossed cell between crossed cells as
 crossed (opposite neighbours north and south, east and west, or on a diagonal),
 so single-cell holes fill in without the band growing; the route and the
-calibration see only the cells actually crossed. The layer sits under the alarm
+calibration see only the cells actually crossed. The tinted area is cut to the
+swing circle and drawn as merged blocks, with no cell grid lines. The layer sits under the alarm
 ring, the trails and the markers, takes no pointer input, and is hidden during
 Adjust because it is built from the committed anchor and radius.
 
@@ -321,3 +326,59 @@ Adjust because it is built from the committed anchor and radius.
   or a new Drop the page says the calibration is being worked out until the
   worker has published a fit for that anchor.
 - Old stays' readings are kept and never pruned.
+
+## Amendment 2026-11-10: the tide panel and the tint
+
+Operators found the five tide lines confusing: two different high waters, a
+plus-or-minus of 0.0, and depth and clearance on separate lines. With a
+low-water verdict the panel is now three lines.
+
+- **The tide:** the station's name and the direction, as before.
+- **The figures at the boat:** the next high and low in time order, each with
+  its time and depth, and the clearance under the keel after the low. Before the
+  calibration is ready they are the station's: the high's time with the "est."
+  depth at the boat, and the station-based low. The station's own heights drop
+  out. A plus-or-minus appears only when it reads 0.1 or more in the operator's
+  units. When the verdict is too shallow, the red line carries the clearance and
+  this line leaves it off.
+- **The Calibration line:** the share of the station's range ("83% of range"),
+  how many minutes earlier or later the tide here turns than the station's
+  (left off when it rounds to 0), and the hours of readings. The answer now
+  carries `k` and `later_min` for it. Not ready, the line says "Calibration in
+  progress (ready at ~6.40 PM)" when the server could project a time, and the
+  hours so far when it could not. Any other reason is worded as before.
+
+The method line, the separate high-water line with the deepest sounded spot and
+the printed tide-match note are gone from the page. The shallowest-spot line and
+the too-shallow warning stay. Mate's payload is unchanged.
+
+The projected ready time (`ready_at`, `too_few_readings` only) comes from the
+readiness test in section 6. Two terms of the half-width narrow with the square
+root of the readings: the cell's own scatter and the uncertainty in `k`. The
+third, how far the offsets the readings cannot yet rule out put the figure from
+the best fit's, does not. The server projects only the narrowing part, against
+the room the margin leaves once the fixed part is taken out: hours needed =
+hours so far × (narrowing part / room) squared. If the fixed part alone reaches
+the margin, more readings never get there and the server sends no time. It
+counts from the end of the fit's data, so the time holds still between fits,
+and the server sends it only when it falls strictly between 10 minutes and 24
+hours after the request. Sooner is noise and later is too loose to quote, so the
+page then shows the hours so far. The page shows a weekday when the time falls on
+another day at the boat. It is a guess, and each fit recomputes it.
+
+The server holds the other two calculations on that line, so the page does
+none of its own. The answer carries `tide_direction`: the station's, until the
+calibration is ready, then "Rising" when the local high comes before the local
+low and "Falling" when it comes after (with no local high, the station's stands).
+It also carries one high, `high_tide_time`, `depth_at_high_m` and, for a
+calibrated high, `depth_at_high_half_width_m`. Before the calibration is ready
+that high is the station's, worked out from the same reading and depth as the
+low, so the two share one calculation and one stale mark. Once ready it is the
+calibrated high, and the calibration block no longer repeats it. The answer's
+`deepest_sounded`, `deepest_differs` and `station_match_note` no longer reach the
+page either; Mate reads them from the server's own structure.
+
+The tint now fills the ground the boat has crossed, in cyan, instead of
+darkening the rest. On satellite imagery the old dark shade was invisible, and
+the gold trail covered the band it left clear. Cyan stands apart from the trail
+and from sand and mud.

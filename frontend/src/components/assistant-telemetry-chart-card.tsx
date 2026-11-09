@@ -7,7 +7,6 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useTelemetrySeries, type TelemetrySeriesBody } from '@/hooks/use-telemetry-series'
 import type { TelemetryChartCard } from '@/lib/mate-cards'
 import {
-  DAY_MS,
   angleAxis,
   angleTickLabel,
   bandKey,
@@ -23,7 +22,7 @@ import {
   seriesValues,
   zonedYmd,
 } from '@/lib/telemetry-chart'
-import { formatAxisTime, formatTimeOfDay, zonedDayStart } from '@/lib/vessel-time'
+import { DAY_MS, formatAxisTime, formatTimeOfDay, zonedDayStart } from '@/lib/vessel-time'
 import { cn } from '@/lib/utils'
 
 // Series colours: the forecast charts' own series tokens, none of them alert

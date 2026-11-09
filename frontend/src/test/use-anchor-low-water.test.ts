@@ -114,13 +114,15 @@ describe('useAnchorLowWater', () => {
     calibration: {
       ready: true,
       hours_of_readings: 4.2,
+      k: 0.83,
+      later_min: -8,
       shallowest_sounded: { value_m: 2.0, half_width_m: 0.3 },
       shallowest_differs: true,
-      high_tide_time: '2026-11-08T10:27:00Z',
-      high_at_boat: { value_m: 5.1, half_width_m: 0.2 },
-      deepest_sounded: { value_m: 5.4, half_width_m: 0.3 },
-      station_match_note: 'The tide here does not follow it.',
     },
+    high_tide_time: '2026-11-08T10:27:00Z',
+    depth_at_high_m: 5.1,
+    depth_at_high_half_width_m: 0.2,
+    tide_direction: 'Rising',
   }
 
   it('reads a calibrated depth with its interval and the figures beside it', async () => {
@@ -140,14 +142,15 @@ describe('useAnchorLowWater', () => {
       calibration: {
         ready: true,
         hoursOfReadings: 4.2,
+        k: 0.83,
+        tideMinutesLater: -8,
         shallowestSounded: { depthM: 2.0, halfWidthM: 0.3 },
         shallowestDiffers: true,
-        highTideTime: '2026-11-08T10:27:00Z',
-        highAtBoat: { depthM: 5.1, halfWidthM: 0.2 },
-        deepestSounded: { depthM: 5.4, halfWidthM: 0.3 },
-        deepestDiffers: false,
-        stationMatchNote: 'The tide here does not follow it.',
       },
+      highTideTime: '2026-11-08T10:27:00Z',
+      depthAtHighM: 5.1,
+      depthAtHighHalfWidthM: 0.2,
+      tideDirection: 'Rising',
     })
   })
 
@@ -174,9 +177,25 @@ describe('useAnchorLowWater', () => {
     })
   })
 
+  it('reads the projected ready time while it is short of readings', async () => {
+    answer({
+      status: 'ok', depth_at_low_m: 2.4, clearance_m: 1.2, low_tide_time: '2026-11-08T04:45:00Z',
+      calibration: { ready: false, not_ready: 'too_few_readings', hours_of_readings: 2, ready_at: '2026-11-08T08:40:00Z' },
+      worked_out_at: '2026-11-08T04:00:00Z',
+    })
+    const { result } = renderHook(() => useAnchorLowWater())
+
+    await waitFor(() => expect(result.current.lowWater).not.toBeNull())
+    expect(result.current.lowWater).toMatchObject({
+      calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 2, readyAt: '2026-11-08T08:40:00Z' },
+    })
+  })
+
   it.each([
     ['a calibrated depth with no interval', { ...CALIBRATED, depth_at_low_half_width_m: undefined }],
     ['a ready calibration with no shallowest spot', { ...CALIBRATED, calibration: { ...CALIBRATED.calibration, shallowest_sounded: undefined } }],
+    ['a ready calibration without its k', { ...CALIBRATED, calibration: { ...CALIBRATED.calibration, k: undefined } }],
+    ['a ready calibration without its timing', { ...CALIBRATED, calibration: { ...CALIBRATED.calibration, later_min: undefined } }],
     ['a calibration that is not ready and does not say why', { ...CALIBRATED, calibration: { ready: false, hours_of_readings: 1 } }],
     ['a calibrated verdict without the clearance behind it', { ...CALIBRATED, verdict_clearance_m: undefined }],
     ['a verdict resting on a figure it does not know', { ...CALIBRATED, cautious_source: 'hunch' }],

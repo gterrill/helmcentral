@@ -3,7 +3,7 @@
 // words and map shapes. Words follow GLOSSARY.md: coverage, coverage square,
 // edits since. Never "tile" (that is a dashboard tile), "cell" or "region".
 
-import { zoneKnown, formatDayKey, formatDayMonthIn, formatTimeOfDay, NO_TIME } from '@/lib/vessel-time'
+import { DAY_MS, zoneKnown, formatDayKey, formatDayMonthIn, formatTimeOfDay, NO_TIME } from '@/lib/vessel-time'
 
 export type CoastlineSquareState = 'ready' | 'failed' | 'pending'
 
@@ -196,7 +196,6 @@ export function squarePolygon(lat: number, lon: number) {
   }
 }
 
-const DAY_MS = 86_400_000
 
 export interface SquareFeatureProps {
   state: CoastlineSquareState

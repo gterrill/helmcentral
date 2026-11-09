@@ -96,6 +96,13 @@ export function formatWeekday(date: Date, timeZone?: string): string {
   return dateTimeFormat({ weekday: 'short' }, timeZone).format(date)
 }
 
+export const DAY_MS = 86_400_000
+
+/** "Tue " (with its space) when `at` is not on the same calendar date as `now` in the zone, otherwise "": the prefix a time on another day needs. */
+export function weekdayPrefix(at: Date, now: Date | null, timeZone?: string): string {
+  return now === null || isSameLocalDate(at, now, timeZone) ? '' : `${formatWeekday(at, timeZone)} `
+}
+
 /** Whether `a` and `b` fall on the same calendar date in the given zone - the test clock-tile.tsx runs to decide whether an ETA needs formatWeekday's prefix. */
 export function isSameLocalDate(a: Date, b: Date, timeZone?: string): boolean {
   const key = dateTimeFormat({ year: 'numeric', month: '2-digit', day: '2-digit' }, timeZone)

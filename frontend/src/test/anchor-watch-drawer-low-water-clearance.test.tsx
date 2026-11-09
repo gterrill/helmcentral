@@ -137,8 +137,9 @@ describe('AnchorWatchDrawer low water clearance', () => {
     mockLowWater = { lowWater: { status: 'ok', depthAtLowM: 3.39, clearanceM: 2.19, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
     render(<AnchorWatchDrawer {...baseProps} />)
 
-    const readout = screen.getByTestId('low-water-clearance')
-    expect(readout).toHaveTextContent('2.2 m under keel at low water')
+    const readout = screen.getByTestId('low-water-tide')
+    expect(readout).toHaveTextContent('Low 4.45 AM · 3.4 m · 2.2 m under keel')
+    expect(screen.queryByTestId('low-water-clearance')).not.toBeInTheDocument()
     expect(readout).not.toHaveTextContent('Too shallow')
   })
 
@@ -186,32 +187,30 @@ describe('AnchorWatchDrawer low water clearance', () => {
   // ADR 0274: the station estimate is labelled until the sounder's own readings
   // at this anchorage have narrowed to better than the margin.
   describe('local tide calibration', () => {
+    // The one high on the wire while the calibration is ready: the calibrated one.
+    const HIGH = { highTideTime: '2026-11-08T10:27:00Z', depthAtHighM: 5.1, depthAtHighHalfWidthM: 0.2 }
     const READY = {
       ready: true,
       hoursOfReadings: 4.6,
       shallowestSounded: { depthM: 2.0, halfWidthM: 0.3 },
       shallowestDiffers: true,
-      highTideTime: '2026-11-08T10:27:00Z',
-      highAtBoat: { depthM: 5.1, halfWidthM: 0.2 },
-      deepestSounded: { depthM: 5.4, halfWidthM: 0.3 },
-      deepestDiffers: true,
-      stationMatchNote: "The tide here doesn't follow Middle Island (11 km away): it runs 64% of its range.",
+      k: 0.83,
+      tideMinutesLater: -8,
     }
 
-    it('calls the estimate tide model prediction when the tide follows the position', () => {
+    it('names the tide model, not a station, when the tide follows the position', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
-          calibration: { ready: false, notReady: 'implausible_fit', hoursOfReadings: 3, shallowestDiffers: false, deepestDiffers: false },
+          calibration: { ready: false, notReady: 'implausible_fit', hoursOfReadings: 3, shallowestDiffers: false },
           tideIsPoint: true,
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      const line = screen.getByTestId('low-water-method')
-      expect(line).toHaveTextContent('Depth based on tide model prediction')
-      expect(line).toHaveTextContent("readings don't fit the tide model, not used")
+      const line = screen.getByTestId('low-water-calibration')
+      expect(line).toHaveTextContent("Calibration readings don't fit the tide model, not used")
       expect(line).not.toHaveTextContent('station')
     })
 
@@ -228,38 +227,130 @@ describe('AnchorWatchDrawer low water clearance', () => {
       expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('set by the tide model estimate')
     })
 
-    it('labels the station estimate, with the hours of readings so far while it calibrates', () => {
+    it('shows the station low and its clearance, with the hours so far, while it calibrates', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
-          calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 1.2, shallowestDiffers: false, deepestDiffers: false },
+          calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 1.2, shallowestDiffers: false },
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      const line = screen.getByTestId('low-water-method')
-      expect(line).toHaveTextContent('Depth based on tide station prediction')
-      expect(line).toHaveTextContent('2.4 m')
-      expect(line).toHaveTextContent('calibrating, 1 h of readings so far')
+      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 2.4 m · 1.2 m under keel')
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (1 h of readings so far)')
       expect(screen.queryByTestId('low-water-shallowest')).not.toBeInTheDocument()
       expect(screen.queryByTestId('tide-match-note')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('low-water-method')).not.toBeInTheDocument()
+    })
+
+    it('gives the projected ready time on the boat clock when the server projects one', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
+          calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 1.2, readyAt: '2026-11-08T08:40:00Z', shallowestDiffers: false },
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (ready at ~8.40 AM)')
+    })
+
+    it('prefixes the weekday when the projected time falls on another day', () => {
+      const cal = { ready: false, notReady: 'too_few_readings' as const, hoursOfReadings: 1.2, shallowestDiffers: false }
+      mockLowWater = {
+        lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW, calibration: { ...cal, readyAt: '2026-11-09T02:00:00Z' } },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('ready at ~Mon 2.00 AM')
+    })
+
+    it('shows the station high the server worked out with the low, before the calibration is ready', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW, highTideTime: '2026-11-08T02:00:00Z', depthAtHighM: 5.6,
+          calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 1.2, shallowestDiffers: false },
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('High 2.00 AM · est. 5.6 m / Low 4.45 AM · 2.4 m · 1.2 m under keel')
+    })
+
+    it('gives no ready time when the server has not said when the figures were worked out', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
+          calibration: { ready: false, notReady: 'too_few_readings', hoursOfReadings: 1.2, readyAt: '2026-11-08T08:40:00Z', shallowestDiffers: false },
+        },
+        workedOutAt: null, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (1 h of readings so far)')
+    })
+
+    it('names the tide source from the verdict when the page has no tide of its own, never "No tide station"', () => {
+      mockLowWater = {
+        lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW, tideStationName: 'Middle Island' },
+        workedOutAt: WORKED, failed: false,
+      }
+      const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
+      expect(screen.getByTestId('anchor-watch-hud-header')).toHaveTextContent('Tide · Middle Island')
+      expect(screen.getByTestId('anchor-watch-hud-header')).not.toHaveTextContent('No tide station')
+      unmount()
+
+      mockLowWater = { lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
+      render(<AnchorWatchDrawer {...baseProps} />)
+      expect(screen.getByTestId('anchor-watch-hud-header')).not.toHaveTextContent('No tide station')
     })
 
     it('says a noisy sounder is the reason, in the operator words', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
-          calibration: { ready: false, notReady: 'readings_too_scattered', hoursOfReadings: 3, shallowestDiffers: false, deepestDiffers: false },
+          calibration: { ready: false, notReady: 'readings_too_scattered', hoursOfReadings: 3, shallowestDiffers: false },
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-method')).toHaveTextContent('readings too scattered to calibrate yet')
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration readings too scattered to calibrate yet')
     })
 
-    it('shows the calibrated depth with its interval, the shallowest spot, high water and the tide-match note', () => {
+    it('shows the calibrated high and low at the boat, the clearance, and one calibration line', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: READY, ...HIGH, highTideTime: '2026-11-08T02:00:00Z',
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('High 2.00 AM · 5.1 m ±0.2 / Low 4.45 AM · 2.4 m ±0.2 · 1.2 m ±0.2 under keel')
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration 83% of range · 8 min earlier · 4 h of readings')
+      expect(screen.getByTestId('low-water-shallowest')).toHaveTextContent('Shallowest sounded spot 2.0 m ±0.3')
+      for (const gone of ['low-water-method', 'high-water-depth', 'tide-match-note']) {
+        expect(screen.queryByTestId(gone)).not.toBeInTheDocument()
+      }
+    })
+
+    it('orders the high and the low by time and drops the high when the server has none', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: READY, ...HIGH,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
+      expect(screen.getByTestId('low-water-tide').textContent).toMatch(/^Low 4\.45 AM.* \/ High 10\.27 AM/)
+      unmount()
+
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
@@ -268,27 +359,61 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      expect(screen.getByTestId('low-water-tide')).not.toHaveTextContent('High')
+    })
 
-      expect(screen.getByTestId('low-water-method')).toHaveTextContent('Locally calibrated depth estimate (4 h of readings) · 2.4 m ±0.2')
-      expect(screen.getByTestId('low-water-shallowest')).toHaveTextContent('Shallowest sounded spot 2.0 m ±0.3')
-      expect(screen.getByTestId('high-water-depth')).toHaveTextContent('High water 5.1 m ±0.2')
-      expect(screen.getByTestId('high-water-depth')).toHaveTextContent('deepest sounded spot 5.4 m ±0.3')
-      expect(screen.getByTestId('tide-match-note')).toHaveTextContent("The tide here doesn't follow Middle Island (11 km away): it runs 64% of its range.")
+    it('never prints a plus-or-minus that reads 0.0, and leaves out a timing that rounds to 0 min', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.5, depthAtLowHalfWidthM: 0.03, clearanceM: 1.3, lowTideTime: LOW,
+          cautiousSource: 'boat_now',
+          calibration: { ...READY, tideMinutesLater: 0.2 }, highTideTime: '2026-11-08T10:27:00Z', depthAtHighM: 5.7, depthAtHighHalfWidthM: 0.04,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-tide').textContent).not.toContain('±')
+      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 2.5 m · 1.3 m under keel')
+      expect(screen.getByTestId('low-water-calibration').textContent).not.toMatch(/min (earlier|later)/)
+    })
+
+    it('says later when the tide here turns after the station', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: { ...READY, tideMinutesLater: 12 },
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('12 min later')
+    })
+
+    it('marks the figures as not updated since after a failed poll', () => {
+      mockLowWater = {
+        lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW },
+        workedOutAt: WORKED, failed: true,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      const line = screen.getByTestId('low-water-tide')
+      expect(line).toHaveTextContent('not updated since 4.31 AM')
+      expect(line.className).toMatch(/opacity-70/)
     })
 
     it('leaves the shallowest spot off when it is not worth a line', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
-          cautiousSource: 'boat_now', calibration: { ...READY, shallowestDiffers: false, deepestDiffers: false, stationMatchNote: undefined },
+          cautiousSource: 'boat_now', calibration: { ...READY, shallowestDiffers: false },
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
       expect(screen.queryByTestId('low-water-shallowest')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('tide-match-note')).not.toBeInTheDocument()
-      expect(screen.getByTestId('high-water-depth')).not.toHaveTextContent('deepest')
     })
 
     it('says when the shallowest sounded spot, not the boat cell, set the warning', () => {
@@ -366,26 +491,26 @@ describe('AnchorWatchDrawer low water clearance', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
-          calibration: { ready: false, notReady: 'working_it_out', hoursOfReadings: 0, shallowestDiffers: false, deepestDiffers: false },
+          calibration: { ready: false, notReady: 'working_it_out', hoursOfReadings: 0, shallowestDiffers: false },
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-method')).toHaveTextContent('working out the calibration')
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration working out the calibration')
     })
 
     it('says to set a clearance when none is set', () => {
       mockLowWater = {
         lowWater: {
           status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
-          calibration: { ready: false, notReady: 'no_clearance_set', hoursOfReadings: 3, shallowestDiffers: false, deepestDiffers: false },
+          calibration: { ready: false, notReady: 'no_clearance_set', hoursOfReadings: 3, shallowestDiffers: false },
         },
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-method')).toHaveTextContent('set a low-water clearance in Anchor Watch settings to judge the calibration')
+      expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('set a low-water clearance in Anchor Watch settings to judge the calibration')
     })
 
     it('gives depths in feet when the operator reads feet', () => {
@@ -398,7 +523,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} isImperial />)
 
-      expect(screen.getByTestId('low-water-method')).toHaveTextContent('7.9 ft ±0.7')
+      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 7.9 ft ±0.7')
     })
   })
 })

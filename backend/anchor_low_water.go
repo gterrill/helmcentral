@@ -78,6 +78,19 @@ type lowWaterClearance struct {
 	ClearanceM  *float64 `json:"clearance_m,omitempty"`
 	MarginM     *float64 `json:"margin_m,omitempty"`
 	LowTideTime string   `json:"low_tide_time,omitempty"`
+	// The station's next high and the depth at the boat then, the same way the
+	// low's is worked out. Station figures: while a calibration is ready the page
+	// reads the calibration's high instead.
+	HighTideTime string   `json:"high_tide_time,omitempty"`
+	DepthAtHighM *float64 `json:"depth_at_high_m,omitempty"`
+	// DepthAtHighHalfWidthM is there only while the high is the calibrated one.
+	DepthAtHighHalfWidthM *float64 `json:"depth_at_high_half_width_m,omitempty"`
+	// TideStationName is the station (or model) the tide came from, so the page can
+	// name it when its own tide fetch has nothing.
+	TideStationName string `json:"tide_station_name,omitempty"`
+	// TideDirection is "Rising" or "Falling": the station's, until the
+	// calibration is ready, then the order of the local high and low.
+	TideDirection string `json:"tide_direction,omitempty"`
 	// While a calibration is ready (Calibration.Ready, ADR 0274) DepthAtLowM is
 	// the depth the sounder's own readings at this anchorage point to, with the
 	// half width of its 95% interval below. Otherwise it is the station's
@@ -142,7 +155,8 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 
 	// The low the tide names must still be ahead. An unparseable time counts as
 	// passed rather than let a zero time produce a false verdict.
-	if lowAt, err := time.Parse(time.RFC3339, in.Tide.LowTideTime); err != nil || !lowAt.After(in.Now) {
+	lowRiseM, lowAhead := tideChangeAhead(in.Tide.CurrentTideHeightFt, in.Tide.LowTideHeightFt, in.Tide.LowTideTime, in.Now)
+	if !lowAhead {
 		out.Reason = lowWaterTideStale
 		return out
 	}
@@ -150,7 +164,7 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 	// Already at or below the next low's forecast height: the shallowest water
 	// before that low is now, so the fall clamps to zero. A negative fall would
 	// raise the projected depth, the wrong way for a safety warning.
-	fallM := math.Max(0, *in.Tide.CurrentTideHeightFt-*in.Tide.LowTideHeightFt) / metersToFeet
+	fallM := math.Max(0, -lowRiseM)
 	depthAtLow := *in.DepthM - fallM
 	clearance := depthAtLow - *in.DraftM
 	out.Status = lowWaterOK
@@ -162,7 +176,32 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 	}
 	out.TideFallM, out.DepthAtLowM, out.ClearanceM = floatPtr(fallM), floatPtr(depthAtLow), floatPtr(clearance)
 	out.LowTideTime = in.Tide.LowTideTime
+	// The station's next high at the boat, worked out from the same reading and
+	// the same depth as the low, so the page shows both from one calculation. A
+	// high that has passed, or has no height, gives nothing.
+	if riseM, ahead := tideChangeAhead(in.Tide.CurrentTideHeightFt, in.Tide.HighTideHeightFt, in.Tide.HighTideTime, in.Now); ahead {
+		// Clamped at zero like the low's fall: a negative rise near the turn would
+		// put the high shallower than now.
+		out.HighTideTime, out.DepthAtHighM = in.Tide.HighTideTime, floatPtr(*in.DepthM+math.Max(0, riseM))
+	}
+	out.TideDirection = in.Tide.TideDirection
+	out.TideStationName = in.Tide.StationName
 	return out
+}
+
+// tideChangeAhead is how far the tide moves, in metres (negative for a fall),
+// from the current height to an extreme's height. It is there only when the
+// extreme has a real height and a time still ahead of now; an unparseable time
+// counts as passed.
+func tideChangeAhead(currentFt, extremeFt *float64, at string, now time.Time) (float64, bool) {
+	if currentFt == nil || extremeFt == nil || !finite(*currentFt) || !finite(*extremeFt) {
+		return 0, false
+	}
+	t, err := time.Parse(time.RFC3339, at)
+	if err != nil || !t.After(now) {
+		return 0, false
+	}
+	return (*extremeFt - *currentFt) / metersToFeet, true
 }
 
 // buildLowWater reads the boat, the tide and the operator's margin and judges

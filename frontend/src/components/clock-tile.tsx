@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo } from 'react'
 import { Sunrise, Sunset } from 'lucide-react'
 
 import { Tile } from '@/components/ui/tile'
-import { formatClock, formatDate, formatTimeOfDay, formatWeekday, isSameLocalDate } from '@/lib/vessel-time'
+import { formatClock, formatDate, formatTimeOfDay, weekdayPrefix } from '@/lib/vessel-time'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
 import { usePlaceName } from '@/hooks/use-place-name'
@@ -100,7 +100,7 @@ export const ClockTile = memo(function ClockTile({
     // here now the trip ETA can span more than one day.
     // A zone this browser does not know has no clock to put the ETA on.
     if (zoneError) return `ETA ${tripEta.label ? `${tripEta.label} ` : ''}--`
-    const dayPrefix = now === null || isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
+    const dayPrefix = weekdayPrefix(tripEta.etaAt, now, timeZone)
     // The ETA is a time label, so it reads like every other one: "9.40 PM".
     const time = `${dayPrefix}${formatTimeOfDay(tripEta.etaAt, timeZone)}`
     const labelPart = tripEta.label ? `${tripEta.label} ` : ''

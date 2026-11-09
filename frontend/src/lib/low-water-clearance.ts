@@ -37,15 +37,15 @@ export interface LowWaterCalibration {
   ready: boolean
   notReady?: LowWaterCalibrationNotReady
   hoursOfReadings: number
+  /** Too few readings only: when the server projects the calibration will be ready, RFC 3339. A guess, recomputed on every fit. */
+  readyAt?: string
+  /** Ready only: the share of the station's tide range the water here runs, 1 being all of it. */
+  k?: number
+  /** Ready only: minutes later the tide here turns than the station's; negative is earlier. */
+  tideMinutesLater?: number
   /** The shallowest spot sounded, projected to the low; shown when it differs from the boat's cell, or sets the verdict. */
   shallowestSounded?: { depthM: number; halfWidthM: number }
   shallowestDiffers: boolean
-  highTideTime?: string
-  highAtBoat?: { depthM: number; halfWidthM: number }
-  deepestSounded?: { depthM: number; halfWidthM: number }
-  deepestDiffers: boolean
-  /** "The tide here doesn't follow ...", from the server, or absent. */
-  stationMatchNote?: string
 }
 
 /** What the tide prediction is called: the model that follows the position, or a station. */
@@ -62,6 +62,15 @@ export type LowWaterClearanceResult =
       /** Water under the keel at the next low tide (depthAtLowM - draft). */
       clearanceM: number
       lowTideTime: string
+      /** The next high at the boat and the depth then, worked out with the low from the same reading: the calibrated high while calibration.ready, otherwise the station's. Absent when there is no high ahead. */
+      highTideTime?: string
+      depthAtHighM?: number
+      /** The 95% half width of depthAtHighM, there only for a calibrated high. */
+      depthAtHighHalfWidthM?: number
+      /** The tide station (or model) the server used, for when the page's own tide fetch has nothing. */
+      tideStationName?: string
+      /** "Rising" or "Falling": the station's, until the calibration is ready, then the order of the local high and low. */
+      tideDirection?: string
       /** The 95% half width of depthAtLowM, there while calibration.ready: the depth is then the calibrated one, otherwise the station's. */
       depthAtLowHalfWidthM?: number
       cautiousSource?: LowWaterCautiousSource
@@ -79,6 +88,11 @@ export interface LengthFormat {
   unit: string
 }
 
+/** Whether a half width is worth printing: one that reads 0.0 in the operator's units is noise, not a range. */
+export function showsHalfWidth(halfWidthM: number | undefined, format: (m: number) => string): halfWidthM is number {
+  return halfWidthM !== undefined && Number.parseFloat(format(halfWidthM)) >= 0.1
+}
+
 /**
  * The clearance of a calibrated estimate with its 95% range, in the operator's
  * units, such as "0.8 m ±0.4 under keel, could be 0.4 m". The "could be" half is
@@ -86,11 +100,19 @@ export interface LengthFormat {
  */
 export function underKeelRangePhrase(clearanceM: number, halfWidthM: number, withBottom: boolean, length: LengthFormat): string {
   const { format, unit } = length
+  const below = (m: number) => Math.round(m * 10) / 10 < 0
   const intoBottom = (m: number) => `keel ${format(Math.abs(m))} ${unit} into the bottom`
-  const head = Math.round(clearanceM * 10) / 10 < 0 ? `${intoBottom(clearanceM)} ±${format(halfWidthM)} ${unit}` : `${format(clearanceM)} ${unit} ±${format(halfWidthM)} under keel`
+  const range = showsHalfWidth(halfWidthM, format) ? ` ±${format(halfWidthM)}` : ''
+  // A tiny negative clearance rounds to zero, so it reads "0.0 m under keel", never "-0.0".
+  const head = below(clearanceM)
+    ? `${intoBottom(clearanceM)}${range && `${range} ${unit}`}`
+    : `${format(Math.max(0, clearanceM))} ${unit}${range} under keel`
   if (!withBottom) return head
+  // The bottom is what the warning is judged on, so it shows whenever it reads
+  // differently from the centre, even when the half width alone reads 0.0.
   const bottom = clearanceM - halfWidthM
-  return `${head}, could be ${Math.round(bottom * 10) / 10 < 0 ? intoBottom(bottom) : `${format(bottom)} ${unit}`}`
+  if (range === '' && format(bottom) === format(clearanceM)) return head
+  return `${head}, could be ${below(bottom) ? intoBottom(bottom) : `${format(bottom)} ${unit}`}`
 }
 
 /** Hours of readings as the label reads them: "4 h", or minutes under the first hour. */
@@ -99,11 +121,18 @@ export function readingsSpanText(hours: number): string {
   return `${Math.max(1, Math.round(hours * 60))} min`
 }
 
-/** Why the calibration is not ready yet, for the line under the station estimate. */
-export function calibrationNotReadyText(reason: LowWaterCalibrationNotReady, hoursOfReadings: number, isPoint = false): string {
+/**
+ * What the Calibration line says when the calibration is not ready, without its
+ * label. `readyText` is the projected ready time as the page words it, "ready at
+ * ~6.40 PM", when the server could project one.
+ */
+export function calibrationNotReadyText(
+  reason: LowWaterCalibrationNotReady,
+  { hoursOfReadings, readyText, isPoint = false }: { hoursOfReadings: number; readyText?: string; isPoint?: boolean },
+): string {
   switch (reason) {
     case 'too_few_readings':
-      return `calibrating, ${readingsSpanText(hoursOfReadings)} of readings so far`
+      return `in progress (${readyText ?? `${readingsSpanText(hoursOfReadings)} of readings so far`})`
     case 'readings_too_scattered':
       return 'readings too scattered to calibrate yet'
     case 'implausible_fit':
@@ -119,6 +148,23 @@ export function calibrationNotReadyText(reason: LowWaterCalibrationNotReady, hou
     case 'unavailable':
       return 'calibration unavailable'
   }
+}
+
+/**
+ * The Calibration line under the tide, without its label. Ready: how much of the
+ * station's range the water here runs, how much earlier or later it turns, and
+ * the readings behind it. Not ready: where it stands.
+ */
+export function calibrationSummaryText(cal: LowWaterCalibration, options: { readyText?: string; isPoint?: boolean } = {}): string {
+  if (!cal.ready) {
+    return cal.notReady ? calibrationNotReadyText(cal.notReady, { hoursOfReadings: cal.hoursOfReadings, ...options }) : ''
+  }
+  const parts: string[] = []
+  if (cal.k !== undefined) parts.push(`${Math.round(cal.k * 100)}% of range`)
+  const later = cal.tideMinutesLater
+  if (later !== undefined && Math.round(later) !== 0) parts.push(`${Math.abs(Math.round(later))} min ${later > 0 ? 'later' : 'earlier'}`)
+  parts.push(`${readingsSpanText(cal.hoursOfReadings)} of readings`)
+  return parts.join(' · ')
 }
 
 /** What's missing, in the operator's words. Shared by the tile and the drawer. */
@@ -151,7 +197,6 @@ export function lowWaterClearanceReasonLabel(reason: LowWaterClearanceReason): s
  * that rounds to zero never prints as "-0.0".
  */
 export function underKeelPhrase(clearanceM: number): string {
-  const rounded = Math.round(clearanceM * 10) / 10
-  if (rounded < 0) return `keel ${Math.abs(rounded).toFixed(1)} m into the bottom`
-  return `${Math.abs(rounded).toFixed(1)} m under keel`
+  // Rounded once, and the rounded figure is the one printed.
+  return underKeelRangePhrase(Math.round(clearanceM * 10) / 10, 0, false, { format: (m) => m.toFixed(1), unit: 'm' })
 }
