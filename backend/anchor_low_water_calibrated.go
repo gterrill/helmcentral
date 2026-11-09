@@ -87,6 +87,11 @@ type calibrationResult struct {
 	// StationIsPoint is set when the tide comes from a position and not a
 	// station, so the note names no station and no distance.
 	StationIsPoint bool
+	// StationFallM is how far the station's curve falls from now to the station
+	// low the local low was shifted from, never below zero. The station figure
+	// for the verdict is the depth now less this, so it and the calibrated depth
+	// are for the same tide.
+	StationFallM float64
 }
 
 // lowWaterCalibrator works out the calibration for the tide the check used. It
@@ -116,7 +121,9 @@ func applyCalibration(out lowWaterClearance, res *calibrationResult, marginM flo
 	cal.KHalfWidth = roundedPtr(fit.KHalf, 3)
 	later := -fit.OffsetMin
 	cal.TideMinutesLater = &later
-	stationDepth := *out.DepthAtLowM
+	// The station's depth at the same low the calibrated depth is for, which is
+	// not always the tide response's next station low: see publishedCalibrator.
+	stationDepth := *out.DepthNowM - res.StationFallM
 	cal.StationDepthAtLowM = floatPtr(stationDepth)
 	here, shallow := est.LowHere, est.LowShallowest
 	cal.ShallowestSounded = figureOf(shallow)
@@ -225,6 +232,17 @@ func publishedCalibrator(watch anchorWatchData) lowWaterCalibrator {
 			res.Err = tideCalErr(tideCalNoTideCurve, "no low tide ahead in the stored predictions")
 			return res
 		}
+		nowH, okNow := e.fit.Curve.heightAt(now)
+		if !okNow {
+			res.Err = tideCalErr(tideCalNoTideCurve, "the station's tide curve does not reach now, %s", now.UTC().Format(time.RFC3339))
+			return res
+		}
+		lowH, okLow := e.fit.Curve.heightAt(lowAt)
+		if !okLow {
+			res.Err = tideCalErr(tideCalNoTideCurve, "the station's tide curve does not reach the low at %s", lowAt.UTC().Format(time.RFC3339))
+			return res
+		}
+		res.StationFallM = math.Max(0, nowH-lowH)
 		res.Est, res.Err = e.fit.estimate(lowAt, highAt, marginM, now)
 		return res
 	}
