@@ -171,9 +171,7 @@ func anchorWatchFilePath() string {
 // "no tide height" as none. A height saved since carries its datum, always
 // written, so a real -1.0 ft reading is told from the old marker by that.
 func (a *anchorWatchData) dropLegacyTideMarker() {
-	if a.PlanningTideHeightFt != nil && *a.PlanningTideHeightFt == -1 && a.PlanningTideDatum == "" {
-		a.PlanningTideHeightFt = nil
-	}
+	a.PlanningTideHeightFt = legacyTideMarker(a.PlanningTideHeightFt, a.PlanningTideDatum)
 }
 
 func loadAnchorWatch() error {
@@ -298,7 +296,7 @@ func setAnchorWatch(c echo.Context) error {
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
 	}
-	setTideDatum, msg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
+	setTideFt, setTideDatum, msg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
 	if msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
@@ -372,7 +370,7 @@ func setAnchorWatch(c echo.Context) error {
 		}
 	}
 	if body.PlanningTideHeightFt.Present {
-		planningTideHeightFt = body.PlanningTideHeightFt.Value
+		planningTideHeightFt = setTideFt
 		planningTideDatum = setTideDatum
 	}
 
@@ -685,7 +683,7 @@ func patchAnchorWatch(c echo.Context) error {
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
 	}
-	patchTideDatum, tideMsg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
+	patchTideFt, patchTideDatum, tideMsg := checkPlanningTide(body.PlanningTideHeightFt.Value, body.PlanningTideDatum)
 	if tideMsg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": tideMsg})
 	}
@@ -780,7 +778,7 @@ func patchAnchorWatch(c echo.Context) error {
 			updated.PlanningTideHeightFt = nil
 			updated.PlanningTideDatum = ""
 		} else if body.PlanningTideHeightFt.Present {
-			updated.PlanningTideHeightFt = body.PlanningTideHeightFt.Value
+			updated.PlanningTideHeightFt = patchTideFt
 			updated.PlanningTideDatum = patchTideDatum
 		}
 	}

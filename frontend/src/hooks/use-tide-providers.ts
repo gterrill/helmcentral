@@ -9,6 +9,8 @@ export interface TideProviderInfo {
   position_based?: boolean
   /** What its heights are measured from; chart datum when left out. */
   height_datum?: string
+  /** True for the provider a blank setting means; the server marks it, so no screen holds its id. */
+  default?: boolean
 }
 
 const NONE: TideProviderInfo[] = []

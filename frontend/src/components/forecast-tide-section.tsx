@@ -10,7 +10,7 @@ import { useAnchorWatchSelector, selectAnchorPointKey } from '@/hooks/use-anchor
 import { useConfiguredTideChart } from '@/hooks/use-configured-tide-chart'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { apiRequest } from '@/lib/api-query'
-import { effectiveTideProvider, isMeanSeaLevel, MEAN_SEA_LEVEL_LABEL, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL_LABEL, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { addDaysISO } from '@/lib/stay'
 import { formatDayKey, selectTimeZone, unknownZoneMessage, zonedDayStart } from '@/lib/vessel-time'
@@ -40,10 +40,12 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   // screen sends neither, so it never handles a station for such a provider and
   // never saves one. The key only makes the chart fetch again when the saved
   // provider or station changes.
-  const provider = effectiveTideProvider(tideProvider)
   const anchorPoint = useAnchorWatchSelector(selectAnchorPointKey)
-  const { chart, loading, error, noStation, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased, refetch } =
-    useConfiguredTideChart(`${provider}|${tideStationId}|${anchorPoint}`, !settingsLoading)
+  const { chart, loading, error, noStation, notSetUp, isCached, updatedAt, ttlSeconds, providerName, providerId, positionBased, refetch } =
+    useConfiguredTideChart(`${tideProvider}|${tideStationId}|${anchorPoint}`, !settingsLoading)
+  // The provider the server used (a blank setting means its default), for the
+  // station lookup and the picker, which only a station provider reaches.
+  const provider = providerId || tideProvider
 
   // Only a provider with stations answers `no_station`, so a station found here
   // is a real one: the one nearest the boat, saved as the operator would have
@@ -210,12 +212,11 @@ interface ForecastPlaceTideSectionProps {
  */
 export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({ isImperial, place, dayKey }: ForecastPlaceTideSectionProps) {
   const { tideProvider, loading: settingsLoading } = useTideSettings()
-  const provider = effectiveTideProvider(tideProvider)
   // The server finds the tide at the place: the station nearest it, or for a
   // provider that follows a position the place's own point. No station lookup
   // comes first, and no station is ever saved.
-  const { chart, loading, error, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased: followsPlace, refetch } =
-    useConfiguredTideChart(provider, !settingsLoading, { lat: place.lat, lon: place.lon })
+  const { chart, loading, error, notSetUp, isCached, updatedAt, ttlSeconds, providerName, providerId, positionBased: followsPlace, refetch } =
+    useConfiguredTideChart(tideProvider, !settingsLoading, { lat: place.lat, lon: place.lon })
   const meanSeaLevel = isMeanSeaLevel(chart?.heightDatum)
 
   const { windowStart, windowEnd } = useMemo(() => {
@@ -228,7 +229,7 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
 
   const refreshMeta = (isCached || updatedAt) ? (
     <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
-      Data: {providerName || provider}
+      Data: {providerName || providerId}
       {' · '}
       {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
       {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
@@ -241,7 +242,7 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
   } else if (notSetUp) {
     body = (
       <p data-testid="forecast-place-tide-not-set-up" className="py-6 text-center text-xs text-muted-foreground">
-        Tide provider is not set up: {error}. Choose another in Settings to see tides at {place.name}.
+        No tide at {place.name}: {error}.
       </p>
     )
   } else if (loading && !chart) {

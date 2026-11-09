@@ -62,6 +62,8 @@ export interface MappedTideChart {
   ttlSeconds: number | null
   /** Who answered, for the "Data:" line. */
   providerName: string
+  /** The id of the provider that answered. */
+  providerId: string
   /** True when the tide follows a position, so there is no station to choose. */
   positionBased: boolean
 }
@@ -96,6 +98,7 @@ export function mapTideChart(data: TideChartApi): MappedTideChart {
     updatedAt: typeof data.updated_at === 'string' ? data.updated_at : null,
     ttlSeconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : null,
     providerName: data.provider_name || data.provider || '',
+    providerId: data.provider || '',
     positionBased: data.position_based === true,
   }
 }

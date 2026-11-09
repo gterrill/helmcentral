@@ -31,7 +31,7 @@ export function useConfiguredTideChart(cacheKey: string, enabled: boolean, place
   }, [error])
 
   // A failed answer still says why, and what kind of provider it was.
-  const body = error instanceof ApiError ? (error.body as { reason?: unknown; position_based?: unknown } | undefined) : undefined
+  const body = error instanceof ApiError ? (error.body as { reason?: unknown; position_based?: unknown; provider?: unknown } | undefined) : undefined
   const reason = typeof body?.reason === 'string' ? body.reason : ''
   // Null until the chart or the error says what kind of provider this is, so
   // a screen waiting on it does not guess from a saved station.
@@ -48,6 +48,8 @@ export function useConfiguredTideChart(cacheKey: string, enabled: boolean, place
     updatedAt: data?.updatedAt ?? null,
     ttlSeconds: data?.ttlSeconds ?? null,
     providerName: data?.providerName ?? '',
+    /** The provider the server used, from the chart or from its error; empty until known. */
+    providerId: data?.providerId || (typeof body?.provider === 'string' ? body.provider : ''),
     positionBased,
     refetch,
   }

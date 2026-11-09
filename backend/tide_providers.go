@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -175,14 +176,21 @@ func tideProviderHeightDatum(p tideProvider) string {
 
 // Names for the place a position-based tide is for.
 const (
-	tideNameBoatPosition = "Boat's position"
-	tideNameChosenPlace  = "Selected place"
+	tideNameBoatPosition   = "Boat's position"
+	tideNameAnchorPosition = "Anchor position"
+	tideNameChosenPlace    = "Selected place"
 )
 
 // tideBoatFixNow reads the boat's fix for a tide. A variable so tests can place
 // the boat without a SignalK server. Callers that hold a vessel state already
 // build the fix with tideBoatFixOf instead of calling it.
+//
+// An anchor watch that is set decides the point on its own, so the vessel state
+// is read only when no watch is: nothing is fetched to be ignored.
 var tideBoatFixNow = func() tideBoatFix {
+	if fix, decided := tideAnchorFix(); decided {
+		return fix
+	}
 	state, err := tideVesselState()
 	return tideBoatFixOf(state, err)
 }
@@ -211,19 +219,8 @@ func tideOwnFixNow() tideBoatFix {
 // usableOwnShipFix (a critical GNSS alert and the -1,-1 pair are refused) and
 // explained only when it fails.
 func tidePositionFromState(state vesselStateData, err error) (lat, lon float64, reason error) {
-	w, active, loadErr := currentAnchorWatch()
-	if loadErr != "" {
-		// The watch file is unreadable, so whether a watch is set is not known;
-		// the boat's fix would be a guess at which point the stay is on.
-		return 0, 0, fmt.Errorf("the anchor watch could not be read, so the tide's point is not known: %s", loadErr)
-	}
-	if active {
-		if !hasUsableVesselPosition(w.Lat, w.Lon) {
-			return 0, 0, fmt.Errorf("an anchor watch is set but has no usable anchor position")
-		}
-		return w.Lat, w.Lon, nil
-	}
-	return boatOwnPosition(state, err)
+	fix := tideBoatFixOf(state, err)
+	return fix.Lat, fix.Lon, fix.Err
 }
 
 // boatOwnPosition is the boat's own trusted fix, or the reason there is none:
@@ -252,11 +249,37 @@ func boatOwnPosition(state vesselStateData, err error) (lat, lon float64, reason
 type tideBoatFix struct {
 	Lat, Lon float64
 	Err      error
+	// Anchored is true when the point is the anchor watch's, not the boat's.
+	Anchored bool
 }
 
 func tideBoatFixOf(state vesselStateData, err error) tideBoatFix {
-	lat, lon, reason := tidePositionFromState(state, err)
+	if fix, decided := tideAnchorFix(); decided {
+		return fix
+	}
+	lat, lon, reason := boatOwnPosition(state, err)
 	return tideBoatFix{Lat: lat, Lon: lon, Err: reason}
+}
+
+// tideAnchorFix is the fix the anchor watch decides, and whether it decides one.
+// While a watch is set the point is the anchor's, read fresh each call because
+// Adjust can move it: a boat swinging on its rode near a rounding line must not
+// flip the point, and with it the cache key, mid-stay. A watch with no usable
+// anchor position, or a watch file that cannot be read, is an error and never a
+// quiet use of the boat's fix.
+func tideAnchorFix() (fix tideBoatFix, decided bool) {
+	w, active, loadErr := currentAnchorWatch()
+	switch {
+	case loadErr != "":
+		// Whether a watch is set is not known; the boat's fix would be a guess at
+		// which point the stay is on.
+		return tideBoatFix{Err: fmt.Errorf("the anchor watch could not be read, so the tide's point is not known: %s", loadErr)}, true
+	case !active:
+		return tideBoatFix{}, false
+	case !hasUsableVesselPosition(w.Lat, w.Lon):
+		return tideBoatFix{Err: fmt.Errorf("an anchor watch is set but has no usable anchor position")}, true
+	}
+	return tideBoatFix{Lat: w.Lat, Lon: w.Lon, Anchored: true}, true
 }
 
 // tidePointID is the id of a position-based tide's point: the position rounded
@@ -279,34 +302,49 @@ func tidePointStation(lat, lon float64, name string) tideStation {
 	return station
 }
 
-// tidePointZones remembers the zone found at a tide point, or that none was
-// found, so a point offshore is looked up and logged once and not on every
-// fetch (zoneAtCached remembers successes only). The points are on a 0.05 degree
-// grid, so the map stays small; it is cleared if it ever grows past a bound.
+// tidePointZones remembers the zone found at a tide point. A point with no zone
+// (offshore) is remembered too, so it is not looked up on every fetch, but only
+// for tideZoneRetry: the index may be built by then, or the position moved to a
+// coast. A failure is logged once per period. The lookup runs outside the lock.
+type tideZoneEntry struct {
+	name     string
+	failedAt time.Time // zero when a zone was found
+}
+
 var (
 	tidePointZonesMu sync.Mutex
-	tidePointZones   = map[string]string{}
+	tidePointZones   = map[string]tideZoneEntry{}
+
+	tideZoneLookup = zoneAtCached
+	tideZoneNow    = time.Now
 )
 
-const tidePointZonesMax = 4096
+const (
+	tidePointZonesMax = 4096
+	tideZoneRetry     = 10 * time.Minute
+)
 
 func tidePointZone(id string, lat, lon float64) string {
 	tidePointZonesMu.Lock()
-	defer tidePointZonesMu.Unlock()
-	if name, ok := tidePointZones[id]; ok {
-		return name
+	e, ok := tidePointZones[id]
+	tidePointZonesMu.Unlock()
+	if ok && (e.failedAt.IsZero() || tideZoneNow().Sub(e.failedAt) < tideZoneRetry) {
+		return e.name
 	}
-	name := ""
-	if z, err := zoneAtCached(lat, lon); err == nil {
-		name = z.Name
+	entry := tideZoneEntry{}
+	if z, err := tideZoneLookup(lat, lon); err == nil {
+		entry.name = z.Name
 	} else {
-		log.Printf("tide: no time zone for %s: %v", id, err)
+		entry.failedAt = tideZoneNow()
+		log.Printf("tide: no time zone for %s (looked up again in %v): %v", id, tideZoneRetry, err)
 	}
+	tidePointZonesMu.Lock()
 	if len(tidePointZones) >= tidePointZonesMax {
-		tidePointZones = map[string]string{}
+		tidePointZones = map[string]tideZoneEntry{}
 	}
-	tidePointZones[id] = name
-	return name
+	tidePointZones[id] = entry
+	tidePointZonesMu.Unlock()
+	return entry.name
 }
 
 // parseTidePointID reads the "<lat>,<lon>" a position-based tide is asked for.
@@ -355,10 +393,13 @@ func (positionTideAdapter) NearestStation(lat, lon float64) (tideStation, bool) 
 	return tidePointStation(lat, lon, tideNameChosenPlace), true
 }
 
+// errBadTidePoint is a station id that is not a usable "<lat>,<lon>".
+var errBadTidePoint = errors.New("a position-based tide takes a usable \"<lat>,<lon>\" as its station")
+
 func (a positionTideAdapter) FetchTideChart(stationID string) (tideChartResult, error) {
 	lat, lon, ok := parseTidePointID(stationID)
 	if !ok {
-		return tideChartResult{}, fmt.Errorf("%q is not a usable \"<lat>,<lon>\" position", stationID)
+		return tideChartResult{}, fmt.Errorf("%w: %q", errBadTidePoint, stationID)
 	}
 	res, err := a.tideProvider.FetchTideChart(tidePointID(lat, lon))
 	if err != nil {
@@ -370,13 +411,22 @@ func (a positionTideAdapter) FetchTideChart(stationID string) (tideChartResult, 
 
 // fetchBoatTide is the tide at the boat's own point, named for it. Used by the
 // tide tile and by the chart's "boat" station, so they read the same way.
-func fetchBoatTide(p tideProvider, lat, lon float64) (tideChartResult, error) {
-	res, err := p.FetchTideChart(tidePointID(lat, lon))
+func fetchBoatTide(p tideProvider, fix tideBoatFix) (tideChartResult, error) {
+	res, err := p.FetchTideChart(tidePointID(fix.Lat, fix.Lon))
 	if err != nil {
 		return tideChartResult{}, err
 	}
-	res.Station.Name = tideNameBoatPosition
+	res.Station.Name = tideBoatPointName(fix)
 	return res, nil
+}
+
+// tideBoatPointName names the point for the screens: the anchor's while a watch
+// is set, else the boat's.
+func tideBoatPointName(fix tideBoatFix) string {
+	if fix.Anchored {
+		return tideNameAnchorPosition
+	}
+	return tideNameBoatPosition
 }
 
 // resolveTideProvider reads ui.tide_provider from settingsPath and resolves
@@ -621,6 +671,9 @@ type tideProviderInfo struct {
 	// follows the boat's position. HeightDatum is chart_datum or mean_sea_level.
 	PositionBased bool   `json:"position_based"`
 	HeightDatum   string `json:"height_datum"`
+	// Default marks the provider a blank setting means, so the screens read it
+	// from here and hold no copy of its id.
+	Default bool `json:"default"`
 }
 
 func tideProvidersHandler(c echo.Context) error {
@@ -630,6 +683,7 @@ func tideProvidersHandler(c echo.Context) error {
 			result = append(result, tideProviderInfo{
 				ID: provider.ID(), Name: provider.Name(), Description: provider.Description(),
 				PositionBased: tideProviderPositionBased(provider), HeightDatum: tideProviderHeightDatum(provider),
+				Default: provider.ID() == defaultTideProviderID,
 			})
 		}
 	}
@@ -686,6 +740,7 @@ func tideNearestHandler(c echo.Context) error {
 	if pointErr != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": pointErr.Error()})
 	}
+	anchored := false
 	if !explicit {
 		var err error
 		// The anchor's point is for providers that follow a position; a station
@@ -696,6 +751,7 @@ func tideNearestHandler(c echo.Context) error {
 		} else {
 			fix = tideOwnFixNow()
 		}
+		anchored = fix.Anchored
 		lat, lon, err = fix.Lat, fix.Lon, fix.Err
 		if err != nil {
 			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
@@ -707,7 +763,7 @@ func tideNearestHandler(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no stations available"})
 	}
 	if !explicit && tideProviderPositionBased(provider) {
-		station.Name = tideNameBoatPosition
+		station.Name = tideBoatPointName(tideBoatFix{Anchored: anchored})
 	}
 	return c.JSON(http.StatusOK, station)
 }
@@ -731,12 +787,10 @@ func tideChartHandler(c echo.Context) error {
 	if stationID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing station_id"})
 	}
-	if tideProviderPositionBased(provider) {
-		if _, _, ok := parseTidePointID(stationID); !ok {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "station_id must be \"<lat>,<lon>\" for this provider"})
-		}
-	}
 	result, err := provider.FetchTideChart(stationID)
+	if errors.Is(err, errBadTidePoint) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
@@ -773,15 +827,23 @@ func configuredTideChartHandler(c echo.Context) error {
 		if result, err = provider.FetchTideChart(station.StationID); err != nil {
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error(), "reason": string(tideUnreachable)})
 		}
+		// A plugin may leave its station at 0,0. The catalog entry the nearest
+		// lookup found has the position, so the distance and the far warning
+		// still come back.
+		if result.Station.Lat == 0 && result.Station.Lon == 0 {
+			result.Station.Lat, result.Station.Lon = station.Lat, station.Lon
+		}
 	} else {
 		var te *tideTodayError
-		provider, _, result, te = configuredTideChart(uiMap, tideBoatFixNow)
+		var providerID string
+		provider, providerID, result, te = configuredTideChart(uiMap, tideBoatFixNow)
 		if te != nil {
 			body := map[string]any{"error": te.message, "reason": string(te.reason)}
-			// Say what kind of provider failed, so the screen does not guess
-			// from a saved station while it waits.
-			if p, _, rerr := resolveTideProviderFromUI(uiMap); rerr == nil {
-				body["position_based"] = tideProviderPositionBased(p)
+			// Say which provider failed and what kind it is, so the screen does
+			// not guess from a saved station while it waits.
+			if provider != nil {
+				body["provider"] = providerID
+				body["position_based"] = tideProviderPositionBased(provider)
 			}
 			return c.JSON(te.status, body)
 		}

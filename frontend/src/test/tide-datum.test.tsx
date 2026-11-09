@@ -19,7 +19,6 @@ import { useWaveProviders } from '@/hooks/use-wave-providers'
 import { useWeatherProviders } from '@/hooks/use-weather-providers'
 import { lowWaterClearanceReasonLabel } from '@/lib/low-water-clearance'
 import { maxExpectedDepthM, planningTideDatumDiffers, tideCapture, tideHeightFtOrNull } from '@/lib/rode-plan'
-import { effectiveTideProvider } from '@/lib/tide-datum'
 import { selectAnchorPointKey, setAnchorHere, updatePlanningDepth } from '@/hooks/use-anchor-watch'
 import { tileCard, tilePayload } from './helpers/tile-card-fixture'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
@@ -67,11 +66,6 @@ describe('tide datum helpers', () => {
     expect(tideHeightFtOrNull({ ...chartTide, current_tide_height_ft: null })).toBeNull()
   })
 
-  it('names the default provider when none is saved', () => {
-    expect(effectiveTideProvider('')).toBe('open-meteo')
-    expect(effectiveTideProvider('  ')).toBe('open-meteo')
-    expect(effectiveTideProvider('bom')).toBe('bom')
-  })
 })
 
 describe('rode planner with a tide from mean sea level', () => {
@@ -190,7 +184,7 @@ describe('useTideToday carries the datum', () => {
 
 const noChart = {
   chart: null, loading: false, error: null, noStation: false, notSetUp: false, isCached: false, updatedAt: null,
-  ttlSeconds: null, providerName: '', positionBased: false, refetch: vi.fn(),
+  ttlSeconds: null, providerName: '', providerId: '', positionBased: false, refetch: vi.fn(),
 }
 
 describe('ForecastTideSection with a provider that follows the boat', () => {
@@ -227,7 +221,7 @@ describe('ForecastTideSection with a provider that follows the boat', () => {
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
     // The screen sends no provider and no station: the server picks the tide.
-    expect(mockedChart).toHaveBeenCalledWith('open-meteo||', true)
+    expect(mockedChart).toHaveBeenCalledWith('||', true)
     expect(screen.queryByLabelText('Search tide stations')).toBeNull()
     expect(screen.queryByText('Change Station')).toBeNull()
     expect(screen.getByText("Boat's position")).toBeInTheDocument()
@@ -274,7 +268,7 @@ describe('Settings tide section', () => {
 
   const both = [
     { id: 'bom', name: 'BOM', description: '' },
-    { id: 'open-meteo', name: 'Open-Meteo (global sea level)', description: '', position_based: true, height_datum: 'mean_sea_level' },
+    { id: 'open-meteo', name: 'Open-Meteo (global sea level)', description: '', position_based: true, height_datum: 'mean_sea_level', default: true },
   ]
 
   it('hides the station fields and says tides follow the boat, by default', async () => {

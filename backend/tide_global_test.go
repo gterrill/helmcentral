@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -396,21 +397,28 @@ func TestCheckPlanningTide_AnyHeightIsAReadingAndItCarriesItsDatum(t *testing.T)
 	for _, h := range []float64{-1, -0.6, 0, 3.2} {
 		for _, d := range []string{"", tideDatumChart, tideDatumMeanSeaLevel} {
 			h, d := h, d
-			stored, msg := checkPlanningTide(&h, &d)
+			got, stored, msg := checkPlanningTide(&h, &d)
 			want := d
 			if want == "" {
 				want = tideDatumChart
 			}
-			if msg != "" || stored != want {
+			if h == -1 && d == "" {
+				// The old marker: no datum with it.
+				if got != nil || stored != "" || msg != "" {
+					t.Errorf("-1 with no datum is none: %v %q %q", got, stored, msg)
+				}
+				continue
+			}
+			if msg != "" || got == nil || *got != h || stored != want {
 				t.Errorf("%v on %q: stored %q, %q", h, d, stored, msg)
 			}
 		}
 	}
-	if stored, msg := checkPlanningTide(nil, nil); stored != "" || msg != "" {
+	if got, stored, msg := checkPlanningTide(nil, nil); got != nil || stored != "" || msg != "" {
 		t.Errorf("no height stores no datum: %q %q", stored, msg)
 	}
 	huge := 900.0
-	if _, msg := checkPlanningTide(&huge, nil); msg == "" {
+	if _, _, msg := checkPlanningTide(&huge, nil); msg == "" {
 		t.Error("an absurd height is refused")
 	}
 }
@@ -441,7 +449,7 @@ func TestPlanningTide_ARequestCanSayNoneWithNullAndAMinusTideIsStamped(t *testin
 func TestPlanningTide_ExactMinusOneFootSurvivesAReload(t *testing.T) {
 	anchorTestEnv(t, 0)
 	resetAnchorWatchState(t)
-	if code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -1.0}); code != http.StatusOK {
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -1.0, "planning_tide_datum": "chart_datum"}); code != http.StatusOK {
 		t.Fatalf("%d %+v", code, resp)
 	}
 	resetAnchorWatchState(t)
@@ -1159,21 +1167,42 @@ func TestTideNearest_PositionBasedReadsTheVesselOnce(t *testing.T) {
 	}
 }
 
-func TestTidePointZone_AFailedLookupIsRememberedAndLoggedOnce(t *testing.T) {
+func TestTidePointZone_AFailureIsRememberedForAWhileThenTriedAgain(t *testing.T) {
 	tidePointZonesMu.Lock()
-	tidePointZones = map[string]string{}
+	tidePointZones = map[string]tideZoneEntry{}
 	tidePointZonesMu.Unlock()
-	// A point the zone index has no name for: the middle of the Pacific.
-	first := tidePointStation(0.05, -150, "")
-	second := tidePointStation(0.05, -150, "")
-	if first.Timezone != second.Timezone {
-		t.Errorf("the same point must give the same zone: %q vs %q", first.Timezone, second.Timezone)
+	prevLookup, prevNow := tideZoneLookup, tideZoneNow
+	t.Cleanup(func() { tideZoneLookup, tideZoneNow = prevLookup, prevNow })
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	tideZoneNow = func() time.Time { return now }
+	calls, fail := 0, true
+	tideZoneLookup = func(lat, lon float64) (placeZone, error) {
+		calls++
+		if fail {
+			return placeZone{}, errors.New("no zone offshore")
+		}
+		return placeZone{Name: "Pacific/Honolulu"}, nil
 	}
-	tidePointZonesMu.Lock()
-	_, remembered := tidePointZones["0.05,-150.00"]
-	tidePointZonesMu.Unlock()
-	if !remembered {
-		t.Error("the lookup, failed or not, is remembered")
+	var logs strings.Builder
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	for i := 0; i < 5; i++ {
+		if z := tidePointZone("0.05,-150.00", 0.05, -150); z != "" {
+			t.Fatalf("zone = %q", z)
+		}
+	}
+	if calls != 1 || strings.Count(logs.String(), "no time zone") != 1 {
+		t.Fatalf("a failure is looked up once and logged once per period: %d calls, log %q", calls, logs.String())
+	}
+	now = now.Add(11 * time.Minute)
+	fail = false
+	if z := tidePointZone("0.05,-150.00", 0.05, -150); z != "Pacific/Honolulu" || calls != 2 {
+		t.Fatalf("a failure is tried again after the retry period: %q after %d calls", z, calls)
+	}
+	// A zone found is kept.
+	if z := tidePointZone("0.05,-150.00", 0.05, -150); z != "Pacific/Honolulu" || calls != 2 {
+		t.Fatalf("a found zone is not looked up again: %q after %d calls", z, calls)
 	}
 }
 
@@ -1193,5 +1222,106 @@ func TestConfiguredChart_AnErrorSaysWhatKindOfProviderFailed(t *testing.T) {
 	_, body = getConfiguredChart(t, "")
 	if body["position_based"] != false {
 		t.Errorf("a station provider's error says so: %v", body)
+	}
+}
+
+func TestPlanningTide_AnOldClientsMinusOneWithNoDatumIsNone(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+	code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -1.0})
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != nil {
+		t.Fatalf("an old client's -1 is none on a drop: %d %+v", code, resp)
+	}
+	code, resp = patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 5.0, "planning_tide_height_ft": -1.0})
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != nil {
+		t.Fatalf("and on a patch: %d %+v", code, resp)
+	}
+	// A new client always sends the datum, so its -1.0 is a reading.
+	code, resp = patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 5.0, "planning_tide_height_ft": -1.0, "planning_tide_datum": "chart_datum"})
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != -1.0 || resp["planning_tide_datum"] != tideDatumChart {
+		t.Fatalf("-1.0 with a datum is real: %d %+v", code, resp)
+	}
+}
+
+// ── fifth review ───────────────────────────────────────────────────────
+
+func TestConfiguredChart_APlaceKeepsTheCatalogStationsPositionWhenThePluginLeavesItAtZero(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	registerTideProvider(&stubTideProvider{id: "bom",
+		stations: []tideStation{{StationID: "NEAR", Name: "Near Bar", Lat: -27.0, Lon: 153.0}},
+		result:   tideChartResult{Station: tideStation{StationID: "NEAR", Name: "Near Bar"}}}) // 0,0
+	writeTideSettings(t, "  tide_provider: bom\n")
+	code, body := getConfiguredChart(t, "lat=-27.1&lon=153.1")
+	st, _ := body["station"].(map[string]any)
+	if code != http.StatusOK || st["lat"] != -27.0 || st["lon"] != 153.0 {
+		t.Fatalf("the distance and the far warning need the station's position: %d %v", code, body)
+	}
+}
+
+func TestTideStationName_WhileAnAnchorWatchIsSetItIsTheAnchorPosition(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	stub := newMSLStub(time.Now())
+	registerTideProvider(stub)
+	withVesselPosition(t, 45.4312, 12.3378, nil)
+	writeTideSettings(t, "  tide_provider: \"\"\n")
+
+	withAnchorWatch(t, &anchorWatchData{Lat: 45.51, Lon: 12.41})
+	_, body := getConfiguredChart(t, "")
+	if body["station"].(map[string]any)["name"] != "Anchor position" {
+		t.Errorf("the chart names the anchor: %v", body["station"])
+	}
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/tide-nearest?provider=open-meteo", nil), rec)
+	if err := tideNearestHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	var st tideStation
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if st.Name != "Anchor position" {
+		t.Errorf("tide-nearest names the anchor: %+v", st)
+	}
+
+	withAnchorWatch(t, nil)
+	_, body = getConfiguredChart(t, "")
+	if body["station"].(map[string]any)["name"] != "Boat's position" {
+		t.Errorf("with no watch it is the boat's: %v", body["station"])
+	}
+}
+
+func TestTideBoatFixNow_WithAWatchSetTheVesselStateIsNotRead(t *testing.T) {
+	withAnchorWatch(t, &anchorWatchData{Lat: 45.51, Lon: 12.41})
+	prev := tideVesselState
+	tideVesselState = func() (vesselStateData, error) {
+		t.Error("read the vessel state for a point the anchor decides")
+		return vesselStateData{}, nil
+	}
+	t.Cleanup(func() { tideVesselState = prev })
+	fix := tideBoatFixNow()
+	if fix.Err != nil || !fix.Anchored || fix.Lat != 45.51 {
+		t.Fatalf("fix = %+v", fix)
+	}
+	// An unreadable watch file is still an explicit error, with no read.
+	withAnchorWatch(t, nil)
+	prevErr := anchorWatchLoadErr
+	anchorWatchLoadErr = "permission denied"
+	t.Cleanup(func() { anchorWatchLoadErr = prevErr })
+	if fix = tideBoatFixNow(); fix.Err == nil {
+		t.Fatal("an unreadable watch file is an error")
+	}
+}
+
+func TestTideProviders_ListMarksTheDefault(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	registerTideProvider(&stubTideProvider{id: "bom"})
+	registerTideProvider(newMSLStub(time.Now()))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/tide-providers", nil), rec)
+	if err := tideProvidersHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	var list []tideProviderInfo
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list) != 2 || list[0].Default || !list[1].Default {
+		t.Fatalf("providers = %+v", list)
 	}
 }

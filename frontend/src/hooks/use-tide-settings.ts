@@ -10,9 +10,9 @@ export interface TideSettings {
 
 // tideProvider is the saved setting and starts empty: blank means the
 // backend's default provider (ADR 0273, defaultTideProviderID). The default's
-// id is not substituted here, because this is the saved value and the settings
-// form round-trips it; consumers that need the provider in force go through
-// effectiveTideProvider (lib/tide-datum.ts). They already gate on `loading`
+// id is not copied here: the provider list marks it (`default`), and the
+// configured chart names the provider that answered. This is the saved value
+// and the settings form round-trips it. Consumers already gate on `loading`
 // before reading tideProvider, so an empty initial value is safe.
 const defaultTideSettings: TideSettings = {
   tideProvider: '',

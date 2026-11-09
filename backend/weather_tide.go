@@ -322,7 +322,7 @@ func tideToday(c echo.Context) error {
 func configuredTideChart(uiMap map[string]any, boat func() tideBoatFix) (tideProvider, string, tideChartResult, *tideTodayError) {
 	provider, configuredProvider, resolveErr := resolveTideProviderFromUI(uiMap)
 	if resolveErr != nil {
-		return nil, "", tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPlugin, message: resolveErr.Error()}
+		return nil, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPlugin, message: resolveErr.Error()}
 	}
 
 	var result tideChartResult
@@ -331,19 +331,19 @@ func configuredTideChart(uiMap map[string]any, boat func() tideBoatFix) (tidePro
 		// No station to choose: the tide is at the point the caller's fix gives.
 		fix := boat()
 		if fix.Err != nil {
-			return nil, "", tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPosition, message: fmt.Sprintf("tide provider %q follows the boat's position, and there is none to use: %v", configuredProvider, fix.Err)}
+			return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoPosition, message: fmt.Sprintf("tide provider %q follows the boat's position, and there is none to use: %v", configuredProvider, fix.Err)}
 		}
-		result, fetchErr = fetchBoatTide(provider, fix.Lat, fix.Lon)
+		result, fetchErr = fetchBoatTide(provider, fix)
 	} else {
 		configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 		if configuredStation == "" {
-			return nil, "", tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoStation, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
+			return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNoStation, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
 		}
 		result, fetchErr = provider.FetchTideChart(configuredStation)
 	}
 	if fetchErr != nil {
 		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
-		return nil, "", tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
+		return provider, configuredProvider, tideChartResult{}, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
 	}
 	return provider, configuredProvider, result, nil
 }

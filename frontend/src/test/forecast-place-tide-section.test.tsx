@@ -57,6 +57,7 @@ function chartFor(day: string, station = STATION, overrides: Record<string, unkn
     updatedAt: null,
     ttlSeconds: null,
     providerName: "BOM",
+    providerId: "bom",
     positionBased: false,
     refetch: vi.fn(),
     ...overrides,
@@ -133,16 +134,16 @@ describe("ForecastPlaceTideSection", () => {
     mockedChart.mockReturnValue({ ...noChart, notSetUp: true, error: "no tide provider is chosen" });
     renderPlace();
 
-    expect(screen.getByTestId("forecast-place-tide-not-set-up")).toHaveTextContent("not set up");
+    expect(screen.getByTestId("forecast-place-tide-not-set-up")).toHaveTextContent("No tide at");
     expect(screen.queryByText(/No tide found/)).not.toBeInTheDocument();
   });
 
-  it("uses the default tide provider when none is saved (ADR 0273)", () => {
+  it("asks the server with the blank provider when none is saved (ADR 0273)", () => {
     mockedSettings.mockReturnValue(settings({ tideProvider: "" }));
     mockedChart.mockReturnValue(noChart);
     renderPlace();
 
-    expect(mockedChart).toHaveBeenCalledWith("open-meteo", true, { lat: PLACE.lat, lon: PLACE.lon });
+    expect(mockedChart).toHaveBeenCalledWith("", true, { lat: PLACE.lat, lon: PLACE.lon });
   });
 
   it("names the place and no station for a provider that follows a position, from the chart's own datum", () => {

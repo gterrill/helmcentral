@@ -55,6 +55,7 @@ function chartState(overrides: Partial<ReturnType<typeof useConfiguredTideChart>
     updatedAt: null,
     ttlSeconds: null,
     providerName: '',
+    providerId: '',
     positionBased: false as boolean | null,
     refetch: vi.fn(),
     ...overrides,
@@ -137,7 +138,7 @@ describe('ForecastTideSection', () => {
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
-    expect(mockedUseTideChart).toHaveBeenCalledWith('open-meteo||', true)
+    expect(mockedUseTideChart).toHaveBeenCalledWith('||', true)
     expect(screen.getByText('Loading tide data...')).toBeInTheDocument()
   })
 

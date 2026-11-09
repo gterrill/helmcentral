@@ -87,29 +87,44 @@ const maxPlanningTideFt = 150.0
 // A height is a reading whatever its sign, on either datum, so it only has to be a sensible number: a minus
 // tide below chart datum is real. A nil height is none. A datum with no height
 // to go with it is not stored.
-func checkPlanningTide(heightFt *float64, datum *string) (stored string, msg string) {
+func checkPlanningTide(heightFt *float64, datum *string) (height *float64, stored string, msg string) {
 	d := ""
 	if datum != nil {
 		d = *datum
 	}
+	// A client from before null existed sends -1 for none, and no datum. New
+	// clients always send a datum with a height, so a real -1.0 still counts.
+	heightFt = legacyTideMarker(heightFt, d)
 	switch d {
 	case "", tideDatumChart:
 	case tideDatumMeanSeaLevel:
 		stored = tideDatumMeanSeaLevel
 	default:
-		return "", "planning_tide_datum must be chart_datum or mean_sea_level"
+		return nil, "", "planning_tide_datum must be chart_datum or mean_sea_level"
 	}
 	if heightFt == nil {
-		return "", ""
+		return nil, "", ""
 	}
 	if !finite(*heightFt) || math.Abs(*heightFt) > maxPlanningTideFt {
-		return "", "planning_tide_height_ft must be a height within 150 ft either side of the datum"
+		return nil, "", "planning_tide_height_ft must be a height within 150 ft either side of the datum"
 	}
 	// A height always carries its datum when stored; see dropLegacyTideMarker.
 	if stored == "" {
 		stored = tideDatumChart
 	}
-	return stored, ""
+	return heightFt, stored, ""
+}
+
+// legacyTideMarker reads the -1 ft that older anchor watch files, and clients
+// from before null existed, use for "no tide height" as none. It does so only
+// when no datum came with it: a height saved or sent since always carries its
+// datum, so a real -1.0 ft is told from the old marker by that. The one rule,
+// for the loader and for incoming requests.
+func legacyTideMarker(heightFt *float64, datum string) *float64 {
+	if heightFt != nil && *heightFt == -1 && datum == "" {
+		return nil
+	}
+	return heightFt
 }
 
 // transducerDepthSetting reads anchor.transducer_depth_m from settings.yaml,

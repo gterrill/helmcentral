@@ -37,7 +37,7 @@ describe('ProviderGroup tide provider default', () => {
             providers={[
               { id: 'bom', name: 'Bureau of Meteorology', description: 'Australian tide data' },
               { id: 'noaa', name: 'NOAA', description: 'US tide data' },
-              { id: 'open-meteo', name: 'Open-Meteo', description: 'Global modelled tide' },
+              { id: 'open-meteo', name: 'Open-Meteo', description: 'Global modelled tide', default: true },
             ]}
           />
         </SecretsStatusProvider>

@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { ProviderIntegrationCard } from '@/components/settings/provider-integration-card'
 import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { useSettingsFormContext } from '@/components/settings/settings-form-context'
-import { DEFAULT_TIDE_PROVIDER } from '@/lib/tide-datum'
 
 // ProviderGroupDomain extends the settings-modal's own ProviderDomain with
 // "place-names" (ADR 0101): a place-names card is always backed by a POI
@@ -22,7 +21,6 @@ export type ProviderGroupDomain = ProviderDomain | 'place-names'
 // plugin, so a fresh install has a tide before anyone opens Settings. An
 // install that chose BOM or NOAA keeps it.
 const DEFAULT_ACTIVE_PROVIDER: Partial<Record<ProviderGroupDomain, string>> = {
-  tide: DEFAULT_TIDE_PROVIDER,
   weather: 'open-meteo',
   wave: 'open-meteo-marine',
   poi: 'osm-overpass',
@@ -66,6 +64,8 @@ export interface ProviderGroupInfo {
   id: string
   name: string
   description: string
+  /** The provider the server uses when none is saved. */
+  default?: boolean
 }
 
 interface ProviderGroupProps {
@@ -94,7 +94,9 @@ export function ProviderGroup({ type, providers, loading, error, kind, emptyMess
 
   const settingsKey = SETTINGS_KEY_BY_DOMAIN[type]
   const configuredId = settings.ui?.[settingsKey]
-  const activeId = configuredId && configuredId !== '' ? configuredId : DEFAULT_ACTIVE_PROVIDER[type]
+  // Tide's default is marked in the provider list by the server; the others are named here.
+  const marked = type === 'tide' ? (providers as Array<{ id: string; default?: boolean }>).find((p) => p.default)?.id : undefined
+  const activeId = configuredId && configuredId !== '' ? configuredId : marked ?? DEFAULT_ACTIVE_PROVIDER[type]
 
   const handleActivate = (id: string) => {
     // Saves at once, outside the page's draft, so the Save bar never opens

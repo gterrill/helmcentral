@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { ProviderGroup } from '@/components/settings/provider-group'
 import { useSettingsFormContext } from '@/components/settings/settings-form-context'
-import { effectiveTideProvider, isMeanSeaLevel, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
 import { usePlaceNameProviders } from '@/hooks/use-place-name-providers'
@@ -31,7 +31,8 @@ export function PluginsSection({ draft, onChange }: PluginsSectionProps) {
   const placeNames = usePlaceNameProviders()
   const poi = usePOIProviders()
   const { settings } = useSettingsFormContext()
-  const activeTide = tide.providers.find((p) => p.id === effectiveTideProvider(settings.ui?.tide_provider ?? ''))
+  const savedTide = settings.ui?.tide_provider ?? ''
+  const activeTide = tide.providers.find((p) => (savedTide === '' ? p.default === true : p.id === savedTide))
   const followsBoat = activeTide?.position_based === true
   const meanSeaLevel = isMeanSeaLevel(activeTide?.height_datum)
 

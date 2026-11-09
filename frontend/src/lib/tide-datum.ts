@@ -7,14 +7,6 @@ export const CHART_DATUM = 'chart_datum'
 export const MEAN_SEA_LEVEL = 'mean_sea_level'
 export type TideDatum = typeof CHART_DATUM | typeof MEAN_SEA_LEVEL
 
-/** The tide provider a blank setting means (backend defaultTideProviderID). */
-export const DEFAULT_TIDE_PROVIDER = 'open-meteo'
-
-/** The provider in force: the operator's choice, or the default when none is saved. */
-export function effectiveTideProvider(configured: string): string {
-  return configured.trim() === '' ? DEFAULT_TIDE_PROVIDER : configured.trim()
-}
-
 /** An absent or unknown datum is chart datum, as for every payload sent before the field existed. */
 export function normaliseTideDatum(raw: unknown): TideDatum {
   return raw === MEAN_SEA_LEVEL ? MEAN_SEA_LEVEL : CHART_DATUM
