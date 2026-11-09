@@ -65,7 +65,7 @@ func tideCalSignal() {
 	}
 }
 
-var tideCalWorkFailing atomic.Bool
+var tideCalWorkFailing, soundedWorkFailing atomic.Bool
 
 // startTideCalibrationWorker runs the single fitting goroutine until ctx ends.
 // It starts with a signal of its own, so after a restart the first fit is made
@@ -93,6 +93,14 @@ func tideCalWorkOnce() {
 	watch, active, _ := currentAnchorWatch()
 	if !active || globalPassageStore == nil {
 		return
+	}
+	// Which ground has been crossed needs no tide chart, so it is published first.
+	if err := publishSoundedCells(watch, globalPassageStore); err != nil {
+		if soundedWorkFailing.CompareAndSwap(false, true) {
+			log.Printf("tide calibration: the sounded cells wait: %v", err)
+		}
+	} else if soundedWorkFailing.CompareAndSwap(true, false) {
+		log.Printf("tide calibration: sounded cells publishing again")
 	}
 	chart, err := tideCalChartSource()
 	if err == nil {
@@ -122,6 +130,24 @@ type tideCalStay struct {
 	// changes, not before.
 	stationFor string
 	station    stationCoord
+	// cells are the distinct cells of the readings in the frame of
+	// cellLat, cellLon, kept as minutes arrive so a publish does not rescan
+	// the readings. Nil until first built; rebuilt if the anchor moves.
+	cells            map[tideCalCell]struct{}
+	cellLat, cellLon float64
+}
+
+// ensureCells builds the cell set for this anchor position if the stay does not
+// hold it. The caller holds tideCalStayMu.
+func (st *tideCalStay) ensureCells(lat, lon float64) {
+	if st.cells != nil && st.cellLat == lat && st.cellLon == lon {
+		return
+	}
+	st.cells = map[tideCalCell]struct{}{}
+	st.cellLat, st.cellLon = lat, lon
+	for _, c := range soundedCellsOf(st.readings, lat, lon) {
+		st.cells[c] = struct{}{}
+	}
 }
 
 type stationCoord struct {
@@ -149,6 +175,9 @@ func tideCalStayAppend(store *passageStore, setAt time.Time, r tideCalReading) {
 		return
 	}
 	st.readings = append(st.readings, r)
+	if st.cells != nil {
+		st.cells[tideCalCellAt(st.cellLat, st.cellLon, r.Lat, r.Lon)] = struct{}{}
+	}
 }
 
 // chartHash is the content of a chart's extremes and its source. A revised
@@ -179,17 +208,11 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 	hash := chartHash(chart.Source, chart.Extremes)
 
 	// Under the lock: the stay in memory, and what is already stored of this chart.
-	tideCalStayMu.Lock()
-	st := tideCalStayCur
-	if st == nil || st.store != store || st.setAtMs != setAtMs {
-		readings, err := store.tideCalReadings(watch.SetAt)
-		if err != nil {
-			tideCalStayMu.Unlock()
-			return nil, err
-		}
-		st = &tideCalStay{store: store, setAtMs: setAtMs, readings: readings}
-		tideCalStayCur = st
+	st, err := tideCalStayLoaded(watch, store)
+	if err != nil {
+		return nil, err
 	}
+	tideCalStayMu.Lock()
 	needStore, needStation := st.storedHash != hash, st.stationFor != hash
 	tideCalStayMu.Unlock()
 
@@ -241,6 +264,24 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 	}
 	tideCalPublished.Store(e)
 	return e, nil
+}
+
+// tideCalStayLoaded is the stay in memory for this watch, loaded from the store
+// if it is not the one held.
+func tideCalStayLoaded(watch anchorWatchData, store *passageStore) (*tideCalStay, error) {
+	setAtMs := watch.SetAt.UnixMilli()
+	tideCalStayMu.Lock()
+	defer tideCalStayMu.Unlock()
+	st := tideCalStayCur
+	if st == nil || st.store != store || st.setAtMs != setAtMs {
+		readings, err := store.tideCalReadings(watch.SetAt)
+		if err != nil {
+			return nil, err
+		}
+		st = &tideCalStay{store: store, setAtMs: setAtMs, readings: readings}
+		tideCalStayCur = st
+	}
+	return st, nil
 }
 
 // lookUpStation finds the coordinates of a station-based chart that came without

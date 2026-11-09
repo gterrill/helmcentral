@@ -278,8 +278,32 @@ nearest BoM station. There were 11 low-water estimates.
 
 ## Not in this decision
 
-The map tint of sounded cells, the keel line, the rode planner's depth at high
-water, reusing `k` at a saved place and a transducer offset setting.
+The keel line, the rode planner's depth at high water, reusing `k` at a saved
+place and a transducer offset setting.
+
+## The map shows what has been sounded
+
+The Anchor Watch map shades the swing circle in one colour and leaves clear
+every 2.5 m cell the boat has recorded a minute in during this stay. The shade
+carries no depth: it only says how much of the circle the calibration can speak
+for. Every recorded minute's cell counts, whether or not the fit used it.
+
+The worker publishes the cells before it asks for the tide chart, so they appear
+whether or not the fit succeeds. The stay keeps its distinct cells as minutes
+arrive, and rebuilds them from the new origin if the anchor is corrected.
+`GET /api/anchor-watch/sounded-cells` reads that publication. It returns
+`status` (`no_watch`, `not_ready` while nothing is published for this watch and
+anchor, or `ready`), `cell_m`, the anchor as `origin_lat` and `origin_lon`, and
+`cells` as `[i, j]` pairs counted east and north from the anchor. Like the fit,
+it reads no store and takes no lock the recorder holds. The page polls it once a
+minute while a watch is set, shades nothing until the answer is `ready`, and
+shades nothing if the answer's origin is not the anchor it is drawing. For
+display only, the map also treats an uncrossed cell between crossed cells as
+crossed (opposite neighbours north and south, east and west, or on a diagonal),
+so single-cell holes fill in without the band growing; the route and the
+calibration see only the cells actually crossed. The layer sits under the alarm
+ring, the trails and the markers, takes no pointer input, and is hidden during
+Adjust because it is built from the committed anchor and radius.
 
 ## Consequences
 

@@ -34,6 +34,8 @@ import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { hasWebGL2 } from '@/lib/webgl'
 import { ANCHOR_VIEW_MAX_ZOOM, ANCHOR_VIEW_MIN_ZOOM, fitRadiusZoom } from '@/lib/anchor-view'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
+import { useAnchorSoundedCells } from '@/hooks/use-anchor-sounded-cells'
+import { unsoundedAreaGeoJSON } from '@/lib/sounded-cells'
 import {
   anchorMoveOffset,
   formatMovedLabel,
@@ -425,6 +427,21 @@ export function AnchorWatchMap({
   // from props and from an optionally-chained mapRef that is simply never
   // populated when the map itself doesn't mount.
   const canRenderMap = hasWebGL2()
+  // The shading over the part of the swing circle the boat has not crossed
+  // (ADR 0274). Asked for only while a map can draw it, and drawn only for
+  // cells measured from this anchor position. During Adjust it is hidden: it is
+  // built from the committed anchor and radius, which Adjust is changing.
+  const { answer: sounded } = useAnchorSoundedCells({
+    enabled: hasAnchor && canRenderMap,
+    setAt: anchorSetAt,
+    lat: anchorLat,
+    lon: anchorLon,
+  })
+  const soundedTintGeoJSON = useMemo(() => {
+    if (!hasAnchor || adjustActive || sounded?.status !== 'ready') return null
+    if (sounded.frame.originLat !== anchorLat || sounded.frame.originLon !== anchorLon) return null
+    return unsoundedAreaGeoJSON(sounded.frame, sounded.cells, radiusMeters)
+  }, [hasAnchor, adjustActive, sounded, anchorLat, anchorLon, radiusMeters])
   const mapWrapperRef = useRef<HTMLDivElement | null>(null)
   const metricsPanelRef = useRef<HTMLDivElement | null>(null)
   const mapControlsRef = useRef<HTMLDivElement | null>(null)
@@ -1409,6 +1426,24 @@ export function AnchorWatchMap({
             }}
           />
         </Source>
+
+        {/* Ground the boat has not crossed this watch stays shaded; the
+            2.5 m cells it has crossed are left clear. One colour, no depth
+            meaning. Below the alarm ring and everything drawn after it. */}
+        {soundedTintGeoJSON && (
+          <Source id="sounded-tint" type="geojson" data={soundedTintGeoJSON} tolerance={0}>
+            <Layer
+              id="sounded-tint-fill"
+              type="fill"
+              beforeId="alarm-circle-stroke"
+              paint={{
+                'fill-color': isDarkTheme ? '#020617' : '#334155',
+                'fill-opacity': isDarkTheme ? 0.45 : 0.17,
+                'fill-antialias': false,
+              }}
+            />
+          </Source>
+        )}
 
         {/* Adjust mode's own draft swing circle (ADR 0143): a real
             geographic polygon centred on the draft position (the crosshair,

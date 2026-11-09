@@ -349,6 +349,7 @@ func resetTideCalState(t *testing.T) {
 		tideCalStayCur = nil
 		tideCalStayMu.Unlock()
 		tideCalPublished.Store(nil)
+		soundedPublished.Store(nil)
 	}
 	clear()
 	t.Cleanup(clear)
