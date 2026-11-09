@@ -190,6 +190,13 @@ func stationVerdict(depthAtLow float64) lowWaterClearance {
 	}
 }
 
+// applyStation lays the calibration on the station verdict for a low at
+// depthAtLow, with the station fall that goes with it (3 m now, as the verdict has).
+func applyStation(depthAtLow float64, res *calibrationResult, marginM float64) lowWaterClearance {
+	res.StationFallM = 3 - depthAtLow
+	return applyCalibration(stationVerdict(depthAtLow), res, marginM)
+}
+
 func readyEstimate(here, hereHW, shallow, shallowHW float64) *calibrationResult {
 	fit := &tideCalFit{tideCalMember: &tideCalMember{K: 0.85, KHalf: 0.02, OffsetMin: 5}}
 	return &calibrationResult{
@@ -214,7 +221,7 @@ func notReadyCode(err error) string {
 func TestVerdictRestsOnTheBottomOfTheInterval(t *testing.T) {
 	// 2.0 m at low less a 1.2 m draft leaves 0.8 m, over the 0.5 m margin; the
 	// bottom of a +/-0.6 m interval leaves 0.2 m, under it.
-	got := applyCalibration(stationVerdict(2.0), readyEstimate(2.0, 0.6, 2.0, 0.1), 0.5)
+	got := applyStation(2.0, readyEstimate(2.0, 0.6, 2.0, 0.1), 0.5)
 	if got.Status != lowWaterTooShallow || !got.Calibration.Ready || got.CautiousSource != lowWaterCautiousBoat {
 		t.Errorf("wide interval: %+v", got)
 	}
@@ -226,7 +233,7 @@ func TestVerdictRestsOnTheBottomOfTheInterval(t *testing.T) {
 		t.Errorf("a calibrated figure carries the station's tide fall: %v", *got.TideFallM)
 	}
 
-	narrow := applyCalibration(stationVerdict(2.0), readyEstimate(2.0, 0.1, 2.0, 0.1), 0.5)
+	narrow := applyStation(2.0, readyEstimate(2.0, 0.1, 2.0, 0.1), 0.5)
 	if narrow.Status != lowWaterOK {
 		t.Errorf("narrow interval: %+v", narrow)
 	}
@@ -235,14 +242,14 @@ func TestVerdictRestsOnTheBottomOfTheInterval(t *testing.T) {
 func TestVerdictKeepsTheRulesOfThePage(t *testing.T) {
 	// Judged as displayed: a bottom leaving 0.46 m reads 0.5 m and meets a 0.5 m
 	// margin; 0.44 m reads 0.4 m and does not.
-	if got := applyCalibration(stationVerdict(3), readyEstimate(1.66+0.1, 0.1, 1.76, 0.1), 0.5); got.Status != lowWaterOK {
+	if got := applyStation(3, readyEstimate(1.66+0.1, 0.1, 1.76, 0.1), 0.5); got.Status != lowWaterOK {
 		t.Errorf("0.46 m under the keel at the bottom: %s", got.Status)
 	}
-	if got := applyCalibration(stationVerdict(3), readyEstimate(1.64+0.1, 0.1, 1.74, 0.1), 0.5); got.Status != lowWaterTooShallow {
+	if got := applyStation(3, readyEstimate(1.64+0.1, 0.1, 1.74, 0.1), 0.5); got.Status != lowWaterTooShallow {
 		t.Errorf("0.44 m: %s", got.Status)
 	}
 	// Below zero is too shallow whatever the margin.
-	if got := applyCalibration(stationVerdict(3), readyEstimate(1.3, 0.2, 1.3, 0.1), 0); got.Status != lowWaterTooShallow {
+	if got := applyStation(3, readyEstimate(1.3, 0.2, 1.3, 0.1), 0); got.Status != lowWaterTooShallow {
 		t.Errorf("keel through the bottom with a zero margin: %s", got.Status)
 	}
 }
@@ -251,7 +258,7 @@ func TestVerdictTakesTheMostCautiousFigure(t *testing.T) {
 	// Boat's cell 2.6 +/- 0.1 (bottom 2.5); station 2.1; shallowest 1.5 + 0.2
 	// allowance = 1.7 - 0.1 = bottom 1.6. The shallowest spot is the most
 	// cautious, and the page is told so and shows it.
-	got := applyCalibration(stationVerdict(2.1), readyEstimate(2.6, 0.1, 1.5, 0.1), 0.5)
+	got := applyStation(2.1, readyEstimate(2.6, 0.1, 1.5, 0.1), 0.5)
 	if got.CautiousSource != lowWaterCautiousShallowest || got.Status != lowWaterTooShallow {
 		t.Errorf("shallowest: %+v", got)
 	}
@@ -261,14 +268,14 @@ func TestVerdictTakesTheMostCautiousFigure(t *testing.T) {
 
 	// A shallowest spot 0.15 m under the boat's is not worth a line, and with the
 	// allowance it is not the cautious figure either.
-	near := applyCalibration(stationVerdict(2.9), readyEstimate(2.6, 0.1, 2.45, 0.05), 0.5)
+	near := applyStation(2.9, readyEstimate(2.6, 0.1, 2.45, 0.05), 0.5)
 	if near.CautiousSource != lowWaterCautiousBoat || near.Calibration.ShallowestDiffers {
 		t.Errorf("near: %s differs=%v", near.CautiousSource, near.Calibration.ShallowestDiffers)
 	}
 
 	// The station estimate, with no interval, is the cautious figure when it is the
 	// lowest.
-	st := applyCalibration(stationVerdict(1.6), readyEstimate(2.6, 0.1, 2.5, 0.1), 0.5)
+	st := applyStation(1.6, readyEstimate(2.6, 0.1, 2.5, 0.1), 0.5)
 	if st.CautiousSource != lowWaterCautiousStation || st.Status != lowWaterTooShallow {
 		t.Errorf("station: %+v", st)
 	}
@@ -276,7 +283,7 @@ func TestVerdictTakesTheMostCautiousFigure(t *testing.T) {
 
 func TestBeforeReadyTheStationEstimateStandsUnderItsOwnLabel(t *testing.T) {
 	res := &calibrationResult{HoursOfReadings: 0.5, Err: tideCalErr(tideCalTooFewReadings, "")}
-	got := applyCalibration(stationVerdict(2.0), res, 0.5)
+	got := applyStation(2.0, res, 0.5)
 	if got.Calibration == nil || got.Calibration.Ready || got.Calibration.NotReady != tideCalTooFewReadings {
 		t.Fatalf("%+v", got)
 	}
@@ -289,7 +296,7 @@ func TestBeforeReadyTheStationEstimateStandsUnderItsOwnLabel(t *testing.T) {
 	}
 
 	// A calibration that fails says so and does not stand in for anything.
-	failed := applyCalibration(stationVerdict(2.0), &calibrationResult{Err: tideCalUnavailableErr(errors.New("the store is closed"))}, 0.5)
+	failed := applyStation(2.0, &calibrationResult{Err: tideCalUnavailableErr(errors.New("the store is closed"))}, 0.5)
 	if failed.Calibration.Ready || failed.Calibration.NotReady != tideCalUnavailable || !strings.Contains(failed.Calibration.NotReadyDetail, "store is closed") {
 		t.Errorf("%+v", failed.Calibration)
 	}
@@ -299,25 +306,25 @@ func TestBeforeReadyTheStationEstimateStandsUnderItsOwnLabel(t *testing.T) {
 
 func TestStationMatchNoteFiresOnlyPastTheMargin(t *testing.T) {
 	// Calibrated 2.6 m against the station's 2.0 m: 0.6 m apart, over a 0.5 m margin.
-	got := applyCalibration(stationVerdict(2.0), readyEstimate(2.6, 0.1, 2.6, 0.1), 0.5)
+	got := applyStation(2.0, readyEstimate(2.6, 0.1, 2.6, 0.1), 0.5)
 	want := "The tide here doesn't follow Middle Island (11 km away): it runs 85% of its range."
 	if got.Calibration.StationMatchNote != want {
 		t.Errorf("note = %q, want %q", got.Calibration.StationMatchNote, want)
 	}
 	// 0.4 m apart: it follows well enough.
-	if got := applyCalibration(stationVerdict(2.2), readyEstimate(2.6, 0.1, 2.6, 0.1), 0.5); got.Calibration.StationMatchNote != "" {
+	if got := applyStation(2.2, readyEstimate(2.6, 0.1, 2.6, 0.1), 0.5); got.Calibration.StationMatchNote != "" {
 		t.Errorf("note under the margin: %q", got.Calibration.StationMatchNote)
 	}
 	// No distance is left out, not guessed.
 	res := readyEstimate(2.6, 0.1, 2.6, 0.1)
 	res.StationDistanceM = nil
-	if got := applyCalibration(stationVerdict(2.0), res, 0.5); strings.Contains(got.Calibration.StationMatchNote, "away") {
+	if got := applyStation(2.0, res, 0.5); strings.Contains(got.Calibration.StationMatchNote, "away") {
 		t.Errorf("a distance that is not known is given: %q", got.Calibration.StationMatchNote)
 	}
 	// And nearby stations read in tenths of a kilometre.
 	res = readyEstimate(2.6, 0.1, 2.6, 0.1)
 	res.StationDistanceM = floatPtr(2300)
-	if got := applyCalibration(stationVerdict(2.0), res, 0.5); !strings.Contains(got.Calibration.StationMatchNote, "(2.3 km away)") {
+	if got := applyStation(2.0, res, 0.5); !strings.Contains(got.Calibration.StationMatchNote, "(2.3 km away)") {
 		t.Errorf("%q", got.Calibration.StationMatchNote)
 	}
 }
@@ -408,8 +415,7 @@ func TestCalibrationIsRebuiltFromTheStoredMinutesAfterARestart(t *testing.T) {
 	// Through the whole answer: at three hours the page is on the calibrated
 	// figure, the station depth it replaces is close, and the tide-match note does
 	// not fire.
-	station := stationVerdict(2.22)
-	got := applyCalibration(station, res, keppelMarginM)
+	got := applyStation(2.22, res, keppelMarginM)
 	if !got.Calibration.Ready || got.Calibration.StationMatchNote != "" {
 		t.Errorf("ready %v note %q", got.Calibration.Ready, got.Calibration.StationMatchNote)
 	}
@@ -758,7 +764,7 @@ func TestMateIsToldWhetherTheTideHereRunsLaterOrEarlier(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := applyCalibration(stationVerdict(2.2), &calibrationResult{Est: est, HoursOfReadings: 5}, 5)
+		got := applyStation(2.2, &calibrationResult{Est: est, HoursOfReadings: 5}, 5)
 		later := got.Calibration.TideMinutesLater
 		if later == nil || *later != lag {
 			t.Errorf("a local tide %d min later than the station's: told %v", lag, later)
@@ -1018,7 +1024,7 @@ func TestTheLowIsAtTheLocalTimeAndAMissingHighDoesNotHoldItBack(t *testing.T) {
 	if est.HighHere != nil || est.HighUnavailable == nil || est.HighUnavailable.Code != tideCalNoTideCurve {
 		t.Errorf("high %+v unavailable %+v", est.HighHere, est.HighUnavailable)
 	}
-	got := applyCalibration(stationVerdict(2.2), &calibrationResult{Est: est, HoursOfReadings: 5}, 5)
+	got := applyStation(2.2, &calibrationResult{Est: est, HoursOfReadings: 5}, 5)
 	if !got.Calibration.Ready || got.Calibration.HighNotAvailable != tideCalNoTideCurve || got.Calibration.HighAtBoat != nil {
 		t.Errorf("%+v", got.Calibration)
 	}
@@ -1218,20 +1224,20 @@ func TestAMinuteReadBackFromTheStoreIsNotAppendedTwice(t *testing.T) {
 // The too-shallow line shows the figure the verdict rests on.
 func TestTheVerdictCarriesTheClearanceOfTheFigureBehindIt(t *testing.T) {
 	// Boat's cell: its own clearance and interval.
-	boat := applyCalibration(stationVerdict(2.0), readyEstimate(2.0, 0.6, 2.0, 0.1), 0.5)
+	boat := applyStation(2.0, readyEstimate(2.0, 0.6, 2.0, 0.1), 0.5)
 	if boat.CautiousSource != lowWaterCautiousBoat {
 		t.Fatalf("%+v", boat)
 	}
 	lwFloat(t, "boat clearance", boat.VerdictClearanceM, 0.8, 1e-9)
 	lwFloat(t, "boat half width", boat.VerdictHalfWidthM, 0.6, 1e-9)
 	// Station: its clearance, no interval.
-	st := applyCalibration(stationVerdict(1.6), readyEstimate(2.6, 0.1, 2.5, 0.1), 0.5)
+	st := applyStation(1.6, readyEstimate(2.6, 0.1, 2.5, 0.1), 0.5)
 	if st.CautiousSource != lowWaterCautiousStation || st.VerdictHalfWidthM != nil {
 		t.Fatalf("%+v", st)
 	}
 	lwFloat(t, "station clearance", st.VerdictClearanceM, 0.4, 1e-9)
 	// Shallowest spot, as judged with its allowance, and its own interval.
-	sh := applyCalibration(stationVerdict(2.1), readyEstimate(2.6, 0.1, 1.5, 0.3), 0.5)
+	sh := applyStation(2.1, readyEstimate(2.6, 0.1, 1.5, 0.3), 0.5)
 	if sh.CautiousSource != lowWaterCautiousShallowest {
 		t.Fatalf("%+v", sh)
 	}
@@ -1269,5 +1275,44 @@ func TestNoReadingIsStoredFromAnAlertedOrStaleFix(t *testing.T) {
 		if got := len(storedFor(t, store)) - before; got != c.want {
 			t.Errorf("%s: %d readings stored, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// The offset can straddle now: the station's low is 10 minutes away, and the
+// local low, 20 minutes earlier, has already passed, so the local low that comes
+// is the next one, about 12 hours on. The station figure the verdict weighs it
+// against is the fall to that same station low, not to the imminent one.
+func TestStationFigureIsForTheSameLowAsTheLocalOne(t *testing.T) {
+	curve := loadKeppelCurve(t)
+	store := newTestPassageStore(t)
+	now := keppelLow.Add(-10 * time.Minute)
+	for _, r := range readingsUntil(keppelMinutes(t, curve), now) {
+		if err := store.appendTideCalReading(keppelDrop, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	globalTideCalRecorder.reset()
+	resetTideCalState(t)
+	e := fitAndPublish(t, keppelWatch(), store)
+	if e.fit == nil {
+		t.Fatalf("no fit: %+v", e.err)
+	}
+	e.fit.OffsetMin = 20
+
+	res := publishedCalibrator(keppelWatch())(keppelTide(), keppelMarginM, now)
+	if res == nil || res.Err != nil || res.Est == nil {
+		t.Fatalf("%+v", res)
+	}
+	stationLow := res.Est.LowHere.At.Add(20 * time.Minute)
+	if !stationLow.After(keppelLow.Add(time.Hour)) {
+		t.Fatalf("the local low should be the one after the imminent station low, got station time %s", stationLow)
+	}
+	nowH, okNow := curve.heightAt(now)
+	lowH, okLow := curve.heightAt(stationLow)
+	if !okNow || !okLow {
+		t.Fatalf("the curve does not reach now or the low at %s", stationLow)
+	}
+	if want := math.Max(0, nowH-lowH); math.Abs(res.StationFallM-want) > 1e-9 {
+		t.Errorf("station fall = %.3f m, want %.3f m to the station low at %s", res.StationFallM, want, stationLow)
 	}
 }
