@@ -4,7 +4,7 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { apiRequest, declareQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
-import { isMeanSeaLevel, MEAN_SEA_LEVEL, normaliseTideDatum, type TideCapture } from '@/lib/tide-datum'
+import { normaliseTideDatum, type TideCapture, type TideDatum } from '@/lib/tide-datum'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
@@ -322,7 +322,7 @@ export async function setAnchorHere(
     apply_bow_offset: true
     planning_depth_m: number
     planning_tide_height_ft: number | null
-    planning_tide_datum?: typeof MEAN_SEA_LEVEL
+    planning_tide_datum?: TideDatum
   } = {
     lat,
     lon,
@@ -330,9 +330,9 @@ export async function setAnchorHere(
     planning_depth_m: capture.planningDepthM ?? -1,
     planning_tide_height_ft: capture.planningTide?.ft ?? null,
   }
-  // A height from mean sea level is stamped as such so the server does not
-  // read a negative one as "not captured" or work a depth at chart datum from it.
-  if (isMeanSeaLevel(capture.planningTide?.datum)) payload.planning_tide_datum = MEAN_SEA_LEVEL
+  // A height always names its datum, so the server never has to guess what a
+  // negative one is measured from.
+  if (capture.planningTide) payload.planning_tide_datum = capture.planningTide.datum
   if (typeof capture.radiusMeters === 'number' && capture.radiusMeters > 0) {
     payload.radius_meters = capture.radiusMeters
   }
@@ -414,7 +414,7 @@ export async function updatePlanningDepth(depthM: number, tide: TideCapture | nu
   land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
     planning_depth_m: depthM,
     planning_tide_height_ft: tide?.ft ?? null,
-    ...(isMeanSeaLevel(tide?.datum) ? { planning_tide_datum: MEAN_SEA_LEVEL } : {}),
+    ...(tide ? { planning_tide_datum: tide.datum } : {}),
   } }))
 }
 

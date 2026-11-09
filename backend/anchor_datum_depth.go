@@ -84,17 +84,14 @@ const maxPlanningTideFt = 150.0
 // checkPlanningTide validates a request's planning tide height against the
 // datum it says it was measured from, and returns the datum to store:
 // chart_datum or mean_sea_level when a height is given, and "" when it is not.
-// A height is a reading whatever its sign, on either datum, so it only has to be a sensible number: a minus
-// tide below chart datum is real. A nil height is none. A datum with no height
+// A height is a reading whatever its sign, on either datum, so it only has to
+// be a sensible number: a minus tide below chart datum is real, a -1.0 included. A nil height is none. A datum with no height
 // to go with it is not stored.
 func checkPlanningTide(heightFt *float64, datum *string) (height *float64, stored string, msg string) {
 	d := ""
 	if datum != nil {
 		d = *datum
 	}
-	// A client from before null existed sends -1 for none, and no datum. New
-	// clients always send a datum with a height, so a real -1.0 still counts.
-	heightFt = legacyTideMarker(heightFt, d)
 	switch d {
 	case "", tideDatumChart:
 	case tideDatumMeanSeaLevel:
@@ -108,18 +105,19 @@ func checkPlanningTide(heightFt *float64, datum *string) (height *float64, store
 	if !finite(*heightFt) || math.Abs(*heightFt) > maxPlanningTideFt {
 		return nil, "", "planning_tide_height_ft must be a height within 150 ft either side of the datum"
 	}
-	// A height always carries its datum when stored; see dropLegacyTideMarker.
+	// A height always carries its datum when stored, which is how the
+	// loader tells a real -1.0 from an old file's "none".
 	if stored == "" {
 		stored = tideDatumChart
 	}
 	return heightFt, stored, ""
 }
 
-// legacyTideMarker reads the -1 ft that older anchor watch files, and clients
-// from before null existed, use for "no tide height" as none. It does so only
-// when no datum came with it: a height saved or sent since always carries its
-// datum, so a real -1.0 ft is told from the old marker by that. The one rule,
-// for the loader and for incoming requests.
+// legacyTideMarker reads the -1 ft that older anchor watch files use for "no
+// tide height" as none. It does so only when no datum is stored with it: a
+// height saved since always carries its datum, so a real -1.0 ft is told from
+// the old marker by that. Only the loader uses it; a request's -1.0 is a
+// reading, because clients send null for none.
 func legacyTideMarker(heightFt *float64, datum string) *float64 {
 	if heightFt != nil && *heightFt == -1 && datum == "" {
 		return nil
