@@ -4,22 +4,22 @@ Alarms watch the boat's own instrument readings around the clock. A rising
 engine temperature, a failing bilge pump or a falling barometer gets your
 attention, whether or not anyone is on watch to notice it.
 
-A rule can be built on any live reading published anywhere on the boat's
-instrument network, including gear from other manufacturers that's already wired
-into it. Helmcentral watches for newly published readings rather than working
+You can build a rule on any live reading published anywhere on the boat's
+instrument network, including gear from other manufacturers already wired into
+it. Helmcentral watches for newly published readings rather than working
 from a fixed list, so a rule for something new needs no software update first.
 
 Every alarm carries one of five severities: normal, alert, warn, alarm and
 emergency. An alarm raised elsewhere on the instrument network, by a battery
 monitor, an engine gateway or another instrument, arrives here with the severity
 it already had. When one of your own rules fires, it goes back onto that same
-network in the same terms. That way an alarm buzzer or chartplotter that's
+network in the same terms. That way, an alarm buzzer or chartplotter that's
 already wired to it can react too.
 
 ## Three decisions worth spelling out
 
-**Dwell and hysteresis are mandatory.** A rule has to hold for its dwell before
-it fires, and the value has to return past a deadband before it clears. That
+**Dwell and hysteresis are mandatory.** A rule must hold for its dwell before
+it fires, and the value must return past a deadband before it clears. That
 stops repeated alarms when a reading hovers around a threshold.
 
 The deadband is also why acknowledging doesn't clear an alarm. Acknowledge says
@@ -33,9 +33,9 @@ the chartplotter, has no rule behind it. Here is how those cards behave:
 
 - **Clearing:** The alarm clears when the instrument that raised it lets go. The
   card gives no clearing condition it can't vouch for.
-- **Title:** The card names the event in plain words made from the alarm's own
-  name, such as "Waypoint Passed" or "Propulsion Starboard Over Temperature",
-  rather than the instrument's own address.
+- **Title:** The card names the event in plain words from the alarm's name,
+  such as "Waypoint Passed" or "Propulsion Starboard Over Temperature", rather
+  than the instrument's address.
 - **Getting worse after you acknowledge:** If an alarm like this gets worse after
   you've acknowledged it, it comes back as active and needs a fresh
   acknowledgement. The card shows when it was acknowledged, even if you did it at
@@ -55,7 +55,7 @@ reverse. A live alarm doesn't clear when its reading goes stale, so a sensor
 outage can't clear an active alarm.
 
 **Failed deliveries are queued for retry.** Retries back off from 30 seconds to
-30 minutes, for up to 24 hours. After that the delivery is dropped, so an old
+30 minutes, for up to 24 hours. After that, the delivery is dropped, so an old
 alarm isn't presented as current. Heartbeats are never queued, because a late
 heartbeat would wrongly suggest the system is still running.
 
@@ -65,8 +65,8 @@ Anchor drag and the watchdog for a lost instrument connection are built in. They
 use the same logging, acknowledgement and delivery as your own rules.
 
 The watchdog raises an alarm if the connection to the boat's instrument network
-fails, because frozen readings can look like stable conditions. It listens for
-your own boat's readings only. Other boats' AIS signals keep arriving when your
+fails, because frozen readings can look like stable conditions. It listens only
+for your boat's readings. Other boats' AIS signals keep arriving when your
 instruments have gone quiet, so they don't count. If the instrument network
 never connects after Helmcentral starts, for example after a power cut, the
 alarm raises once the usual silence time has passed. A periodic
@@ -95,7 +95,7 @@ for that transport. That's deliberate. A credential belongs to the destination
 it was entered for, and it doesn't follow you to a new one. After you change
 either address, paste the token or password back in, because the transport stays
 quiet until you do. Changing the SMTP username clears the password too, since
-the two are sent together.
+they're sent together.
 
 Helmcentral picks up alarms from other producers on the instrument network, so
 it has to recognise its own output coming back. It does that by name. Anything
@@ -111,8 +111,7 @@ Restarting the boat's instrument network hub is the surest way for an alarm from
 another device to go stale. Whatever the hub was holding is gone when it comes
 back, whatever the underlying condition is doing, and the reconnection gives no
 sign that anything changed. The 30-second re-check described above catches it,
-so the alarm doesn't sit on your board until the same reading happens to change
-again.
+so the alarm doesn't sit on your board until the same reading changes again.
 
 Arrival circle and waypoint perpendicular passed alarms, raised from the
 plotter's active route, go stale a different way. Stopping or cancelling the
@@ -142,13 +141,13 @@ what that covers:
   lines, one for the warning level and one for the alarm level.
 - Which alarms don't: Anchor dragging, the lost instrument connection, collision
   risk, and alarms raised by other devices on the network. Those aren't a reading
-  that Helmcentral records, so there is nothing to draw. A "no data for a while"
+  that Helmcentral records, so there is nothing to chart. A "no data for a while"
   rule gets no chart either, because a silent reading has no curve.
 - When it's raised or gets worse: A chart goes with the first message. It also
   goes with the message when a live alarm gets worse, such as a tank going from
   warning to alarm. There's no chart when an alarm clears or eases back. There's
   none on the reminder that nobody has acknowledged it, either.
-- Where it appears: In an email the chart sits under the message. On ntfy it's
+- Where it appears: In an email, the chart sits under the message. On ntfy, it's
   an attachment. A webhook receives it as a picture and as the numbers behind it.
   Web push and Publish to SignalK stay as they were, and the alarm card in the
   app is unchanged.
@@ -172,7 +171,7 @@ alarm's card and confirm. Here is what happens then:
   transports.
 - **Mate and history:** Mate no longer hears of it, and it stops being added to
   the alarm history.
-- **Which device:** It applies to that alarm whichever device raises it.
+- **Which device:** It applies to that alarm, whichever device raises it.
 - **On the instrument network:** It doesn't acknowledge anything there, so the
   plotter keeps showing its own.
 
@@ -201,9 +200,9 @@ such as how far away it is and which way.
 
 - **Clearing:** The receiver raises it once and never withdraws it, so
   Helmcentral clears it about ten minutes after the beacon was last heard.
-- **When the feed is down:** Helmcentral never clears it while the feed from the
-  instrument network is down. It also waits until that feed has been back for
-  ten minutes. Silence during a loss of data says nothing about the beacon.
+- **When the feed is down:** Helmcentral never clears it while the instrument
+  network feed is down. It also waits ten minutes after the feed returns.
+  Silence during a data loss says nothing about the beacon.
 - **After the feed returns:** A cleared alarm doesn't come back when the feed
   reconnects and replays the beacon's last position. It does come back if the
   beacon is genuinely heard again.
@@ -220,7 +219,7 @@ its own page: [Anomaly detection](anomaly-detection.md).
 Collision warnings for AIS targets come from a separate AIS Target Prioritizer
 plugin on the boat's own instrument-network server, not from a Helmcentral rule.
 It works out CPA and TCPA for every target from the AIS data already on the
-network. When a target crosses the thresholds of the profile in force, it raises
+network. When a target crosses the thresholds of the active profile, it raises
 a warning for that target. It keeps four profiles (anchored, harbor, coastal and
 offshore), each with its own warning and alarm tiers. Helmcentral picks the
 profile from the vessel's navigation state (anchored, moored, under way) and
@@ -248,14 +247,14 @@ for a minute and Helmcentral can read the profiles.
 SignalK can let Helmcentral read the profiles but refuse the switch itself, for
 example over a login. Helmcentral then tries again at longer and longer gaps,
 from a minute up to ten minutes. If the boat moves to a state that wants a
-different profile, that one is tried at once, unless it has already failed.
+different profile, it tries that one at once, unless it has already failed.
 A profile that has failed waits out its own gap, however often the state flips
 back and forth. A profile you pick by hand still clears the
 warning at the next check.
 
 Those numbers are yours, and the shipped harbor profile needs attention before a
 marina. It warns on any target closer than half a mile with a reported speed over
-half a knot. Alongside a pontoon every neighbour is inside half a mile. GPS
+half a knot. Alongside a pontoon, every neighbour is inside half a mile. GPS
 jitter also puts a tied-up boat over half a knot every few minutes, so the
 warning fires on boats doing nothing. Each collision alarm card links to the plugin's own
 settings, which is where the thresholds live. Raise the warning tier's speed
@@ -274,7 +273,7 @@ example:
 > alter to starboard, pass astern.
 
 It names the rule and the role: overtaking, head-on or crossing, who gives way
-and who stands on. For a stand-on power-driven vessel it adds a reminder not to
+and who stands on. For a stand-on power-driven vessel, it adds a reminder not to
 turn to port for a target on your own port side. The vessel type comes from
 what each of you is doing right now, motoring or sailing. It doesn't come from
 the AIS ship type, which says nothing about whether an engine is running.
@@ -298,10 +297,10 @@ clears at, in your own units, and deleting one asks first.
 Each alarm card has an **Ask Mate** button next to **Acknowledge**, and each row
 in History has a small Mate button. It opens a new conversation with Mate that
 already knows which alarm you mean, and asks why it went off. Mate looks at the
-level the alarm fires at, the reading and how recent it is, how the reading
-moved around the time it went off, and what else went off or cleared within
-15 minutes either side, then charts it. Mate answers in plain words. If the
-alarm keeps going off it says so, and if the cause points to something you can
+level the alarm fires at, the reading and how recent it is, and how the reading
+moved around the time it went off. It also looks at what else went off or
+cleared within 15 minutes either side, then charts it. Mate answers in plain words. If the
+alarm keeps going off, it says so, and if the cause points to something you can
 check, it ends with what to check. The card itself isn't changed. See
 [Mate](assistant.md) for what it can and can't tell you.
 
@@ -335,7 +334,7 @@ Here is what happens once it's on:
   leaves the change to you.
 - On the card: The alarm card says **Mate reviewed this**, shows the first
   sentence and what the review cost, and links to the conversation. While Mate
-  is working it says **Mate is reviewing this**.
+  is working, it says **Mate is reviewing this**.
 - On your phone: A second message, "Mate on House Bank Low", goes to the same
   channels the alarm uses, with the first sentence. If you've set the **Address
   for links** in Settings, it includes a link that opens the conversation. It
@@ -357,16 +356,16 @@ Helmcentral can't be reviewed yet.
 ## Gauge bands are alarm rules
 
 A coloured band on a gauge set to an alarm severity defines an alarm rule. Drag
-engine temperature into the red on the dial and it raises an alarm through the
+engine temperature into the red on the dial, and it raises an alarm through the
 configured transports. You don't re-enter the threshold on a separate screen or
 convert it to different units.
 
 Rules derived this way appear in the alarms list alongside hand-written ones,
-marked as coming from a gauge. You edit them on the gauge rather than in the
+marked as coming from a gauge. You edit them on the gauge, not in the
 list. A tile can show a piece of equipment, and then the bands are the equipment
-profile's. That gives you one alarm per engine and reading, however many tiles
-show it, and changing the profile's limit changes the alarm. The alarm is named
-for the equipment, such as "Port engine Oil Press". See [Set an alarm
+profile's. That gives you one alarm per engine and reading, no matter how many
+tiles show it, and changing the profile's limit changes the alarm. The alarm is
+named for the equipment, such as "Port engine Oil Press". See [Set an alarm
 threshold](../how-to/set-an-alarm-threshold.md) for the steps either way.
 
 ## Tank level alarms
@@ -376,7 +375,7 @@ running low never depends on a chartplotter noticing first. The tank alarms
 share their levels with the Tanks tile and the Engine Cluster's fuel bars, so
 the colour you see and the alarm you get always agree.
 
-- **Two levels per tank:** A warn level raises a warn alarm and an alarm level
+- **Two levels per tank:** A warn level raises a warn alarm, and an alarm level
   raises an alarm. Fuel and fresh water use 20 and 10 percent, because a low
   tank is the bad one. Waste tanks use 80 and 90, because a full tank is the
   bad one.
@@ -397,14 +396,14 @@ the colour you see and the alarm you get always agree.
 - **One alarm per tank:** A tank is a single alarm that moves from warn to alarm
   as the level falls, and back to warn as it recovers. It only clears once the
   tank is clear of the warn level. Acknowledging it acknowledges the tank. If
-  it recovers from alarm to warn it stays acknowledged, and if it falls back to
-  the alarm level it is raised again, unacknowledged.
+  it recovers from alarm to warn, it stays acknowledged, and if it falls back to
+  the alarm level, it is raised again, unacknowledged.
 - **Alarms off:** A tank can have its alarms switched off. The Tanks tile still
   shows its level and colours.
 
 The card is named for the tank, for example "Fuel Port Fwd Low" or "Black Water
-Stbd High". It shows the level and, when the tank reports its capacity, what
-that is in litres: "19% · 228 L". The line underneath says where the level has
+Stbd High". It shows the level and, when the tank reports its capacity, the
+value in litres: "19% · 228 L". The line underneath shows where the level has
 to get back to, such as "Clears above 25%". The alarms appear in the rules list
 marked as coming from the tank levels, and you change them on the tank rather
 than there.
@@ -416,9 +415,9 @@ exist as one reading. They have to be worked out from the history Helmcentral
 already keeps: a rate of change, a relationship between two readings, a total
 across every tank.
 
-Helmcentral computes a set of these itself. They show up alongside every other
-instrument reading when you choose what a rule or a gauge should watch, and they
-carry their own units. When there isn't yet enough history, they report nothing
+Helmcentral computes a set of these itself. They appear alongside every other
+instrument reading when you choose what a rule or gauge should watch, and they
+carry their own units. When there isn't enough history yet, they report nothing
 rather than a misleading zero. See [Alarm rules
 reference](../reference/alarm-rules.md#derived-values) for the full list, what
 each one needs before it starts reporting, and when it goes quiet again.
@@ -448,7 +447,7 @@ own barometer for a season.
 
 In the tropics, for example, the barometer swings about 1.5 mb either way every
 day on its own, so any departure from that rhythm is significant. Outside the
-tropics the same rule can raise false alarms.
+tropics, the same rule can raise false alarms.
 
 Once created, these rules can be edited, retuned or deleted like any other. A
 rule you delete stays deleted. The set isn't re-created on the next restart.
@@ -458,9 +457,9 @@ rule you delete stays deleted. The set isn't re-created on the next restart.
 A rate of fall means different things depending on which way you're going. A
 system moving at 15 knots closes 190 miles a day on a boat running with it, and
 528 on one heading into it, and the barometer moves accordingly. The same 1
-mb/hr is a different situation in each case.
+mb/hr means something different in each case.
 
-At anchor this doesn't apply. Underway, allow for your course relative to the
+At anchor, this doesn't apply. Underway, allow for your course relative to the
 weather system when you read an alarm. The thresholds don't adjust for it.
 
 ## The Law of Storms barometer rules
@@ -509,10 +508,10 @@ View, so silencing the sound doesn't need a trip to the Active Alarms tile.
 
 - **No provider:** No forecast-warnings provider is installed.
 - **No position:** The boat has had no position fix.
-- **Provider down:** The provider has been down for half an hour.
+- **Provider down:** The provider has been down for 30 minutes.
 
 It's there so a dead provider looks like a dead provider rather than a quiet sea.
-If your boat has no provider and you don't want the standing alert, disable that
+If your boat has no provider and you don't want the standing alert, turn off that
 rule like any other.
 
 The alarm card says which warning is in force and links straight to the bulletin,
