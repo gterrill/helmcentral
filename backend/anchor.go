@@ -940,6 +940,7 @@ func anchorRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
 		{http.MethodGet, "/api/anchor-watch/low-water", tierRead, getAnchorLowWater},
+		{http.MethodGet, "/api/anchor-watch/sounded-cells", tierRead, getAnchorSoundedCells},
 		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAISTrailsHandler},

@@ -83,6 +83,22 @@ under the boat arrow.
   bright yellow where it is now, in a few steps along the whole stay. The oldest
   part stays solid, so a long swing never fades out of sight.
 
+## The shaded swing circle
+
+Inside the swing circle, the ground your boat hasn't crossed since the anchor
+went down is shaded, and the ground it has crossed is clear. The shading is one
+colour and says nothing about depth. It's there so you can see at a glance how
+much of the circle has been sounded, which is the part the low-water estimate
+can speak for.
+
+- **A new drop:** The whole circle is shaded at first, because nothing has been
+  sounded yet. A square clears each minute the boat swings over it, in squares
+  about 2.5 m on a side. Small gaps between crossed squares are filled in, so
+  the picture doesn't speckle.
+- **Correcting the anchor:** The stay's readings are kept, so the squares you
+  had cleared are redrawn around the corrected position straight away.
+- **While you adjust:** The shading is hidden until you save or cancel.
+
 ## AIS targets on the map
 
 Nearby AIS targets draw on the anchor-watch map as amber circles carrying the

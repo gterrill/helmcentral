@@ -25,6 +25,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   doesn't follow the station it says how much of the station's range it runs.
   A noisy sounder keeps the estimate on the station figure and the line says the
   readings are too scattered. Mate quotes the same method and margin of error.
+- **The Anchor Watch map shades the ground you haven't sounded.** Inside the swing
+  circle, the part the boat hasn't crossed since the drop is shaded, and the part
+  it has crossed is clear, so you can see how much of the circle the depth
+  estimate can speak for.
 
 ### Changed
 

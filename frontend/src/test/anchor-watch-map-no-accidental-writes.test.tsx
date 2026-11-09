@@ -23,6 +23,9 @@ interface MapProps {
 
 const mapState = vi.hoisted(() => ({ props: null as MapProps | null }))
 
+// The map's own once-a-minute read of the sounded cells is not a write.
+vi.mock('@/hooks/use-anchor-sounded-cells', () => ({ useAnchorSoundedCells: () => ({ answer: null, error: null }) }))
+
 vi.mock('maplibre-gl', () => ({
   default: {},
 }))
