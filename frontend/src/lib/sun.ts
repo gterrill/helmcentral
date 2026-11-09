@@ -3,8 +3,9 @@
 // degree, which is far finer than a sky colour needs. Pure; a replay frame asks
 // it for the boat's position and the track's own time.
 
+import { DAY_MS } from '@/lib/vessel-time'
+
 const RAD = Math.PI / 180
-const DAY_MS = 86_400_000
 const J1970 = 2_440_588
 const J2000 = 2_451_545
 const OBLIQUITY = RAD * 23.4397

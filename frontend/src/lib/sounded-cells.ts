@@ -1,5 +1,5 @@
-// The Anchor Watch map shades the swing circle and leaves the ground the boat
-// has crossed clear. The server sends the crossed 2.5 m cells as integer
+// The Anchor Watch map tints the ground the boat has crossed inside the swing
+// circle, and leaves the rest untouched. The server sends the crossed 2.5 m cells as integer
 // indices in a local east/north frame at the anchor (docs/adr/0274); this turns
 // them back into map polygons.
 
@@ -75,7 +75,7 @@ function clipToConvex(subject: Pt[], clip: Pt[]): Pt[] {
 const CIRCLE_STEPS = 64
 
 /**
- * The cells to draw clear: the crossed ones, and each uncrossed cell that sits
+ * The cells to tint: the crossed ones, and each uncrossed cell that sits
  * between crossed cells (opposite neighbours N and S, E and W, or on either
  * diagonal). Small holes in the swing band fill in; the band does not grow.
  * For display only; the server's cells are what was actually crossed.
@@ -104,11 +104,13 @@ export function withSmallGapsFilled(cells: readonly SoundedCell[]): SoundedCell[
 }
 
 /**
- * The part of the swing circle the boat has not crossed, as a MultiPolygon.
- * Small gaps between crossed cells count as crossed. Each row of cells keeps the runs with no crossed cell; a run is cut to the
- * circle, and rows whose runs are the same join into one taller block.
+ * The part of the swing circle the boat has crossed, as a MultiPolygon. Small
+ * gaps between crossed cells count as crossed. Each row of cells keeps its runs
+ * of crossed cells; a run is cut to the circle, and rows whose runs are the same
+ * join into one taller block. There are no per-cell edges, so the tint reads as
+ * one area.
  */
-export function unsoundedAreaGeoJSON(
+export function soundedAreaGeoJSON(
   frame: SoundedFrame,
   cells: readonly SoundedCell[],
   radiusM: number,
@@ -127,19 +129,19 @@ export function unsoundedAreaGeoJSON(
     else rows.set(j, [i])
   }
 
-  // Row j covers north j*c..(j+1)*c. Its unsounded runs are in east metres.
+  // Row j covers north j*c..(j+1)*c. Its crossed runs are in east metres, with
+  // neighbouring cells joined.
   const lo = Math.floor(-radiusM / c)
   const hi = Math.ceil(radiusM / c)
   const blocks: { key: string; runs: [number, number][]; n0: number; n1: number }[] = []
   for (let j = lo; j < hi; j += 1) {
     const eastIdx = (rows.get(j) ?? []).slice().sort((a, b) => a - b)
     const runs: [number, number][] = []
-    let from = -radiusM
     for (const i of eastIdx) {
-      if (i * c > from) runs.push([from, i * c])
-      from = Math.max(from, (i + 1) * c)
+      const last = runs[runs.length - 1]
+      if (last && last[1] === i * c) last[1] = (i + 1) * c
+      else runs.push([i * c, (i + 1) * c])
     }
-    if (from < radiusM) runs.push([from, radiusM])
     const key = runs.map((r) => `${r[0]}:${r[1]}`).join('|')
     const last = blocks[blocks.length - 1]
     if (last && last.key === key && last.n1 === j * c) last.n1 = (j + 1) * c

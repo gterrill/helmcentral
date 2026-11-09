@@ -1,9 +1,8 @@
 import type { TelemetryChartSeries } from '@/lib/mate-cards'
 import type { TelemetrySeriesBody } from '@/hooks/use-telemetry-series'
-import { zonedDayStart } from '@/lib/vessel-time'
+import { DAY_MS, zonedDayStart } from '@/lib/vessel-time'
 
 const HOUR_MS = 3_600_000
-export const DAY_MS = 24 * HOUR_MS
 
 function parts(ms: number, timeZone: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormatPart[] {
   return new Intl.DateTimeFormat('en-GB', { timeZone, hourCycle: 'h23', ...opts }).formatToParts(new Date(ms))

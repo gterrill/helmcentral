@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
-import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
+import { formatTimeOfDay, selectTimeZone, weekdayPrefix } from '@/lib/vessel-time'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { TideToday } from '@/hooks/use-tide-today'
 import {
-  calibrationNotReadyText,
+  calibrationSummaryText,
   lowWaterClearanceReasonLabel,
-  readingsSpanText,
+  showsHalfWidth,
   tideSourceName,
   underKeelPhrase,
   underKeelRangePhrase,
@@ -106,13 +106,6 @@ export function AnchorWatchReadings({
     </div>
   )
 
-  const direction = tide !== null && nextTurn !== null && (
-    <p className={cn('inline-flex shrink-0 items-center gap-1 font-semibold text-gauge-secondary', hud ? 'text-sm' : 'mt-1 text-sm')}>
-      {tideIsRising ? <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />}
-      {tide.tide_direction}
-    </p>
-  )
-
   // nextTurn only ever holds an extreme tideExtremesByTime already found
   // usable (lib/tide-estimate.ts drops the -1-sentinel/no-time case before
   // this reads it), so its height is always real here — including a genuine
@@ -131,39 +124,6 @@ export function AnchorWatchReadings({
     <span className="font-semibold text-gauge-secondary">
       {depthValueText(estimatedDepthAtNextTurn, isImperial)} {lengthUnit}
     </span>
-  )
-
-  const tideBlock = tide !== null && nextTurn !== null ? (
-    hud ? (
-      <>
-        <div className="flex items-center justify-between gap-3">
-          <p className={cn('min-w-0 truncate', label)}>{tideLabel}</p>
-          {direction}
-        </div>
-        <p className={cn('mt-0.5 truncate text-xs', body)}>
-          {turnLine}
-          {estimate && (
-            <>
-              {' · '}
-              <span className={quiet}>est.</span> {estimate}
-            </>
-          )}
-        </p>
-      </>
-    ) : (
-      <>
-        <p className={cn('truncate', label)}>{tideLabel}</p>
-        {direction}
-        <p className={cn('mt-1 truncate text-xs', body)}>{turnLine}</p>
-        {estimate && (
-          <p className={cn('truncate text-xs', body)}>
-            <span className={quiet}>{tideIsRising ? 'Est. high' : 'Est. low'}</span> {estimate}
-          </p>
-        )}
-      </>
-    )
-  ) : (
-    <p className={cn('text-xs', quiet)}>No tide station</p>
   )
 
   // Anchor Watch's low-water clearance warning (ADR 0135): the depth at the
@@ -216,12 +176,6 @@ export function AnchorWatchReadings({
           {staleSuffix}
         </div>
       )}
-      {lowWaterClearance?.status === 'ok' && (
-        <p data-testid="low-water-clearance" className={quietLine}>
-          {clearanceText(lowWaterClearance, false)} at low water · {clockTime(lowWaterClearance.lowTideTime, timeZone)}
-          {staleSuffix}
-        </p>
-      )}
       {lowWaterClearance?.status === 'unknown' && lowWaterClearance.reason !== 'not_anchored' && (
         <p data-testid="low-water-clearance" className={quietLine}>
           {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
@@ -231,50 +185,132 @@ export function AnchorWatchReadings({
     </>
   )
 
-  // Where the low-water depth comes from (ADR 0274): the station's prediction,
-  // labelled as such, until the sounder's own readings at this anchorage have
-  // narrowed to better than the margin; then the calibrated estimate with its
-  // 95% interval. The shallowest and deepest sounded spots, the next high and the
-  // tide-match note come with it. Wrapped lines, because the figures run long.
+  // The tide under Depth (ADR 0274). With a low-water verdict the panel is three
+  // lines: the tide and its direction; the high and the low at the boat, with the
+  // clearance under the keel; and where the local calibration stands. The
+  // station's own heights drop out then, because the figures that matter are the
+  // ones at the boat. With no verdict (not anchored, no tide station, nothing
+  // worked out yet) the tide line is the station's next high or low, as it was.
   const verdict = lowWaterClearance !== null && lowWaterClearance.status !== 'unknown' ? lowWaterClearance : null
   const calibration = verdict?.calibration
   const depthText = (m: number) => depthValueText(m, isImperial)
-  const withInterval = (f: { depthM: number; halfWidthM: number }) => `${depthText(f.depthM)} ${lengthUnit} ±${depthText(f.halfWidthM)}`
-  const noteLine = cn('text-xs', quiet, staleStyle, hud ? 'hidden w-0 min-w-full border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-1')
-  let methodText: string | null = null
+  const withInterval = (f: { depthM: number; halfWidthM: number }) => `${depthText(f.depthM)} ${lengthUnit}${showsHalfWidth(f.halfWidthM, depthText) ? ` ±${depthText(f.halfWidthM)}` : ''}`
+
+  // The high and the low at the boat, the sooner first. The server sends one high:
+  // the calibrated one while the calibration is ready, otherwise the station's.
+  let tideFigures: string | null = null
   if (verdict !== null) {
-    if (calibration?.ready && verdict.depthAtLowHalfWidthM !== undefined) {
-      methodText = `Locally calibrated depth estimate (${readingsSpanText(calibration.hoursOfReadings)} of readings) · ${withInterval({ depthM: verdict.depthAtLowM, halfWidthM: verdict.depthAtLowHalfWidthM })}`
-    } else {
-      methodText = `Depth based on ${tideSourceName(verdict)} prediction · ${depthText(verdict.depthAtLowM)} ${lengthUnit}`
-      if (calibration && !calibration.ready && calibration.notReady) {
-        methodText += ` · ${calibrationNotReadyText(calibration.notReady, calibration.hoursOfReadings, verdict.tideIsPoint === true)}`
-      }
-    }
+    const calibrated = calibration?.ready === true
+    const highText = verdict.highTideTime !== undefined && verdict.depthAtHighM !== undefined
+      ? `High ${clockTime(verdict.highTideTime, timeZone)} · ${
+        calibrated && verdict.depthAtHighHalfWidthM !== undefined
+          ? withInterval({ depthM: verdict.depthAtHighM, halfWidthM: verdict.depthAtHighHalfWidthM })
+          : `est. ${depthText(verdict.depthAtHighM)} ${lengthUnit}`
+      }`
+      : null
+    // The verdict's red line carries the clearance when the verdict is too shallow.
+    const lowDepth = calibrated && verdict.depthAtLowHalfWidthM !== undefined
+      ? withInterval({ depthM: verdict.depthAtLowM, halfWidthM: verdict.depthAtLowHalfWidthM })
+      : `${depthText(verdict.depthAtLowM)} ${lengthUnit}`
+    const lowClearance = verdict.status === 'ok' ? ` · ${clearanceText(verdict, false)}` : ''
+    const lowText = `Low ${clockTime(verdict.lowTideTime, timeZone)} · ${lowDepth}${lowClearance}`
+    const highFirst = verdict.highTideTime !== undefined && Date.parse(verdict.highTideTime) < Date.parse(verdict.lowTideTime)
+    tideFigures = (highFirst ? [highText, lowText] : [lowText, highText]).filter((t) => t !== null).join(' / ')
   }
-  const calibrationLines = methodText !== null && (
+  // A projected ready time is measured from when the figures were worked out; with
+  // no such time there is nothing to measure it from, so the line gives the hours.
+  const workedOutAt = lowWaterWorkedOutAt !== null ? new Date(lowWaterWorkedOutAt) : null
+  const readyAt = calibration?.readyAt !== undefined ? new Date(calibration.readyAt) : null
+  // The server sends a ready time only between 10 minutes and a day ahead, so a
+  // weekday is all a time that crosses midnight needs.
+  const readyText = readyAt === null || workedOutAt === null
+    ? undefined
+    : `ready at ~${weekdayPrefix(readyAt, workedOutAt, timeZone)}${clockTime(readyAt.getTime(), timeZone)}`
+  const calibrationText = calibration ? calibrationSummaryText(calibration, { readyText, isPoint: verdict?.tideIsPoint === true }) : ''
+  // Wrapped, not truncated: the figures run long. w-0 min-w-full makes the line
+  // take the width the other rows set instead of widening the shrink-to-fit panel.
+  const wrapLine = cn('text-xs', staleStyle, hud ? 'mt-0.5 w-0 min-w-full' : 'mt-1')
+  const tideFigureLines = verdict !== null && (
     <>
-      <p data-testid="low-water-method" className={noteLine}>
-        {methodText}
+      <p data-testid="low-water-tide" className={cn(wrapLine, body)}>
+        {tideFigures}
         {staleSuffix}
       </p>
-      {calibration?.shallowestDiffers && calibration.shallowestSounded && (
-        <p data-testid="low-water-shallowest" className={noteLine}>
-          Shallowest sounded spot {withInterval(calibration.shallowestSounded)} at low water
-        </p>
-      )}
-      {calibration?.highAtBoat && calibration.highTideTime && (
-        <p data-testid="high-water-depth" className={noteLine}>
-          High water {withInterval(calibration.highAtBoat)} · {clockTime(calibration.highTideTime, timeZone)}
-          {calibration.deepestDiffers && calibration.deepestSounded && <> · deepest sounded spot {withInterval(calibration.deepestSounded)}</>}
-        </p>
-      )}
-      {calibration?.stationMatchNote && (
-        <p data-testid="tide-match-note" className={noteLine}>
-          {calibration.stationMatchNote}
+      {calibrationText !== '' && (
+        <p data-testid="low-water-calibration" className={cn(wrapLine, body, hud && 'hidden sm:block')}>
+          <span className={quiet}>Calibration</span> {calibrationText}
         </p>
       )}
     </>
+  )
+
+  // The station's single line, as it was before there was a low-water figure.
+  const stationLines = hud ? (
+    <p className={cn('mt-0.5 truncate text-xs', body)}>
+      {turnLine}
+      {estimate && (
+        <>
+          {' · '}
+          <span className={quiet}>est.</span> {estimate}
+        </>
+      )}
+    </p>
+  ) : (
+    <>
+      <p className={cn('mt-1 truncate text-xs', body)}>{turnLine}</p>
+      {estimate && (
+        <p className={cn('truncate text-xs', body)}>
+          <span className={quiet}>{tideIsRising ? 'Est. high' : 'Est. low'}</span> {estimate}
+        </p>
+      )}
+    </>
+  )
+  const tideBody = verdict === null ? stationLines : tideFigureLines
+
+  // Rising or Falling comes with the verdict, so it follows the calibrated high
+  // and low once the calibration is ready; without a verdict it is the station's.
+  // A stale verdict's direction is old, so the live station's stands then.
+  const directionName = (!stale ? verdict?.tideDirection : undefined) ?? tide?.tide_direction
+  const direction = tide !== null && nextTurn !== null && (
+    <p className={cn('inline-flex shrink-0 items-center gap-1 font-semibold text-gauge-secondary', hud ? 'text-sm' : 'mt-1 text-sm')}>
+      {directionName === 'Rising' ? <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />}
+      {directionName}
+    </p>
+  )
+
+  const tideBlock = tide !== null && nextTurn !== null ? (
+    hud ? (
+      <>
+        <div className="flex items-center justify-between gap-3">
+          <p className={cn('min-w-0 truncate', label)}>{tideLabel}</p>
+          {direction}
+        </div>
+        {tideBody}
+      </>
+    ) : (
+      <>
+        <p className={cn('truncate', label)}>{tideLabel}</p>
+        {direction}
+        {tideBody}
+      </>
+    )
+  ) : (
+    <>
+      {verdict === null ? (
+        <p className={cn('text-xs', quiet)}>No tide station</p>
+      ) : (
+        <p className={cn('truncate', label)}>{`Tide${verdict.tideStationName ? ` · ${verdict.tideStationName}` : ''}`}</p>
+      )}
+      {tideFigureLines}
+    </>
+  )
+
+  // The shallowest spot sounded, when it differs from the boat's cell or sets the verdict.
+  const noteLine = cn('text-xs', quiet, staleStyle, hud ? 'hidden w-0 min-w-full border-t border-white/10 px-3 py-1.5 sm:block' : 'mt-1')
+  const shallowestLine = calibration?.shallowestDiffers && calibration.shallowestSounded && (
+    <p data-testid="low-water-shallowest" className={noteLine}>
+      Shallowest sounded spot {withInterval(calibration.shallowestSounded)} at low water
+    </p>
   )
 
   // Always shown, phone included: the mark is somewhere other than where the
@@ -296,7 +332,7 @@ export function AnchorWatchReadings({
         {depthBlock}
         <div className="border-t border-white/10 px-3 py-1.5">{tideBlock}</div>
         {clearance}
-        {calibrationLines}
+        {shallowestLine}
         {bowWarning}
       </div>
     )
@@ -310,7 +346,7 @@ export function AnchorWatchReadings({
         {adjustAction}
       </div>
       {clearance}
-      {calibrationLines}
+      {shallowestLine}
       {bowWarning}
     </div>
   )

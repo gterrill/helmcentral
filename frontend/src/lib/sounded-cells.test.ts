@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellRing, localToLonLat, parseSoundedCells, unsoundedAreaGeoJSON, type SoundedFrame } from '@/lib/sounded-cells'
+import { cellRing, localToLonLat, parseSoundedCells, soundedAreaGeoJSON, type SoundedFrame } from '@/lib/sounded-cells'
 
 const frame: SoundedFrame = { originLat: -25.29, originLon: 152.91, cellM: 2.5 }
 
@@ -33,73 +33,73 @@ describe('cellRing', () => {
   })
 })
 
-describe('unsoundedAreaGeoJSON', () => {
-  it('shades the whole circle when nothing is sounded', () => {
-    const area = unsoundedAreaGeoJSON(frame, [], 30)
-    expect(covered(area, 0, 0)).toBe(true)
-    expect(covered(area, 20, -20)).toBe(true)
-    expect(covered(area, 29, 0)).toBe(true)
-    expect(covered(area, 25, 25)).toBe(false) // outside the circle
+describe('soundedAreaGeoJSON', () => {
+  it('tints nothing when nothing is sounded', () => {
+    const area = soundedAreaGeoJSON(frame, [], 30)
+    expect(area.geometry.coordinates).toHaveLength(0)
   })
 
-  it('leaves sounded cells clear and the rest shaded', () => {
+  it('tints the sounded cells and leaves the rest alone', () => {
     const cells = [
       [0, 0],
       [1, 0],
       [-1, 3],
     ] as const
-    const area = unsoundedAreaGeoJSON(frame, cells, 30)
-    expect(covered(area, 1.25, 1.25)).toBe(false) // cell (0,0)
-    expect(covered(area, 3.75, 1.25)).toBe(false) // cell (1,0)
-    expect(covered(area, -1.25, 8.75)).toBe(false) // cell (-1,3)
-    expect(covered(area, 6.25, 1.25)).toBe(true) // cell (2,0) next to the sounded run
-    expect(covered(area, 1.25, 3.75)).toBe(true) // the row above
-    expect(covered(area, -10, -10)).toBe(true)
+    const area = soundedAreaGeoJSON(frame, cells, 30)
+    expect(covered(area, 1.25, 1.25)).toBe(true) // cell (0,0)
+    expect(covered(area, 3.75, 1.25)).toBe(true) // cell (1,0)
+    expect(covered(area, -1.25, 8.75)).toBe(true) // cell (-1,3)
+    expect(covered(area, 6.25, 1.25)).toBe(false) // cell (2,0) next to the sounded run
+    expect(covered(area, 1.25, 3.75)).toBe(false) // the row above
+    expect(covered(area, -10, -10)).toBe(false)
   })
 
-  it('cuts a sounded cell at the circle edge without shading outside it', () => {
-    const area = unsoundedAreaGeoJSON(frame, [[11, 0]], 28) // east 27.5-30 m, mostly outside
-    expect(covered(area, 27.75, 1.25)).toBe(false)
-    expect(covered(area, 40, 0)).toBe(false)
+  it('cuts a sounded cell at the circle edge without tinting outside it', () => {
+    const area = soundedAreaGeoJSON(frame, [[11, 0]], 28) // east 27.5-30 m, mostly outside
+    expect(covered(area, 27.7, 0.1)).toBe(true) // inside the circle
+    expect(covered(area, 29, 1)).toBe(false) // in the cell, outside the circle
+    const inside = soundedAreaGeoJSON(frame, [[10, 0]], 28) // east 25-27.5 m, inside
+    expect(covered(inside, 26, 1)).toBe(true)
+    expect(covered(inside, 40, 0)).toBe(false)
+  })
+
+  it('joins a run of crossed cells into one polygon', () => {
+    const area = soundedAreaGeoJSON(frame, [[0, 0], [1, 0], [2, 0]], 30)
+    expect(area.geometry.coordinates).toHaveLength(1)
   })
 })
 
 describe('seams', () => {
   it('gives neighbouring blocks the same vertices along the edge they share', () => {
-    const area = unsoundedAreaGeoJSON(frame, [[0, 0]], 30)
-    for (const [e, n] of [[0, 2.5], [2.5, 2.5], [0, 0], [2.5, 0]]) {
-      const want = localToLonLat(frame, e, n)
-      const owners = area.geometry.coordinates.filter((poly) =>
-        poly[0].some(([x, y]) => x === want[0] && y === want[1]),
-      )
-      // The clear cell's corner is a vertex of each block that touches it, and of the full-width block beyond it.
-      expect(owners.length, `corner ${e},${n}`).toBeGreaterThanOrEqual(2)
-    }
+    const area = soundedAreaGeoJSON(frame, [[0, 0], [0, 1], [1, 1]], 30)
+    const want = localToLonLat(frame, 2.5, 2.5)
+    const owners = area.geometry.coordinates.filter((poly) => poly[0].some(([x, y]) => x === want[0] && y === want[1]))
+    // The lower block's corner is a vertex of the wider block above it too.
+    expect(owners.length).toBeGreaterThanOrEqual(2)
   })
 })
 
 describe('filling small gaps', () => {
   it('fills a one-cell hole between crossed cells on opposite sides', () => {
     const ring = [[-1, 0], [1, 0]] as const // east and west of cell (0,0)
-    expect(covered(unsoundedAreaGeoJSON(frame, ring, 30), 1.25, 1.25)).toBe(false)
+    expect(covered(soundedAreaGeoJSON(frame, ring, 30), 1.25, 1.25)).toBe(true)
     const ns = [[0, -1], [0, 1]] as const
-    expect(covered(unsoundedAreaGeoJSON(frame, ns, 30), 1.25, 1.25)).toBe(false)
+    expect(covered(soundedAreaGeoJSON(frame, ns, 30), 1.25, 1.25)).toBe(true)
     const diag = [[-1, -1], [1, 1]] as const
-    expect(covered(unsoundedAreaGeoJSON(frame, diag, 30), 1.25, 1.25)).toBe(false)
+    expect(covered(soundedAreaGeoJSON(frame, diag, 30), 1.25, 1.25)).toBe(true)
     const diag2 = [[-1, 1], [1, -1]] as const
-    expect(covered(unsoundedAreaGeoJSON(frame, diag2, 30), 1.25, 1.25)).toBe(false)
+    expect(covered(soundedAreaGeoJSON(frame, diag2, 30), 1.25, 1.25)).toBe(true)
   })
 
-  it('keeps a cell beside one crossed cell on one side shaded, and does not grow the band', () => {
-    const area = unsoundedAreaGeoJSON(frame, [[0, 0]], 30)
-    expect(covered(area, 1.25, 1.25)).toBe(false)
-    expect(covered(area, 3.75, 1.25)).toBe(true)
-    expect(covered(area, -1.25, 1.25)).toBe(true)
-    expect(covered(area, 3.75, 3.75)).toBe(true)
-    // Two crossed cells side by side: the cells at their ends stay shaded.
-    const pair = unsoundedAreaGeoJSON(frame, [[0, 0], [1, 0]], 30)
-    expect(covered(pair, 6.25, 1.25)).toBe(true)
-    expect(covered(pair, -1.25, 1.25)).toBe(true)
+  it('does not grow the band beyond the holes it fills', () => {
+    const area = soundedAreaGeoJSON(frame, [[0, 0]], 30)
+    expect(covered(area, 1.25, 1.25)).toBe(true)
+    expect(covered(area, 3.75, 1.25)).toBe(false)
+    expect(covered(area, -1.25, 1.25)).toBe(false)
+    expect(covered(area, 3.75, 3.75)).toBe(false)
+    const pair = soundedAreaGeoJSON(frame, [[0, 0], [1, 0]], 30)
+    expect(covered(pair, 6.25, 1.25)).toBe(false)
+    expect(covered(pair, -1.25, 1.25)).toBe(false)
   })
 })
 

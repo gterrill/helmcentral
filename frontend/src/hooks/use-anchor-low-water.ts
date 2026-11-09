@@ -21,13 +21,11 @@ interface CalibrationWire {
   ready?: boolean
   not_ready?: string
   hours_of_readings?: number
+  ready_at?: string
+  k?: number
+  later_min?: number
   shallowest_sounded?: FigureWire
   shallowest_differs?: boolean
-  high_tide_time?: string
-  high_at_boat?: FigureWire
-  deepest_sounded?: FigureWire
-  deepest_differs?: boolean
-  station_match_note?: string
 }
 
 interface LowWaterWire {
@@ -36,6 +34,11 @@ interface LowWaterWire {
   depth_at_low_m?: number
   clearance_m?: number
   low_tide_time?: string
+  high_tide_time?: string
+  depth_at_high_m?: number
+  depth_at_high_half_width_m?: number
+  tide_direction?: string
+  tide_station_name?: string
   depth_at_low_half_width_m?: number
   cautious_source?: string
   verdict_clearance_m?: number
@@ -94,23 +97,19 @@ function parseCalibration(wire: CalibrationWire): LowWaterCalibration {
     ready: wire.ready,
     hoursOfReadings: wire.hours_of_readings,
     shallowestDiffers: wire.shallowest_differs === true,
-    deepestDiffers: wire.deepest_differs === true,
   }
   if (!wire.ready) {
     const reason = NOT_READY.find((r) => r === wire.not_ready)
     if (!reason) throw new Error(`low-water clearance: unknown calibration reason ${JSON.stringify(wire.not_ready)}`)
     out.notReady = reason
+    if (typeof wire.ready_at === 'string' && wire.ready_at !== '') out.readyAt = wire.ready_at
     return out
   }
+  if (!isFiniteNumber(wire.k) || !isFiniteNumber(wire.later_min)) throw new Error('low-water clearance: a ready calibration without its k and timing')
+  out.k = wire.k
+  out.tideMinutesLater = wire.later_min
   out.shallowestSounded = figure(wire.shallowest_sounded)
   if (!out.shallowestSounded) throw new Error('low-water clearance: a ready calibration without its shallowest sounded spot')
-  out.highAtBoat = figure(wire.high_at_boat)
-  out.deepestSounded = figure(wire.deepest_sounded)
-  if (out.highAtBoat) {
-    if (typeof wire.high_tide_time !== 'string' || wire.high_tide_time === '') throw new Error('low-water clearance: a high water figure without its time')
-    out.highTideTime = wire.high_tide_time
-  }
-  if (wire.station_match_note) out.stationMatchNote = wire.station_match_note
   return out
 }
 
@@ -132,6 +131,13 @@ function parseVerdict(wire: LowWaterWire): LowWaterClearanceResult {
       clearanceM: wire.clearance_m,
       lowTideTime: wire.low_tide_time,
     }
+    if (typeof wire.high_tide_time === 'string' && wire.high_tide_time !== '' && isFiniteNumber(wire.depth_at_high_m)) {
+      verdict.highTideTime = wire.high_tide_time
+      verdict.depthAtHighM = wire.depth_at_high_m
+      if (isFiniteNumber(wire.depth_at_high_half_width_m)) verdict.depthAtHighHalfWidthM = wire.depth_at_high_half_width_m
+    }
+    if (typeof wire.tide_station_name === 'string' && wire.tide_station_name !== '') verdict.tideStationName = wire.tide_station_name
+    if (typeof wire.tide_direction === 'string' && wire.tide_direction !== '') verdict.tideDirection = wire.tide_direction
     if (wire.tide_is_point === true) verdict.tideIsPoint = true
     if (wire.calibration !== undefined) verdict.calibration = parseCalibration(wire.calibration)
     if (verdict.calibration?.ready) {
