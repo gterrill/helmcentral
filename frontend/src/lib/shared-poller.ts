@@ -42,17 +42,25 @@ export interface PollStore<S> {
   publish: (next: S) => void
 }
 
+export interface SharedPollerOptions<S> {
+  /** When the last reader leaves, stop, put the snapshot back to `initial` and notify. For data with no cursor to keep. */
+  resetOnIdle?: boolean
+  /** Decides whether a published snapshot is the one already held (default `Object.is`). An equal one changes nothing. */
+  isEqual?: (a: S, b: S) => boolean
+}
+
 export function createSharedPoller<S>(
   initial: S,
   poll: (signal: AbortSignal, store: PollStore<S>) => Promise<void>,
   reset: () => void,
+  { resetOnIdle = false, isEqual = Object.is }: SharedPollerOptions<S> = {},
 ): SharedPoller<S> {
   let snapshot = initial
   const listeners = new Set<() => void>()
   const store: PollStore<S> = {
     get: () => snapshot,
     publish: next => {
-      if (Object.is(next, snapshot)) return
+      if (isEqual(next, snapshot)) return
       snapshot = next
       for (const listener of [...listeners]) listener()
     },
@@ -90,7 +98,10 @@ export function createSharedPoller<S>(
     }
     return () => {
       holders -= 1
-      if (holders === 0) stop()
+      if (holders === 0) {
+        stop()
+        if (resetOnIdle) store.publish(initial)
+      }
     }
   }
 

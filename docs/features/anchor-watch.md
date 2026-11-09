@@ -155,6 +155,54 @@ SignalK server for them.
   is already set when Helmcentral is updated starts recording from then.
 - **Without a watch:** No tracks are recorded and none are drawn.
 
+## Where nearby boats have anchored
+
+A boat at anchor stays on a circle round its anchor, so once a boat has swung
+round for a while, Helmcentral can work out roughly where its anchor is. The map
+draws that as a small amber anchor with a dashed circle round it, in the same
+style as your own alarm circle. It's context, not an alert, and it never raises an
+alarm.
+
+- **What the circle shows:** That boat's swing, scaled up by the same proportion of
+  room you've left round your own. Your alarm circle is bigger than the circle your
+  boat actually traces. If your alarm radius is a quarter more than your boat's
+  swing, each boat's circle is drawn a quarter bigger than its swing. A boat on
+  less rode gets less room, so the two circles compare fairly.
+- **Both boats need to have swung:** Until your own boat has swung at least a
+  quarter turn, no anchors or circles show at all. They appear only once both your
+  boat and theirs have swung that far.
+- **Only boats still near:** A circle shows only while the boat is within 500 m of
+  your anchor. When it leaves, the circle goes.
+
+- **A guess, not a fact:** The anchor is worked out from where the boat has been,
+  nothing more. Helmcentral doesn't know which way the boat points or how long it
+  is, so treat the marker as good to a few metres in the best case. The circle's
+  size is how far the boat's GPS antenna swings, which is a little more than the
+  rode alone.
+- **When an estimate appears:** Only after the boat has swung enough to show a
+  circle. It needs about 20 recorded points. A boat at anchor
+  reports about every three minutes, so that can take an hour. The boat also needs
+  to have moved through at least a quarter of a turn round its anchor. A boat that has just arrived, or is sitting in a calm with
+  hardly any movement, has no marker yet.
+- **When there's none:** A boat passing through, circling, or swinging on a circle
+  smaller than 5 m or bigger than 80 m gets no marker. So does a track that
+  doesn't make a good circle. There's no message for a boat without one.
+- **Light wind:** On slack rode a boat drifts about inside its circle. Helmcentral
+  fits the circle to the outer edge of where the boat has been, which is where the
+  rode is taut.
+- **Since it settled:** The estimate uses the boat's positions since it settled,
+  so the run in to its anchorage doesn't count. The whole time at anchor counts
+  towards the boat's swing, for as long as your watch runs, not just the last 24
+  hours. A gap in its reports doesn't matter if the boat hasn't moved. A boat that
+  moves well away gets a fresh estimate. One that re-sets its anchor close by can
+  show a blended circle, or none, until its new swing outweighs the old.
+- **Red where it reaches you:** When the boat's circle overlaps your own
+  alarm circle, its anchor and circle turn red. That means the two of you can
+  touch if you both swing the wrong way. It doesn't mean either boat has moved.
+- **Which boats:** Only the boats that are also drawn as markers on the map, the
+  same as their tracks.
+- **Without a watch:** No estimates are shown.
+
 ## Adjust: moving the anchor or changing the radius
 
 A dropped anchor rarely needs moving far. Wind shifts, a bad set or a neighbour

@@ -7,6 +7,7 @@ import type { AlarmState } from '@/hooks/use-alarms'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
+import type { AisAnchorEstimate } from '@/lib/ais-anchor-estimates'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
@@ -88,6 +89,8 @@ interface AnchorWatchDrawerProps {
   vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: Map<string, AisTrailPoint[]>
+  // Where nearby boats appear to have anchored, passed straight through to the map.
+  aisAnchorEstimates?: AisAnchorEstimate[]
   // Optional, mirroring AnchorWatchMapProps — passed straight through to the
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).
@@ -164,6 +167,7 @@ export function AnchorWatchDrawer({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisAnchorEstimates,
   aisCollisionAlarms,
   isDarkTheme,
   showImageryLayer,
@@ -588,6 +592,7 @@ export function AnchorWatchDrawer({
                 vesselTrail={vesselTrail}
                 aisVessels={aisVessels}
                 aisTrails={aisTrails}
+                aisAnchorEstimates={aisAnchorEstimates}
                 aisCollisionAlarms={aisCollisionAlarms}
                 isDarkTheme={isDarkTheme}
                 showImageryLayer={showImageryLayer}

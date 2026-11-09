@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Anchor Watch shows where nearby boats have anchored.** Once a boat near you has
+  swung round far enough, the map draws a small anchor at its estimated anchor
+  position and a dashed circle for where it may swing, drawn like your own alarm
+  circle. The circle is its swing scaled up by the same proportion of room you
+  leave round your own. Both are amber, and turn red when its circle overlaps
+  yours. It's a guess from the boat's positions since it settled, and the whole
+  time at anchor counts, so it only appears once both your boat and theirs have
+  swung a quarter turn or more. It shows only for boats still near your anchor,
+  and it never raises an alarm.
+
 ## [0.63.0] - 2026-11-09
 
 ### Added

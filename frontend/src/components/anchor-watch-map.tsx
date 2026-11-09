@@ -11,6 +11,7 @@ import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import { AisCappedNote } from '@/components/ais-capped-note'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
+import { aisAnchorSwingCircles, type AisAnchorEstimate } from '@/lib/ais-anchor-estimates'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import {
   AIS_BAND_COLORS,
@@ -211,6 +212,18 @@ function bandColorExpression(colors: readonly string[]): ExpressionSpecification
 }
 
 const AIS_TRAIL_LINE_COLOR = bandColorExpression(AIS_BAND_COLORS)
+const NO_AIS_ANCHOR_ESTIMATES: AisAnchorEstimate[] = []
+// Our own swing circle and the estimated swing circles of other boats share these
+// values, so the two can never be drawn differently.
+const SWING_CIRCLE_FILL_OPACITY = 0.1
+const SWING_CIRCLE_LINE_WIDTH = 2
+const SWING_CIRCLE_DASH = [4, 3]
+const SWING_CIRCLE_LINE_OPACITY = 0.8
+// An estimated anchor and its circle take the AIS vessel marker's amber
+// (amber-500, as the marker's bg-amber-500/90), and the red the marker turns in a
+// collision alarm (red-600) where the circle overlaps ours. Like the AIS markers,
+// they keep these colours in both themes; our own circle follows the theme.
+const AIS_ESTIMATE_COLOR: ExpressionSpecification = ['case', ['get', 'overlaps'], '#dc2626', '#f59e0b']
 const SELF_TRAIL_LINE_COLOR = bandColorExpression(SELF_BAND_COLORS)
 const TRAIL_LINE_LAYOUT: LineLayerSpecification['layout'] = {
   'line-join': 'round',
@@ -276,6 +289,11 @@ export interface AnchorWatchMapProps {
   vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: Map<string, AisTrailPoint[]>
+  // Where nearby boats appear to have anchored (ADR 0275): a small anchor and a
+  // swing circle sharing our own circle's fill and stroke values, in the AIS marker
+  // colour: amber, red when it overlaps ours. Optional:
+  // callers with no estimate feed draw none.
+  aisAnchorEstimates?: AisAnchorEstimate[]
   // Vessel id -> worst live collision-alarm state (ADR 0088), keyed the same
   // way collisionAlarmStatesByVessel keys it. Optional and left undefined by
   // every existing caller/test with no alarm feed wired up — the AIS marker
@@ -395,6 +413,7 @@ export function AnchorWatchMap({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisAnchorEstimates = NO_AIS_ANCHOR_ESTIMATES,
   aisCollisionAlarms,
   isDarkTheme,
   showImageryLayer = false,
@@ -822,14 +841,24 @@ export function AnchorWatchMap({
     schedule()
     return () => clearTimeout(id)
   }, [])
+  const activeAisSet = useMemo(
+    () => new Set(activeAisMmsis === '' ? [] : activeAisMmsis.split('\n')),
+    [activeAisMmsis],
+  )
   const aisTrailsData = useMemo(() => {
-    const active = new Set(activeAisMmsis === '' ? [] : activeAisMmsis.split('\n'))
     const lines: AgeBandedLine[] = []
     for (const [mmsi, points] of aisTrails) {
-      if (active.has(mmsi)) lines.push(...aisLinesFor(points, bandNowMs))
+      if (activeAisSet.has(mmsi)) lines.push(...aisLinesFor(points, bandNowMs))
     }
     return bandedLinesToGeoJSON(lines)
-  }, [aisTrails, activeAisMmsis, bandNowMs])
+  }, [aisTrails, activeAisSet, bandNowMs])
+
+  // Estimated anchors of the boats still on the map, like the trails above.
+  const shownAisAnchors = useMemo(
+    () => aisAnchorEstimates.filter(e => activeAisSet.has(e.mmsi)),
+    [aisAnchorEstimates, activeAisSet],
+  )
+  const aisAnchorCirclesData = useMemo(() => aisAnchorSwingCircles(shownAisAnchors), [shownAisAnchors])
 
   // ── Map click handler ────────────────────────────────────────────────────
   // Editing (reposition, radius drag) is gone entirely — every branch that
@@ -1412,7 +1441,7 @@ export function AnchorWatchMap({
             type="fill"
             paint={{
               'fill-color': isDarkTheme ? '#38bdf8' : '#0ea5e9',
-              'fill-opacity': adjustActive ? 0.04 : 0.1,
+              'fill-opacity': adjustActive ? 0.04 : SWING_CIRCLE_FILL_OPACITY,
             }}
           />
           <Layer
@@ -1420,9 +1449,9 @@ export function AnchorWatchMap({
             type="line"
             paint={{
               'line-color': isDarkTheme ? '#38bdf8' : '#0284c7',
-              'line-width': 2,
-              'line-dasharray': [4, 3],
-              'line-opacity': adjustActive ? 0.35 : 0.8,
+              'line-width': SWING_CIRCLE_LINE_WIDTH,
+              'line-dasharray': SWING_CIRCLE_DASH,
+              'line-opacity': adjustActive ? 0.35 : SWING_CIRCLE_LINE_OPACITY,
             }}
           />
         </Source>
@@ -1522,6 +1551,30 @@ export function AnchorWatchMap({
               type="line"
               paint={{ 'line-width': 2.5, 'line-color': AIS_TRAIL_LINE_COLOR }}
               layout={TRAIL_LINE_LAYOUT}
+            />
+          </Source>
+        )}
+
+        {/* Estimated swing circles of nearby boats at anchor: they share our own
+            alarm circle's fill, stroke, dash and opacity constants, and take the
+            AIS marker's colour (amber, or collision red where one overlaps ours)
+            in either theme. */}
+        {aisAnchorCirclesData.features.length > 0 && (
+          <Source id="ais-anchor-circles" type="geojson" data={aisAnchorCirclesData}>
+            <Layer
+              id="ais-anchor-circles-fill"
+              type="fill"
+              paint={{ 'fill-color': AIS_ESTIMATE_COLOR, 'fill-opacity': SWING_CIRCLE_FILL_OPACITY }}
+            />
+            <Layer
+              id="ais-anchor-circles-stroke"
+              type="line"
+              paint={{
+                'line-color': AIS_ESTIMATE_COLOR,
+                'line-width': SWING_CIRCLE_LINE_WIDTH,
+                'line-dasharray': SWING_CIRCLE_DASH,
+                'line-opacity': SWING_CIRCLE_LINE_OPACITY,
+              }}
             />
           </Source>
         )}
@@ -1658,6 +1711,29 @@ export function AnchorWatchMap({
             </Marker>
           )
         })}
+
+        {/* Estimated anchor of a nearby boat: a small anchor, below every other
+            marker (AIS markers sit at 10 and up). Not interactive: taps pass
+            through to whatever lies under it. */}
+        {shownAisAnchors.map(e => (
+          <Marker key={`ais-anchor-${e.mmsi}`} latitude={e.lat} longitude={e.lon} style={{ zIndex: 5 }}>
+            <div
+              className="pointer-events-none flex items-center justify-center"
+              style={{ width: 24, height: 24 }}
+              role="img"
+              aria-label={`Estimated anchor of AIS vessel ${e.mmsi}${e.overlaps_ours ? ', swing overlaps ours' : ''}`}
+            >
+              <div
+                className={cn(
+                  'flex h-4 w-4 items-center justify-center rounded-full shadow-sm',
+                  e.overlaps_ours ? 'bg-red-600' : 'bg-amber-500/90',
+                )}
+              >
+                <Anchor className="h-2.5 w-2.5 text-white" />
+              </div>
+            </div>
+          </Marker>
+        ))}
 
         {/* Vessel marker */}
         <Marker latitude={vesselLat} longitude={vesselLon}>
