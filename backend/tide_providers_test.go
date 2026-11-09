@@ -361,21 +361,9 @@ func writeResolveTideProviderSettings(t *testing.T, tideProviderYAML string) str
 	return path
 }
 
-func TestResolveTideProvider_BlankIDIsErrorNamingSettings(t *testing.T) {
-	withCleanTideProviderRegistry(t)
-	settingsPath := writeResolveTideProviderSettings(t, `""`)
-
-	_, id, err := resolveTideProvider(settingsPath)
-	if err == nil {
-		t.Fatalf("expected an error for a blank ui.tide_provider")
-	}
-	if id != "" {
-		t.Fatalf("expected an empty configured id, got %q", id)
-	}
-	if !strings.Contains(err.Error(), "Settings") {
-		t.Fatalf("expected the error to name Settings, got %q", err.Error())
-	}
-}
+// A blank ui.tide_provider now resolves to the default (ADR 0273); see
+// tide_global_test.go for the default, and for the error when the default
+// plugin is not installed.
 
 func TestResolveTideProvider_UnknownIDIsErrorNamingPluginsTides(t *testing.T) {
 	withCleanTideProviderRegistry(t)

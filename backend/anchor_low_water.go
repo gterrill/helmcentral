@@ -31,7 +31,12 @@ const (
 	// The tide is missing for one of three reasons, each its own word: no
 	// station is set up, the service could not be reached, or it answered with
 	// no usable height or upcoming low.
-	lowWaterNoTideStation   = "no_tide_station"
+	lowWaterNoTideStation = "no_tide_station"
+	// lowWaterNoPlugin: the tide plugin is not installed.
+	lowWaterNoPlugin = "no_plugin"
+	// lowWaterNoPosition: the tide follows the boat's position and the boat has
+	// no usable fix to take it from.
+	lowWaterNoPosition      = "no_position"
 	lowWaterTideUnreachable = "tide_unreachable"
 	lowWaterNoTide          = "no_tide"
 	// lowWaterNotAnchored is the page's answer when the boat is neither anchored
@@ -194,8 +199,15 @@ func buildLowWater(state vesselStateData, tide func() (tideTodayResponse, error)
 		detail = tideUnavailableSentence(terr)
 		in.TideReason = lowWaterTideUnreachable
 		var te *tideTodayError
-		if errors.As(terr, &te) && te.reason == tideNotSetUp {
-			in.TideReason = lowWaterNoTideStation
+		if errors.As(terr, &te) {
+			switch te.reason {
+			case tideNoStation:
+				in.TideReason = lowWaterNoTideStation
+			case tideNoPlugin:
+				in.TideReason = lowWaterNoPlugin
+			case tideNoPosition:
+				in.TideReason = lowWaterNoPosition
+			}
 		}
 	} else {
 		in.Tide = &resp
@@ -230,8 +242,8 @@ func getAnchorLowWater(c echo.Context) error {
 	watch, active, _ := currentAnchorWatch()
 	return serveAnchorLowWater(c, fetchSignalKVesselState,
 		func() bool { return active },
-		func(now time.Time) (tideTodayResponse, error) {
-			resp, _, err := buildTideToday(settingsPath, now)
+		func(state vesselStateData, now time.Time) (tideTodayResponse, error) {
+			resp, _, err := buildTideToday(settingsPath, now, func() tideBoatFix { return tideBoatFixOf(state, nil) })
 			return resp, err
 		},
 		func() (float64, error) {
@@ -240,7 +252,7 @@ func getAnchorLowWater(c echo.Context) error {
 		}, liveLowWaterCalibrator(watch, active))
 }
 
-func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, error), watchSet func() bool, tide func(time.Time) (tideTodayResponse, error), margin func() (float64, error), calibrate lowWaterCalibrator) error {
+func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, error), watchSet func() bool, tide func(vesselStateData, time.Time) (tideTodayResponse, error), margin func() (float64, error), calibrate lowWaterCalibrator) error {
 	state, err := vesselState()
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("the boat's state is unavailable: %v", err)})
@@ -251,7 +263,7 @@ func serveAnchorLowWater(c echo.Context, vesselState func() (vesselStateData, er
 		// No tide is built and no margin read: there is nothing to check.
 		return c.JSON(http.StatusOK, lowWaterClearance{Status: lowWaterUnknown, Reason: lowWaterNotAnchored, WorkedOutAt: now.Format(time.RFC3339)})
 	}
-	out, err := buildLowWater(state, func() (tideTodayResponse, error) { return tide(now) }, margin, calibrate, now)
+	out, err := buildLowWater(state, func() (tideTodayResponse, error) { return tide(state, now) }, margin, calibrate, now)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

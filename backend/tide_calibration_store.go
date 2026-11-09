@@ -217,21 +217,15 @@ type tideCalChart struct {
 	// based provider's station id is the rounded position, so a boat that moves
 	// to another position starts another source.
 	Source string
+	// PositionBased is the provider's own flag (ADR 0273): the tide comes from a
+	// position, not a catalog station, so there is no station to name or measure
+	// to. The point's id is tidePointID of the anchor while a watch is set, so it
+	// is the same for as long as the anchor is where it is.
+	PositionBased bool
 	// Search lists the provider's stations, for a station-based chart that came
 	// without coordinates. It is nil for a chart of a position, which has no
 	// station list to look in.
 	Search func() []tideStation
-}
-
-// tideCalStationIsPoint says whether the chart's station is a position, not a
-// catalog station: the host names such a provider's station by its rounded
-// "lat,lon". This is the one place that knows; when the plugin's explicit
-// position_based flag is wired, it replaces this test.
-func tideCalStationIsPoint(station tideStation) bool {
-	var lat, lon float64
-	var rest string
-	n, _ := fmt.Sscanf(station.StationID, "%f,%f%s", &lat, &lon, &rest)
-	return n == 2
 }
 
 // tideCalChartSource is the configured provider's tide chart; a test stands in
@@ -241,12 +235,17 @@ var tideCalChartSource = liveTideCalChart
 // liveTideCalChart reads the tide chart of the configured provider and station,
 // the one the Depth and Tide tile shows.
 func liveTideCalChart() (tideCalChart, error) {
-	chart, providerID, provider, err := configuredTideChart(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	settings, err := readSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
-		return tideCalChart{}, err
+		return tideCalChart{}, fmt.Errorf("failed to read settings: %w", err)
 	}
-	out := tideCalChart{tideChartResult: chart, Source: providerID + "/" + chart.Station.StationID}
-	if !tideCalStationIsPoint(chart.Station) {
+	uiMap, _ := settings["ui"].(map[string]any)
+	provider, providerID, chart, terr := configuredTideChart(uiMap, tideBoatFixNow)
+	if terr != nil {
+		return tideCalChart{}, terr
+	}
+	out := tideCalChart{tideChartResult: chart, Source: providerID + "/" + chart.Station.StationID, PositionBased: tideProviderPositionBased(provider)}
+	if !out.PositionBased {
 		out.Search = func() []tideStation { return provider.SearchStations("", maxStationsForNearestLookup) }
 	}
 	return out, nil

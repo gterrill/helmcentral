@@ -16,7 +16,7 @@ func tileCardDeps(state vesselStateData) assistantToolDeps {
 		now:          func() time.Time { return tileCardNow },
 		displayUnits: func() (string, error) { return "metric", nil },
 		vesselState:  func() (vesselStateData, error) { return state, nil },
-		tileTide: func(context.Context, time.Time) (tideTodayResponse, error) {
+		tileTide: func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 			return tideTodayResponse{
 				Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: 6.56, TideDirection: "Rising",
 				HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: 9.84,
@@ -130,8 +130,8 @@ func TestShowTileDepthTideCardsTheSnapshotTheModelReads(t *testing.T) {
 
 func TestShowTileDepthTideSaysWhichReadingIsMissing(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: -1, DepthLastUpdateAge: -1})
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
-		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured — set ui.tide_provider in Settings (see README)"}
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured — set ui.tide_provider in Settings (see README)"}
 	}
 	out, res := tileCardRun(t, d, `{"tile":"depth-tide"}`)
 	p := tileCardPayload(t, d, out)
@@ -205,8 +205,8 @@ func TestShowTileEmptyTrendIsAnEmptyListNotNull(t *testing.T) {
 func TestShowTileCurrentTideBelowZeroReadsAsMissingLikeTheTile(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
 	good := d.tileTide
-	d.tileTide = func(ctx context.Context, now time.Time) (tideTodayResponse, error) {
-		r, err := good(ctx, now)
+	d.tileTide = func(ctx context.Context, st vesselStateData, now time.Time) (tideTodayResponse, error) {
+		r, err := good(ctx, st, now)
 		r.CurrentTideHeightFt = -0.5
 		return r, err
 	}
@@ -236,7 +236,7 @@ func TestShowTileStopsWhenTheTurnIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	inner := d.vesselState
 	d.vesselState = func() (vesselStateData, error) { cancel(); return inner() }
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 		t.Error("the tide was read after the turn was cancelled")
 		return tideTodayResponse{}, nil
 	}
@@ -259,7 +259,7 @@ func TestShowTileNamesTheDependencyThatIsNotWired(t *testing.T) {
 
 func TestShowTileSaysWhenTheTideServiceCannotBeReached(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideUnreachable, message: `tide provider "bom" unavailable: dial tcp: i/o timeout`}
 	}
 	_, res := tileCardRun(t, d, `{"tile":"depth-tide"}`)

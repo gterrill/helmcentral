@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { declareQuery, useApiQuery } from '@/lib/api-query';
+import { CHART_DATUM, normaliseTideDatum, type TideDatum } from '@/lib/tide-datum';
 
 export interface TideToday {
   datetime: string;
@@ -11,6 +12,8 @@ export interface TideToday {
   low_tide_height_ft: number;
   station_name: string;
   provider: string;
+  /** What every height above is measured from; an absent field is chart datum. */
+  height_datum?: TideDatum;
 }
 
 // Before the first fetch resolves, high/low are simply unknown - '' matches
@@ -27,6 +30,7 @@ export const defaultTide: TideToday = {
   low_tide_height_ft: -1,
   station_name: '',
   provider: '',
+  height_datum: CHART_DATUM,
 };
 
 function normalise(data: Partial<TideToday>): TideToday {
@@ -61,6 +65,7 @@ function normalise(data: Partial<TideToday>): TideToday {
         : -1,
     station_name: typeof data.station_name === 'string' ? data.station_name : '',
     provider: typeof data.provider === 'string' ? data.provider : '',
+    height_datum: normaliseTideDatum(data.height_datum),
   };
 }
 

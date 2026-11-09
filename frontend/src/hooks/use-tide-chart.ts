@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 
 import { useApiQuery } from '@/lib/api-query'
 import type { TideStation } from '@/hooks/use-tide-stations'
+import { mapTideChart, type MappedTideChart } from '@/lib/tide-chart-map'
+import type { TideDatum } from '@/lib/tide-datum'
 
 export interface TideExtremePoint {
   time: string
@@ -14,6 +16,8 @@ export interface TideChart {
   extremes: TideExtremePoint[]
   currentHeightM: number
   direction: string
+  /** What heightM is measured from; chart datum when the server says nothing. */
+  heightDatum?: TideDatum
   // Optional: populated by the backend's centralized classifyTidalPhase/
   // hasDoubleTide (see backend/tide_providers.go), so every provider gets
   // identical values. Absent/empty when the backend can't resolve a phase
@@ -22,68 +26,6 @@ export interface TideChart {
   tidalPhase?: string
   doubleHighToday?: boolean
   doubleLowToday?: boolean
-}
-
-interface TideChartApi {
-  station?: {
-    station_id?: string
-    name?: string
-    state?: string
-    lat?: number
-    lon?: number
-    timezone?: string
-  }
-  extremes?: Array<{
-    time?: string
-    height_m?: number
-    high?: boolean
-  }>
-  current_height_m?: number
-  direction?: string
-  cached?: boolean
-  updated_at?: string
-  ttl_seconds?: number
-  tidal_phase?: string
-  double_high_today?: boolean
-  double_low_today?: boolean
-}
-
-interface MappedTideChart {
-  chart: TideChart
-  isCached: boolean
-  updatedAt: string | null
-  ttlSeconds: number | null
-}
-
-function mapTideChart(data: TideChartApi): MappedTideChart {
-  const chart: TideChart = {
-    station: {
-      stationId: data.station?.station_id ?? '',
-      name: data.station?.name ?? '',
-      state: data.station?.state,
-      lat: typeof data.station?.lat === 'number' ? data.station.lat : 0,
-      lon: typeof data.station?.lon === 'number' ? data.station.lon : 0,
-      timezone: data.station?.timezone,
-    },
-    extremes: Array.isArray(data.extremes)
-      ? data.extremes.map((extreme) => ({
-          time: extreme.time ?? '',
-          heightM: typeof extreme.height_m === 'number' ? extreme.height_m : 0,
-          high: Boolean(extreme.high),
-        }))
-      : [],
-    currentHeightM: typeof data.current_height_m === 'number' ? data.current_height_m : 0,
-    direction: data.direction || '—',
-    tidalPhase: typeof data.tidal_phase === 'string' && data.tidal_phase !== '' ? data.tidal_phase : undefined,
-    doubleHighToday: typeof data.double_high_today === 'boolean' ? data.double_high_today : undefined,
-    doubleLowToday: typeof data.double_low_today === 'boolean' ? data.double_low_today : undefined,
-  }
-  return {
-    chart,
-    isCached: Boolean(data.cached),
-    updatedAt: typeof data.updated_at === 'string' ? data.updated_at : null,
-    ttlSeconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : null,
-  }
 }
 
 export function useTideChart(provider: string, stationId: string, refreshIntervalSeconds = 3600) {

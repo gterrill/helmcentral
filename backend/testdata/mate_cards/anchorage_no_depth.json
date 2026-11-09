@@ -365,6 +365,8 @@
       "error": "",
       "station": "Shute Harbour",
       "distance_nm": 15.2,
+      "height_datum": "chart_datum",
+      "modelled": false,
       "time_basis": "Australia/Brisbane",
       "height_at_arrival_m": 1.5,
       "direction": "Rising",

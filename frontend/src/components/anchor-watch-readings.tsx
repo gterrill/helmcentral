@@ -13,6 +13,7 @@ import {
 } from '@/lib/low-water-clearance'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL_LABEL } from '@/lib/tide-datum'
 import { depthValueText, feetToMeters } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
@@ -119,7 +120,7 @@ export function AnchorWatchReadings({
   const turnLine = nextTurn !== null && (
     <>
       {nextTurn.isHigh ? 'High' : 'Low'}
-      <span className={quiet}> {tideValueDisplay(nextTurn.heightFt, isImperial)} {lengthUnit}</span>
+      <span className={quiet}> {tideValueDisplay(nextTurn.heightFt, isImperial)} {lengthUnit}{isMeanSeaLevel(tide?.height_datum) ? ` ${MEAN_SEA_LEVEL_LABEL}` : ''}</span>
       {' · '}
       {clockTime(nextTurn.time, timeZone)}
     </>

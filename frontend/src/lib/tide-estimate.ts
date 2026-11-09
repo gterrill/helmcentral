@@ -15,7 +15,9 @@ export interface TideExtreme {
  * datums and must not be mistaken for missing data just for being very
  * negative).
  */
-function isUsableTideHeightFt(value: number): boolean {
+export function isUsableTideHeightFt(value: number): boolean {
+  // The server never sends a real height from mean sea level as exactly -1
+  // (backend tideHeightFtOnTheWire), so this holds for both datums.
   return Number.isFinite(value) && value !== -1
 }
 

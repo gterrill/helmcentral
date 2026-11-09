@@ -29,6 +29,7 @@ import { WidgetHost, type WidgetHostActions } from '@/components/widget-host'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
+import type { TideCapture } from '@/lib/tide-datum'
 // Not lazy: prefetchNoteEditor() is a plain function that only reaches into
 // the editor-vendor chunk through a dynamic import() of its own (see that
 // file's doc comment) — importing the function itself here costs nothing.
@@ -306,7 +307,7 @@ interface ShellAnchorWatch {
   active: boolean
   lastAutoRaiseAt: string | null
   planningDepthM: number | null
-  planningTideHeightFt: number | null
+  planningTide: TideCapture | null
 }
 
 const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => ({
@@ -314,12 +315,13 @@ const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => (
   active: watch.active,
   lastAutoRaiseAt: watch.lastAutoRaise?.at ?? null,
   planningDepthM: watch.planningDepthM,
-  planningTideHeightFt: watch.planningTideHeightFt,
+  planningTide: watch.planningTide,
 })
 
 function sameShellAnchorWatch(a: ShellAnchorWatch, b: ShellAnchorWatch): boolean {
   return a.loaded === b.loaded && a.active === b.active && a.lastAutoRaiseAt === b.lastAutoRaiseAt
-    && a.planningDepthM === b.planningDepthM && a.planningTideHeightFt === b.planningTideHeightFt
+    && a.planningDepthM === b.planningDepthM && a.planningTide?.ft === b.planningTide?.ft
+    && a.planningTide?.datum === b.planningTide?.datum
 }
 
 function AppShell() {
@@ -971,7 +973,7 @@ function AppShell() {
   // and is deliberately lost on reload. Cleared on every hasActiveAnchorWatch
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
-  const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
+  const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tide: TideCapture | null } | null>(null)
   // A wall display keeps every page of its feed mounted (ADR 0217): the
   // pages in the stack, with the one on screen kept until the next step even
   // if it just left the feed.
@@ -1021,9 +1023,9 @@ function AppShell() {
   // 0063): the persisted watch record while anchored, the session what-if
   // otherwise.
   const resolvedPlanningDepthM = hasActiveAnchorWatch ? anchorWatch.planningDepthM : sessionPlanningDepth?.depthM ?? null
-  const resolvedPlanningTideHeightFt = hasActiveAnchorWatch ? anchorWatch.planningTideHeightFt : sessionPlanningDepth?.tideHeightFt ?? null
+  const resolvedPlanningTide = hasActiveAnchorWatch ? anchorWatch.planningTide : sessionPlanningDepth?.tide ?? null
 
-  const handlePlanningDepthChange = useCallback((depthM: number, tideHeightFt: number | null) => {
+  const handlePlanningDepthChange = useCallback((depthM: number, tide: TideCapture | null) => {
     if (hasActiveAnchorWatch) {
       // updatePlanningDepth now throws on a failed PATCH rather than
       // silently no-op'ing (use-anchor-watch.ts). The rejection is left to
@@ -1032,9 +1034,9 @@ function AppShell() {
       // message and a Retry it can act on) and reverts the depth input to
       // the last-known-good server value, the same pattern the radius
       // stepper and the rode/conditions fields already use.
-      return updatePlanningDepth(depthM, tideHeightFt ?? -1)
+      return updatePlanningDepth(depthM, tide)
     }
-    setSessionPlanningDepth({ depthM, tideHeightFt })
+    setSessionPlanningDepth({ depthM, tide })
     return Promise.resolve()
   }, [hasActiveAnchorWatch])
 
@@ -1612,7 +1614,7 @@ function AppShell() {
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
               planningDepthM={resolvedPlanningDepthM}
-              planningTideHeightFt={resolvedPlanningTideHeightFt}
+              planningTide={resolvedPlanningTide}
               onPlanningDepthChange={handlePlanningDepthChange}
             />
           </>

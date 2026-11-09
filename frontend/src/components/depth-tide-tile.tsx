@@ -5,6 +5,7 @@ import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { currentTideHeightKnown, isMeanSeaLevel, MEAN_SEA_LEVEL_LABEL } from '@/lib/tide-datum'
 import { estimateDepthAtNextTurn, tideExtremesByTime } from '@/lib/tide-estimate'
 import { FORECAST_REFRESH_SECONDS } from '@/config/app-config'
 import { useVesselFields, useVesselStateSelector } from '@/hooks/use-vessel-state'
@@ -105,9 +106,12 @@ export const DepthTideTile = memo(function DepthTideTile({
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
             Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
           </p>
+          {isMeanSeaLevel(tide.height_datum) && (
+            <p data-testid="tide-datum-label" className="text-xs text-muted-foreground">Heights {MEAN_SEA_LEVEL_LABEL}</p>
+          )}
           <div className="mt-1 flex items-baseline gap-2">
             <span className="font-display text-4xl leading-none text-gauge-secondary">
-              {tide.current_tide_height_ft >= 0 ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
+              {currentTideHeightKnown(tide) ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
             </span>
             <span className="text-lg text-muted-foreground">{tideUnit}</span>
             <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-gauge-secondary">

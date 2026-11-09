@@ -23,6 +23,7 @@ import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clamp
 import { useAnchorLowWater } from '@/hooks/use-anchor-low-water'
 import { haversineMeters } from '@/lib/geo'
 import { resolveLoaM } from '@/lib/rode-plan'
+import type { TideCapture } from '@/lib/tide-datum'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
 import { hasWebGL2 } from '@/lib/webgl'
 import { cn } from '@/lib/utils'
@@ -128,8 +129,9 @@ interface AnchorWatchDrawerProps {
   // watch record while anchored, the not-anchored session what-if otherwise.
   // Feeds the Rode Planner below.
   planningDepthM: number | null
-  planningTideHeightFt: number | null
-  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => Promise<void>
+  /** The tide stamped on the planning depth, or null when none was. */
+  planningTide: TideCapture | null
+  onPlanningDepthChange: (depthM: number, tide: TideCapture | null) => Promise<void>
 }
 
 /** The reason the server stamps when a position change is made by hand in Adjust (backend/anchor.go). */
@@ -187,7 +189,7 @@ export function AnchorWatchDrawer({
   onWindBandChange,
   onUpdateRodeAndConditions,
   planningDepthM,
-  planningTideHeightFt,
+  planningTide,
   onPlanningDepthChange,
   adjustAnchor,
 }: AnchorWatchDrawerProps) {
@@ -684,7 +686,7 @@ export function AnchorWatchDrawer({
           seabedType={seabedType}
           depthM={depthMeters}
           planningDepthM={planningDepthM}
-          planningTideHeightFt={planningTideHeightFt}
+          planningTide={planningTide}
           onPlanningDepthChange={onPlanningDepthChange}
           windSpeedApparentKts={windSpeedApparentKts}
           maxGustKts={maxGustKts}

@@ -4,6 +4,7 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { apiRequest, declareQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL, normaliseTideDatum, tideHeightFtKnown, type TideCapture } from '@/lib/tide-datum'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
@@ -36,6 +37,8 @@ interface AnchorWatchServerState {
   place_name?: string
   planning_depth_m?: number
   planning_tide_height_ft?: number
+  // What planning_tide_height_ft is measured from (ADR 0273); absent or empty is chart datum.
+  planning_tide_datum?: string
   // The planning depth at chart datum, worked out on the server; null with a
   // reason when it cannot be.
   datum_depth_m?: number | null
@@ -91,7 +94,8 @@ export interface AnchorWatchRecord {
    * live tide station (ADR 0063). Null when nothing has been recorded
    * (legacy record, or no reading was available at the moment of drop). */
   planningDepthM: number | null
-  planningTideHeightFt: number | null
+  /** The tide height stamped on the planning depth, with the datum it is from; null when none was. A height from mean sea level can be negative and is still a reading. */
+  planningTide: TideCapture | null
   /** The depth under the anchor at chart datum (planning depth plus the transducer depth, less the tide at the drop). Null when it cannot be worked out; datumDepthReason then says why. */
   datumDepthM: number | null
   datumDepthReason: string
@@ -104,7 +108,7 @@ export interface AnchorWatchRecord {
   setAnchorHere: (
     lat: number,
     lon: number,
-    capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
+    capture: { planningDepthM: number | null; planningTide: TideCapture | null; radiusMeters?: number },
   ) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
   /**
@@ -130,7 +134,7 @@ export interface AnchorWatchRecord {
    */
   adjustAnchor: (params: { lat?: number; lon?: number; radiusMeters: number; restore?: AnchorAdjustRestore }) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
-  updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
+  updatePlanningDepth: (depthM: number, tide: TideCapture | null) => Promise<void>
   clearAnchor: () => Promise<void>
 }
 
@@ -258,8 +262,9 @@ export function parseAnchorWatch(data: AnchorWatchServerState | undefined): Anch
     planningDepthM: on && typeof serverState.planning_depth_m === 'number' && serverState.planning_depth_m > 0
       ? serverState.planning_depth_m
       : null,
-    planningTideHeightFt: on && typeof serverState.planning_tide_height_ft === 'number' && serverState.planning_tide_height_ft >= 0
-      ? serverState.planning_tide_height_ft
+    planningTide: on && typeof serverState.planning_tide_height_ft === 'number'
+      && tideHeightFtKnown(serverState.planning_tide_height_ft, serverState.planning_tide_datum)
+      ? { ft: serverState.planning_tide_height_ft, datum: normaliseTideDatum(serverState.planning_tide_datum) }
       : null,
     datumDepthM: on && typeof serverState.datum_depth_m === 'number' ? serverState.datum_depth_m : null,
     datumDepthReason: on && typeof serverState.datum_depth_reason === 'string' ? serverState.datum_depth_reason : '',
@@ -273,9 +278,14 @@ export function parseAnchorWatch(data: AnchorWatchServerState | undefined): Anch
   }
 }
 
-/** Fields equal by value; the auto-raise by its time and reason, since every poll parses a new object for it. */
+/** Fields equal by value; the auto-raise by its time and reason, and the planning tide by its height and datum, since every poll parses a new object for them. */
 export function sameAnchorWatchFields(a: AnchorWatchFields, b: AnchorWatchFields): boolean {
   return (Object.keys(a) as Array<keyof AnchorWatchFields>).every((key) => {
+    if (key === 'planningTide') {
+      return a.planningTide === b.planningTide
+        || (a.planningTide !== null && b.planningTide !== null
+          && a.planningTide.ft === b.planningTide.ft && a.planningTide.datum === b.planningTide.datum)
+    }
     if (key === 'lastAutoRaise') {
       return a.lastAutoRaise === b.lastAutoRaise
         || (a.lastAutoRaise !== null && b.lastAutoRaise !== null
@@ -304,7 +314,7 @@ export function sameAnchorWatchFields(a: AnchorWatchFields, b: AnchorWatchFields
 export async function setAnchorHere(
   lat: number,
   lon: number,
-  capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
+  capture: { planningDepthM: number | null; planningTide: TideCapture | null; radiusMeters?: number },
 ): Promise<void> {
   const payload: {
     lat: number
@@ -313,13 +323,17 @@ export async function setAnchorHere(
     apply_bow_offset: true
     planning_depth_m: number
     planning_tide_height_ft: number
+    planning_tide_datum?: typeof MEAN_SEA_LEVEL
   } = {
     lat,
     lon,
     apply_bow_offset: true,
     planning_depth_m: capture.planningDepthM ?? -1,
-    planning_tide_height_ft: capture.planningTideHeightFt ?? -1,
+    planning_tide_height_ft: capture.planningTide?.ft ?? -1,
   }
+  // A height from mean sea level is stamped as such so the server does not
+  // read a negative one as "not captured" or work a depth at chart datum from it.
+  if (isMeanSeaLevel(capture.planningTide?.datum)) payload.planning_tide_datum = MEAN_SEA_LEVEL
   if (typeof capture.radiusMeters === 'number' && capture.radiusMeters > 0) {
     payload.radius_meters = capture.radiusMeters
   }
@@ -397,10 +411,11 @@ export async function updateRodeAndConditions(rodeDeployedM: number, seaState: S
  * depth seeded at drop. Await, replace state with the server echo, no
  * optimistic update.
  */
-export async function updatePlanningDepth(depthM: number, tideHeightFt: number): Promise<void> {
+export async function updatePlanningDepth(depthM: number, tide: TideCapture | null): Promise<void> {
   land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
     planning_depth_m: depthM,
-    planning_tide_height_ft: tideHeightFt,
+    planning_tide_height_ft: tide?.ft ?? -1,
+    ...(isMeanSeaLevel(tide?.datum) ? { planning_tide_datum: MEAN_SEA_LEVEL } : {}),
   } }))
 }
 
@@ -445,6 +460,14 @@ export function useAnchorWatchSelector<T>(
     refetchInterval: (active ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS : ANCHOR_WATCH_IDLE_REFRESH_SECONDS) * 1000,
   }, selectFromParsed, isEqual)
 }
+
+/**
+ * The anchor's point while a watch is set, else ''. A tide that follows a
+ * position is taken at the anchor while one is set (ADR 0273), so a chart keyed
+ * on this is fetched again after a drop, an Adjust or a raise.
+ */
+export const selectAnchorPointKey = (fields: AnchorWatchFields): string =>
+  fields.active && fields.anchorLat !== null && fields.anchorLon !== null ? `${fields.anchorLat},${fields.anchorLon}` : ''
 
 const selectFields = (fields: AnchorWatchFields) => fields
 

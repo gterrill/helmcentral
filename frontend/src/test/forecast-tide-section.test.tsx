@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { ForecastTideSection } from '@/components/forecast-tide-section'
-import { useTideChart } from '@/hooks/use-tide-chart'
-import { useTideProviders } from '@/hooks/use-tide-providers'
+import { useConfiguredTideChart } from '@/hooks/use-configured-tide-chart'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
@@ -11,13 +10,15 @@ import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
 
 
+vi.mock('@/hooks/use-anchor-watch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-anchor-watch')>()),
+  useAnchorWatchSelector: () => '',
+}))
 vi.mock('@/hooks/use-tide-settings')
-vi.mock('@/hooks/use-tide-chart')
-vi.mock('@/hooks/use-tide-providers')
+vi.mock('@/hooks/use-configured-tide-chart')
 
 const mockedUseTideSettings = vi.mocked(useTideSettings)
-const mockedUseTideChart = vi.mocked(useTideChart)
-const mockedUseTideProviders = vi.mocked(useTideProviders)
+const mockedUseTideChart = vi.mocked(useConfiguredTideChart)
 
 const STATION = {
   stationId: 'station-1',
@@ -43,14 +44,18 @@ function settingsState(overrides: Partial<ReturnType<typeof useTideSettings>> = 
   }
 }
 
-function chartState(overrides: Partial<ReturnType<typeof useTideChart>> = {}) {
+function chartState(overrides: Partial<ReturnType<typeof useConfiguredTideChart>> = {}) {
   return {
     chart: null,
     loading: false,
     error: null,
+    noStation: false,
+    notSetUp: false,
     isCached: false,
     updatedAt: null,
     ttlSeconds: null,
+    providerName: '',
+    positionBased: false,
     refetch: vi.fn(),
     ...overrides,
   }
@@ -71,10 +76,6 @@ function buildChart(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ForecastTideSection', () => {
-  beforeEach(() => {
-    mockedUseTideProviders.mockReturnValue({ providers: [], loading: false, error: null })
-  })
-
   afterEach(() => {
     vi.clearAllMocks()
     vi.unstubAllGlobals()
@@ -89,51 +90,55 @@ describe('ForecastTideSection', () => {
     expect(screen.getByText('Loading tide settings...')).toBeInTheDocument()
   })
 
-  it('shows the BOM auto-detecting state while /api/tide-nearest is in flight', () => {
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {}))) // never resolves
-    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'bom', tideStationId: '' }))
-    mockedUseTideChart.mockReturnValue(chartState())
+  // A station provider with none chosen is the only provider that answers
+  // `no_station`, so the nearest station it finds is a real one and is saved,
+  // as it always was. The save changes the chart's key, which fetches it again.
+  it.each(['bom', 'noaa'])('finds and saves the nearest station for a %s user with none chosen', async (tideProvider) => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ station_id: 'S9', name: 'Nearest Bar' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const settings = settingsState({ tideProvider, tideStationId: '' })
+    mockedUseTideSettings.mockReturnValue(settings)
+    mockedUseTideChart.mockReturnValue(chartState({ noStation: true, error: 'no tide station configured' }))
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
     expect(screen.getByText('Finding nearest tide station…')).toBeInTheDocument()
+    await waitFor(() => expect(settings.saveStation).toHaveBeenCalledWith('S9', 'Nearest Bar'))
+    expect(String(fetchMock.mock.calls.find((c) => String(c[0]).includes('tide-nearest'))?.[0])).toContain(`provider=${tideProvider}`)
   })
 
-  it('shows the choose-a-station picker when BOM auto-detect fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }))
-    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'bom', tideStationId: '' }))
-    mockedUseTideChart.mockReturnValue(chartState())
+  it('shows the choose-a-station picker when the nearest station cannot be found', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'vessel position unavailable' }) }))
+    const settings = settingsState({ tideProvider: 'bom', tideStationId: '' })
+    mockedUseTideSettings.mockReturnValue(settings)
+    mockedUseTideChart.mockReturnValue(chartState({ noStation: true, error: 'no tide station configured' }))
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
     expect(await screen.findByText('Could not detect vessel position — choose a tide station')).toBeInTheDocument()
     expect(screen.getByLabelText('Search tide stations')).toBeInTheDocument()
+    expect(settings.saveStation).not.toHaveBeenCalled()
   })
 
-  // Same bug class as #14/#15: the station-less empty state was gated on
-  // tideProvider === 'bom', which was standing in for "not Storm Glass".
-  // With Storm Glass gone every provider is station-based, so a NOAA user
-  // with no station set must get the same guided picker rather than
-  // dropping through to "No tide data available".
-  it('shows the auto-detecting state for a NOAA user with no station, not just BOM', () => {
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {}))) // never resolves
-    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa', tideStationId: '' }))
-    mockedUseTideChart.mockReturnValue(chartState())
+  it('never looks a station up for a chart that is not waiting on one', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: '', tideStationId: '' }))
+    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), positionBased: true }))
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
-    expect(screen.getByText('Finding nearest tide station…')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('tide-nearest'))).toHaveLength(0)
   })
 
-  it('shows the choose-a-station picker when auto-detect fails for a NOAA user', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }))
-    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa', tideStationId: '' }))
-    mockedUseTideChart.mockReturnValue(chartState())
+  it('asks the server for the configured chart, keyed by the saved provider and station', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: '', tideStationId: '' }))
+    mockedUseTideChart.mockReturnValue(chartState({ loading: true }))
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
-    expect(await screen.findByText('Could not detect vessel position — choose a tide station')).toBeInTheDocument()
-    expect(screen.getByLabelText('Search tide stations')).toBeInTheDocument()
+    expect(mockedUseTideChart).toHaveBeenCalledWith('open-meteo||', true)
+    expect(screen.getByText('Loading tide data...')).toBeInTheDocument()
   })
 
   it('renders the chart once settings and chart data resolve', () => {
@@ -209,22 +214,16 @@ describe('ForecastTideSection', () => {
   // between two specific provider ids, so any other configured provider
   // (e.g. NOAA) displayed the wrong name. It must instead look up the real
   // provider name from useTideProviders().
-  it('shows the real provider name from useTideProviders(), not a hardcoded binary', () => {
-    mockedUseTideProviders.mockReturnValue({
-      providers: [{ id: 'noaa', name: 'NOAA (US)', description: 'US tide stations' }],
-      loading: false,
-      error: null,
-    })
+  it('shows the real provider name the server sent, not a hardcoded binary', () => {
     mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa' }))
-    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString() }))
+    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString(), providerName: 'NOAA (US)' }))
 
     render(<ForecastTideSection isImperial={false} dayOffset={0} />)
 
     expect(screen.getByText(/Data: NOAA \(US\)/)).toBeInTheDocument()
   })
 
-  it('falls back to the raw provider id in the "Data:" line when no matching provider is found', () => {
-    mockedUseTideProviders.mockReturnValue({ providers: [], loading: true, error: null })
+  it('falls back to the raw provider id in the "Data:" line when the server named none', () => {
     mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: 'noaa' }))
     mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart(), updatedAt: new Date().toISOString() }))
 

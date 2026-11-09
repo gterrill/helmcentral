@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Waves } from 'lucide-react'
 
@@ -6,15 +6,15 @@ import { Button } from '@/components/ui/button'
 import { formatRefreshAge } from '@/components/forecast-drawer'
 import { TideChart, TidePhaseBadge } from '@/components/tide-chart'
 import { TideStationPicker } from '@/components/tide-station-picker'
-import { apiRequest } from '@/lib/api-query'
-import { useTideChart } from '@/hooks/use-tide-chart'
-import { useTideProviders } from '@/hooks/use-tide-providers'
+import { useAnchorWatchSelector, selectAnchorPointKey } from '@/hooks/use-anchor-watch'
+import { useConfiguredTideChart } from '@/hooks/use-configured-tide-chart'
 import { useTideSettings } from '@/hooks/use-tide-settings'
-import { usePlaceTideStation } from '@/hooks/use-place-tide-station'
+import { apiRequest } from '@/lib/api-query'
+import { effectiveTideProvider, isMeanSeaLevel, MEAN_SEA_LEVEL_LABEL, MEAN_SEA_LEVEL_NOTE } from '@/lib/tide-datum'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { addDaysISO } from '@/lib/stay'
 import { formatDayKey, selectTimeZone, unknownZoneMessage, zonedDayStart } from '@/lib/vessel-time'
-import { isFarFromPlace, TIDE_STATION_FAR_NM } from '@/lib/stay'
+import { distanceNm, isFarFromPlace, TIDE_STATION_FAR_NM } from '@/lib/stay'
 import { classifyTidePhase } from '@/lib/tide-phase'
 
 interface ForecastTideSectionProps {
@@ -32,30 +32,37 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
     error: settingsError,
     saveStation,
   } = useTideSettings()
-  const { providers: tideProviders } = useTideProviders()
   const timeZone = useVesselStateSelector(selectTimeZone)
   const [showPicker, setShowPicker] = useState(false)
-  const [autoDetecting, setAutoDetecting] = useState(true)
-  const [autoDetectFailed, setAutoDetectFailed] = useState(false)
 
+  // The server picks the tide (ADR 0273): the provider in force, with its saved
+  // station, or for one that follows the boat the anchor's or boat's point. The
+  // screen sends neither, so it never handles a station for such a provider and
+  // never saves one. The key only makes the chart fetch again when the saved
+  // provider or station changes.
+  const provider = effectiveTideProvider(tideProvider)
+  const anchorPoint = useAnchorWatchSelector(selectAnchorPointKey)
+  const { chart, loading, error, noStation, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased: followsBoat, refetch } =
+    useConfiguredTideChart(`${provider}|${tideStationId}|${anchorPoint}`, !settingsLoading)
+
+  // Only a provider with stations answers `no_station`, so a station found here
+  // is a real one: the one nearest the boat, saved as the operator would have
+  // chosen it. A provider that follows a position never gets here, so nothing
+  // made up is saved. Saving it changes the chart's key, which fetches it again.
+  const [autoDetecting, setAutoDetecting] = useState(false)
+  const [autoDetectFailed, setAutoDetectFailed] = useState(false)
+  const triedFor = useRef('')
   useEffect(() => {
-    if (settingsLoading || tideStationId) {
-      setAutoDetecting(false)
-      return
-    }
-    apiRequest<{ station_id: string; name: string }>(`/api/tide-nearest?provider=${tideProvider}`)
+    if (!noStation || triedFor.current === provider) return
+    triedFor.current = provider
+    setAutoDetecting(true)
+    apiRequest<{ station_id: string; name: string }>(`/api/tide-nearest?provider=${provider}`)
       .then((s) => saveStation(s.station_id, s.name))
       .catch(() => setAutoDetectFailed(true))
       .finally(() => setAutoDetecting(false))
-  }, [settingsLoading, tideProvider, tideStationId, saveStation])
-
-  // Don't start fetching until settings have loaded — prevents a stale/default
-  // provider or station from briefly flashing before the real configured
-  // values are known.
-  const { chart, loading, error, isCached, updatedAt, ttlSeconds, refetch } = useTideChart(
-    settingsLoading ? '' : tideProvider,
-    settingsLoading ? '' : tideStationId,
-  )
+  }, [noStation, provider, saveStation])
+  // Labelled from the chart's own datum, so it follows what the server sent.
+  const meanSeaLevel = isMeanSeaLevel(chart?.heightDatum)
 
   const { windowStart, windowEnd } = useMemo(() => {
     // The boat's day, not the device's: "today" is the date in the boat's zone.
@@ -72,7 +79,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   // "still show the meta even with no legend to share a row with" rule.
   const tideRefreshMeta = (isCached || updatedAt) ? (
     <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
-      Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
+      Data: {providerName || provider}
       {' · '}
       {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
       {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
@@ -85,34 +92,32 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
         {/* Tide is a single-axis chart, so the unit belongs here rather than
             on the chart's ticks - the same rule Wind (kts) and Wave (m)
             follow. See the axis-idiom rule block in forecast-drawer.tsx. */}
-        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
+        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'}{meanSeaLevel ? `, ${MEAN_SEA_LEVEL_LABEL}` : ''})
       </h4>
 
       {settingsLoading ? (
         <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
-      ) : !tideStationId ? (
-        autoDetecting ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">Finding nearest tide station…</p>
-        ) : (
-          <div className="space-y-3">
-            <p className="py-6 text-center text-xs text-muted-foreground">
-              {autoDetectFailed
-                ? 'Could not detect vessel position — choose a tide station'
-                : 'Choose a tide station to see a forecast chart'}
-            </p>
-            <TideStationPicker
-              provider={tideProvider}
-              onSelect={(station) => void saveStation(station.stationId, station.name)}
-            />
-            {saving && <p className="text-center text-xs text-muted-foreground">Saving station...</p>}
-            {settingsError && <p className="text-center text-xs text-destructive">{settingsError}</p>}
-          </div>
-        )
+      ) : noStation && autoDetecting ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">Finding nearest tide station…</p>
+      ) : noStation ? (
+        <div className="space-y-3">
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            {autoDetectFailed ? 'Could not detect vessel position — choose a tide station' : 'Choose a tide station to see a forecast chart'}
+          </p>
+          <TideStationPicker
+            provider={provider}
+            onSelect={(station) => void saveStation(station.stationId, station.name)}
+          />
+          {saving && <p className="text-center text-xs text-muted-foreground">Saving station...</p>}
+          {settingsError && <p className="text-center text-xs text-destructive">{settingsError}</p>}
+        </div>
+      ) : notSetUp ? (
+        <p data-testid="forecast-tide-not-set-up" className="py-6 text-center text-xs text-destructive">{error}</p>
       ) : (
         <>
           {(() => {
-            const displayStationName = tideStationName || chart?.station.name || ''
-            const displayStationState = chart?.station.state
+            const displayStationName = followsBoat ? chart?.station.name || '' : tideStationName || chart?.station.name || ''
+            const displayStationState = followsBoat ? undefined : chart?.station.state
             const tidePhase = chart ? classifyTidePhase(chart.extremes, new Date()) : null
 
             return (
@@ -122,18 +127,25 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
                     {displayStationName}
                     {displayStationState && <span className="ml-1 text-sm text-muted-foreground">({displayStationState})</span>}
                   </p>
+                  {followsBoat && (
+                    <p data-testid="forecast-tide-follows-boat" className="text-xs text-muted-foreground">
+                      The tide follows the boat's position.{meanSeaLevel ? ` ${MEAN_SEA_LEVEL_NOTE}` : ''}
+                    </p>
+                  )}
                   {tidePhase && <TidePhaseBadge phase={tidePhase} className="mt-0.5" />}
                 </div>
-                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>
-                  Change Station
-                </Button>
+                {!followsBoat && (
+                  <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>
+                    Change Station
+                  </Button>
+                )}
               </div>
             )
           })()}
 
-          {showPicker && (
+          {showPicker && !followsBoat && (
             <TideStationPicker
-              provider={tideProvider}
+              provider={provider}
               onSelect={(station) => {
                 setShowPicker(false)
                 void saveStation(station.stationId, station.name)
@@ -188,10 +200,13 @@ interface ForecastPlaceTideSectionProps {
  */
 export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({ isImperial, place, dayKey }: ForecastPlaceTideSectionProps) {
   const { tideProvider, loading: settingsLoading } = useTideSettings()
-  const { providers: tideProviders } = useTideProviders()
-  const provider = settingsLoading ? '' : tideProvider
-  const { nearest, loading: nearestLoading, error: nearestError } = usePlaceTideStation(provider, { lat: place.lat, lon: place.lon })
-  const { chart, loading, error, isCached, updatedAt, ttlSeconds, refetch } = useTideChart(provider, nearest?.station.stationId ?? '')
+  const provider = effectiveTideProvider(tideProvider)
+  // The server finds the tide at the place: the station nearest it, or for a
+  // provider that follows a position the place's own point. No station lookup
+  // comes first, and no station is ever saved.
+  const { chart, loading, error, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased: followsPlace, refetch } =
+    useConfiguredTideChart(provider, !settingsLoading, { lat: place.lat, lon: place.lon })
+  const meanSeaLevel = isMeanSeaLevel(chart?.heightDatum)
 
   const { windowStart, windowEnd } = useMemo(() => {
     if (unknownZoneMessage(place.timezone)) return { windowStart: new Date(NaN), windowEnd: new Date(NaN) }
@@ -203,7 +218,7 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
 
   const refreshMeta = (isCached || updatedAt) ? (
     <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
-      Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
+      Data: {providerName || provider}
       {' · '}
       {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
       {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
@@ -213,21 +228,31 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
   let body
   if (settingsLoading) {
     body = <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
-  } else if (!tideProvider) {
-    body = <p className="py-6 text-center text-xs text-muted-foreground">Tide provider is not set up. Choose one in Settings to see tides at {place.name}.</p>
-  } else if (nearestLoading) {
-    body = <p className="py-6 text-center text-xs text-muted-foreground">Finding the nearest tide station to {place.name}…</p>
-  } else if (!nearest) {
+  } else if (notSetUp) {
     body = (
-      <p className="py-6 text-center text-xs text-muted-foreground">
-        No tide station found near {place.name}{nearestError ? ` (${nearestError})` : ''}.
+      <p data-testid="forecast-place-tide-not-set-up" className="py-6 text-center text-xs text-muted-foreground">
+        Tide provider is not set up: {error}. Choose another in Settings to see tides at {place.name}.
       </p>
     )
+  } else if (loading && !chart) {
+    body = <p className="py-6 text-center text-xs text-muted-foreground">Finding the tide at {place.name}…</p>
+  } else if (error && !chart) {
+    body = (
+      <div className="py-6 text-center">
+        <p className="text-xs text-destructive">No tide found near {place.name} ({error}).</p>
+        <Button type="button" size="sm" variant="outline" className="mt-3 h-8" onClick={() => void refetch()}>
+          Retry
+        </Button>
+      </div>
+    )
   } else {
-    const far = nearest.distanceNm !== null && isFarFromPlace(nearest.distanceNm)
-    const miles = nearest.distanceNm !== null ? nearest.distanceNm.toFixed(1) : null
-    const stationName = chart?.station.name || nearest.station.name
-    const stationState = chart?.station.state ?? nearest.station.state
+    // A tide that follows the place has no station to be a distance away. A
+    // station the server named without a position is never measured against 0,0.
+    const located = chart !== null && !(chart.station.lat === 0 && chart.station.lon === 0)
+    const miles = !followsPlace && chart && located ? distanceNm(place.lat, place.lon, chart.station.lat, chart.station.lon) : null
+    const far = miles !== null && isFarFromPlace(miles)
+    const stationName = followsPlace ? place.name : chart?.station.name
+    const stationState = followsPlace ? undefined : chart?.station.state
     body = (
       <>
         <div className="mb-2">
@@ -235,14 +260,19 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
             {stationName}
             {stationState && <span className="ml-1 text-sm text-muted-foreground">({stationState})</span>}
           </p>
+          {followsPlace && (
+            <p data-testid="forecast-place-tide-modelled" className="text-xs text-muted-foreground">
+              The tide is modelled for this place.{meanSeaLevel ? ` ${MEAN_SEA_LEVEL_NOTE}` : ''}
+            </p>
+          )}
           {miles !== null && (
             <p data-testid="forecast-place-tide-distance" className="text-xs text-muted-foreground">
-              {miles} NM from {place.name}
+              {miles.toFixed(1)} NM from {place.name}
             </p>
           )}
           {far && (
             <p data-testid="forecast-place-tide-far" className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
-              Nearest station is {miles} NM away, more than {TIDE_STATION_FAR_NM} NM. Tide times and heights at {place.name} may differ.
+              Nearest station is {miles.toFixed(1)} NM away, more than {TIDE_STATION_FAR_NM} NM. Tide times and heights at {place.name} may differ.
             </p>
           )}
         </div>
@@ -269,7 +299,7 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
   return (
     <div className="mt-3 rounded-md border bg-card/70 p-2">
       <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
+        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'}{meanSeaLevel ? `, ${MEAN_SEA_LEVEL_LABEL}` : ''})
       </h4>
       {body}
       {!chart && refreshMeta && <div className="mt-1 flex justify-end">{refreshMeta}</div>}

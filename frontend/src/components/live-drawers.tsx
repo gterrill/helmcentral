@@ -18,7 +18,7 @@ import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useApiQuerySelector } from '@/lib/api-query'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
 import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
-import { tideHeightFtOrNull } from '@/lib/rode-plan'
+import { tideCapture } from '@/lib/rode-plan'
 import { usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
 import { useNearbyVesselList } from '@/hooks/use-nearby-vessels'
 
@@ -122,7 +122,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
     if (latitude === null || longitude === null || gnssCriticalAlert) return
     void setAnchorHere(latitude, longitude, {
       planningDepthM: depth,
-      planningTideHeightFt: tideHeightFtOrNull(tide),
+      planningTide: tideCapture(tide),
     })
   }, [tide])
   const aisCollisionAlarms = useAisCollisionAlarms()

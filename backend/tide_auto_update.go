@@ -39,8 +39,10 @@ func updateNearestTideStation() {
 		return
 	}
 
-	provider, ok := getTideProvider(payload.UI.TideProvider)
-	if !ok {
+	provider, _, perr := resolveTideProviderFromUI(map[string]any{"tide_provider": payload.UI.TideProvider})
+	// A provider that follows a position has no station to find, and nothing
+	// synthetic is saved for it.
+	if perr != nil || tideProviderPositionBased(provider) {
 		return
 	}
 

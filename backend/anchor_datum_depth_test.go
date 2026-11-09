@@ -33,7 +33,7 @@ func TestComputeDatumDepth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reason := computeDatumDepth(tc.depthM, tc.tideFt, tc.source, tc.transducerM)
+			got, reason := computeDatumDepth(tc.depthM, tc.tideFt, tc.source, tc.transducerM, "")
 			if tc.wantReasonContains != "" {
 				if got != nil || !strings.Contains(reason, tc.wantReasonContains) {
 					t.Fatalf("want no value and reason containing %q, got %v %q", tc.wantReasonContains, got, reason)

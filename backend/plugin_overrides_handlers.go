@@ -35,6 +35,21 @@ type namedProvider interface {
 // rather than a supported "native provider" configuration.
 type pluginPathProvider interface{ Path() string }
 
+// asPluginPathProvider finds the plugin path behind a provider, looking through
+// wrappers such as positionTideAdapter that carry an Unwrap.
+func asPluginPathProvider(p any) (pluginPathProvider, bool) {
+	for {
+		if pp, ok := p.(pluginPathProvider); ok {
+			return pp, true
+		}
+		u, ok := p.(interface{ Unwrap() tideProvider })
+		if !ok {
+			return nil, false
+		}
+		p = u.Unwrap()
+	}
+}
+
 // pluginInfoResponse is the exact, fixed HTTP contract for
 // GET/POST/DELETE /api/plugins/:type/:id(/overrides) and
 // GET/POST /api/plugins/:type/:id/config - a separate frontend team builds
@@ -143,7 +158,7 @@ func buildPluginInfoResponse(providerType string, provider namedProvider) (plugi
 		ConfigFields:   []pluginConfigFieldResponse{},
 	}
 
-	pp, ok := provider.(pluginPathProvider)
+	pp, ok := asPluginPathProvider(provider)
 	if !ok {
 		return pluginInfoResponse{}, fmt.Errorf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", provider.ID(), providerType)
 	}
@@ -301,7 +316,7 @@ func postPluginOverridesHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "provider not found: " + id})
 	}
 
-	pp, ok := provider.(pluginPathProvider)
+	pp, ok := asPluginPathProvider(provider)
 	if !ok {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
 	}
@@ -349,7 +364,7 @@ func deletePluginOverridesHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "provider not found: " + id})
 	}
 
-	pp, ok := provider.(pluginPathProvider)
+	pp, ok := asPluginPathProvider(provider)
 	if !ok {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
 	}
@@ -415,7 +430,7 @@ func postPluginConfigHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "provider not found: " + id})
 	}
 
-	pp, ok := provider.(pluginPathProvider)
+	pp, ok := asPluginPathProvider(provider)
 	if !ok {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
 	}

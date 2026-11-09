@@ -216,10 +216,10 @@ describe('resolvePlanningDepth', () => {
       isAnchored: true,
       liveDepthM: 99,
       planningDepthM: 6,
-      planningTideHeightFt: 1.5,
+      planningTide: { ft: 1.5, datum: 'chart_datum' },
       tide,
     })
-    expect(result).toEqual({ depthM: 6, tideHeightFt: 1.5 })
+    expect(result).toEqual({ depthM: 6, tideHeightFt: 1.5, tideDatum: 'chart_datum' })
   })
 
   it('rule 2: not anchored uses the live sounder, tide-stamped from right now', () => {
@@ -227,7 +227,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: false,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toEqual({ depthM: 5, tideHeightFt: 3 })
@@ -238,7 +238,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: true,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toBeNull()
@@ -249,7 +249,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: false,
       liveDepthM: null,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide,
     })
     expect(result).toBeNull()
@@ -260,7 +260,7 @@ describe('resolvePlanningDepth', () => {
       isAnchored: false,
       liveDepthM: 5,
       planningDepthM: null,
-      planningTideHeightFt: null,
+      planningTide: null,
       tide: makeTide({ current_tide_height_ft: -1 }),
     })
     expect(result).toEqual({ depthM: 5, tideHeightFt: null })

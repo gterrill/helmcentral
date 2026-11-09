@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ProviderIntegrationCard } from '@/components/settings/provider-integration-card'
 import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { useSettingsFormContext } from '@/components/settings/settings-form-context'
+import { DEFAULT_TIDE_PROVIDER } from '@/lib/tide-datum'
 
 // ProviderGroupDomain extends the settings-modal's own ProviderDomain with
 // "place-names" (ADR 0101): a place-names card is always backed by a POI
@@ -14,14 +15,14 @@ import { useSettingsFormContext } from '@/components/settings/settings-form-cont
 // place-names card still opens the right (poi) settings modal.
 export type ProviderGroupDomain = ProviderDomain | 'place-names'
 
-// Weather/wave/forecast-warnings/place-names default to "active" when
-// nothing has been configured yet, matching this app's existing hardcoded
-// frontend fallback (`useState('open-meteo')` etc. in the old
-// signalk-settings-panel.tsx) so a fresh install still shows one card
-// active per group. Tide intentionally has NO default (old code:
-// `useState('')`) - it can show zero active cards until the operator picks
-// one. This asymmetry is deliberate, not a bug.
+// Every group defaults to an "active" card when nothing has been configured
+// yet, matching the backend's own default for it, so a fresh install shows one
+// card active per group. Tide used to have none (it showed zero active cards
+// until the operator picked one); ADR 0273 gave it the global open-meteo
+// plugin, so a fresh install has a tide before anyone opens Settings. An
+// install that chose BOM or NOAA keeps it.
 const DEFAULT_ACTIVE_PROVIDER: Partial<Record<ProviderGroupDomain, string>> = {
+  tide: DEFAULT_TIDE_PROVIDER,
   weather: 'open-meteo',
   wave: 'open-meteo-marine',
   poi: 'osm-overpass',

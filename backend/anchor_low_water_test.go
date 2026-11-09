@@ -284,7 +284,7 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 	margin := func() (float64, error) { return 0.5, nil }
 
 	noStation := func() (tideTodayResponse, error) {
-		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured"}
 	}
 	got, err := buildLowWater(state, noStation, margin, nil, lwNow)
 	if err != nil || got.Status != lowWaterUnknown || got.Reason != lowWaterNoTideStation || got.Detail != "no tide station is set up" {
@@ -307,7 +307,7 @@ func TestLowWater_BuildSaysWhyTheTideIsMissingAndFailsOnUnreadableSettings(t *te
 
 func serveLowWaterForTest(t *testing.T, state func() (vesselStateData, error), watch bool, margin func() (float64, error), tideCalls *int) (int, map[string]any) {
 	t.Helper()
-	tide := func(now time.Time) (tideTodayResponse, error) {
+	tide := func(_ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		*tideCalls++
 		r := *lwTide(nil)
 		r.Datetime = now.Add(-5 * time.Minute).Format(time.RFC3339)

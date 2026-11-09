@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 )
 
 // maxTransducerDepthM bounds anchor.transducer_depth_m: a transducer sits
@@ -25,13 +26,22 @@ const (
 // never substitutes a value. Unknown inputs use the watch's own sentinels: a
 // planning depth of 0 or less, a tide height of -1 (a reading below zero is a
 // real one, as in lowWaterClearance), and a transducer depth of 0.
-func computeDatumDepth(planningDepthM, planningTideHeightFt float64, source string, transducerDepthM float64) (*float64, string) {
+//
+// tideDatum is what the tide height was measured from when it was captured
+// (ADR 0273). Only a height above chart datum can be taken off a depth to give
+// a depth at chart datum; one from mean sea level cannot, so it gives no depth
+// and says why. Empty means chart datum, which is what every watch stored
+// before the field existed holds.
+func computeDatumDepth(planningDepthM, planningTideHeightFt float64, source string, transducerDepthM float64, tideDatum string) (*float64, string) {
+	corrects, why := tideCorrectsChartDepth(tideDatum)
 	switch {
 	case planningDepthM <= 0 || math.IsNaN(planningDepthM):
 		return nil, "No depth was recorded for this watch."
 	case source != planningDepthFromSounder && source != planningDepthFromOperator:
 		return nil, "This watch does not record whether its depth came from the sounder or typed in. Enter the depth again in the rode planner."
-	case planningTideHeightFt == -1 || math.IsNaN(planningTideHeightFt) || math.IsInf(planningTideHeightFt, 0):
+	case !corrects:
+		return nil, strings.ToUpper(why[:1]) + why[1:] + "."
+	case planningTideHeightFt == -1 || !finite(planningTideHeightFt):
 		return nil, "The tide height at the drop is unknown."
 	}
 	v := planningDepthM - planningTideHeightFt/metersToFeet
@@ -42,6 +52,46 @@ func computeDatumDepth(planningDepthM, planningTideHeightFt float64, source stri
 		v += transducerDepthM
 	}
 	return &v, ""
+}
+
+// maxPlanningTideMSLFt bounds a mean-sea-level tide height the watch will
+// store: no tide, surge included, comes near it.
+const maxPlanningTideMSLFt = 150.0
+
+// checkPlanningTide validates a request's planning tide height against the
+// datum it says it was measured from, and returns the datum to store: "" for
+// chart datum, tideDatumMeanSeaLevel otherwise. A height above chart datum
+// keeps the existing rule (-1 means not captured, nothing below it). A height
+// from mean sea level is real whatever its sign, so it only has to be a
+// sensible number. A datum with no height to go with it is not stored.
+func checkPlanningTide(heightFt *float64, datum *string) (stored string, msg string) {
+	d := ""
+	if datum != nil {
+		d = *datum
+	}
+	switch d {
+	case "", tideDatumChart:
+	case tideDatumMeanSeaLevel:
+		stored = tideDatumMeanSeaLevel
+	default:
+		return "", "planning_tide_datum must be chart_datum or mean_sea_level"
+	}
+	if heightFt == nil {
+		return stored, ""
+	}
+	if stored == tideDatumMeanSeaLevel {
+		if !finite(*heightFt) || math.Abs(*heightFt) > maxPlanningTideMSLFt {
+			return "", "planning_tide_height_ft must be a height within 150 ft either side of mean sea level"
+		}
+		if *heightFt == noTideExtremeHeightFt {
+			return "", "planning_tide_height_ft of -1 means not captured, so it can't carry a mean_sea_level stamp"
+		}
+		return stored, ""
+	}
+	if *heightFt < -1 {
+		return "", "planning_tide_height_ft must be -1 or greater"
+	}
+	return stored, ""
 }
 
 // transducerDepthSetting reads anchor.transducer_depth_m from settings.yaml,
@@ -72,6 +122,7 @@ func readSettingsShared(settingsPath string) (map[string]any, error) {
 // response. A settings file that cannot be read is a reason, not a quiet zero.
 func withDatumDepth(resp map[string]any, aw *anchorWatchData) map[string]any {
 	resp["planning_depth_source"] = aw.PlanningDepthSource
+	resp["planning_tide_datum"] = aw.PlanningTideDatum
 	transducerM, err := transducerDepthSetting(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		log.Printf("anchor watch: reading the transducer depth from settings failed: %v", err)
@@ -79,7 +130,7 @@ func withDatumDepth(resp map[string]any, aw *anchorWatchData) map[string]any {
 		resp["datum_depth_reason"] = "Settings could not be read, so the transducer depth is unknown."
 		return resp
 	}
-	depth, reason := computeDatumDepth(aw.PlanningDepthM, aw.PlanningTideHeightFt, aw.PlanningDepthSource, transducerM)
+	depth, reason := computeDatumDepth(aw.PlanningDepthM, aw.PlanningTideHeightFt, aw.PlanningDepthSource, transducerM, aw.PlanningTideDatum)
 	if depth == nil {
 		resp["datum_depth_m"] = nil
 	} else {

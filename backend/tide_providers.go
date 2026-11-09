@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +74,11 @@ var tideProviderRegistry = map[string]tideProvider{}
 var tideProviderOrder []string
 
 func registerTideProvider(p tideProvider) {
+	// A position-based provider is wrapped once, here, so the rest of the host
+	// meets the station contract and never branches on it.
+	if _, wrapped := p.(positionTideAdapter); !wrapped && tideProviderPositionBased(p) {
+		p = positionTideAdapter{p}
+	}
 	tideProviderRegistry[p.ID()] = p
 	tideProviderOrder = append(tideProviderOrder, p.ID())
 }
@@ -94,6 +100,11 @@ const maxStationsForNearestLookup = 5000
 // from the provider's full catalog with real Lat/Lon populated. Returns
 // ok=false if the provider has no stations at all.
 func nearestStation(p tideProvider, lat, lon float64) (tideStation, bool) {
+	if n, ok := p.(interface {
+		NearestStation(lat, lon float64) (tideStation, bool)
+	}); ok {
+		return n.NearestStation(lat, lon)
+	}
 	stations := p.SearchStations("", maxStationsForNearestLookup)
 	if len(stations) == 0 {
 		return tideStation{}, false
@@ -108,19 +119,249 @@ func nearestStation(p tideProvider, lat, lon float64) (tideStation, bool) {
 	return best, true
 }
 
+// defaultTideProviderID is used when ui.tide_provider is blank, as
+// defaultWeatherProviderID is for weather (ADR 0273). It is a keyless global
+// source, so a fresh install anywhere has a tide before anyone opens Settings.
+// An install that already chose a provider keeps it.
+const defaultTideProviderID = "open-meteo"
+
+// The datum a provider's tide heights are measured from. A provider that does
+// not say is chart datum: BOM and NOAA publish predictions on their charts'
+// datum, which is what a depth at chart datum can be raised or lowered by.
+// Open-Meteo's modelled sea level is from mean sea level, which is not.
+const (
+	tideDatumChart        = "chart_datum"
+	tideDatumMeanSeaLevel = "mean_sea_level"
+)
+
+// tideCorrectsChartDepth says whether a tide's heights can be added to or taken
+// from a depth at chart datum. From mean sea level they cannot: the sum would be
+// a wrong depth, not an approximate one. The reason is a clause that starts in
+// lower case, for callers to place in a sentence.
+func tideCorrectsChartDepth(datum string) (ok bool, reason string) {
+	if datum == tideDatumMeanSeaLevel {
+		return false, "this tide source gives heights from mean sea level, not chart datum, so they can't be used with a depth at chart datum (choose a tide provider with a station in Settings for that)"
+	}
+	return true, ""
+}
+
+// tideHeightKnown says a tide height in feet is a reading rather than the -1 ft
+// "not published" mark: at or above zero on chart datum, any real number from
+// mean sea level. Exactly -1 is none on both, as in the browser's
+// tideHeightFtKnown; the host never sends a real height from mean sea level as
+// exactly -1 (tideHeightFtOnTheWire).
+func tideHeightKnown(ft float64, datum string) bool {
+	if !finite(ft) || ft == noTideExtremeHeightFt {
+		return false
+	}
+	return datum == tideDatumMeanSeaLevel || ft >= 0
+}
+
+// tideDatumNote is what Mate and the screens say about heights from mean sea
+// level.
+const tideDatumNote = "Heights are metres from mean sea level, not chart datum, so they are routinely negative and are not a depth. " +
+	"They include surge and air-pressure effects as well as the tide. Use the rise and fall, not the figure, to judge water under the keel."
+
+// positionTideProvider is the optional side of a tideProvider (ADR 0273).
+// PositionBased is true when the provider has no station catalog and takes a
+// position as "<lat>,<lon>" in place of a station id (ADR 0033). HeightDatum
+// is tideDatumChart or tideDatumMeanSeaLevel. A provider without these is
+// station-based on chart datum, so BOM and NOAA need no change.
+type positionTideProvider interface {
+	PositionBased() bool
+	HeightDatum() string
+}
+
+func tideProviderPositionBased(p tideProvider) bool {
+	t, ok := p.(positionTideProvider)
+	return ok && t.PositionBased()
+}
+
+func tideProviderHeightDatum(p tideProvider) string {
+	if t, ok := p.(positionTideProvider); ok {
+		return t.HeightDatum()
+	}
+	return tideDatumChart
+}
+
+// Names for the place a position-based tide is for.
+const (
+	tideNameBoatPosition = "Boat's position"
+	tideNameChosenPlace  = "Selected place"
+)
+
+// tideBoatFixNow reads the boat's fix for a tide. A variable so tests can place
+// the boat without a SignalK server. Callers that hold a vessel state already
+// build the fix with tideBoatFixOf instead of calling it.
+var tideBoatFixNow = func() tideBoatFix {
+	state, err := tideVesselState()
+	return tideBoatFixOf(state, err)
+}
+
+// tideVesselState reads the vessel state for a tide; a variable so tests can
+// place the boat without a SignalK server.
+var tideVesselState = fetchSignalKVesselState
+
+// tideOwnFixNow is the boat's own fix, without the anchor rule: what a station
+// provider uses to find its nearest station.
+func tideOwnFixNow() tideBoatFix {
+	state, err := tideVesselState()
+	lat, lon, reason := boatOwnPosition(state, err)
+	return tideBoatFix{Lat: lat, Lon: lon, Err: reason}
+}
+
+// tidePositionFromState is the point a position-based tide is taken for, or the
+// reason there is none. This is the one place it is resolved, so the tide tile,
+// the low-water check, Mate and the boat chart agree.
+//
+// While an anchor watch is set the point is the watch's anchor position, read
+// fresh each call because Adjust can move it: a boat swinging on its rode near a
+// rounding line must not flip the point, and with it the cache key, mid-stay. A
+// watch with no usable anchor position is an error, never a quiet use of the
+// boat's fix. With no watch, the boat's fix is used, trusted by
+// usableOwnShipFix (a critical GNSS alert and the -1,-1 pair are refused) and
+// explained only when it fails.
+func tidePositionFromState(state vesselStateData, err error) (lat, lon float64, reason error) {
+	if w, active, _ := currentAnchorWatch(); active {
+		if !hasUsableVesselPosition(w.Lat, w.Lon) {
+			return 0, 0, fmt.Errorf("an anchor watch is set but has no usable anchor position")
+		}
+		return w.Lat, w.Lon, nil
+	}
+	return boatOwnPosition(state, err)
+}
+
+// boatOwnPosition is the boat's own trusted fix, or the reason there is none:
+// usableOwnShipFix's rule (a critical GNSS alert and the -1,-1 pair are
+// refused), explained only when it fails.
+func boatOwnPosition(state vesselStateData, err error) (lat, lon float64, reason error) {
+	if lat, lon, ok := usableOwnShipFix(state, err); ok {
+		return lat, lon, nil
+	}
+	switch {
+	case err != nil:
+		return 0, 0, err
+	case state.GNSSCriticalAlert:
+		return 0, 0, fmt.Errorf("the GNSS fix is flagged unreliable")
+	}
+	return 0, 0, fmt.Errorf("the boat has no usable position fix yet")
+}
+
+// tideBoatFix is the boat's position handed to buildTideToday by its caller,
+// or the reason there is none.
+type tideBoatFix struct {
+	Lat, Lon float64
+	Err      error
+}
+
+func tideBoatFixOf(state vesselStateData, err error) tideBoatFix {
+	lat, lon, reason := tidePositionFromState(state, err)
+	return tideBoatFix{Lat: lat, Lon: lon, Err: reason}
+}
+
+// tidePointID is the id of a position-based tide's point: the position rounded
+// to the nearest 0.05 degree, written "<lat>,<lon>". It is the only formatter,
+// and does no zone lookup.
+func tidePointID(lat, lon float64) string {
+	rlat, rlon := roundTidePosition(lat, lon)
+	return fmt.Sprintf("%.2f,%.2f", rlat, rlon)
+}
+
+// tidePointStation is the station for a position-based tide, built in this one
+// place: the point rounded to the nearest 0.05 degree, its id "<lat>,<lon>" in that
+// rounding, the name the screens show, and the zone found there. A zone that
+// cannot be found is logged and left off, as hasDoubleTide then logs its UTC
+// fallback.
+func tidePointStation(lat, lon float64, name string) tideStation {
+	rlat, rlon := roundTidePosition(lat, lon)
+	station := tideStation{StationID: tidePointID(lat, lon), Name: name, Lat: rlat, Lon: rlon}
+	if z, zerr := zoneAtCached(rlat, rlon); zerr == nil {
+		station.Timezone = z.Name
+	} else {
+		log.Printf("tide: no time zone for %s: %v", station.StationID, zerr)
+	}
+	return station
+}
+
+// parseTidePointID reads the "<lat>,<lon>" a position-based tide is asked for.
+func parseTidePointID(id string) (lat, lon float64, ok bool) {
+	parts := strings.Split(strings.TrimSpace(id), ",")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lat, latErr := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	lon, lonErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if latErr != nil || lonErr != nil || !hasUsableVesselPosition(lat, lon) {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+// tidePointsPerDeg is how coarsely a position-based tide's point is rounded:
+// the nearest 0.05 degree, about 5 km. The model's grid is finer than that but
+// its sea level changes slowly across it, and a boat under way stays on one
+// cache entry for hours instead of missing it every kilometre.
+const tidePointsPerDeg = 20 // 1/0.05
+
+func roundTidePosition(lat, lon float64) (float64, float64) {
+	r := func(v float64) float64 { return math.Round(v*tidePointsPerDeg)/tidePointsPerDeg + 0 } // + 0 turns -0 into 0
+	return r(lat), r(lon)
+}
+
+// positionTideAdapter wraps a position-based plugin so it meets the station
+// contract (ADR 0273): its nearest station is the point itself, and its chart
+// is asked for by "<lat>,<lon>", rounded, with the point and its zone stamped
+// on the result in place of whatever station the plugin returned.
+type positionTideAdapter struct{ tideProvider }
+
+func (positionTideAdapter) PositionBased() bool { return true }
+
+// Unwrap gives the plugin behind the adapter, for the handlers that need its
+// path and companion files.
+func (a positionTideAdapter) Unwrap() tideProvider { return a.tideProvider }
+
+func (a positionTideAdapter) HeightDatum() string { return tideProviderHeightDatum(a.tideProvider) }
+
+func (positionTideAdapter) NearestStation(lat, lon float64) (tideStation, bool) {
+	if !hasUsableVesselPosition(lat, lon) {
+		return tideStation{}, false
+	}
+	return tidePointStation(lat, lon, tideNameChosenPlace), true
+}
+
+func (a positionTideAdapter) FetchTideChart(stationID string) (tideChartResult, error) {
+	lat, lon, ok := parseTidePointID(stationID)
+	if !ok {
+		return tideChartResult{}, fmt.Errorf("%q is not a usable \"<lat>,<lon>\" position", stationID)
+	}
+	res, err := a.tideProvider.FetchTideChart(tidePointID(lat, lon))
+	if err != nil {
+		return tideChartResult{}, err
+	}
+	res.Station = tidePointStation(lat, lon, tideNameChosenPlace)
+	return res, nil
+}
+
+// fetchBoatTide is the tide at the boat's own point, named for it. Used by the
+// tide tile and by the chart's "boat" station, so they read the same way.
+func fetchBoatTide(p tideProvider, lat, lon float64) (tideChartResult, error) {
+	res, err := p.FetchTideChart(tidePointID(lat, lon))
+	if err != nil {
+		return tideChartResult{}, err
+	}
+	res.Station.Name = tideNameBoatPosition
+	return res, nil
+}
+
 // resolveTideProvider reads ui.tide_provider from settingsPath and resolves
 // it against the registry, mirroring resolveWeatherProvider's idiom
 // (weather_providers.go) - added for the assistant's get_tides tool (ADR
-// 0093), which needs this resolution outside an HTTP handler; tideToday
-// (weather_tide.go) used to inline the same lookup and is left untouched.
+// 0093), which needs this resolution outside an HTTP handler.
 //
-// Unlike resolveWeatherProvider there is no default id: a keyless global
-// weather provider is a reasonable default for a fresh install anywhere in
-// the world, but tide stations are national catalogs (BOM, NOAA, ...) with
-// no sane global default, so a blank id is an error naming Settings, in the
-// exact wording tideToday already uses for the unconfigured case. An
-// unknown id is an error naming plugins/tides, matching
-// resolveWeatherProvider's wording for its own unregistered-provider case.
+// A blank id resolves to defaultTideProviderID (ADR 0273, reversing the "no
+// default" stance of ADR 0033). A provider that is not registered, the default
+// included, is an error naming plugins/tides, matching resolveWeatherProvider's
+// wording for its own unregistered-provider case.
 func resolveTideProvider(settingsPath string) (tideProvider, string, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
@@ -128,12 +369,22 @@ func resolveTideProvider(settingsPath string) (tideProvider, string, error) {
 	}
 
 	uiMap, _ := settings["ui"].(map[string]any)
+	return resolveTideProviderFromUI(uiMap)
+}
+
+// resolveTideProviderFromUI is the one place the configured tide provider is
+// read and defaulted, shared by resolveTideProvider and buildTideToday.
+func resolveTideProviderFromUI(uiMap map[string]any) (tideProvider, string, error) {
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
-	if configuredProvider == "" {
-		return nil, "", fmt.Errorf("no tide provider configured, set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)")
+	chosen := configuredProvider != ""
+	if !chosen {
+		configuredProvider = defaultTideProviderID
 	}
 
 	provider, ok := getTideProvider(configuredProvider)
+	if !ok && !chosen {
+		return nil, configuredProvider, fmt.Errorf("no tide provider is chosen and the default worldwide tide plugin %q isn't installed: update the plugin bundle (plugins/tides), or choose a tide provider in Settings", configuredProvider)
+	}
 	if !ok {
 		return nil, configuredProvider, fmt.Errorf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)
 	}
@@ -340,13 +591,20 @@ type tideProviderInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// PositionBased is true for a provider with no stations to choose: it
+	// follows the boat's position. HeightDatum is chart_datum or mean_sea_level.
+	PositionBased bool   `json:"position_based"`
+	HeightDatum   string `json:"height_datum"`
 }
 
 func tideProvidersHandler(c echo.Context) error {
 	result := make([]tideProviderInfo, 0, len(tideProviderOrder))
 	for _, id := range tideProviderOrder {
 		if provider, ok := tideProviderRegistry[id]; ok {
-			result = append(result, tideProviderInfo{ID: provider.ID(), Name: provider.Name(), Description: provider.Description()})
+			result = append(result, tideProviderInfo{
+				ID: provider.ID(), Name: provider.Name(), Description: provider.Description(),
+				PositionBased: tideProviderPositionBased(provider), HeightDatum: tideProviderHeightDatum(provider),
+			})
 		}
 	}
 	return c.JSON(http.StatusOK, result)
@@ -380,6 +638,13 @@ type tideChartResponse struct {
 	TidalPhase      string                     `json:"tidal_phase,omitempty"`
 	DoubleHighToday bool                       `json:"double_high_today,omitempty"`
 	DoubleLowToday  bool                       `json:"double_low_today,omitempty"`
+	// HeightDatum is chart_datum or mean_sea_level: what height_m is measured from.
+	HeightDatum string `json:"height_datum"`
+	// Provider and ProviderName say who answered; PositionBased that the tide
+	// follows a point, so there is no station to choose.
+	Provider      string `json:"provider"`
+	ProviderName  string `json:"provider_name"`
+	PositionBased bool   `json:"position_based"`
 }
 
 func tideNearestHandler(c echo.Context) error {
@@ -396,22 +661,39 @@ func tideNearestHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": pointErr.Error()})
 	}
 	if !explicit {
-		vesselState, err := fetchSignalKVesselState()
-		if err != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
+		var err error
+		// The anchor's point is for providers that follow a position; a station
+		// provider finds its nearest station from the boat itself.
+		fix := tideOwnFixNow()
+		if tideProviderPositionBased(provider) {
+			fix = tideBoatFixNow()
+		}
+		lat, lon, err = fix.Lat, fix.Lon, fix.Err
+		if err != nil {
 			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
 		}
-		lat, lon = vesselState.Latitude, vesselState.Longitude
 	}
 
 	station, ok := nearestStation(provider, lat, lon)
 	if !ok {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no stations available"})
 	}
+	if !explicit && tideProviderPositionBased(provider) {
+		station.Name = tideNameBoatPosition
+	}
 	return c.JSON(http.StatusOK, station)
 }
 
+// tideChartHandler serves GET /api/tide-chart. With a provider and a station_id
+// it is that provider's chart for that station. With neither it is the
+// configured chart: the server picks the tide, so a screen never handles a
+// station for a provider that follows a position. lat and lon, given together,
+// ask for the tide at a place instead of the boat's.
 func tideChartHandler(c echo.Context) error {
 	providerID := strings.TrimSpace(c.QueryParam("provider"))
+	if providerID == "" {
+		return configuredTideChartHandler(c)
+	}
 	provider, ok := getTideProvider(providerID)
 	if !ok {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown tide provider"})
@@ -421,12 +703,61 @@ func tideChartHandler(c echo.Context) error {
 	if stationID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing station_id"})
 	}
-
+	if tideProviderPositionBased(provider) {
+		if _, _, ok := parseTidePointID(stationID); !ok {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "station_id must be \"<lat>,<lon>\" for this provider"})
+		}
+	}
 	result, err := provider.FetchTideChart(stationID)
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
+	return writeTideChart(c, provider, result)
+}
 
+// configuredTideChartHandler is the chart the settings call for, or for a place
+// when lat and lon are given: the station nearest it, or for a provider that
+// follows a position, its point.
+func configuredTideChartHandler(c echo.Context) error {
+	settings, err := readSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read settings: %v", err), "reason": string(tideSettingsUnreadable)})
+	}
+	uiMap, _ := settings["ui"].(map[string]any)
+
+	lat, lon, place, pointErr := explicitForecastPoint(c)
+	if pointErr != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": pointErr.Error()})
+	}
+
+	var provider tideProvider
+	var result tideChartResult
+	if place {
+		var resolveErr error
+		provider, _, resolveErr = resolveTideProviderFromUI(uiMap)
+		if resolveErr != nil {
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": resolveErr.Error(), "reason": string(tideNoPlugin)})
+		}
+		station, ok := nearestStation(provider, lat, lon)
+		if !ok {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no tide station found near this place", "reason": string(tideNoStation)})
+		}
+		if result, err = provider.FetchTideChart(station.StationID); err != nil {
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error(), "reason": string(tideUnreachable)})
+		}
+	} else {
+		var te *tideTodayError
+		provider, _, result, te = configuredTideChart(uiMap, tideBoatFixNow)
+		if te != nil {
+			return c.JSON(te.status, map[string]string{"error": te.message, "reason": string(te.reason)})
+		}
+	}
+	return writeTideChart(c, provider, result)
+}
+
+// writeTideChart answers with a provider's chart, saying which provider it is,
+// whether it follows a position, and what its heights are measured from.
+func writeTideChart(c echo.Context, provider tideProvider, result tideChartResult) error {
 	extremes := make([]tideExtremePointResponse, 0, len(result.Extremes))
 	for _, extreme := range result.Extremes {
 		extremes = append(extremes, tideExtremePointResponse{
@@ -451,5 +782,9 @@ func tideChartHandler(c echo.Context) error {
 		TidalPhase:      tidalPhase,
 		DoubleHighToday: doubleHigh,
 		DoubleLowToday:  doubleLow,
+		HeightDatum:     tideProviderHeightDatum(provider),
+		Provider:        provider.ID(),
+		ProviderName:    provider.Name(),
+		PositionBased:   tideProviderPositionBased(provider),
 	})
 }

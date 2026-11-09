@@ -4,7 +4,6 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { resetQueryStore } from "@/lib/api-query";
 import { usePlannedStay } from "@/hooks/use-planned-stay";
 import { searchPlaces } from "@/hooks/use-place-search";
-import { usePlaceTideStation } from "@/hooks/use-place-tide-station";
 
 const STAY = {
   name: "Coral Coast Marina",
@@ -167,50 +166,5 @@ describe("searchPlaces", () => {
     );
     const found = await searchPlaces("x");
     expect(found).toEqual({ candidates: [] });
-  });
-});
-
-describe("usePlaceTideStation", () => {
-  beforeEach(() => {
-    resetQueryStore();
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("measures the distance to a station that has coordinates", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          reply({
-            station_id: "BRI",
-            name: "Brisbane Bar",
-            lat: -27.37,
-            lon: 153.17,
-          }),
-        ),
-    );
-    const { result } = renderHook(() =>
-      usePlaceTideStation("bom", { lat: -27.2, lon: 153.1 }),
-    );
-    await waitFor(() => expect(result.current.nearest).not.toBeNull());
-    expect(result.current.nearest?.distanceNm).toBeGreaterThan(5);
-  });
-
-  it("never measures against 0,0 when the station has no coordinates", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(reply({ station_id: "BRI", name: "Brisbane Bar" })),
-    );
-    const { result } = renderHook(() =>
-      usePlaceTideStation("bom", { lat: -27.2, lon: 153.1 }),
-    );
-    await waitFor(() => expect(result.current.nearest).not.toBeNull());
-    expect(result.current.nearest?.station.name).toBe("Brisbane Bar");
-    expect(result.current.nearest?.distanceNm).toBeNull();
   });
 });

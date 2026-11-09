@@ -18,6 +18,44 @@ const mutate = (fn: (p: Loose) => void) => {
   return p
 }
 
+describe('decodeMateCards: anchorage tide datum (ADR 0273)', () => {
+  it('reads what the Go side writes: chart datum from a station', () => {
+    const card = anchorageCard()
+    expect(card.tide.heightDatum).toBe('chart_datum')
+    expect(card.tide.modelled).toBe(false)
+  })
+
+  it('reads a modelled tide from mean sea level', () => {
+    const p = mutate((x) => {
+      x.tide.height_datum = 'mean_sea_level'
+      x.tide.modelled = true
+    })
+    const card = decodeMateCards([{ kind: 'anchorage', payload: p }])[0]
+    expect(card.kind).toBe('anchorage')
+    if (card.kind === 'anchorage') {
+      expect(card.tide.heightDatum).toBe('mean_sea_level')
+      expect(card.tide.modelled).toBe(true)
+    }
+  })
+
+  it('reads a card saved before the fields existed as a chart-datum station tide', () => {
+    const p = mutate((x) => {
+      delete x.tide.height_datum
+      delete x.tide.modelled
+    })
+    const card = decodeMateCards([{ kind: 'anchorage', payload: p }])[0]
+    expect(card.kind).toBe('anchorage')
+    if (card.kind === 'anchorage') {
+      expect(card.tide.heightDatum).toBe('chart_datum')
+      expect(card.tide.modelled).toBe(false)
+    }
+  })
+
+  it('refuses a datum it does not know rather than guess', () => {
+    expect(reasonOf(mutate((x) => { x.tide.height_datum = 'lat' }))).toContain('tide.height_datum')
+  })
+})
+
 describe('decodeMateCards: anchorage', () => {
   it('reads the card the Go side writes for West Butterfly Bay', () => {
     const card = anchorageCard()

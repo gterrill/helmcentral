@@ -113,7 +113,7 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     headingAtSetDeg: -1,
     placeName: '',
     planningDepthM: null,
-    planningTideHeightFt: null,
+    planningTide: null,
     datumDepthM: null,
     datumDepthReason: '',
     planningDepthSource: null,

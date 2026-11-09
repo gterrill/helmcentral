@@ -267,7 +267,7 @@ func windRoseNoGustCard(t *testing.T) mateCard {
 func tileFullCard(t *testing.T) mateCard {
 	useFreshBoatZone(t)
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 		return tideTodayResponse{
 			Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: 6.56, TideDirection: "Rising",
 			HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: 9.84,
@@ -291,8 +291,8 @@ func tileFullCard(t *testing.T) mateCard {
 func tileMissingCard(t *testing.T) mateCard {
 	useFreshBoatZone(t)
 	d := tileCardDeps(vesselStateData{Depth: -1, DepthLastUpdateAge: -1})
-	d.tileTide = func(context.Context, time.Time) (tideTodayResponse, error) {
-		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNotSetUp, message: "no tide provider configured"}
+	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
+		return tideTodayResponse{}, &tideTodayError{status: 502, reason: tideNoStation, message: "no tide provider configured"}
 	}
 	d.tileDepthTrend = func(context.Context, string) depthTrendResponse {
 		return depthTrendResponse{Points: []depthTrendPoint{}, Since: "window"}

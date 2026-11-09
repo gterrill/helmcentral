@@ -132,6 +132,16 @@ type wasmPluginBase struct {
 	// anchorage_features, the optional export behind the features section of
 	// Mate's anchorage_details tool. Like marina_details it stands alone.
 	supportsAnchorageFeatures bool
+	// positionBased is true when a tide plugin exports position_based returning
+	// "true" (ADR 0273): it has no station catalog and takes the position as
+	// "<lat>,<lon>" in place of a station id. Absent means station-based, so
+	// BOM and NOAA need no change.
+	positionBased bool
+	// heightDatum is what a tide plugin's heights are measured from, from its
+	// optional height_datum export: tideDatumChart or tideDatumMeanSeaLevel.
+	// Absent means chart datum. An export that returns anything else fails the
+	// load: guessing would give the operator a wrong depth.
+	heightDatum string
 }
 
 func (b *wasmPluginBase) ID() string                  { return b.id }
@@ -145,6 +155,10 @@ func (b *wasmPluginBase) SupportsMarinaDetails() bool { return b.supportsMarinaD
 func (b *wasmPluginBase) SupportsAnchorageFeatures() bool {
 	return b.supportsAnchorageFeatures
 }
+
+// PositionBased and HeightDatum make a tide plugin a positionTideProvider.
+func (b *wasmPluginBase) PositionBased() bool { return b.positionBased }
+func (b *wasmPluginBase) HeightDatum() string { return b.heightDatum }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -745,6 +759,23 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 
 	supportsShoreline := instance.FunctionExists("shoreline_square") && instance.FunctionExists("shoreline_changes")
 
+	// position_based and height_datum (ADR 0273) are tide-only optional
+	// exports, read here on the same throwaway instance. A plugin that
+	// declares a datum the host does not know fails to load rather than have
+	// its heights taken for something else.
+	positionBasedOut, err := optionalEnumExport(instance, path, "position_based", "false", "true")
+	if err != nil {
+		compiled.Close(ctx)
+		return nil, err
+	}
+	// Absent means chart datum, and it is stored as such here so nothing
+	// downstream re-applies the default.
+	heightDatum, err := optionalEnumExport(instance, path, "height_datum", tideDatumChart, tideDatumMeanSeaLevel)
+	if err != nil {
+		compiled.Close(ctx)
+		return nil, err
+	}
+
 	return &wasmPluginBase{
 		id:                    id,
 		name:                  name,
@@ -758,7 +789,29 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		supportsMarinaDetails: instance.FunctionExists("marina_details"),
 
 		supportsAnchorageFeatures: instance.FunctionExists("anchorage_features"),
+		positionBased:             positionBasedOut == "true",
+		heightDatum:               heightDatum,
 	}, nil
+}
+
+// optionalEnumExport reads an optional export that must return one of allowed.
+// Absent gives allowed[0]. A value outside the set fails the load: guessing
+// what a plugin meant could hand the operator a wrong depth.
+func optionalEnumExport(instance *extism.Plugin, path, name string, allowed ...string) (string, error) {
+	if !instance.FunctionExists(name) {
+		return allowed[0], nil
+	}
+	_, out, err := instance.Call(name, nil)
+	if err != nil {
+		return "", fmt.Errorf("plugin %s: %s() call failed: %w", path, name, err)
+	}
+	got := strings.TrimSpace(string(out))
+	for _, a := range allowed {
+		if got == a {
+			return got, nil
+		}
+	}
+	return "", fmt.Errorf("plugin %s: %s() returned %q, want one of %s", path, name, string(out), strings.Join(allowed, ", "))
 }
 
 // wasmCacheEntry wraps a cached value T with the bookkeeping timestamp used

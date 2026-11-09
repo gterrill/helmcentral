@@ -1,5 +1,6 @@
 import type { DepthTrendData } from '@/hooks/use-depth-trend'
 import type { TideToday } from '@/hooks/use-tide-today'
+import { CHART_DATUM, isMeanSeaLevel, MEAN_SEA_LEVEL, type TideDatum } from '@/lib/tide-datum'
 
 /**
  * Cards under a Mate reply (ADR 0191). Each kind is one member of this union,
@@ -291,6 +292,10 @@ export interface AnchorageCard {
     error: string
     station: string
     distanceNm: number
+    /** What the heights are measured from; chart datum for a card saved before the field existed. */
+    heightDatum: TideDatum
+    /** True when the tide is worked out for the anchorage itself, with no station to be a distance away. */
+    modelled: boolean
     timeBasis: string
     heightAtArrivalM: number | null
     direction: string
@@ -834,6 +839,11 @@ function decodeAnchorageTide(raw: unknown): AnchorageCard['tide'] {
     error: str(o.error, 'tide.error'),
     station: str(o.station, 'tide.station'),
     distanceNm: finite(o.distance_nm, 'tide.distance_nm'),
+    // Optional: an anchorage card saved by an earlier version has neither field (Saved Data).
+    heightDatum: o.height_datum === undefined || o.height_datum === ''
+      ? CHART_DATUM
+      : oneOf<TideDatum>(o.height_datum, [CHART_DATUM, MEAN_SEA_LEVEL], 'tide.height_datum'),
+    modelled: o.modelled === undefined ? false : bool(o.modelled, 'tide.modelled'),
     timeBasis: str(o.time_basis, 'tide.time_basis'),
     heightAtArrivalM: nullableNumber(o.height_at_arrival_m, 'tide.height_at_arrival_m'),
     direction: str(o.direction, 'tide.direction'),
@@ -1014,6 +1024,9 @@ function decodeTide(raw: unknown): TideToday | null {
     low_tide_height_ft: finite(o.low_tide_height_ft, 'snapshot.tide.low_tide_height_ft'),
     station_name: optionalText(o.station_name, 'snapshot.tide.station_name'),
     provider: optionalText(o.provider, 'snapshot.tide.provider'),
+    // Optional: a tile card saved before the field existed is chart datum, so
+    // only mean sea level is marked.
+    ...(isMeanSeaLevel(o.height_datum) ? { height_datum: MEAN_SEA_LEVEL } : {}),
   }
 }
 

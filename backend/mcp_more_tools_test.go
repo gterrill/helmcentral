@@ -97,7 +97,7 @@ func TestMCPMoreTools_ReadingTexts(t *testing.T) {
 	// Only text that depends on the result stays a reading; the rest is in
 	// the description, which Mate's prompt cache holds.
 	cases := map[string][]string{
-		"tides":   {readingTides(assistantStationInfo{Name: "Bris Bar", DistanceNm: 3.2, BearingDeg: 45}, "Australia/Brisbane"), "Bris Bar", "3.2 nm from the place asked about", "bearing 045°T", "Australia/Brisbane"},
+		"tides":   {readingTides(assistantStationInfo{Name: "Bris Bar", DistanceNm: ptr(3.2), BearingDeg: ptr(45)}, "Australia/Brisbane"), "Bris Bar", "3.2 nm from the place asked about", "bearing 045°T", "Australia/Brisbane"},
 		"shelter": {readingShelter("2026-10-01"), "2026-10-01"},
 		"tidal":   {readingTidalDeparture, "wind against tide", "say so and say when", "fair_fraction"},
 	}

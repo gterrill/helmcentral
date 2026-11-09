@@ -224,6 +224,8 @@ var lowWaterWhy = map[string]string{
 	lowWaterNoDepth:         "the sounder has no fresh depth reading",
 	lowWaterNoDraft:         "the boat reports no maximum draft",
 	lowWaterNoTideStation:   "no tide station is set up",
+	lowWaterNoPlugin:        "the tide plugin isn't installed: update the plugin bundle, or choose a tide provider in Settings",
+	lowWaterNoPosition:      "the tide follows a position and there is none to use",
 	lowWaterTideUnreachable: "the tide could not be read",
 	lowWaterNoTide:          "the tide has no usable height or upcoming low",
 	lowWaterTideStale:       "the next low the tide names has already passed",
@@ -832,7 +834,7 @@ func (d assistantToolDeps) calibratorFor(watch anchorWatchData, watchSet bool) l
 // dependencies (vesselStatusMissingDeps).
 func (d assistantToolDeps) vesselStatusLowWaterFor(ctx context.Context, state vesselStateData, watch anchorWatchData, watchSet bool, system string, now time.Time) (*vesselStatusLowWater, string, error) {
 	res, err := buildLowWater(state,
-		func() (tideTodayResponse, error) { return d.tileTide(ctx, now) },
+		func() (tideTodayResponse, error) { return d.tileTide(ctx, state, now) },
 		func() (float64, error) {
 			s, err := d.anchorSettings()
 			return s.MinClearanceAtLowM, err

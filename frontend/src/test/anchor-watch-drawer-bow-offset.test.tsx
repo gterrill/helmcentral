@@ -75,7 +75,7 @@ const baseProps = {
   onWindBandChange: () => undefined,
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null,
-  planningTideHeightFt: null,
+  planningTide: null,
   onPlanningDepthChange: () => Promise.resolve(),
 }
 
@@ -94,7 +94,7 @@ describe('AnchorWatchDrawer swing includes the GPS to bow offset', () => {
     windSpeedApparentKts: 12,
     maxGustKts: { '10m': null, '30m': null, '1h': 20, '24h': null },
     planningDepthM: 5,
-    planningTideHeightFt: 2,
+    planningTide: { ft: 2, datum: 'chart_datum' as const },
   }
 
   beforeEach(() => {

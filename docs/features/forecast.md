@@ -33,6 +33,17 @@ early, delay a passage or pick a different anchorage.
   provider plugin. If one is down, you get an explicit failure for that section
   rather than a stale number. The card says which provider answered, whether
   the data was cached and how long ago it refreshed.
+- **Tides anywhere:** Until you choose a tide provider, tides come from a
+  worldwide model that follows the boat's position, so there's no station to
+  pick. Its heights are measured from mean sea level, not chart datum. They're
+  often negative, they include surge and air pressure, and the chart and tiles
+  say "from mean sea level" beside them. It's a model, not a tide table. If the
+  Australian or US provider covers your waters, choose it in Settings and pick
+  a station, and you get that station's published predictions on chart datum.
+  Anchor Watch can't work out a depth at chart datum from the worldwide model's
+  heights, so Save depth tells you why instead of saving a wrong figure. The
+  tide line, the low-water clearance and the rode at high water use only how far
+  the water rises and falls, so they work either way.
 
 ## Where the wave thresholds come from
 
@@ -230,7 +241,9 @@ Here's what the stay view shows:
   the place, names it, and says how far it is from the place. A station more
   than 20 nautical miles away is flagged, because a tide there can differ from
   the tide at the berth. Your saved tide station and automatic station setting
-  are left as they are, and only this view uses the nearer one.
+  are left as they are, and only this view uses the nearer one. If your tide
+  provider is the default one, which follows a position rather than a station,
+  the chart is modelled for the place itself and names no station.
 - **Warnings for that place.** A wind or surf warning is worded as the place's
   and names its zone, so you don't read a warning for somewhere else as your
   own.

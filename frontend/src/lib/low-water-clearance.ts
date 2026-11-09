@@ -8,6 +8,8 @@ export type LowWaterClearanceReason =
   | 'no_depth'
   | 'no_draft'
   | 'no_tide_station'
+  | 'no_position'
+  | 'no_plugin'
   | 'tide_unreachable'
   | 'no_tide'
   | 'tide_stale'
@@ -121,6 +123,10 @@ export function lowWaterClearanceReasonLabel(reason: LowWaterClearanceReason): s
       return 'No draft from the boat'
     case 'no_tide_station':
       return 'No tide station'
+    case 'no_position':
+      return 'No position for the tide'
+    case 'no_plugin':
+      return 'Tide plugin not installed'
     case 'tide_unreachable':
     case 'no_tide':
       return 'Tide unavailable'

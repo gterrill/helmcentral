@@ -89,7 +89,7 @@ const baseProps = {
   onWindBandChange: () => undefined,
   onUpdateRodeAndConditions: async () => undefined,
   planningDepthM: null as number | null,
-  planningTideHeightFt: null as number | null,
+  planningTide: null as { ft: number; datum: "chart_datum" | "mean_sea_level" } | null,
   onPlanningDepthChange: () => Promise.resolve(),
 }
 

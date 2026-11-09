@@ -5,6 +5,10 @@ export interface TideProviderInfo {
   id: string
   name: string
   description: string
+  /** True for a provider with no stations to choose: it follows the boat's position (ADR 0273). */
+  position_based?: boolean
+  /** What its heights are measured from; chart datum when left out. */
+  height_datum?: string
 }
 
 const NONE: TideProviderInfo[] = []
