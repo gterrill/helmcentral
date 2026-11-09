@@ -970,6 +970,7 @@ func anchorRoutes() []apiRoute {
 		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAISTrailsHandler},
+		{http.MethodGet, "/api/anchor-watch/ais-anchors", tierRead, getAISAnchorsHandler},
 		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
 		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
 		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},

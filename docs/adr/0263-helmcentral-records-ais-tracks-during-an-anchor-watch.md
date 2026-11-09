@@ -89,7 +89,11 @@ for the life of the process, under one mutex:
   after the target's previous one. The browser draws no line into a flagged
   point. The 15 minutes is a constant.
 - **Retention.** Points older than 24 hours are never served. The table is
-  trimmed at most once a minute.
+  trimmed at most once a minute. A point recorded since the current watch started
+  is kept for the whole watch, not trimmed at 24 hours, so the swing estimate of
+  nearby boats ([ADR 0275](0275-the-anchor-watch-estimates-where-nearby-boats-have-anchored.md))
+  can use all of it. The trails endpoint still serves 24 hours. With no watch the
+  24 hour trim holds.
 
 ### Lifetime
 

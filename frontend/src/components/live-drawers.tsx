@@ -9,6 +9,7 @@ import { setAnchorHere, useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useAisTrails } from '@/hooks/use-ais-anchor-tracks'
+import { useAisAnchorEstimates } from '@/hooks/use-ais-anchor-estimates'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { selectTimeZone } from '@/lib/vessel-time'
@@ -109,7 +110,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'anchorLat' | 'anchorLon' | 'radiusMeters' | 'bowOffsetM' | 'bowOffsetApplied' | 'bowOffsetReason' | 'headingAtSetDeg'
   | 'placeName' | 'saveDepth' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
-  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
+  | 'vesselTrail' | 'aisTrails' | 'aisAnchorEstimates' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
   | 'aisVessels' | 'tide' | 'onDropAnchor'>) {
   const watch = useAnchorWatch()
   const aisVessels = useNearbyVesselList()
@@ -129,6 +130,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
   const aisTrails = useAisTrails(TRAIL_POLL_MS)
+  const aisAnchorEstimates = useAisAnchorEstimates()
   const pins = usePins(watch.active)
   const hasFix = v.latitude !== null && v.longitude !== null
   const canDrop = hasFix && !v.gnssCriticalAlert
@@ -160,6 +162,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       onUpdateRodeAndConditions={watch.updateRodeAndConditions}
       vesselTrail={anchorTrail}
       aisTrails={aisTrails}
+      aisAnchorEstimates={aisAnchorEstimates}
       vesselLat={v.latitude ?? watch.anchorLat}
       vesselLon={v.longitude ?? watch.anchorLon}
       hasGpsFix={canDrop}

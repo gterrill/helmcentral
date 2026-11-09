@@ -38,6 +38,13 @@ const (
 	// for a report to be stored inside aisAnchorMinInterval, so a boat crossing
 	// the anchorage at speed keeps its trail up to its marker. Not a setting.
 	aisAnchorMinMoveM = 25.0
+	// aisAnchorOldPointSpacing is the least time between two kept points of one
+	// target once they are older than aisAnchorRetention, in a watch long enough to
+	// hold any. At the 30 second floor a boat that never leaves stores 2,880 points
+	// a day, so a week-long watch of twenty boats would hold over 400,000. A swing
+	// fit needs the shape of the circle, not every report, and one point in five
+	// minutes still gives a boat 288 a day, plenty for the 20 the fit asks for.
+	aisAnchorOldPointSpacing = 5 * time.Minute
 	// aisAnchorPruneEvery is how often the table is trimmed to the retention.
 	// Reads and the client apply the 24 hour cut themselves.
 	aisAnchorPruneEvery = time.Minute
@@ -117,8 +124,31 @@ func (s *passageStore) appendAISAnchorSamples(samples []aisAnchorSample) (bool, 
 	return true, tx.Commit()
 }
 
+// pruneAISAnchorTracks deletes points older than aisAnchorRetention, except
+// that a point recorded since the current watch started is kept for the life of
+// the watch: a boat's whole time at anchor counts towards its swing estimate
+// (ADR 0275). The table is emptied at each drop and raise, so only a watch
+// longer than the retention holds anything older. The trails endpoint still
+// serves the last 24 hours only. With no watch the 24 hour rule holds.
 func (s *passageStore) pruneAISAnchorTracks(now time.Time) error {
-	if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ?`, now.Add(-aisAnchorRetention).UnixMilli()); err != nil {
+	cutoffMs := now.Add(-aisAnchorRetention).UnixMilli()
+	started, err := s.anchorTrailStarted()
+	if err != nil {
+		return fmt.Errorf("prune ais anchor tracks: %w", err)
+	}
+	if !started.IsZero() && started.UnixMilli() < cutoffMs {
+		cutoffMs = started.UnixMilli()
+	}
+	// A point older than the retention that survives (a long watch) is thinned to
+	// one per target per aisAnchorOldPointSpacing: the first of each bucket stays.
+	thinCutoffMs := now.Add(-aisAnchorRetention).UnixMilli()
+	spacingMs := aisAnchorOldPointSpacing.Milliseconds()
+	if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ? AND seq NOT IN (
+			SELECT MIN(seq) FROM ais_anchor_track_points WHERE t_ms < ? GROUP BY mmsi, t_ms / ?)`,
+		thinCutoffMs, thinCutoffMs, spacingMs); err != nil {
+		return fmt.Errorf("thin old ais anchor tracks: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ?`, cutoffMs); err != nil {
 		return fmt.Errorf("prune ais anchor tracks: %w", err)
 	}
 	return nil

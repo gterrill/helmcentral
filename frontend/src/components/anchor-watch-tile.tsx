@@ -13,6 +13,8 @@ import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useAnchorWatch, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { useNearbyVesselList, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { useAisTrails, type AisTrailPoint } from '@/hooks/use-ais-anchor-tracks'
+import { useAisAnchorEstimates } from '@/hooks/use-ais-anchor-estimates'
+import type { AisAnchorEstimate } from '@/lib/ais-anchor-estimates'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
 import { usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
@@ -67,6 +69,8 @@ interface AnchorWatchTileProps {
   vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: Map<string, AisTrailPoint[]>
+  // Where nearby boats appear to have anchored, passed straight through to the map.
+  aisAnchorEstimates?: AisAnchorEstimate[]
   // Optional, mirroring AnchorWatchMapProps — passed straight through to the
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).
@@ -112,6 +116,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisAnchorEstimates,
   aisCollisionAlarms,
   isDarkTheme,
   showImageryLayer,
@@ -287,6 +292,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               vesselTrail={vesselTrail}
               aisVessels={aisVessels}
               aisTrails={aisTrails}
+              aisAnchorEstimates={aisAnchorEstimates}
               aisCollisionAlarms={aisCollisionAlarms}
               isDarkTheme={isDarkTheme}
               showImageryLayer={showImageryLayer}
@@ -342,7 +348,7 @@ const ANCHOR_FIELDS = [
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
   'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
-  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
+  | 'vesselTrail' | 'aisTrails' | 'aisAnchorEstimates' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
   | 'aisVessels' | 'tide'>) {
   const watch = useAnchorWatch()
   const aisVessels = useNearbyVesselList()
@@ -352,6 +358,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
   const aisTrails = useAisTrails(TRAIL_POLL_MS)
+  const aisAnchorEstimates = useAisAnchorEstimates()
   const pins = usePins(watch.active)
   return (
     <AnchorWatchTile
@@ -362,6 +369,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
       watch={atFix}
       vesselTrail={anchorTrail}
       aisTrails={aisTrails}
+      aisAnchorEstimates={aisAnchorEstimates}
       lastUpdateAgeS={v.positionLastUpdateAgeS}
       lat={v.latitude}
       lon={v.longitude}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,6 +45,7 @@ func resetAISAnchorTrackStateForTest() {
 	aisTracks.lastPrune = time.Time{}
 	aisTracks.mu.Unlock()
 	missingMMSILoggedForAISAnchorTrack = sync.Map{}
+	resetAISAnchorEstimateCache()
 }
 
 func aisEnv(t *testing.T) *passageStore {
@@ -349,6 +352,140 @@ func TestAISAnchorTracksDropPointsOlderThanTwentyFourHours(t *testing.T) {
 	_ = store.db.QueryRow(`SELECT COUNT(*) FROM ais_anchor_track_points WHERE mmsi = '111111111'`).Scan(&n)
 	if n != 1 {
 		t.Fatalf("expected the old row pruned from storage, %d rows left", n)
+	}
+}
+
+// setTrailStart moves the running trail's start, standing in for a watch set
+// that long ago.
+func setTrailStart(t *testing.T, store *passageStore, at time.Time) {
+	t.Helper()
+	if _, err := store.db.Exec(`UPDATE anchor_trail_state SET started_ms = ? WHERE id = 1`, at.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAISAnchorTracksRecordedDuringALongWatchOutliveTwentyFourHours(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	now := aisBase()
+	setTrailStart(t, store, now.Add(-72*time.Hour))
+	old := now.Add(-30 * time.Hour)
+	if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES ('111111111', ?, ?, ?, 1)`,
+		old.UnixMilli(), aisInsideLat, aisTestAnchorLon); err != nil {
+		t.Fatal(err)
+	}
+	// A recording tick prunes storage: the point is inside the watch, so it stays.
+	recordAISAnchorTracks([]nearbyVessel{aisTarget("222222222", "BRAVO", aisInsideLat, now)}, now)
+	if n := aisRowCount(t, store); n != 2 {
+		t.Fatalf("a point older than 24 h but inside the watch must survive pruning, %d rows left", n)
+	}
+	// It reaches the estimator's read...
+	all, err := store.aisAnchorTracksSinceWatch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all["111111111"]) != 1 {
+		t.Fatalf("the watch-long read must return it, got %+v", all)
+	}
+	// ...but the trails on the map still carry the last 24 hours only.
+	for _, tr := range aisTracksNow(t, store, now) {
+		if tr.MMSI == "111111111" {
+			t.Fatalf("the trails must not serve a point older than 24 h: %+v", tr)
+		}
+	}
+}
+
+func TestAISAnchorTracksOlderThanTwentyFourHoursAreThinnedDuringALongWatch(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	now := aisBase()
+	setTrailStart(t, store, now.Add(-72*time.Hour))
+	insert := func(mmsi string, at time.Time) {
+		if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES (?, ?, ?, ?, 0)`,
+			mmsi, at.UnixMilli(), aisInsideLat, aisTestAnchorLon); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A dense old stretch: one point every 30 s for an hour, two targets.
+	oldStart := now.Add(-30 * time.Hour)
+	for i := 0; i < 120; i++ {
+		insert("111111111", oldStart.Add(time.Duration(i)*30*time.Second))
+		insert("222222222", oldStart.Add(time.Duration(i)*30*time.Second))
+	}
+	// Recent points, 30 s apart, which must all stay.
+	for i := 0; i < 10; i++ {
+		insert("111111111", now.Add(-2*time.Hour+time.Duration(i)*30*time.Second))
+	}
+	recordAISAnchorTracks(nil, now) // prunes
+	countOld := func(mmsi string) int {
+		var n int
+		_ = store.db.QueryRow(`SELECT COUNT(*) FROM ais_anchor_track_points WHERE mmsi = ? AND t_ms < ?`,
+			mmsi, now.Add(-aisAnchorRetention).UnixMilli()).Scan(&n)
+		return n
+	}
+	for _, m := range []string{"111111111", "222222222"} {
+		// An hour in 5 minute buckets is 12 or 13 points.
+		if n := countOld(m); n < 12 || n > 13 {
+			t.Fatalf("%s: a dense old hour must be thinned to one point per target per %v, %d left", m, aisAnchorOldPointSpacing, n)
+		}
+	}
+	var recent int
+	_ = store.db.QueryRow(`SELECT COUNT(*) FROM ais_anchor_track_points WHERE mmsi = '111111111' AND t_ms >= ?`,
+		now.Add(-aisAnchorRetention).UnixMilli()).Scan(&recent)
+	if recent != 10 {
+		t.Fatalf("points newer than 24 h must be untouched, %d of 10 left", recent)
+	}
+}
+
+func TestAISAnchorTracksAnOldSwingStillFitsAfterThinning(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	now := aisBase()
+	setTrailStart(t, store, now.Add(-72*time.Hour))
+	rng := rand.New(rand.NewSource(31))
+	// 600 points at 30 s round a 40 m circle, from 30 hours ago.
+	pts := estArc(rng, 600, 100, 220, 40, 1)
+	for i, p := range pts {
+		if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES ('111111111', ?, ?, ?, 0)`,
+			now.Add(-30*time.Hour+time.Duration(i)*30*time.Second).UnixMilli(), p.Lat, p.Lon); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordAISAnchorTracks(nil, now) // prunes
+	all, err := store.aisAnchorTracksSinceWatch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := settledAISRun(all["111111111"], aisTestAnchorLat, aisTestAnchorLon)
+	fit, ok := fitAISAnchor(run, aisTestAnchorLat, aisTestAnchorLon)
+	if !ok || math.Abs(fit.SwingRadiusM-40) > 6 {
+		t.Fatalf("the thinned old swing (%d points) must still fit, got %+v ok=%v", len(run), fit, ok)
+	}
+}
+
+func TestAISAnchorTracksWithNoWatchArePrunedAtTwentyFourHours(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	now := aisBase()
+	old := now.Add(-30 * time.Hour)
+	if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES ('111111111', ?, ?, ?, 1)`,
+		old.UnixMilli(), aisInsideLat, aisTestAnchorLon); err != nil {
+		t.Fatal(err)
+	}
+	setTrailStart(t, store, now.Add(-72*time.Hour))
+	if rec := raiseAnchor(t); rec.Code != http.StatusOK {
+		t.Fatalf("raise: %d", rec.Code)
+	}
+	// A raise empties the table, so write the row again with no watch running.
+	if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES ('111111111', ?, ?, ?, 1)`,
+		old.UnixMilli(), aisInsideLat, aisTestAnchorLon); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pruneAISAnchorTracks(now); err != nil {
+		t.Fatal(err)
+	}
+	if n := aisRowCount(t, store); n != 0 {
+		t.Fatalf("with no watch the 24 h prune holds, %d rows left", n)
 	}
 }
 
