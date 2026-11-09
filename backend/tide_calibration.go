@@ -232,6 +232,7 @@ type tideCalSolution struct {
 	den      float64
 	resid    []float64
 	weights  []float64
+	heights  []float64 // the curve's height at each row at this offset
 	scale    float64
 	offsetMn int
 	loss     float64 // the Huber loss at the fit's threshold, set when solved
@@ -315,15 +316,21 @@ func newTideCalScratch(rows, cells int) *tideCalScratch {
 // reweighted least squares with Huber weights. The weights start from w0, the
 // previous offset's, when given, since neighbouring offsets weigh the readings
 // alike. The scale never falls below floorM, the stay's noise level.
-func solveAt(rows []tideCalRow, nCells int, curve tideCurve, offsetMin int, floorM float64, sc *tideCalScratch, w0 []float64) (*tideCalSolution, bool) {
+//
+// heights0 are the curve's heights at this offset for the first rows, when an
+// earlier fit already read them off the same curve; only the rest are looked up.
+func solveAt(rows []tideCalRow, nCells int, curve tideCurve, offsetMin int, floorM float64, sc *tideCalScratch, w0, heights0 []float64) (*tideCalSolution, bool) {
 	h := sc.h
-	for i, r := range rows {
+	known := copy(h, heights0)
+	for i := known; i < len(rows); i++ {
+		r := rows[i]
 		v, ok := curve.heightAt(r.at.Add(time.Duration(offsetMin) * time.Minute))
 		if !ok {
 			return nil, false
 		}
 		h[i] = v
 	}
+	heights := append([]float64(nil), h...)
 	w := make([]float64, len(rows))
 	if w0 != nil {
 		copy(w, w0)
@@ -332,7 +339,7 @@ func solveAt(rows []tideCalRow, nCells int, curve tideCurve, offsetMin int, floo
 			w[i] = 1
 		}
 	}
-	sol := &tideCalSolution{seabed: make([]float64, nCells), hbar: make([]float64, nCells), resid: make([]float64, len(rows)), offsetMn: offsetMin}
+	sol := &tideCalSolution{seabed: make([]float64, nCells), hbar: make([]float64, nCells), resid: make([]float64, len(rows)), offsetMn: offsetMin, heights: heights}
 	sw, swh, swd, abs := sc.sw, sc.swh, sc.swd, sc.abs
 	prevK := math.NaN()
 	for iter := 0; iter < tideCalIRLSIterations; iter++ {
@@ -401,8 +408,59 @@ func (s *tideCalSolution) huberLoss(delta float64) float64 {
 // span, so the offsets that stay plausible are decided by the readings alone.
 // Its errors are *tideCalError.
 func fitTideCalibration(readings []tideCalReading, anchorLat, anchorLon float64, curve tideCurve) (*tideCalFit, *tideCalError) {
+	fit, err, _ := fitTideCalibrationWarm(readings, anchorLat, anchorLon, curve, "", nil)
+	return fit, err
+}
+
+// tideCalWarm is what a fit leaves for the next one on the same stay: the Huber
+// weights it ended with at each offset it solved, and the readings they belong
+// to. A minute later the readings are the same ones with another at the end, so
+// those weights are almost the answer and the solver needs a round or two, not
+// forty. The fit it starts is the same optimum a cold fit reaches: the weights
+// only choose where the iteration begins.
+type tideCalWarm struct {
+	key             string // the chart (and so the curve) the weights were found on
+	lat, lon        float64
+	firstAt, lastAt time.Time
+	n               int
+	weights         map[int][]float64 // by offset, minutes
+	heights         map[int][]float64 // the curve's height at each row, by offset
+}
+
+// startHeights are the heights the previous fit read off the curve at this
+// offset, for the readings it had.
+func (w *tideCalWarm) startHeights(offsetMin int) []float64 {
+	if w == nil {
+		return nil
+	}
+	return w.heights[offsetMin]
+}
+
+// startWeights are the previous fit's weights at this offset, extended with 1
+// for the minutes added since, or nil if there are none for it.
+func (w *tideCalWarm) startWeights(offsetMin, rows int) []float64 {
+	if w == nil {
+		return nil
+	}
+	prev, ok := w.weights[offsetMin]
+	if !ok {
+		return nil
+	}
+	out := make([]float64, rows)
+	n := copy(out, prev)
+	for i := n; i < rows; i++ {
+		out[i] = 1
+	}
+	return out
+}
+
+// fitTideCalibrationWarm is fitTideCalibration started from the previous fit's
+// weights when those belong to these readings: same key (the chart), same
+// anchor, and the same readings with minutes added at the end. Otherwise it fits
+// cold. It returns what the next fit can start from.
+func fitTideCalibrationWarm(readings []tideCalReading, anchorLat, anchorLon float64, curve tideCurve, key string, warm *tideCalWarm) (*tideCalFit, *tideCalError, *tideCalWarm) {
 	if len(readings) == 0 {
-		return nil, tideCalErr(tideCalTooFewReadings, "no readings")
+		return nil, tideCalErr(tideCalTooFewReadings, "no readings"), nil
 	}
 	sorted := append([]tideCalReading(nil), readings...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].At.Before(sorted[j].At) })
@@ -421,7 +479,7 @@ func fitTideCalibration(readings []tideCalReading, anchorLat, anchorLon float64,
 		use = append(use, r)
 	}
 	if len(use) == 0 {
-		return nil, tideCalErr(tideCalNoTideCurve, "the station's tide curve does not reach the readings")
+		return nil, tideCalErr(tideCalNoTideCurve, "the station's tide curve does not reach the readings"), nil
 	}
 
 	cellIndex := map[tideCalCell]int{}
@@ -438,22 +496,31 @@ func fitTideCalibration(readings []tideCalReading, anchorLat, anchorLon float64,
 		rows = append(rows, tideCalRow{cell: idx, d: r.DepthM, at: r.At})
 	}
 	usedHours := use[len(use)-1].At.Sub(use[0].At).Hours()
-	failed := func(code, format string, args ...any) (*tideCalFit, *tideCalError) {
+	failed := func(code, format string, args ...any) (*tideCalFit, *tideCalError, *tideCalWarm) {
 		e := tideCalErr(code, format, args...)
 		e.HoursUsed = usedHours
-		return nil, e
+		return nil, e, nil
 	}
 	if len(rows)-len(cells)-1 < 1 {
 		return failed(tideCalTooFewReadings, "%d readings over %d cells", len(rows), len(cells))
 	}
 
+	// The previous fit's weights stand only for the same chart, the same anchor
+	// and the same readings with minutes added at the end.
+	if warm != nil && !(warm.key == key && warm.lat == anchorLat && warm.lon == anchorLon &&
+		warm.n > 0 && warm.n <= len(rows) && rows[0].at.Equal(warm.firstAt) && rows[warm.n-1].at.Equal(warm.lastAt)) {
+		warm = nil
+	}
+	next := &tideCalWarm{key: key, lat: anchorLat, lon: anchorLon, firstAt: rows[0].at, lastAt: rows[len(rows)-1].at, n: len(rows), weights: map[int][]float64{}, heights: map[int][]float64{}}
+
 	sc := newTideCalScratch(len(rows), len(cells))
-	base, ok := solveAt(rows, len(cells), curve, 0, floor, sc, nil)
+	base, ok := solveAt(rows, len(cells), curve, 0, floor, sc, warm.startWeights(0, len(rows)), warm.startHeights(0))
 	if !ok {
 		return failed(tideCalTooFewReadings, "no cell has been crossed at two heights of tide")
 	}
 	delta := tideCalHuberC * base.scale
 	base.loss = base.huberLoss(delta)
+	next.weights[0], next.heights[0] = base.weights, base.heights
 
 	// Coarse offsets across the span, then every recording interval around the
 	// best of them.
@@ -468,8 +535,13 @@ func fitTideCalibration(readings []tideCalReading, anchorLat, anchorLon float64,
 			return
 		}
 		solved[off] = true
-		if s, ok := solveAt(rows, len(cells), curve, off, floor, sc, from.weights); ok {
+		start := warm.startWeights(off, len(rows))
+		if start == nil {
+			start = from.weights
+		}
+		if s, ok := solveAt(rows, len(cells), curve, off, floor, sc, start, warm.startHeights(off)); ok {
 			s.loss = s.huberLoss(delta)
+			next.weights[off], next.heights[off] = s.weights, s.heights
 			sols = append(sols, s)
 			if s.loss < best.loss {
 				best = s
@@ -499,7 +571,7 @@ func fitTideCalibration(readings []tideCalReading, anchorLat, anchorLon float64,
 	lastUse := use[len(use)-1]
 	fit.LastCell = tideCalCellAt(anchorLat, anchorLon, lastUse.Lat, lastUse.Lon)
 	fit.LastAt = lastUse.At
-	return fit, nil
+	return fit, nil, next
 }
 
 // finishMember turns a solution into a member: the cell figures, and the

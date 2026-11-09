@@ -135,6 +135,13 @@ type tideCalStay struct {
 	// the readings. Nil until first built; rebuilt if the anchor moves.
 	cells            map[tideCalCell]struct{}
 	cellLat, cellLon float64
+	// extremes are the stored highs and lows read back after the chart with
+	// content hash extremesFor was filed, so a minute added to the stay does not
+	// read the table again. warm is the last fit's weights, the start of the
+	// next fit while the chart, the anchor and the stay are the same ones.
+	extremes    []tideExtremePoint
+	extremesFor string
+	warm        *tideCalWarm
 }
 
 // ensureCells builds the cell set for this anchor position if the stay does not
@@ -238,11 +245,22 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 		}
 	}
 	readings, station := st.readings, st.station
+	extremes, warm := st.extremes, st.warm
+	haveExtremes := st.extremesFor == hash && !needStore
 	tideCalStayMu.Unlock()
 
-	extremes, err := store.tideCalExtremes(watch.SetAt, chart.Source)
-	if err != nil {
-		return nil, err
+	// The stored extremes change only when a chart is filed, so while the chart
+	// is the one already read they are not read again.
+	if !haveExtremes {
+		var err error
+		if extremes, err = store.tideCalExtremes(watch.SetAt, chart.Source); err != nil {
+			return nil, err
+		}
+		tideCalStayMu.Lock()
+		if tideCalStayCur == st {
+			st.extremes, st.extremesFor = extremes, hash
+		}
+		tideCalStayMu.Unlock()
 	}
 	e := &tideCalFitEntry{setAtMs: setAtMs, lat: watch.Lat, lon: watch.Lon, stationName: chart.Station.Name}
 	if e.stationIsPoint = chart.PositionBased; e.stationIsPoint {
@@ -254,8 +272,14 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 		e.stationDistanceM = floatPtr(haversineMeters(watch.Lat, watch.Lon, station.lat, station.lon))
 	}
 	var ferr *tideCalError
-	e.fit, ferr = fitTideCalibration(readings, watch.Lat, watch.Lon, newTideCurve(extremes))
+	var nextWarm *tideCalWarm
+	e.fit, ferr, nextWarm = fitTideCalibrationWarm(readings, watch.Lat, watch.Lon, newTideCurve(extremes), hash, warm)
 	e.err = ferr
+	tideCalStayMu.Lock()
+	if tideCalStayCur == st {
+		st.warm = nextWarm
+	}
+	tideCalStayMu.Unlock()
 	switch {
 	case e.fit != nil:
 		e.hours = e.fit.Hours()
