@@ -39,6 +39,9 @@ type lowWaterCalibration struct {
 	NotReady        string  `json:"not_ready,omitempty"`
 	NotReadyDetail  string  `json:"not_ready_detail,omitempty"`
 	HoursOfReadings float64 `json:"hours_of_readings"`
+	// StationIsPoint is set when the tide comes from a position model and not a
+	// tide station, so Mate calls it the tide model.
+	StationIsPoint bool `json:"-"`
 
 	// The shallowest cell sounded, projected to the next low. ShallowestDiffers is
 	// set when it is worth a line of its own.
@@ -103,7 +106,7 @@ func roundedPtr(v float64, places int) *float64 { return floatPtr(roundTo(v, pla
 func applyCalibration(out lowWaterClearance, res *calibrationResult, marginM float64) lowWaterClearance {
 	cal := &lowWaterCalibration{HoursOfReadings: roundTo(res.HoursOfReadings, 2), StationName: res.StationName, StationDistanceM: res.StationDistanceM}
 	if res.StationIsPoint {
-		cal.StationName, cal.StationDistanceM = "", nil
+		cal.StationName, cal.StationDistanceM, cal.StationIsPoint = "", nil, true
 	}
 	out.Calibration = cal
 	if res.Err != nil {

@@ -16,7 +16,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Anchor Watch learns the tide where you're anchored.** From the moment you drop
   the anchor it notes the depth and your position every minute and works out how
   the water here differs from the tide station's prediction. Until it's sure, the
-  low-water line reads **Depth based on tide station prediction**. Once the margin
+  low-water line reads **Depth based on tide station prediction**, or **Depth based
+  on tide model prediction** when your tide comes from the worldwide model that
+  follows the boat's position and has no station. Once the margin
   of error is smaller than your clearance setting it reads **Locally calibrated
   depth estimate** with the hours of readings and a figure like **2.4 m ±0.2**.
   The too-shallow warning is now judged on the bottom of that margin, and on the

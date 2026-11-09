@@ -7,6 +7,7 @@ import {
   calibrationNotReadyText,
   lowWaterClearanceReasonLabel,
   readingsSpanText,
+  tideSourceName,
   underKeelPhrase,
   underKeelRangePhrase,
   type LowWaterClearanceResult,
@@ -211,7 +212,7 @@ export function AnchorWatchReadings({
         >
           Too shallow at low water · {clearanceText(lowWaterClearance, true)} at {clockTime(lowWaterClearance.lowTideTime, timeZone)}
           {lowWaterClearance.cautiousSource === 'shallowest_sounded' && ' · set by the shallowest sounded spot'}
-          {lowWaterClearance.cautiousSource === 'station' && ' · set by the tide station estimate'}
+          {lowWaterClearance.cautiousSource === 'station' && ` · set by the ${tideSourceName(lowWaterClearance)} estimate`}
           {staleSuffix}
         </div>
       )}
@@ -245,9 +246,9 @@ export function AnchorWatchReadings({
     if (calibration?.ready && verdict.depthAtLowHalfWidthM !== undefined) {
       methodText = `Locally calibrated depth estimate (${readingsSpanText(calibration.hoursOfReadings)} of readings) · ${withInterval({ depthM: verdict.depthAtLowM, halfWidthM: verdict.depthAtLowHalfWidthM })}`
     } else {
-      methodText = `Depth based on tide station prediction · ${depthText(verdict.depthAtLowM)} ${lengthUnit}`
+      methodText = `Depth based on ${tideSourceName(verdict)} prediction · ${depthText(verdict.depthAtLowM)} ${lengthUnit}`
       if (calibration && !calibration.ready && calibration.notReady) {
-        methodText += ` · ${calibrationNotReadyText(calibration.notReady, calibration.hoursOfReadings)}`
+        methodText += ` · ${calibrationNotReadyText(calibration.notReady, calibration.hoursOfReadings, verdict.tideIsPoint === true)}`
       }
     }
   }

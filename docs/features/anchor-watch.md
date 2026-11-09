@@ -400,6 +400,10 @@ you're reading.
   fall the tide station predicts to the next low. It's what you see after you
   drop the anchor. A station can be a long way off, and the water at your
   anchorage may rise and fall by a different amount, so this is a first guess.
+- **Depth based on tide model prediction:** The same first guess, when your tide
+  provider is the worldwide model that follows the boat's position and has no
+  station. The readout under the clearance, the "set by" note on the warning
+  and the reasons below say "tide model" where they would say "tide station".
 - **Locally calibrated depth estimate (4 h of readings):** Once Helmcentral has
   learned how the tide behaves where you are, this replaces the guess. The
   figure comes with a margin of error, for example **2.4 m ±0.2**. The hours
@@ -425,7 +429,8 @@ and the line says why:
   longer, and the estimate stays on the station figure rather than pretend to
   be sure.
 - **Readings don't fit the station's tide:** The readings disagree so badly with
-  the station that Helmcentral won't use them.
+  the station that Helmcentral won't use them. With the tide model, the line
+  reads **Readings don't fit the tide model**.
 
 Moving the anchor mark with Adjust keeps the readings, because it's the same
 drop. A new **Drop** starts again from nothing. Readings are kept after you raise

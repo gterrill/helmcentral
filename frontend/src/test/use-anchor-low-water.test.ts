@@ -151,6 +151,15 @@ describe('useAnchorLowWater', () => {
     })
   })
 
+  it('reads that the tide comes from the position model', async () => {
+    answer({ ...CALIBRATED, tide_is_point: true })
+    const { result } = renderHook(() => useAnchorLowWater())
+
+    await waitFor(() => expect(result.current.lowWater).not.toBeNull())
+    const v = result.current.lowWater
+    expect(v?.status === 'ok' && v.tideIsPoint).toBe(true)
+  })
+
   it('reads a station estimate with the calibration not ready yet', async () => {
     answer({
       status: 'ok', depth_at_low_m: 2.4, clearance_m: 1.2, low_tide_time: '2026-11-08T04:45:00Z',
