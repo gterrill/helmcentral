@@ -19,8 +19,9 @@ import { useWaveProviders } from '@/hooks/use-wave-providers'
 import { useWeatherProviders } from '@/hooks/use-weather-providers'
 import { lowWaterClearanceReasonLabel } from '@/lib/low-water-clearance'
 import { maxExpectedDepthM, planningTideDatumDiffers, tideCapture, tideHeightFtOrNull } from '@/lib/rode-plan'
-import { currentTideHeightKnown, effectiveTideProvider, tideHeightFtKnown } from '@/lib/tide-datum'
+import { effectiveTideProvider } from '@/lib/tide-datum'
 import { selectAnchorPointKey, setAnchorHere, updatePlanningDepth } from '@/hooks/use-anchor-watch'
+import { tileCard, tilePayload } from './helpers/tile-card-fixture'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
@@ -59,18 +60,11 @@ const mslTide: TideToday = {
 const chartTide: TideToday = { ...mslTide, height_datum: 'chart_datum', station_name: 'Test Station', provider: 'bom' }
 
 describe('tide datum helpers', () => {
-  it('knows a current height from chart datum only at or above zero', () => {
-    expect(currentTideHeightKnown({ current_tide_height_ft: 3 })).toBe(true)
-    expect(currentTideHeightKnown({ current_tide_height_ft: 0 })).toBe(true)
-    expect(currentTideHeightKnown({ current_tide_height_ft: -1, height_datum: 'chart_datum' })).toBe(false)
-    expect(currentTideHeightKnown({ current_tide_height_ft: -2.2, height_datum: 'chart_datum' })).toBe(false)
-  })
-
-  it('knows a negative height from mean sea level is real, and -1 is still none', () => {
-    expect(currentTideHeightKnown({ current_tide_height_ft: -2.2, height_datum: 'mean_sea_level' })).toBe(true)
-    expect(currentTideHeightKnown({ current_tide_height_ft: -1, height_datum: 'mean_sea_level' })).toBe(false)
-    expect(currentTideHeightKnown({ current_tide_height_ft: Number.NaN, height_datum: 'mean_sea_level' })).toBe(false)
-    expect(tideHeightFtKnown(-1.0000000000000002, 'mean_sea_level')).toBe(true)
+  // A height is a reading when it is a number, on either datum. Only null is none.
+  it('takes a NOAA minus tide below chart datum, and exactly -1 ft, as real readings', () => {
+    expect(tideHeightFtOrNull({ ...chartTide, current_tide_height_ft: -0.6 })).toBe(-0.6)
+    expect(tideHeightFtOrNull({ ...chartTide, current_tide_height_ft: -1 })).toBe(-1)
+    expect(tideHeightFtOrNull({ ...chartTide, current_tide_height_ft: null })).toBeNull()
   })
 
   it('names the default provider when none is saved', () => {
@@ -86,11 +80,11 @@ describe('rode planner with a tide from mean sea level', () => {
     expect(tideCapture(mslTide)).toEqual({ ft: -0.5 * FT_PER_M, datum: 'mean_sea_level' })
   })
 
-  it('still reads a chart-datum height below zero as none, and stamps nothing for chart datum', () => {
-    expect(tideHeightFtOrNull({ ...chartTide, current_tide_height_ft: -1.5 })).toBeNull()
-    expect(tideCapture(chartTide)).toBeNull()
+  it('stamps a chart-datum height with its datum, a minus tide and exactly -1 ft included, and null with nothing', () => {
+    expect(tideCapture({ ...chartTide, current_tide_height_ft: -0.6 })).toEqual({ ft: -0.6, datum: 'chart_datum' })
+    expect(tideCapture({ ...chartTide, current_tide_height_ft: -1 })).toEqual({ ft: -1, datum: 'chart_datum' })
     expect(tideCapture({ ...chartTide, current_tide_height_ft: 3 })).toEqual({ ft: 3, datum: 'chart_datum' })
-    expect(tideCapture({ ...mslTide, current_tide_height_ft: -1 })).toBeNull()
+    expect(tideCapture({ ...mslTide, current_tide_height_ft: null })).toBeNull()
   })
 
   it('adds the rise to the next high from a negative mean-sea-level height', () => {
@@ -156,11 +150,22 @@ describe('the tide tile with heights from mean sea level', () => {
     expect(screen.getByTestId('tide-datum-label')).toHaveTextContent('from mean sea level')
   })
 
-  it('still draws a dash for a chart-datum height below zero, with no datum label', () => {
+  it('shows a NOAA minus tide below chart datum, with no datum label', () => {
     render(
-      <DepthTideTile depth={4} isImperialDistance={false} navigationState="anchored" depthTrend={{ points: [], since: 'window' }} tide={{ ...chartTide, current_tide_height_ft: -2 }} lastUpdateAgeS={null} timeZone="UTC" />,
+      <DepthTideTile depth={4} isImperialDistance depthTrend={{ points: [], since: 'window' }} navigationState="anchored" tide={{ ...chartTide, current_tide_height_ft: -0.6 }} lastUpdateAgeS={null} timeZone="UTC" />,
     )
     expect(screen.queryByTestId('tide-datum-label')).toBeNull()
+    expect(screen.getByText('-0.6')).toBeInTheDocument()
+  })
+
+  it('shows exactly -1.0 ft as a reading and draws a dash only for null', () => {
+    const { rerender } = render(
+      <DepthTideTile depth={4} isImperialDistance depthTrend={{ points: [], since: 'window' }} navigationState="anchored" tide={{ ...chartTide, current_tide_height_ft: -1 }} lastUpdateAgeS={null} timeZone="UTC" />,
+    )
+    expect(screen.getByText('-1.0')).toBeInTheDocument()
+    rerender(
+      <DepthTideTile depth={4} isImperialDistance depthTrend={{ points: [], since: 'window' }} navigationState="anchored" tide={{ ...chartTide, current_tide_height_ft: null }} lastUpdateAgeS={null} timeZone="UTC" />,
+    )
     expect(screen.getByText('—')).toBeInTheDocument()
   })
 })
@@ -294,12 +299,6 @@ describe('review fixes', () => {
     vi.unstubAllGlobals()
   })
 
-  it('pins an exact -1 ft from mean sea level as none, the way the server does', () => {
-    expect(tideHeightFtKnown(-1, 'mean_sea_level')).toBe(false)
-    expect(tideHeightFtKnown(-1, 'chart_datum')).toBe(false)
-    expect(tideHeightFtKnown(-1.0000000000000002, 'mean_sea_level')).toBe(true)
-  })
-
   it('labels the next high or low on the Anchor Watch readings as from mean sea level', () => {
     render(
       <AnchorWatchReadings
@@ -345,5 +344,24 @@ describe('the chart follows the anchor', () => {
     expect(selectAnchorPointKey({ ...(base as object), anchorLat: 45.6 } as never)).toBe('45.6,12.4')
     expect(selectAnchorPointKey({ ...(base as object), active: false } as never)).toBe('')
     expect(selectAnchorPointKey({ ...(base as object), anchorLat: null } as never)).toBe('')
+  })
+})
+
+describe('a Mate tile card keeps its tide heights', () => {
+  const tideOf = (over: Record<string, unknown>) => {
+    const base = tilePayload().snapshot as { tide: Record<string, unknown> }
+    return tileCard({}, { tide: { ...base.tide, ...over } }).snapshot.tide
+  }
+
+  it('reads null as none and a minus tide, even exactly -1 ft, as a reading', () => {
+    const t = tideOf({ current_tide_height_ft: -0.6, high_tide_height_ft: null, high_tide_time: '', low_tide_height_ft: -1 })
+    expect(t?.current_tide_height_ft).toBe(-0.6)
+    expect(t?.high_tide_height_ft).toBeNull()
+    expect(t?.low_tide_height_ft).toBe(-1)
+  })
+
+  it('reads the old -1 for a high that was not to come (with an empty time) as none', () => {
+    const t = tideOf({ high_tide_height_ft: -1, high_tide_time: '' })
+    expect(t?.high_tide_height_ft).toBeNull()
   })
 })

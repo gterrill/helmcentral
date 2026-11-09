@@ -104,27 +104,31 @@ type weatherHourlyCloudData struct {
 
 type tideTodayData struct {
 	Datetime            time.Time
-	CurrentTideHeightFt float64
+	CurrentTideHeightFt *float64
 	TideDirection       string
 	HighTideTime        time.Time
-	HighTideHeightFt    float64
+	HighTideHeightFt    *float64
 	LowTideTime         time.Time
-	LowTideHeightFt     float64
+	LowTideHeightFt     *float64
 	TidalPhase          string
 	DoubleHighToday     bool
 	DoubleLowToday      bool
 }
 
+// tideTodayResponse carries a height in feet, or null when there is none: no
+// upcoming high or low of that kind, or no current reading. Null is the whole
+// signal. A height of any size, negative included, is a reading, on either
+// datum.
 type tideTodayResponse struct {
-	Datetime            string  `json:"datetime"`
-	CurrentTideHeightFt float64 `json:"current_tide_height_ft"`
-	TideDirection       string  `json:"tide_direction"`
-	HighTideTime        string  `json:"high_tide_time"`
-	HighTideHeightFt    float64 `json:"high_tide_height_ft"`
-	LowTideTime         string  `json:"low_tide_time"`
-	LowTideHeightFt     float64 `json:"low_tide_height_ft"`
-	StationName         string  `json:"station_name,omitempty"`
-	Provider            string  `json:"provider,omitempty"`
+	Datetime            string   `json:"datetime"`
+	CurrentTideHeightFt *float64 `json:"current_tide_height_ft"`
+	TideDirection       string   `json:"tide_direction"`
+	HighTideTime        string   `json:"high_tide_time"`
+	HighTideHeightFt    *float64 `json:"high_tide_height_ft"`
+	LowTideTime         string   `json:"low_tide_time"`
+	LowTideHeightFt     *float64 `json:"low_tide_height_ft"`
+	StationName         string   `json:"station_name,omitempty"`
+	Provider            string   `json:"provider,omitempty"`
 	// HeightDatum is what every height above is measured from: chart_datum, or
 	// mean_sea_level for a source whose heights are not a depth correction.
 	HeightDatum     string `json:"height_datum,omitempty"`
@@ -134,12 +138,12 @@ type tideTodayResponse struct {
 }
 
 type tideTodayETagData struct {
-	CurrentTideHeightFt float64   `json:"current_tide_height_ft"`
+	CurrentTideHeightFt *float64  `json:"current_tide_height_ft"`
 	TideDirection       string    `json:"tide_direction"`
 	HighTideTime        time.Time `json:"high_tide_time"`
-	HighTideHeightFt    float64   `json:"high_tide_height_ft"`
+	HighTideHeightFt    *float64  `json:"high_tide_height_ft"`
 	LowTideTime         time.Time `json:"low_tide_time"`
-	LowTideHeightFt     float64   `json:"low_tide_height_ft"`
+	LowTideHeightFt     *float64  `json:"low_tide_height_ft"`
 	StationName         string    `json:"station_name,omitempty"`
 	Provider            string    `json:"provider,omitempty"`
 	HeightDatum         string    `json:"height_datum,omitempty"`
@@ -260,27 +264,10 @@ func respondJSONWithETag(c echo.Context, status int, etag string, payload any) e
 	return c.JSON(status, payload)
 }
 
-// noTideExtremeHeightFt is what tideToday reports for HighTideHeightFt or
-// LowTideHeightFt when no future extreme of that kind turns up in the
-// provider's list - the same -1 "not published" convention useTideToday
-// (frontend) and this file's other weather sentinels already use. A bare 0
-// used to stand in for this and was indistinguishable from a real 0.0 m
-// extreme, both to the code that filled it in (see the found-flags below)
-// and to a frontend reader that took height 0 as "there is a low, at chart
-// datum, right now" and warned about it.
-const noTideExtremeHeightFt = -1.0
-
-// tideHeightFtOnTheWire is a height in metres as feet for the tide response,
-// never equal to noTideExtremeHeightFt. Heights from mean sea level run
-// negative all the time, and a real one that landed on exactly -1 ft would be
-// read by every consumer as "not published". It is moved by a millionth of a
-// foot, which no reader can see, to a value that is not the sentinel.
-func tideHeightFtOnTheWire(heightM float64) float64 {
+// tideFeet is a height in metres as feet, for the tide response.
+func tideFeet(heightM float64) *float64 {
 	ft := heightM * metersToFeet
-	if ft == noTideExtremeHeightFt {
-		return math.Nextafter(noTideExtremeHeightFt, math.Inf(-1))
-	}
-	return ft
+	return &ft
 }
 
 // tideTodayError is a failure to build the tide, with the HTTP status the
@@ -383,17 +370,15 @@ func buildTideToday(settingsPath string, now time.Time, boat func() tideBoatFix)
 	// HighTideTime/LowTideTime start at the zero time.Time, not `now` or some
 	// other invented instant (code-review finding: the old `now`/`now+24h`
 	// defaults survived to the response whenever no future extreme of that
-	// kind existed, alongside the correct -1 height sentinel - an operator
+	// kind existed, alongside a missing height - an operator
 	// reads a time as real regardless of what the height next to it says, so
 	// the frontend showed a fabricated "Low <tomorrow>"/"High · <now>"). The
 	// zero value is never a real extreme time, and IsZero() below turns it
 	// into an empty string in the response rather than formatting it.
 	state := tideTodayData{
 		Datetime:            now,
-		CurrentTideHeightFt: tideHeightFtOnTheWire(result.CurrentHeightM),
+		CurrentTideHeightFt: tideFeet(result.CurrentHeightM),
 		TideDirection:       result.Direction,
-		HighTideHeightFt:    noTideExtremeHeightFt,
-		LowTideHeightFt:     noTideExtremeHeightFt,
 		TidalPhase:          tidalPhase,
 		DoubleHighToday:     doubleHigh,
 		DoubleLowToday:      doubleLow,
@@ -402,8 +387,8 @@ func buildTideToday(settingsPath string, now time.Time, boat func() tideBoatFix)
 	// Explicit found flags, not a `== 0` check on the height: a real 0.0 m
 	// extreme (the tide sitting exactly at chart datum) is valid data, and
 	// treating it as "not found yet" let the *next* extreme in the list
-	// overwrite it. The frontend's -1 sentinel (useTideToday) fills
-	// HighTideHeightFt/LowTideHeightFt above for whichever one never turns up.
+	// overwrite it. A height that never turns up
+	// stays nil, and goes out as null.
 	foundHigh := false
 	foundLow := false
 	for _, extreme := range result.Extremes {
@@ -412,11 +397,11 @@ func buildTideToday(settingsPath string, now time.Time, boat func() tideBoatFix)
 		}
 		if extreme.High && !foundHigh {
 			state.HighTideTime = extreme.Time
-			state.HighTideHeightFt = tideHeightFtOnTheWire(extreme.HeightM)
+			state.HighTideHeightFt = tideFeet(extreme.HeightM)
 			foundHigh = true
 		} else if !extreme.High && !foundLow {
 			state.LowTideTime = extreme.Time
-			state.LowTideHeightFt = tideHeightFtOnTheWire(extreme.HeightM)
+			state.LowTideHeightFt = tideFeet(extreme.HeightM)
 			foundLow = true
 		}
 		if foundHigh && foundLow {

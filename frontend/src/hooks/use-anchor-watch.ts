@@ -4,7 +4,7 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { apiRequest, declareQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
-import { isMeanSeaLevel, MEAN_SEA_LEVEL, normaliseTideDatum, tideHeightFtKnown, type TideCapture } from '@/lib/tide-datum'
+import { isMeanSeaLevel, MEAN_SEA_LEVEL, normaliseTideDatum, type TideCapture } from '@/lib/tide-datum'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
@@ -36,7 +36,7 @@ interface AnchorWatchServerState {
   // Undo-restore use as heading_at_set_deg above.
   place_name?: string
   planning_depth_m?: number
-  planning_tide_height_ft?: number
+  planning_tide_height_ft?: number | null
   // What planning_tide_height_ft is measured from (ADR 0273); absent or empty is chart datum.
   planning_tide_datum?: string
   // The planning depth at chart datum, worked out on the server; null with a
@@ -262,8 +262,7 @@ export function parseAnchorWatch(data: AnchorWatchServerState | undefined): Anch
     planningDepthM: on && typeof serverState.planning_depth_m === 'number' && serverState.planning_depth_m > 0
       ? serverState.planning_depth_m
       : null,
-    planningTide: on && typeof serverState.planning_tide_height_ft === 'number'
-      && tideHeightFtKnown(serverState.planning_tide_height_ft, serverState.planning_tide_datum)
+    planningTide: on && typeof serverState.planning_tide_height_ft === 'number' && Number.isFinite(serverState.planning_tide_height_ft)
       ? { ft: serverState.planning_tide_height_ft, datum: normaliseTideDatum(serverState.planning_tide_datum) }
       : null,
     datumDepthM: on && typeof serverState.datum_depth_m === 'number' ? serverState.datum_depth_m : null,
@@ -306,8 +305,8 @@ export function sameAnchorWatchFields(a: AnchorWatchFields, b: AnchorWatchFields
  * the bow-offset correction (projecting forward by gps_from_bow_m along
  * heading) if it's configured.
  *
- * planning_depth_m/planning_tide_height_ft always ride along, using the -1
- * sentinel when the caller had nothing to capture (ADR 0063). The capture
+ * planning_depth_m/planning_tide_height_ft always ride along: -1 for no depth
+ * and null for no tide height when the caller had nothing to capture (ADR 0063). The capture
  * argument is required, not optional, so a caller can't silently create a
  * watch the planner has nothing to plan against.
  */
@@ -322,14 +321,14 @@ export async function setAnchorHere(
     radius_meters?: number
     apply_bow_offset: true
     planning_depth_m: number
-    planning_tide_height_ft: number
+    planning_tide_height_ft: number | null
     planning_tide_datum?: typeof MEAN_SEA_LEVEL
   } = {
     lat,
     lon,
     apply_bow_offset: true,
     planning_depth_m: capture.planningDepthM ?? -1,
-    planning_tide_height_ft: capture.planningTide?.ft ?? -1,
+    planning_tide_height_ft: capture.planningTide?.ft ?? null,
   }
   // A height from mean sea level is stamped as such so the server does not
   // read a negative one as "not captured" or work a depth at chart datum from it.
@@ -414,7 +413,7 @@ export async function updateRodeAndConditions(rodeDeployedM: number, seaState: S
 export async function updatePlanningDepth(depthM: number, tide: TideCapture | null): Promise<void> {
   land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
     planning_depth_m: depthM,
-    planning_tide_height_ft: tide?.ft ?? -1,
+    planning_tide_height_ft: tide?.ft ?? null,
     ...(isMeanSeaLevel(tide?.datum) ? { planning_tide_datum: MEAN_SEA_LEVEL } : {}),
   } }))
 }

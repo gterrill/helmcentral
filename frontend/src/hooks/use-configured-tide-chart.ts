@@ -30,9 +30,12 @@ export function useConfiguredTideChart(cacheKey: string, enabled: boolean, place
     if (error) console.error('Error fetching tide chart:', error)
   }, [error])
 
-  const reason = error instanceof ApiError && typeof (error.body as { reason?: unknown } | undefined)?.reason === 'string'
-    ? (error.body as { reason: string }).reason
-    : ''
+  // A failed answer still says why, and what kind of provider it was.
+  const body = error instanceof ApiError ? (error.body as { reason?: unknown; position_based?: unknown } | undefined) : undefined
+  const reason = typeof body?.reason === 'string' ? body.reason : ''
+  // Null until the chart or the error says what kind of provider this is, so
+  // a screen waiting on it does not guess from a saved station.
+  const positionBased: boolean | null = data ? data.positionBased : typeof body?.position_based === 'boolean' ? body.position_based : null
   return {
     chart: data?.chart ?? null,
     loading: isLoading,
@@ -45,7 +48,7 @@ export function useConfiguredTideChart(cacheKey: string, enabled: boolean, place
     updatedAt: data?.updatedAt ?? null,
     ttlSeconds: data?.ttlSeconds ?? null,
     providerName: data?.providerName ?? '',
-    positionBased: data?.positionBased ?? false,
+    positionBased,
     refetch,
   }
 }

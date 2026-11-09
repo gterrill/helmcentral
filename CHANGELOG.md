@@ -45,6 +45,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   under Plugins. The new plugin file, `open-meteo.wasm`, comes in the plugin
   bundle, so re-fetch the bundle as in the [install guide](docs/how-to/install.md)
   and restart. Until you do, the tide section says the tide plugin isn't installed.
+- **A tide below chart datum now shows.** A minus tide from a NOAA station, such as
+  -0.6 ft, used to be blanked on the Depth & Tide tile and treated as no reading
+  elsewhere. It shows everywhere now, and Save depth uses it. Only a tide with no
+  reading at all is left blank.
 
 ### Changed
 

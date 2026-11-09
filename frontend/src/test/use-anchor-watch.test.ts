@@ -113,7 +113,7 @@ describe('useAnchorWatch planning-depth capture', () => {
     expect(body.planning_tide_height_ft).toBe(1.8)
   })
 
-  it('setAnchorHere posts -1 sentinels when there is no reading, rather than omitting the fields', async () => {
+  it('setAnchorHere posts -1 for no depth and null for no tide, rather than omitting the fields', async () => {
     const fetchMock = vi.mocked(fetch)
     const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
@@ -126,7 +126,7 @@ describe('useAnchorWatch planning-depth capture', () => {
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(init!.body as string)
     expect(body.planning_depth_m).toBe(-1)
-    expect(body.planning_tide_height_ft).toBe(-1)
+    expect(body.planning_tide_height_ft).toBeNull()
   })
 })
 

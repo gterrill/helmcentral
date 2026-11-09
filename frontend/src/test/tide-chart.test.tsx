@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 
 import { ChartTooltipBubble } from '@/components/chart-tooltip'
 import { TideChart } from '@/components/tide-chart'
-import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
+import type { TideChart as TideChartData } from '@/lib/tide-chart-map'
 
 const STATION = {
   stationId: 'station-1',

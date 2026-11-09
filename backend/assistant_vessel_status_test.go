@@ -844,9 +844,9 @@ func lowWaterStatusDeps(t *testing.T) assistantToolDeps {
 	}
 	d.tileTide = func(_ context.Context, _ vesselStateData, now time.Time) (tideTodayResponse, error) {
 		return tideTodayResponse{
-			Datetime: now.Format(time.RFC3339), CurrentTideHeightFt: 3, TideDirection: "Falling",
-			LowTideTime: now.Add(time.Hour).Format(time.RFC3339), LowTideHeightFt: 1,
-			HighTideTime: now.Add(7 * time.Hour).Format(time.RFC3339), HighTideHeightFt: 5,
+			Datetime: now.Format(time.RFC3339), CurrentTideHeightFt: ptr(3.0), TideDirection: "Falling",
+			LowTideTime: now.Add(time.Hour).Format(time.RFC3339), LowTideHeightFt: ptr(1.0),
+			HighTideTime: now.Add(7 * time.Hour).Format(time.RFC3339), HighTideHeightFt: ptr(5.0),
 		}, nil
 	}
 	d.anchorSettings = func() (anchorageBoatSettings, error) {

@@ -1,5 +1,3 @@
-import { isUsableTideHeightFt } from '@/lib/tide-estimate'
-
 // What a tide height is measured from. A station-based provider (BOM, NOAA)
 // predicts on its chart's datum. The default provider models sea level from
 // mean sea level, so its heights run negative all the time and are not a depth
@@ -33,27 +31,8 @@ export const MEAN_SEA_LEVEL_LABEL = 'from mean sea level'
 export const MEAN_SEA_LEVEL_NOTE =
   'Heights are from mean sea level, not chart datum, so they are often negative and are not a depth.'
 
-/**
- * Whether a stored or forecast tide height in feet is a reading. -1 is "none"
- * in every payload; on chart datum anything below zero is none too, from mean
- * sea level a negative height is real.
- */
-export function tideHeightFtKnown(ft: number, datum: unknown): boolean {
-  return isUsableTideHeightFt(ft) && (isMeanSeaLevel(datum) || ft >= 0)
-}
-
 /** A tide height in feet and the datum it is measured from: one value, so one is never passed without the other. */
 export interface TideCapture {
   ft: number
   datum: TideDatum
-}
-
-/**
- * Whether the current height in a tide payload is a reading. The payload's
- * -1 ft means "none yet": on chart datum a height below zero is also none (the
- * tile has always drawn a dash for it); from mean sea level a negative height
- * is real, and the server never sends a real one as exactly -1.
- */
-export function currentTideHeightKnown(tide: { current_tide_height_ft: number; height_datum?: string }): boolean {
-  return tideHeightFtKnown(tide.current_tide_height_ft, tide.height_datum)
 }

@@ -55,7 +55,7 @@ function chartState(overrides: Partial<ReturnType<typeof useConfiguredTideChart>
     updatedAt: null,
     ttlSeconds: null,
     providerName: '',
-    positionBased: false,
+    positionBased: false as boolean | null,
     refetch: vi.fn(),
     ...overrides,
   }
@@ -259,5 +259,48 @@ describe('ForecastTideSection', () => {
 
     expect(screen.getByText('No tide data available')).toBeInTheDocument()
     expect(screen.getByTestId('forecast-tide-refresh-meta')).toBeInTheDocument()
+  })
+
+  // Until the chart or its error says what kind of provider this is, the saved
+  // station and the station controls are not shown for it.
+  it('shows neither the saved station nor Change Station while the provider kind is unknown', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: '', tideStationName: 'Old Harbour' }))
+    mockedUseTideChart.mockReturnValue(chartState({ loading: true, positionBased: null }))
+
+    render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+
+    expect(screen.queryByText('Old Harbour')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Change Station' })).not.toBeInTheDocument()
+  })
+
+  it('shows neither for a failed answer that says the provider follows a position', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState({ tideProvider: '', tideStationName: 'Old Harbour' }))
+    mockedUseTideChart.mockReturnValue(chartState({ error: 'vessel position unavailable', positionBased: true }))
+
+    render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+
+    expect(screen.getByText('vessel position unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Old Harbour')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Change Station' })).not.toBeInTheDocument()
+  })
+
+  it('looks for the nearest station again on a later no_station for the same provider', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ station_id: 'S9', name: 'Nearest Bar' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const settings = settingsState({ tideProvider: 'bom', tideStationId: '' })
+    mockedUseTideSettings.mockReturnValue(settings)
+    mockedUseTideChart.mockReturnValue(chartState({ noStation: true, error: 'no tide station configured' }))
+    const { rerender } = render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+    await waitFor(() => expect(settings.saveStation).toHaveBeenCalledTimes(1))
+
+    // The station is saved and the chart comes back; later it is lost again.
+    // (dayOffset changes only to make the memoized section render again.)
+    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart() }))
+    rerender(<ForecastTideSection isImperial={false} dayOffset={1} />)
+    mockedUseTideChart.mockReturnValue(chartState({ noStation: true, error: 'no tide station configured' }))
+    rerender(<ForecastTideSection isImperial={false} dayOffset={2} />)
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('tide-nearest'))).toHaveLength(2))
+    await waitFor(() => expect(settings.saveStation).toHaveBeenCalledTimes(2))
   })
 })

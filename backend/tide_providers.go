@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -145,18 +146,6 @@ func tideCorrectsChartDepth(datum string) (ok bool, reason string) {
 	return true, ""
 }
 
-// tideHeightKnown says a tide height in feet is a reading rather than the -1 ft
-// "not published" mark: at or above zero on chart datum, any real number from
-// mean sea level. Exactly -1 is none on both, as in the browser's
-// tideHeightFtKnown; the host never sends a real height from mean sea level as
-// exactly -1 (tideHeightFtOnTheWire).
-func tideHeightKnown(ft float64, datum string) bool {
-	if !finite(ft) || ft == noTideExtremeHeightFt {
-		return false
-	}
-	return datum == tideDatumMeanSeaLevel || ft >= 0
-}
-
 // tideDatumNote is what Mate and the screens say about heights from mean sea
 // level.
 const tideDatumNote = "Heights are metres from mean sea level, not chart datum, so they are routinely negative and are not a depth. " +
@@ -222,7 +211,13 @@ func tideOwnFixNow() tideBoatFix {
 // usableOwnShipFix (a critical GNSS alert and the -1,-1 pair are refused) and
 // explained only when it fails.
 func tidePositionFromState(state vesselStateData, err error) (lat, lon float64, reason error) {
-	if w, active, _ := currentAnchorWatch(); active {
+	w, active, loadErr := currentAnchorWatch()
+	if loadErr != "" {
+		// The watch file is unreadable, so whether a watch is set is not known;
+		// the boat's fix would be a guess at which point the stay is on.
+		return 0, 0, fmt.Errorf("the anchor watch could not be read, so the tide's point is not known: %s", loadErr)
+	}
+	if active {
 		if !hasUsableVesselPosition(w.Lat, w.Lon) {
 			return 0, 0, fmt.Errorf("an anchor watch is set but has no usable anchor position")
 		}
@@ -242,6 +237,11 @@ func boatOwnPosition(state vesselStateData, err error) (lat, lon float64, reason
 	case err != nil:
 		return 0, 0, err
 	case state.GNSSCriticalAlert:
+		// The reason names what the validation found, such as SignalK being
+		// unreachable.
+		if r := strings.TrimSpace(state.GNSSValidationReason); r != "" {
+			return 0, 0, fmt.Errorf("the GNSS fix is flagged unreliable: %s", r)
+		}
 		return 0, 0, fmt.Errorf("the GNSS fix is flagged unreliable")
 	}
 	return 0, 0, fmt.Errorf("the boat has no usable position fix yet")
@@ -275,12 +275,38 @@ func tidePointID(lat, lon float64) string {
 func tidePointStation(lat, lon float64, name string) tideStation {
 	rlat, rlon := roundTidePosition(lat, lon)
 	station := tideStation{StationID: tidePointID(lat, lon), Name: name, Lat: rlat, Lon: rlon}
-	if z, zerr := zoneAtCached(rlat, rlon); zerr == nil {
-		station.Timezone = z.Name
-	} else {
-		log.Printf("tide: no time zone for %s: %v", station.StationID, zerr)
-	}
+	station.Timezone = tidePointZone(station.StationID, rlat, rlon)
 	return station
+}
+
+// tidePointZones remembers the zone found at a tide point, or that none was
+// found, so a point offshore is looked up and logged once and not on every
+// fetch (zoneAtCached remembers successes only). The points are on a 0.05 degree
+// grid, so the map stays small; it is cleared if it ever grows past a bound.
+var (
+	tidePointZonesMu sync.Mutex
+	tidePointZones   = map[string]string{}
+)
+
+const tidePointZonesMax = 4096
+
+func tidePointZone(id string, lat, lon float64) string {
+	tidePointZonesMu.Lock()
+	defer tidePointZonesMu.Unlock()
+	if name, ok := tidePointZones[id]; ok {
+		return name
+	}
+	name := ""
+	if z, err := zoneAtCached(lat, lon); err == nil {
+		name = z.Name
+	} else {
+		log.Printf("tide: no time zone for %s: %v", id, err)
+	}
+	if len(tidePointZones) >= tidePointZonesMax {
+		tidePointZones = map[string]string{}
+	}
+	tidePointZones[id] = name
+	return name
 }
 
 // parseTidePointID reads the "<lat>,<lon>" a position-based tide is asked for.
@@ -664,9 +690,11 @@ func tideNearestHandler(c echo.Context) error {
 		var err error
 		// The anchor's point is for providers that follow a position; a station
 		// provider finds its nearest station from the boat itself.
-		fix := tideOwnFixNow()
+		var fix tideBoatFix
 		if tideProviderPositionBased(provider) {
 			fix = tideBoatFixNow()
+		} else {
+			fix = tideOwnFixNow()
 		}
 		lat, lon, err = fix.Lat, fix.Lon, fix.Err
 		if err != nil {
@@ -749,7 +777,13 @@ func configuredTideChartHandler(c echo.Context) error {
 		var te *tideTodayError
 		provider, _, result, te = configuredTideChart(uiMap, tideBoatFixNow)
 		if te != nil {
-			return c.JSON(te.status, map[string]string{"error": te.message, "reason": string(te.reason)})
+			body := map[string]any{"error": te.message, "reason": string(te.reason)}
+			// Say what kind of provider failed, so the screen does not guess
+			// from a saved station while it waits.
+			if p, _, rerr := resolveTideProviderFromUI(uiMap); rerr == nil {
+				body["position_based"] = tideProviderPositionBased(p)
+			}
+			return c.JSON(te.status, body)
 		}
 	}
 	return writeTideChart(c, provider, result)

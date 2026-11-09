@@ -1,4 +1,4 @@
-import type { TideExtremePoint } from '@/hooks/use-tide-chart'
+import type { TideExtremePoint } from '@/lib/tide-chart-map'
 
 export type TidePhase = 'spring' | 'neap' | null
 

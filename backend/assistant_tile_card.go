@@ -172,22 +172,21 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 		if msl {
 			from = " from mean sea level"
 		}
-		// The tile draws a dash for any current height under zero on chart
-		// datum, so a negative height is a missing reading here too. From
-		// mean sea level a negative height is a real one.
-		if tideHeightKnown(tide.CurrentTideHeightFt, tide.HeightDatum) {
-			display["tide_now"] = fmt.Sprintf("%s %s%s %s", fixed(tide.CurrentTideHeightFt*perFt, decimals), unit, from, strings.ToLower(tide.TideDirection))
+		// A height of any size is a reading, a minus tide included. Only null
+		// is none.
+		if tide.CurrentTideHeightFt != nil && finite(*tide.CurrentTideHeightFt) {
+			display["tide_now"] = fmt.Sprintf("%s %s%s %s", fixed(*tide.CurrentTideHeightFt*perFt, decimals), unit, from, strings.ToLower(tide.TideDirection))
 		} else {
 			missing = append(missing, "tide: no current tide height")
 		}
 		for _, e := range []struct {
 			key, when string
-			ft        float64
+			ft        *float64
 		}{
 			{"next_high", tide.HighTideTime, tide.HighTideHeightFt},
 			{"next_low", tide.LowTideTime, tide.LowTideHeightFt},
 		} {
-			if e.when == "" || !usableTideHeightFt(e.ft) {
+			if e.when == "" || e.ft == nil || !finite(*e.ft) {
 				missing = append(missing, "tide: no "+strings.TrimPrefix(e.key, "next_")+" tide to come")
 				continue
 			}
@@ -199,7 +198,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 			if loc != nil {
 				when = boatClock(at, loc) + " " + boat.qualify(boat.Label(at))
 			}
-			display[e.key] = fmt.Sprintf("%s %s%s at %s", fixed(e.ft*perFt, decimals), unit, from, when)
+			display[e.key] = fmt.Sprintf("%s %s%s at %s", fixed(*e.ft*perFt, decimals), unit, from, when)
 		}
 	}
 

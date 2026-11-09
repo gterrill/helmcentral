@@ -12,6 +12,22 @@ import { useTideToday } from '@/hooks/use-tide-today'
 // number, however negative, is real), and a missing/non-string time stays
 // '' rather than becoming "now".
 describe('useTideToday', () => {
+  it('keeps exactly -1 ft and a minus tide as real readings, and null as none', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        datetime: '2026-09-26T10:00:00Z', current_tide_height_ft: -0.6, tide_direction: 'Falling',
+        high_tide_time: '', high_tide_height_ft: null, low_tide_time: '2026-09-26T16:00:00Z', low_tide_height_ft: -1,
+        station_name: 'S', provider: 'noaa',
+      }),
+    }))
+    const { result } = renderHook(() => useTideToday())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.tide.current_tide_height_ft).toBe(-0.6)
+    expect(result.current.tide.low_tide_height_ft).toBe(-1)
+    expect(result.current.tide.high_tide_height_ft).toBeNull()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -40,7 +56,7 @@ describe('useTideToday', () => {
     expect(result.current.tide.low_tide_height_ft).toBe(-1.2)
   })
 
-  it('still coerces a non-number height to the -1 sentinel', async () => {
+  it('reads a non-number height as none, which is null', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -60,9 +76,9 @@ describe('useTideToday', () => {
     const { result } = renderHook(() => useTideToday())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.tide.current_tide_height_ft).toBe(-1)
-    expect(result.current.tide.high_tide_height_ft).toBe(-1)
-    expect(result.current.tide.low_tide_height_ft).toBe(-1)
+    expect(result.current.tide.current_tide_height_ft).toBeNull()
+    expect(result.current.tide.high_tide_height_ft).toBeNull()
+    expect(result.current.tide.low_tide_height_ft).toBeNull()
   })
 
   it('keeps a missing high/low time as an empty string rather than inventing "now"', async () => {

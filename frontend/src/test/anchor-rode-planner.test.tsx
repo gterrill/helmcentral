@@ -919,7 +919,7 @@ describe('AnchorRodePlanner — Depth cell', () => {
   })
 
   it('asks for the depth when anchored with nothing recorded and no tide station', () => {
-    renderPlanner({ depthM: 42, planningDepthM: null, planningTide: null, tide: { ...tide, current_tide_height_ft: -1, high_tide_height_ft: -1 } })
+    renderPlanner({ depthM: 42, planningDepthM: null, planningTide: null, tide: { ...tide, current_tide_height_ft: null, high_tide_height_ft: null } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.getByText('Type it from the bow roller')).toBeInTheDocument()

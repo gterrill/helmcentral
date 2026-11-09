@@ -18,9 +18,9 @@ func tileCardDeps(state vesselStateData) assistantToolDeps {
 		vesselState:  func() (vesselStateData, error) { return state, nil },
 		tileTide: func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 			return tideTodayResponse{
-				Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: 6.56, TideDirection: "Rising",
-				HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: 9.84,
-				LowTideTime: "2026-10-29T10:30:00Z", LowTideHeightFt: 1.64,
+				Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: ptr(6.56), TideDirection: "Rising",
+				HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: ptr(9.84),
+				LowTideTime: "2026-10-29T10:30:00Z", LowTideHeightFt: ptr(1.64),
 				StationName: "Cape Upstart", Provider: "bom",
 			}, nil
 		},
@@ -202,19 +202,20 @@ func TestShowTileEmptyTrendIsAnEmptyListNotNull(t *testing.T) {
 	}
 }
 
-func TestShowTileCurrentTideBelowZeroReadsAsMissingLikeTheTile(t *testing.T) {
+func TestShowTileCurrentTideBelowZeroIsAReading(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
 	good := d.tileTide
 	d.tileTide = func(ctx context.Context, st vesselStateData, now time.Time) (tideTodayResponse, error) {
 		r, err := good(ctx, st, now)
-		r.CurrentTideHeightFt = -0.5
+		r.CurrentTideHeightFt = ptr(-0.5)
 		return r, err
 	}
 	_, res := tileCardRun(t, d, `{"tile":"depth-tide"}`)
-	if _, ok := res.Display["tide_now"]; ok {
-		t.Errorf("the tile draws a dash for a current height under zero, so display must not give one: %v", res.Display)
+	// A NOAA minus tide below chart datum is real: the tile shows it, so does the card.
+	if got, _ := res.Display["tide_now"].(string); !strings.HasPrefix(got, "-0.15 m") {
+		t.Errorf("tide_now = %q, want the minus tide shown", got)
 	}
-	if !strings.Contains(strings.Join(res.Missing, "|"), "no current tide height") {
+	if strings.Contains(strings.Join(res.Missing, "|"), "no current tide height") {
 		t.Errorf("missing = %v", res.Missing)
 	}
 }

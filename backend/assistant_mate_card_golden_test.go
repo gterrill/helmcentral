@@ -269,9 +269,9 @@ func tileFullCard(t *testing.T) mateCard {
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
 	d.tileTide = func(context.Context, vesselStateData, time.Time) (tideTodayResponse, error) {
 		return tideTodayResponse{
-			Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: 6.56, TideDirection: "Rising",
-			HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: 9.84,
-			LowTideTime: "2026-10-29T10:30:00Z", LowTideHeightFt: 1.64,
+			Datetime: tileCardNow.Format(time.RFC3339), CurrentTideHeightFt: ptr(6.56), TideDirection: "Rising",
+			HighTideTime: "2026-10-29T04:12:00Z", HighTideHeightFt: ptr(9.84),
+			LowTideTime: "2026-10-29T10:30:00Z", LowTideHeightFt: ptr(1.64),
 			StationName: "Example Harbour", Provider: "test",
 		}, nil
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -132,7 +133,7 @@ func TestBuildTideToday_PositionBasedNeedsNoStationAndFollowsTheBoat(t *testing.
 		t.Errorf("height_datum = %q, want mean sea level", resp.HeightDatum)
 	}
 	// MSL heights are negative here and must come through as given.
-	if resp.CurrentTideHeightFt >= 0 || resp.LowTideHeightFt >= 0 {
+	if resp.CurrentTideHeightFt == nil || resp.LowTideHeightFt == nil || *resp.CurrentTideHeightFt >= 0 || *resp.LowTideHeightFt >= 0 {
 		t.Errorf("negative MSL heights were lost: %+v", resp)
 	}
 }
@@ -217,15 +218,16 @@ func TestBuildTideToday_StationBasedHeightsAreChartDatum(t *testing.T) {
 	}
 }
 
-func TestBuildTideToday_ARealMinusOneFootMSLExtremeIsNotTheNotPublishedSentinel(t *testing.T) {
+// A height is a reading when it is present, whatever its size. Exactly -1 ft is
+// a height like any other, and a NOAA minus tide below chart datum is real.
+func TestBuildTideToday_AnyHeightIsAReadingAndOnlyNullIsNone(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	stub := newMSLStub(now)
 	stub.result.Extremes = []tideExtremePoint{
 		{Time: now.Add(time.Hour), HeightM: -1 / metersToFeet, High: false},
-		{Time: now.Add(7 * time.Hour), HeightM: 0.2, High: true},
 	}
-	stub.result.CurrentHeightM = -1 / metersToFeet
+	stub.result.CurrentHeightM = -0.6 / metersToFeet
 	registerTideProvider(stub)
 	withVesselPosition(t, 45.4, 12.3, nil)
 
@@ -233,17 +235,18 @@ func TestBuildTideToday_ARealMinusOneFootMSLExtremeIsNotTheNotPublishedSentinel(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.LowTideTime == "" {
-		t.Fatal("the low has a time")
+	if resp.LowTideHeightFt == nil || math.Abs(*resp.LowTideHeightFt+1) > 1e-9 {
+		t.Errorf("exactly -1 ft is a real reading, got %v", resp.LowTideHeightFt)
 	}
-	if usableTideHeightFt(resp.LowTideHeightFt) == false {
-		t.Errorf("a real low of -1 ft must not read as the sentinel: %v", resp.LowTideHeightFt)
+	if resp.CurrentTideHeightFt == nil || math.Abs(*resp.CurrentTideHeightFt+0.6) > 1e-9 {
+		t.Errorf("-0.6 ft is a real reading, got %v", resp.CurrentTideHeightFt)
 	}
-	if !usableTideHeightFt(resp.CurrentTideHeightFt) {
-		t.Errorf("a real current height of -1 ft must not read as the sentinel: %v", resp.CurrentTideHeightFt)
+	if resp.HighTideHeightFt != nil || resp.HighTideTime != "" {
+		t.Errorf("no high to come is null and an empty time: %v %q", resp.HighTideHeightFt, resp.HighTideTime)
 	}
-	if d := resp.LowTideHeightFt - (-1); d < -0.001 || d > 0.001 {
-		t.Errorf("the nudge must be negligible, got %v", resp.LowTideHeightFt)
+	raw, _ := json.Marshal(resp)
+	if !strings.Contains(string(raw), `"high_tide_height_ft":null`) {
+		t.Errorf("none travels as null: %s", raw)
 	}
 }
 
@@ -389,21 +392,87 @@ func TestResolveTideProvider_BlankWithoutThePluginDoesNotClaimTheOperatorConfigu
 	}
 }
 
-func TestPlanningTideKnown_ExactMinusOneFootIsNotKnownOnEitherDatum(t *testing.T) {
-	// The browser's tideHeightFtKnown (lib/tide-datum.ts) agrees: -1 is "none".
-	if tideHeightKnown(-1, tideDatumMeanSeaLevel) || tideHeightKnown(-1, "") {
-		t.Error("exactly -1 ft is the not-captured mark on every datum")
+func TestCheckPlanningTide_AnyHeightIsAReadingAndItCarriesItsDatum(t *testing.T) {
+	for _, h := range []float64{-1, -0.6, 0, 3.2} {
+		for _, d := range []string{"", tideDatumChart, tideDatumMeanSeaLevel} {
+			h, d := h, d
+			stored, msg := checkPlanningTide(&h, &d)
+			want := d
+			if want == "" {
+				want = tideDatumChart
+			}
+			if msg != "" || stored != want {
+				t.Errorf("%v on %q: stored %q, %q", h, d, stored, msg)
+			}
+		}
 	}
-	if !tideHeightKnown(-3.3, tideDatumMeanSeaLevel) || !tideHeightKnown(-1.0000000000000002, tideDatumMeanSeaLevel) {
-		t.Error("another negative height from mean sea level is real")
+	if stored, msg := checkPlanningTide(nil, nil); stored != "" || msg != "" {
+		t.Errorf("no height stores no datum: %q %q", stored, msg)
 	}
-	if tideHeightKnown(-3.3, "") || !tideHeightKnown(0, "") {
-		t.Error("chart datum is known at zero and above only")
+	huge := 900.0
+	if _, msg := checkPlanningTide(&huge, nil); msg == "" {
+		t.Error("an absurd height is refused")
 	}
-	f := -1.0
-	m := tideDatumMeanSeaLevel
-	if _, msg := checkPlanningTide(&f, &m); msg == "" {
-		t.Error("a mean-sea-level stamp of exactly -1 ft must be refused")
+}
+
+func TestPlanningTide_ARequestCanSayNoneWithNullAndAMinusTideIsStamped(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": nil})
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != nil || resp["planning_tide_datum"] != "" {
+		t.Fatalf("null is none: %d %+v", code, resp)
+	}
+	if reason, _ := resp["datum_depth_reason"].(string); !strings.Contains(reason, "unknown") {
+		t.Errorf("an unknown tide says so: %q", reason)
+	}
+	resetAnchorWatchState(t)
+	code, resp = postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -0.6})
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != -0.6 || resp["planning_tide_datum"] != tideDatumChart {
+		t.Fatalf("-0.6 ft below chart datum is stamped: %d %+v", code, resp)
+	}
+	// Typed in the rode planner, so no transducer is needed: Save depth's figure uses the minus tide.
+	code, resp = patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 4.0, "planning_tide_height_ft": -0.6})
+	if m, ok := resp["datum_depth_m"].(float64); code != http.StatusOK || !ok || math.Abs(m-(4.0+0.6/metersToFeet)) > 0.01 {
+		t.Errorf("Save depth's figure uses the minus tide: %d %v", code, resp["datum_depth_m"])
+	}
+}
+
+func TestPlanningTide_ExactMinusOneFootSurvivesAReload(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -1.0}); code != http.StatusOK {
+		t.Fatalf("%d %+v", code, resp)
+	}
+	resetAnchorWatchState(t)
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatal(err)
+	}
+	anchorWatchMu.RLock()
+	got := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if got == nil || got.PlanningTideHeightFt == nil || *got.PlanningTideHeightFt != -1 {
+		t.Fatalf("a real -1.0 ft reading was read back as none: %+v", got)
+	}
+}
+
+// The one place the old marker is read: a watch file written before holds -1
+// with no datum for "no tide height".
+func TestLoadAnchorWatch_AnOldFileHoldingMinusOneReadsAsNone(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+	old := `{"lat":-21.1,"lon":149.2,"radius_meters":30,"set_at":"2026-10-01T00:00:00Z","planning_depth_m":4,"planning_tide_height_ft":-1,"planning_depth_source":"sounder"}`
+	if err := os.WriteFile(os.Getenv("ANCHOR_WATCH_FILE"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadAnchorWatch(); err != nil {
+		t.Fatal(err)
+	}
+	anchorWatchMu.RLock()
+	got := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if got == nil || got.PlanningTideHeightFt != nil || got.PlanningDepthM != 4 {
+		t.Fatalf("the old -1 is none and the depth is kept: %+v", got)
 	}
 }
 
@@ -494,7 +563,7 @@ func TestTideProviders_ListSaysWhichArePositionBasedAndTheirDatum(t *testing.T) 
 // ── datum depth ────────────────────────────────────────────────────────
 
 func TestComputeDatumDepth_AMeanSeaLevelTideGivesNoDatumDepth(t *testing.T) {
-	got, reason := computeDatumDepth(5, 3, planningDepthFromOperator, 0, tideDatumMeanSeaLevel)
+	got, reason := computeDatumDepth(5, ptr(3.0), planningDepthFromOperator, 0, tideDatumMeanSeaLevel)
 	if got != nil {
 		t.Fatalf("a depth must not be worked out from mean-sea-level heights, got %v", *got)
 	}
@@ -505,7 +574,7 @@ func TestComputeDatumDepth_AMeanSeaLevelTideGivesNoDatumDepth(t *testing.T) {
 
 func TestComputeDatumDepth_AChartDatumTideStillGivesOne(t *testing.T) {
 	for _, datum := range []string{"", tideDatumChart} {
-		got, reason := computeDatumDepth(5, 3.28084, planningDepthFromOperator, 0, datum)
+		got, reason := computeDatumDepth(5, ptr(3.28084), planningDepthFromOperator, 0, datum)
 		if got == nil || reason != "" {
 			t.Fatalf("datum %q: got %v, %q", datum, got, reason)
 		}
@@ -1045,5 +1114,84 @@ func TestTideCalSource_StationProviderKeepsItsSavedStationWhateverTheAnchorDoes(
 		if err != nil || c.Source != "bom/S1" || c.PositionBased {
 			t.Fatalf("anchor %+v: source %q positionBased %v err %v", w, c.Source, c.PositionBased, err)
 		}
+	}
+}
+
+// ── fourth review ──────────────────────────────────────────────────────
+
+func TestTidePosition_AnUnreadableWatchFileIsAnExplicitErrorNotTheBoatsFix(t *testing.T) {
+	withAnchorWatch(t, nil)
+	prev := anchorWatchLoadErr
+	anchorWatchLoadErr = "reading anchor watch state: permission denied"
+	t.Cleanup(func() { anchorWatchLoadErr = prev })
+	_, _, err := tidePositionFromState(vesselStateData{Latitude: 45.43, Longitude: 12.34}, nil)
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTidePosition_AFlaggedFixNamesWhyWhenTheValidationSaysSo(t *testing.T) {
+	withAnchorWatch(t, nil)
+	_, _, err := tidePositionFromState(vesselStateData{GNSSCriticalAlert: true, GNSSValidationReason: "signalk unreachable: stream has no self vessel data"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "signalk unreachable") {
+		t.Fatalf("the reason must name the SignalK failure, got %v", err)
+	}
+}
+
+func TestTideNearest_PositionBasedReadsTheVesselOnce(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withAnchorWatch(t, nil)
+	registerTideProvider(newMSLStub(time.Now()))
+	reads := 0
+	prev := tideVesselState
+	tideVesselState = func() (vesselStateData, error) {
+		reads++
+		return vesselStateData{Latitude: 45.43, Longitude: 12.34}, nil
+	}
+	t.Cleanup(func() { tideVesselState = prev })
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/tide-nearest?provider=open-meteo", nil), rec)
+	if err := tideNearestHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("%v %d %s", err, rec.Code, rec.Body)
+	}
+	if reads != 1 {
+		t.Errorf("read the vessel state %d times, want 1", reads)
+	}
+}
+
+func TestTidePointZone_AFailedLookupIsRememberedAndLoggedOnce(t *testing.T) {
+	tidePointZonesMu.Lock()
+	tidePointZones = map[string]string{}
+	tidePointZonesMu.Unlock()
+	// A point the zone index has no name for: the middle of the Pacific.
+	first := tidePointStation(0.05, -150, "")
+	second := tidePointStation(0.05, -150, "")
+	if first.Timezone != second.Timezone {
+		t.Errorf("the same point must give the same zone: %q vs %q", first.Timezone, second.Timezone)
+	}
+	tidePointZonesMu.Lock()
+	_, remembered := tidePointZones["0.05,-150.00"]
+	tidePointZonesMu.Unlock()
+	if !remembered {
+		t.Error("the lookup, failed or not, is remembered")
+	}
+}
+
+func TestConfiguredChart_AnErrorSaysWhatKindOfProviderFailed(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withAnchorWatch(t, nil)
+	registerTideProvider(newMSLStub(time.Now()))
+	withVesselPosition(t, -1, -1, nil)
+	writeTideSettings(t, "  tide_provider: \"\"\n")
+	_, body := getConfiguredChart(t, "")
+	if body["position_based"] != true {
+		t.Errorf("a position-based provider's error says so: %v", body)
+	}
+	withCleanTideProviderRegistry(t)
+	registerTideProvider(&stubTideProvider{id: "bom"})
+	writeTideSettings(t, "  tide_provider: bom\n")
+	_, body = getConfiguredChart(t, "")
+	if body["position_based"] != false {
+		t.Errorf("a station provider's error says so: %v", body)
 	}
 }

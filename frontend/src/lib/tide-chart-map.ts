@@ -1,8 +1,31 @@
-import type { TideChart } from '@/hooks/use-tide-chart'
-import { normaliseTideDatum } from '@/lib/tide-datum'
+import type { TideStation } from '@/hooks/use-tide-stations'
+import { normaliseTideDatum, type TideDatum } from '@/lib/tide-datum'
 
-// The tide chart payload as the browser holds it. Kept out of the hooks so a
-// test that mocks one of them still gets the real mapping from the other.
+// The tide chart payload as the browser holds it, and its mapping. Kept out of
+// the hooks so a test that mocks a hook still gets the real mapping.
+
+export interface TideExtremePoint {
+  time: string
+  heightM: number
+  high: boolean
+}
+
+export interface TideChart {
+  station: TideStation
+  extremes: TideExtremePoint[]
+  currentHeightM: number
+  direction: string
+  /** What heightM is measured from; chart datum when the server says nothing. */
+  heightDatum?: TideDatum
+  // Optional: populated by the backend's centralized classifyTidalPhase/
+  // hasDoubleTide (see backend/tide_providers.go), so every provider gets
+  // identical values. Absent/empty when the backend can't resolve a phase
+  // (e.g. too few extremes) - callers should fall back to the local
+  // classifyTidePhase() heuristic (frontend/src/lib/tide-phase.ts) in that case.
+  tidalPhase?: string
+  doubleHighToday?: boolean
+  doubleLowToday?: boolean
+}
 
 interface TideChartApi {
   station?: {

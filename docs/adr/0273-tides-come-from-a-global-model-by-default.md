@@ -133,13 +133,22 @@ chose a provider keeps it. If the plugin is not installed, the error names
 - **Screens.** Anywhere heights show, mean-sea-level ones are labelled "from
   mean sea level".
 
-### 6. The "not published" sentinel
+### 6. A missing height is null, not -1 ft
 
-The tide payload marks a missing height as exactly -1 ft. A mean-sea-level
-height of exactly -1 ft is possible. The host moves a real one off it by one
-unit in the last place (`tideHeightFtOnTheWire`), so -1 still means none on every
-datum, and the browser treats a negative height as real only when
-`height_datum` says mean sea level.
+The tide payload used to mark a missing height as exactly -1 ft, and every
+reader then needed a rule for the real heights that sat near it: a nudge on the
+wire, and "below zero is none" on chart datum, which blanked a NOAA minus tide
+on the Depth & Tide tile. Both are gone. A missing height travels as `null`
+(Go pointers, `number | null` in the browser) and any number is a reading, on
+either datum, exactly -1 ft included.
+
+- **The anchor watch** stores `planning_tide_height_ft` as null for none, and a
+  request says none with null. A height saved since is always stored with its
+  datum, so a real -1.0 ft is told from the old marker.
+- **Old files** holding -1 and no datum read as none. That rule lives once, in
+  `loadAnchorWatch` (`dropLegacyTideMarker`). There is no migration.
+- **Saved Mate cards** from before hold -1 for a high or low that was not to
+  come, with an empty time beside it. The card decoder reads that pair as none.
 
 ## What leaves the boat
 

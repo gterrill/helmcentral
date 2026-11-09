@@ -2,7 +2,7 @@ import type { HullType } from '@/config/app-config'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
-import { CHART_DATUM, currentTideHeightKnown, normaliseTideDatum, tideHeightFtKnown, type TideCapture, type TideDatum } from '@/lib/tide-datum'
+import { CHART_DATUM, normaliseTideDatum, type TideCapture, type TideDatum } from '@/lib/tide-datum'
 import { feetToMeters, toDisplayDistance } from '@/lib/units'
 
 /**
@@ -68,18 +68,13 @@ export interface RodePlan {
 }
 
 /**
- * useTideToday NEVER returns null — it returns defaultTide with -1
- * sentinels for "the station hasn't reported yet", so `tide === null` never
- * fires and the real check is currentTideHeightKnown (lib/tide-datum.ts): at or
- * above zero on chart datum, any real number from mean sea level (ADR 0273).
- * This is the one place that check lives; every caller that needs "the tide
- * right now, or nothing" (the two anchor-drop capture sites and the planner's
- * Depth input, plus this module's own live-datum construction below) shares it
- * rather than re-deriving the sentinel rule.
+ * The tide height right now, or null when there is none. useTideToday never
+ * returns null: before the station has reported it returns defaultTide, whose
+ * heights are null. Any number is a reading, a minus tide below chart datum
+ * included.
  */
 export function tideHeightFtOrNull(tide: TideToday | null): number | null {
-  if (tide === null) return null
-  return currentTideHeightKnown(tide) ? tide.current_tide_height_ft : null
+  return tide?.current_tide_height_ft ?? null
 }
 
 /**
@@ -151,9 +146,8 @@ export function planningTideDatumDiffers(datum: PlanningDepthDatum | null, tide:
 export function maxExpectedDepthM(datum: PlanningDepthDatum | null, tide: TideToday | null): number | null {
   if (datum === null || tide === null) return null
   const tideDatum = normaliseTideDatum(tide.height_datum)
-  if (datum.tideHeightFt === null || !tideHeightFtKnown(datum.tideHeightFt, tideDatum)) return null
+  if (datum.tideHeightFt === null || tide.high_tide_height_ft === null) return null
   if (datum.tideDatum !== undefined && datum.tideDatum !== tideDatum) return null
-  if (!tideHeightFtKnown(tide.high_tide_height_ft, tideDatum)) return null
 
   const riseFt = tide.high_tide_height_ft - datum.tideHeightFt
   const riseM = feetToMeters(Math.max(0, riseFt))

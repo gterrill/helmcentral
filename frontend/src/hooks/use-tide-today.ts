@@ -4,12 +4,13 @@ import { CHART_DATUM, normaliseTideDatum, type TideDatum } from '@/lib/tide-datu
 
 export interface TideToday {
   datetime: string;
-  current_tide_height_ft: number;
+  /** Feet, or null when there is none. Any number, negative included, is a reading. */
+  current_tide_height_ft: number | null;
   tide_direction: string;
   high_tide_time: string;
-  high_tide_height_ft: number;
+  high_tide_height_ft: number | null;
   low_tide_time: string;
-  low_tide_height_ft: number;
+  low_tide_height_ft: number | null;
   station_name: string;
   provider: string;
   /** What every height above is measured from; an absent field is chart datum. */
@@ -22,31 +23,28 @@ export interface TideToday {
 // for a real time.
 export const defaultTide: TideToday = {
   datetime: new Date().toISOString(),
-  current_tide_height_ft: -1,
+  current_tide_height_ft: null,
   tide_direction: '—',
   high_tide_time: '',
-  high_tide_height_ft: -1,
+  high_tide_height_ft: null,
   low_tide_time: '',
-  low_tide_height_ft: -1,
+  low_tide_height_ft: null,
   station_name: '',
   provider: '',
   height_datum: CHART_DATUM,
 };
 
+// A height is a reading when it is a finite number, whatever its size: a minus
+// tide below chart datum, or exactly -1 ft, is real. Null is the whole signal
+// for none.
+function heightOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 function normalise(data: Partial<TideToday>): TideToday {
-  // Code-review finding: the sentinel for "not published" is exactly
-  // -1, not "anything below -1" - a real height only ever becomes -1
-  // here when the backend didn't send a number at all (Number.isFinite
-  // guards against null/undefined/NaN), never because it happened to
-  // be very negative. A real spring low can read below -1 ft on some
-  // datums (low-water-clearance.ts's isUsableTideHeightFt makes the
-  // same distinction on the read side).
   return {
     datetime: data.datetime || new Date().toISOString(),
-    current_tide_height_ft:
-      typeof data.current_tide_height_ft === 'number' && Number.isFinite(data.current_tide_height_ft)
-        ? data.current_tide_height_ft
-        : -1,
+    current_tide_height_ft: heightOrNull(data.current_tide_height_ft),
     tide_direction: data.tide_direction || '—',
     // A missing/unparseable time stays '' rather than becoming "now" -
     // substituting the current instant reads to the operator as a real
@@ -54,15 +52,9 @@ function normalise(data: Partial<TideToday>): TideToday {
     // nextTideExtreme (lib/tide-estimate.ts) and every renderer of this
     // field now treat as absent, not a real time to display.
     high_tide_time: typeof data.high_tide_time === 'string' ? data.high_tide_time : '',
-    high_tide_height_ft:
-      typeof data.high_tide_height_ft === 'number' && Number.isFinite(data.high_tide_height_ft)
-        ? data.high_tide_height_ft
-        : -1,
+    high_tide_height_ft: heightOrNull(data.high_tide_height_ft),
     low_tide_time: typeof data.low_tide_time === 'string' ? data.low_tide_time : '',
-    low_tide_height_ft:
-      typeof data.low_tide_height_ft === 'number' && Number.isFinite(data.low_tide_height_ft)
-        ? data.low_tide_height_ft
-        : -1,
+    low_tide_height_ft: heightOrNull(data.low_tide_height_ft),
     station_name: typeof data.station_name === 'string' ? data.station_name : '',
     provider: typeof data.provider === 'string' ? data.provider : '',
     height_datum: normaliseTideDatum(data.height_datum),

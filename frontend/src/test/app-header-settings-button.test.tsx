@@ -130,18 +130,6 @@ vi.mock('@/hooks/use-tide-settings', () => ({
   }),
 }))
 
-vi.mock('@/hooks/use-tide-chart', () => ({
-  useTideChart: () => ({
-    chart: null,
-    loading: false,
-    error: null,
-    isCached: false,
-    updatedAt: null,
-    ttlSeconds: null,
-    refetch: vi.fn(),
-  }),
-}))
-
 vi.mock('@/hooks/use-czone-switches', () => ({
   useCZoneSwitches: () => ({ switches: [], loading: false, pending: {}, toggleSwitch: vi.fn() }),
 }))

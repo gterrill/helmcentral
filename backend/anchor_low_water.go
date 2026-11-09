@@ -98,14 +98,6 @@ type lowWaterClearance struct {
 	WorkedOutAt string `json:"worked_out_at,omitempty"`
 }
 
-// usableTideHeightFt is whether a tide height in feet is real data rather than
-// the -1 sentinel buildTideToday uses for "not published". The sentinel is
-// exactly -1, not "-1 or below": heights below chart datum are real, and a
-// spring low can read below -1 ft on some datums.
-func usableTideHeightFt(ft float64) bool {
-	return finite(ft) && ft != noTideExtremeHeightFt
-}
-
 // finite is a real number: not NaN, not infinite.
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
@@ -139,7 +131,7 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 		}
 		return out
 	}
-	if !usableTideHeightFt(in.Tide.CurrentTideHeightFt) || !usableTideHeightFt(in.Tide.LowTideHeightFt) {
+	if in.Tide.CurrentTideHeightFt == nil || in.Tide.LowTideHeightFt == nil || !finite(*in.Tide.CurrentTideHeightFt) || !finite(*in.Tide.LowTideHeightFt) {
 		out.Reason = lowWaterNoTide
 		return out
 	}
@@ -154,7 +146,7 @@ func computeLowWaterClearance(in lowWaterInput) lowWaterClearance {
 	// Already at or below the next low's forecast height: the shallowest water
 	// before that low is now, so the fall clamps to zero. A negative fall would
 	// raise the projected depth, the wrong way for a safety warning.
-	fallM := math.Max(0, in.Tide.CurrentTideHeightFt-in.Tide.LowTideHeightFt) / metersToFeet
+	fallM := math.Max(0, *in.Tide.CurrentTideHeightFt-*in.Tide.LowTideHeightFt) / metersToFeet
 	depthAtLow := *in.DepthM - fallM
 	clearance := depthAtLow - *in.DraftM
 	out.Status = lowWaterOK

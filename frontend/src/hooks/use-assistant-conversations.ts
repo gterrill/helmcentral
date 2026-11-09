@@ -7,7 +7,7 @@ import { splitConversationRuns, type AssistantRun, type RunApi, type RunRefApi }
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
-// way use-tide-chart.ts / use-weather-forecast.ts do it, so nothing else in
+// way use-configured-tide-chart.ts / use-weather-forecast.ts do it, so nothing else in
 // the frontend has to think about the wire format.
 
 interface ConversationApi {

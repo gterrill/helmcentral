@@ -42,7 +42,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   // provider or station changes.
   const provider = effectiveTideProvider(tideProvider)
   const anchorPoint = useAnchorWatchSelector(selectAnchorPointKey)
-  const { chart, loading, error, noStation, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased: followsBoat, refetch } =
+  const { chart, loading, error, noStation, notSetUp, isCached, updatedAt, ttlSeconds, providerName, positionBased, refetch } =
     useConfiguredTideChart(`${provider}|${tideStationId}|${anchorPoint}`, !settingsLoading)
 
   // Only a provider with stations answers `no_station`, so a station found here
@@ -53,7 +53,13 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   const [autoDetectFailed, setAutoDetectFailed] = useState(false)
   const triedFor = useRef('')
   useEffect(() => {
-    if (!noStation || triedFor.current === provider) return
+    if (!noStation) {
+      // A station is saved, or the chart came back: a later `no_station` for
+      // this provider is asked again.
+      triedFor.current = ''
+      return
+    }
+    if (triedFor.current === provider) return
     triedFor.current = provider
     setAutoDetecting(true)
     apiRequest<{ station_id: string; name: string }>(`/api/tide-nearest?provider=${provider}`)
@@ -63,6 +69,10 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   }, [noStation, provider, saveStation])
   // Labelled from the chart's own datum, so it follows what the server sent.
   const meanSeaLevel = isMeanSeaLevel(chart?.heightDatum)
+  // Until the chart (or its error) says what kind of provider this is, neither
+  // the saved station nor the station controls are shown for it.
+  const followsBoat = positionBased === true
+  const hasStations = positionBased === false
 
   const { windowStart, windowEnd } = useMemo(() => {
     // The boat's day, not the device's: "today" is the date in the boat's zone.
@@ -116,7 +126,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
       ) : (
         <>
           {(() => {
-            const displayStationName = followsBoat ? chart?.station.name || '' : tideStationName || chart?.station.name || ''
+            const displayStationName = hasStations ? tideStationName || chart?.station.name || '' : chart?.station.name || ''
             const displayStationState = followsBoat ? undefined : chart?.station.state
             const tidePhase = chart ? classifyTidePhase(chart.extremes, new Date()) : null
 
@@ -134,7 +144,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
                   )}
                   {tidePhase && <TidePhaseBadge phase={tidePhase} className="mt-0.5" />}
                 </div>
-                {!followsBoat && (
+                {hasStations && (
                   <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>
                     Change Station
                   </Button>
@@ -143,7 +153,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
             )
           })()}
 
-          {showPicker && !followsBoat && (
+          {showPicker && hasStations && (
             <TideStationPicker
               provider={provider}
               onSelect={(station) => {

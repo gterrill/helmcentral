@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { classifyTidePhase } from '@/lib/tide-phase'
-import type { TideExtremePoint } from '@/hooks/use-tide-chart'
+import type { TideExtremePoint } from '@/lib/tide-chart-map'
 
 // Heights chosen so consecutive-pair ranges (tidal range per half-cycle) trend
 // 0.5, 0.5, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 0.5, 0.5 across the window - a clear

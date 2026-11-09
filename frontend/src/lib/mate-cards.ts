@@ -1014,14 +1014,24 @@ function decodeTide(raw: unknown): TideToday | null {
     const s = str(v, path)
     return s === '' ? s : stamp(s, path)
   }
+  // A height is a number, or null for none. A card saved before null existed
+  // holds -1 for a high or low that was not to come, with an empty time beside
+  // it: that, and only that, is read as none.
+  const height = (v: unknown, path: string, noTime = false) => {
+    if (v === null || v === undefined) return null
+    const n = finite(v, path)
+    return noTime && n === -1 ? null : n
+  }
+  const highTime = time(o.high_tide_time, 'snapshot.tide.high_tide_time')
+  const lowTime = time(o.low_tide_time, 'snapshot.tide.low_tide_time')
   return {
     datetime: stamp(o.datetime, 'snapshot.tide.datetime'),
-    current_tide_height_ft: finite(o.current_tide_height_ft, 'snapshot.tide.current_tide_height_ft'),
+    current_tide_height_ft: height(o.current_tide_height_ft, 'snapshot.tide.current_tide_height_ft'),
     tide_direction: str(o.tide_direction, 'snapshot.tide.tide_direction'),
-    high_tide_time: time(o.high_tide_time, 'snapshot.tide.high_tide_time'),
-    high_tide_height_ft: finite(o.high_tide_height_ft, 'snapshot.tide.high_tide_height_ft'),
-    low_tide_time: time(o.low_tide_time, 'snapshot.tide.low_tide_time'),
-    low_tide_height_ft: finite(o.low_tide_height_ft, 'snapshot.tide.low_tide_height_ft'),
+    high_tide_time: highTime,
+    high_tide_height_ft: height(o.high_tide_height_ft, 'snapshot.tide.high_tide_height_ft', highTime === ''),
+    low_tide_time: lowTime,
+    low_tide_height_ft: height(o.low_tide_height_ft, 'snapshot.tide.low_tide_height_ft', lowTime === ''),
     station_name: optionalText(o.station_name, 'snapshot.tide.station_name'),
     provider: optionalText(o.provider, 'snapshot.tide.provider'),
     // Optional: a tile card saved before the field existed is chart datum, so

@@ -7,20 +7,6 @@ export interface TideExtreme {
   heightFt: number
 }
 
-/**
- * Whether a tide height in feet is real data rather than the -1 sentinel
- * useTideToday substitutes for "not published" - the sentinel is exactly
- * -1, not "-1 or below" (matches low-water-clearance.ts's own
- * isUsableTideHeightFt; a real spring low can read below -1 ft on some
- * datums and must not be mistaken for missing data just for being very
- * negative).
- */
-export function isUsableTideHeightFt(value: number): boolean {
-  // The server never sends a real height from mean sea level as exactly -1
-  // (backend tideHeightFtOnTheWire), so this holds for both datums.
-  return Number.isFinite(value) && value !== -1
-}
-
 /** Whether a tide extreme's own time string is a real, parseable instant - tideToday sends '' for one it has no data for (backend/weather_tide.go). */
 function hasUsableTideTime(time: string): boolean {
   return time !== '' && !Number.isNaN(new Date(time).getTime())
@@ -34,8 +20,8 @@ function hasUsableTideTime(time: string): boolean {
  * both need this same ordering, extracted here so it lives in exactly one
  * place.
  *
- * An extreme the provider has none of (tideToday sends the -1 height
- * sentinel alongside an empty time) is dropped rather than passed through -
+ * An extreme the provider has none of (tideToday sends a null height and an
+ * empty time) is dropped rather than passed through -
  * code-review finding: the old fabricated time ("now" for a missing high,
  * "now+24h" for a missing low) used to reach this list and render as if it
  * were a real extreme. The result can be length 0, 1 or 2 depending on how
@@ -43,10 +29,13 @@ function hasUsableTideTime(time: string): boolean {
  * fixed pair.
  */
 export function tideExtremesByTime(tide: TideToday): TideExtreme[] {
-  const extremes: TideExtreme[] = [
-    { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
-    { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
-  ].filter((extreme) => isUsableTideHeightFt(extreme.heightFt) && hasUsableTideTime(extreme.time))
+  const extremes: TideExtreme[] = []
+  if (tide.high_tide_height_ft !== null && hasUsableTideTime(tide.high_tide_time)) {
+    extremes.push({ isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft })
+  }
+  if (tide.low_tide_height_ft !== null && hasUsableTideTime(tide.low_tide_time)) {
+    extremes.push({ isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft })
+  }
   return extremes.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
 }
 
@@ -66,18 +55,12 @@ export function nextTideExtreme(tide: TideToday): TideExtreme | null {
  * amendment) needed the same estimate.
  *
  * Requires a live depth reading and both the current and target tide
- * heights to be real (not the -1 sentinel useTideToday substitutes for "not
- * published"); returns null rather than a silent zero-based estimate
+ * heights (null is none; any number is a reading); returns null rather than a silent zero-based estimate
  * otherwise.
  */
 export function estimateDepthAtNextTurn(depthM: number | null, tide: TideToday): number | null {
-  const isRising = tide.tide_direction === 'Rising'
-  if (isRising) {
-    return depthM !== null && isUsableTideHeightFt(tide.current_tide_height_ft) && isUsableTideHeightFt(tide.high_tide_height_ft)
-      ? depthM + feetToMeters(tide.high_tide_height_ft - tide.current_tide_height_ft)
-      : null
-  }
-  return depthM !== null && isUsableTideHeightFt(tide.current_tide_height_ft) && isUsableTideHeightFt(tide.low_tide_height_ft)
-    ? depthM - feetToMeters(tide.current_tide_height_ft - tide.low_tide_height_ft)
-    : null
+  const now = tide.current_tide_height_ft
+  const next = tide.tide_direction === 'Rising' ? tide.high_tide_height_ft : tide.low_tide_height_ft
+  if (depthM === null || now === null || next === null) return null
+  return depthM + feetToMeters(next - now)
 }
