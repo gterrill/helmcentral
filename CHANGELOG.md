@@ -110,9 +110,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Paying out the Catenary Method's Pay Out figure now reads "Enough rode".**
   The rode badge used to compare your rode with the exact recommendation, so a
   recommendation of 55.3 m showed "Pay out 55 m", and paying out 55 m still
-  said you were short. It now judges your rode against the Pay Out figure the
-  Catenary Method shows. A rode shorter than that figure reads "Short by" and
-  how much more to pay out.
+  said you were short. It now judges your rode against the Pay Out figure
+  shown on the tab you have open. A rode shorter than that figure reads, for
+  example, "Short by 5 m".
 
 ## [0.62.0] - 2026-11-07
 
