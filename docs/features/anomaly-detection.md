@@ -103,8 +103,8 @@ This watches for the house bank being driven higher by its alternators or
 chargers after it has already finished charging. It looks for a high state of
 charge, a pack voltage at or above the warning point, and real current still
 flowing in. That is the pattern behind a battery management system (BMS)
-tripping its protection disconnect mid-voyage. The bank looks fully charged and
-the charging sources don't know it, so the BMS eventually has to step in. A
+tripping its protection disconnect mid-voyage. The bank looks fully charged,
+and the charging sources don't know it, so the BMS eventually has to step in. A
 second, tighter tier watches for the bank being driven further still, toward
 the point where a BMS would act.
 
@@ -117,9 +117,9 @@ Helmcentral knows what "full" and "too high" mean for your own pack chemistry.
 This check applies when two or more engines run matched at the same rpm.
 Helmcentral compares each engine's coolant temperature, oil pressure, boost
 pressure, load and transmission readings against the others. A gap that grows
-well past what your own boat normally runs points at a developing fault on one
+well past what your own boat normally runs points to a developing fault on one
 side, before it becomes a breakdown. Port always running a little warmer than
-starboard is normal, and Helmcentral learns that out. Port suddenly running ten
+starboard is normal, and Helmcentral learns that. Port suddenly running ten
 degrees warmer than usual at the same rpm is not normal.
 
 These alarms stay switched off until Helmcentral has learned your boat's own
@@ -135,9 +135,9 @@ SignalK.
 Hold the engine at a steady throttle. If rpm dips 40 rpm or more (or 3% of the
 steady figure, whichever is greater) for a few seconds and then comes back,
 that's a stumble. One now and then is nothing. A run of them, with the throttle
-untouched, means an engine that is not getting what it asks for. Helmcentral
+untouched, means the engine isn't getting what it asks for. Helmcentral
 counts the stumbles on each engine over the last ten minutes. When the count
-reaches three, it raises a warning titled with the engine's name (for example
+reaches three, it raises a warning titled with the engine's name (for example,
 "Port Engine RPM Dips"). The card gives the count and the worst dip, for
 example "6 RPM dips in 10 min · up to 140 rpm below 1170 rpm". The warning
 clears once ten minutes pass without a stumble. Helmcentral reports what the
@@ -152,9 +152,9 @@ What doesn't count:
   unloading on the same wave is the sea, not an engine. A dip on one engine
   alone still counts, and a single-engine boat gets no such filtering.
 
-This needs nothing set up. Every engine the boat reports rpm for is watched
-from the moment it starts, and the warning is already switched on. An engine
-that first appears later gets its own warning then. An engine with an equipment
-item is titled with the item's name. Otherwise the title uses the engine's own
-identifier ("Port"). You can edit or remove the alarm rule in Alarms like any
-other, and a restart doesn't undo removing it.
+This needs nothing set up. From the moment Helmcentral starts, it watches every
+engine the boat reports rpm for, and the warning is already switched on. An
+engine that first appears later gets its own warning then. An engine with an
+equipment item is titled with the item's name. Otherwise, the title uses the
+engine's own identifier ("Port"). You can edit or remove the alarm rule in
+Alarms like any other, and a restart doesn't undo removing it.
