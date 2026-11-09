@@ -402,13 +402,6 @@ func TestCheckPlanningTide_AnyHeightIsAReadingAndItCarriesItsDatum(t *testing.T)
 			if want == "" {
 				want = tideDatumChart
 			}
-			if h == -1 && d == "" {
-				// The old marker: no datum with it.
-				if got != nil || stored != "" || msg != "" {
-					t.Errorf("-1 with no datum is none: %v %q %q", got, stored, msg)
-				}
-				continue
-			}
 			if msg != "" || got == nil || *got != h || stored != want {
 				t.Errorf("%v on %q: stored %q, %q", h, d, stored, msg)
 			}
@@ -1242,18 +1235,17 @@ func TestConfiguredChart_AnErrorSaysWhatKindOfProviderFailed(t *testing.T) {
 	}
 }
 
-func TestPlanningTide_AnOldClientsMinusOneWithNoDatumIsNone(t *testing.T) {
+func TestPlanningTide_AMinusOneFootHeightIsAReadingWithOrWithoutADatum(t *testing.T) {
 	anchorTestEnv(t, 0)
 	resetAnchorWatchState(t)
 	code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1, "lon": 149.2, "planning_depth_m": 4.0, "planning_tide_height_ft": -1.0})
-	if code != http.StatusOK || resp["planning_tide_height_ft"] != nil {
-		t.Fatalf("an old client's -1 is none on a drop: %d %+v", code, resp)
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != -1.0 || resp["planning_tide_datum"] != tideDatumChart {
+		t.Fatalf("-1.0 on a drop is a minus tide at chart datum: %d %+v", code, resp)
 	}
 	code, resp = patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 5.0, "planning_tide_height_ft": -1.0})
-	if code != http.StatusOK || resp["planning_tide_height_ft"] != nil {
+	if code != http.StatusOK || resp["planning_tide_height_ft"] != -1.0 || resp["planning_tide_datum"] != tideDatumChart {
 		t.Fatalf("and on a patch: %d %+v", code, resp)
 	}
-	// A new client always sends the datum, so its -1.0 is a reading.
 	code, resp = patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 5.0, "planning_tide_height_ft": -1.0, "planning_tide_datum": "chart_datum"})
 	if code != http.StatusOK || resp["planning_tide_height_ft"] != -1.0 || resp["planning_tide_datum"] != tideDatumChart {
 		t.Fatalf("-1.0 with a datum is real: %d %+v", code, resp)
