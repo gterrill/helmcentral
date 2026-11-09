@@ -268,7 +268,13 @@ func recordTideCalibrationSample(state vesselStateData, now time.Time) {
 		tideCalSignal()
 	}
 	age, known := secondsAge(state.DepthLastUpdateAge)
-	if !known || age > vesselStatusFreshAge || !finite(state.Depth) || state.Depth <= 0 || !hasUsableVesselPosition(state.Latitude, state.Longitude) {
+	if !known || age > vesselStatusFreshAge || !finite(state.Depth) || state.Depth <= 0 {
+		return
+	}
+	// A position the receiver flags, or one that has gone quiet, would put the
+	// depth in the wrong seabed cell, so the minute is skipped.
+	posAge, posKnown := secondsAge(state.PositionLastUpdateAge)
+	if state.GNSSCriticalAlert || !posKnown || posAge > vesselStatusFreshAge || !hasUsableVesselPosition(state.Latitude, state.Longitude) {
 		return
 	}
 	reading, done := globalTideCalRecorder.observe(now, watch.SetAt, state.Depth, state.Latitude, state.Longitude)
