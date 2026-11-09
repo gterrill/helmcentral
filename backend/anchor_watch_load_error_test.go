@@ -18,8 +18,14 @@ import (
 func resetAnchorWatchLoadError(t *testing.T) {
 	t.Helper()
 	anchorWatchMu.Lock()
+	prev := anchorWatchLoadErr
 	anchorWatchLoadErr = ""
 	anchorWatchMu.Unlock()
+	t.Cleanup(func() {
+		anchorWatchMu.Lock()
+		anchorWatchLoadErr = prev
+		anchorWatchMu.Unlock()
+	})
 }
 
 // A corrupt anchor_watch.json must never take the rest of the backend down
