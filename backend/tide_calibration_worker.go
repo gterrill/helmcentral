@@ -174,6 +174,12 @@ func tideCalStayAppend(store *passageStore, setAt time.Time, r tideCalReading) {
 	defer tideCalStayMu.Unlock()
 	st := tideCalStayCur
 	if st == nil || st.store != store || st.setAtMs != setAt.UnixMilli() {
+		// A stay being loaded will take the minute when it is installed.
+		for _, l := range tideCalLoads {
+			if l.store == store && l.setAtMs == setAt.UnixMilli() {
+				l.pending = append(l.pending, r)
+			}
+		}
 		return
 	}
 	// A minute already in the stay, such as one a reload from the store has just
@@ -290,20 +296,94 @@ func tideCalFitNow(watch anchorWatchData, store *passageStore, chart tideCalChar
 	return e, nil
 }
 
+// tideCalLoad is a read of a stay from the store that is under way. Minutes the
+// recorder stores meanwhile are kept here, as the stay they belong to is not yet
+// held. Other callers wanting the same stay wait on done rather than read it again.
+type tideCalLoad struct {
+	store   *passageStore
+	setAtMs int64
+	pending []tideCalReading
+	done    chan struct{}
+}
+
+// tideCalLoads are the reads under way, and tideCalInstalls counts the stays
+// installed, so a load can tell another stay was installed while it read.
+// Guarded by tideCalStayMu.
+var (
+	tideCalLoads    []*tideCalLoad
+	tideCalInstalls int
+)
+
+// tideCalAfterRead is a test seam, called between the store read and the lock
+// that installs the stay.
+var tideCalAfterRead func()
+
 // tideCalStayLoaded is the stay in memory for this watch, loaded from the store
-// if it is not the one held.
+// if it is not the one held. The store is read without the lock, which guards
+// memory only, so the recorder's tick is never held up by it.
 func tideCalStayLoaded(watch anchorWatchData, store *passageStore) (*tideCalStay, error) {
 	setAtMs := watch.SetAt.UnixMilli()
+	for {
+		tideCalStayMu.Lock()
+		if st := tideCalStayCur; st != nil && st.store == store && st.setAtMs == setAtMs {
+			tideCalStayMu.Unlock()
+			return st, nil
+		}
+		var running *tideCalLoad
+		for _, l := range tideCalLoads {
+			if l.store == store && l.setAtMs == setAtMs {
+				running = l
+			}
+		}
+		if running == nil {
+			load := &tideCalLoad{store: store, setAtMs: setAtMs, done: make(chan struct{})}
+			tideCalLoads = append(tideCalLoads, load)
+			installs := tideCalInstalls
+			tideCalStayMu.Unlock()
+			return tideCalRunLoad(watch, store, load, installs)
+		}
+		tideCalStayMu.Unlock()
+		<-running.done
+		// The loop takes the stay it installed, or reads again if it failed.
+	}
+}
+
+// tideCalRunLoad reads the stay and installs it. A stay installed meanwhile for
+// another watch is left in place; the caller still gets this one to use.
+func tideCalRunLoad(watch anchorWatchData, store *passageStore, load *tideCalLoad, installs int) (*tideCalStay, error) {
+	var readings []tideCalReading
+	var err error
+	defer func() {
+		tideCalStayMu.Lock()
+		for i, l := range tideCalLoads {
+			if l == load {
+				tideCalLoads = append(tideCalLoads[:i], tideCalLoads[i+1:]...)
+				break
+			}
+		}
+		tideCalStayMu.Unlock()
+		close(load.done)
+	}()
+	readings, err = store.tideCalReadings(watch.SetAt)
+	if tideCalAfterRead != nil {
+		tideCalAfterRead()
+	}
+	if err != nil {
+		return nil, err
+	}
 	tideCalStayMu.Lock()
 	defer tideCalStayMu.Unlock()
-	st := tideCalStayCur
-	if st == nil || st.store != store || st.setAtMs != setAtMs {
-		readings, err := store.tideCalReadings(watch.SetAt)
-		if err != nil {
-			return nil, err
+	// Minutes stored while the read ran may or may not be in it; add those
+	// after its last, in order.
+	for _, r := range load.pending {
+		if n := len(readings); n == 0 || r.At.After(readings[n-1].At) {
+			readings = append(readings, r)
 		}
-		st = &tideCalStay{store: store, setAtMs: setAtMs, readings: readings}
+	}
+	st := &tideCalStay{store: store, setAtMs: load.setAtMs, readings: readings}
+	if tideCalInstalls == installs {
 		tideCalStayCur = st
+		tideCalInstalls++
 	}
 	return st, nil
 }
