@@ -999,3 +999,51 @@ func TestPlanTidalDeparture_AModelledTideHasNoDistanceAndSaysItsDatum(t *testing
 		t.Errorf("modelled %v datum %q", res.Modelled, res.HeightDatum)
 	}
 }
+
+// ── the calibration's source ───────────────────────────────────────────
+
+// The calibration stores a tide by (provider id, station id). With a watch set,
+// a position-based provider's station id is the anchor's rounded point, so a
+// boat swinging across a rounding line does not start another source. Only a
+// moved anchor (Adjust) does.
+func TestTideCalSource_PositionBasedFollowsTheAnchorNotTheSwingingBoat(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	registerTideProvider(newMSLStub(time.Now()))
+	writeTideSettings(t, "  tide_provider: \"\"\n")
+	withAnchorWatch(t, &anchorWatchData{Lat: 45.51, Lon: 12.41})
+
+	sourceAtBoat := func(lat, lon float64) string {
+		withVesselPosition(t, lat, lon, nil)
+		c, err := liveTideCalChart()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !c.PositionBased {
+			t.Fatal("the chart must say it follows a position")
+		}
+		return c.Source
+	}
+	// 45.475 is a rounding line of the 0.05 degree grid.
+	west, east := sourceAtBoat(45.474, 12.41), sourceAtBoat(45.476, 12.41)
+	if west != east || west != "open-meteo/45.50,12.40" {
+		t.Fatalf("the boat crossing a rounding line changed the source: %q then %q", west, east)
+	}
+
+	withAnchorWatch(t, &anchorWatchData{Lat: 45.60, Lon: 12.41}) // Adjust moved it
+	if moved := sourceAtBoat(45.476, 12.41); moved == east || moved != "open-meteo/45.60,12.40" {
+		t.Fatalf("a moved anchor is another source, got %q", moved)
+	}
+}
+
+func TestTideCalSource_StationProviderKeepsItsSavedStationWhateverTheAnchorDoes(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	registerTideProvider(&stubTideProvider{id: "bom", result: tideChartResult{Station: tideStation{StationID: "S1", Name: "Harbour"}}})
+	writeTideSettings(t, "  tide_provider: bom\n  tide_station_id: S1\n")
+	for _, w := range []*anchorWatchData{{Lat: 45.51, Lon: 12.41}, {Lat: 45.60, Lon: 12.41}, {Lat: -1, Lon: -1}} {
+		withAnchorWatch(t, w)
+		c, err := liveTideCalChart()
+		if err != nil || c.Source != "bom/S1" || c.PositionBased {
+			t.Fatalf("anchor %+v: source %q positionBased %v err %v", w, c.Source, c.PositionBased, err)
+		}
+	}
+}
