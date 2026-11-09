@@ -93,6 +93,10 @@ type lowWaterClearance struct {
 	VerdictClearanceM *float64             `json:"verdict_clearance_m,omitempty"`
 	VerdictHalfWidthM *float64             `json:"verdict_half_width_m,omitempty"`
 	Calibration       *lowWaterCalibration `json:"calibration,omitempty"`
+	// TideIsPoint is set when the tide comes from a model that follows the
+	// boat's position and not from a tide station, so the page and Mate call
+	// it the tide model.
+	TideIsPoint bool `json:"tide_is_point,omitempty"`
 	// WorkedOutAt is when the server worked this out, RFC 3339, set by the
 	// endpoint so the page can say how old a verdict is when a later poll fails.
 	WorkedOutAt string `json:"worked_out_at,omitempty"`
@@ -207,6 +211,8 @@ func buildLowWater(state vesselStateData, tide func() (tideTodayResponse, error)
 	out := computeLowWaterClearance(in)
 	if terr != nil {
 		out.Detail = detail
+	} else if p, ok := getTideProvider(resp.Provider); ok {
+		out.TideIsPoint = tideProviderPositionBased(p)
 	}
 	// The local calibration (ADR 0274) lays on a station verdict; with no
 	// verdict there is nothing for it to refine, and the reason stands.

@@ -41,6 +41,7 @@ interface LowWaterWire {
   verdict_clearance_m?: number
   verdict_half_width_m?: number
   calibration?: CalibrationWire
+  tide_is_point?: boolean
   worked_out_at?: string
 }
 
@@ -131,6 +132,7 @@ function parseVerdict(wire: LowWaterWire): LowWaterClearanceResult {
       clearanceM: wire.clearance_m,
       lowTideTime: wire.low_tide_time,
     }
+    if (wire.tide_is_point === true) verdict.tideIsPoint = true
     if (wire.calibration !== undefined) verdict.calibration = parseCalibration(wire.calibration)
     if (verdict.calibration?.ready) {
       if (!isFiniteNumber(wire.depth_at_low_half_width_m)) throw new Error('low-water clearance: a calibrated depth without its interval')

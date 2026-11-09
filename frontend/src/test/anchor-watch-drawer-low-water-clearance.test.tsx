@@ -198,6 +198,36 @@ describe('AnchorWatchDrawer low water clearance', () => {
       stationMatchNote: "The tide here doesn't follow Middle Island (11 km away): it runs 64% of its range.",
     }
 
+    it('calls the estimate tide model prediction when the tide follows the position', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW,
+          calibration: { ready: false, notReady: 'implausible_fit', hoursOfReadings: 3, shallowestDiffers: false, deepestDiffers: false },
+          tideIsPoint: true,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      const line = screen.getByTestId('low-water-method')
+      expect(line).toHaveTextContent('Depth based on tide model prediction')
+      expect(line).toHaveTextContent("readings don't fit the tide model, not used")
+      expect(line).not.toHaveTextContent('station')
+    })
+
+    it('names the tide model behind the verdict when that set the warning', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'too_shallow', depthAtLowM: 2.0, depthAtLowHalfWidthM: 0.4, clearanceM: 0.8, lowTideTime: LOW,
+          cautiousSource: 'station', verdictClearanceM: 0.3, calibration: READY, tideIsPoint: true,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.getByTestId('low-water-clearance')).toHaveTextContent('set by the tide model estimate')
+    })
+
     it('labels the station estimate, with the hours of readings so far while it calibrates', () => {
       mockLowWater = {
         lowWater: {

@@ -48,6 +48,11 @@ export interface LowWaterCalibration {
   stationMatchNote?: string
 }
 
+/** What the tide prediction is called: the model that follows the position, or a station. */
+export function tideSourceName(verdict: { tideIsPoint?: boolean }): 'tide model' | 'tide station' {
+  return verdict.tideIsPoint === true ? 'tide model' : 'tide station'
+}
+
 export type LowWaterClearanceResult =
   | { status: 'unknown'; reason: LowWaterClearanceReason }
   | {
@@ -64,6 +69,8 @@ export type LowWaterClearanceResult =
       verdictClearanceM?: number
       verdictHalfWidthM?: number
       calibration?: LowWaterCalibration
+      /** The tide comes from the worldwide model that follows the position, not a tide station. */
+      tideIsPoint?: boolean
     }
 
 /** How a length is written for the operator: the digits and the unit beside them. */
@@ -93,18 +100,18 @@ export function readingsSpanText(hours: number): string {
 }
 
 /** Why the calibration is not ready yet, for the line under the station estimate. */
-export function calibrationNotReadyText(reason: LowWaterCalibrationNotReady, hoursOfReadings: number): string {
+export function calibrationNotReadyText(reason: LowWaterCalibrationNotReady, hoursOfReadings: number, isPoint = false): string {
   switch (reason) {
     case 'too_few_readings':
       return `calibrating, ${readingsSpanText(hoursOfReadings)} of readings so far`
     case 'readings_too_scattered':
       return 'readings too scattered to calibrate yet'
     case 'implausible_fit':
-      return "readings don't fit the station's tide, not used"
+      return isPoint ? "readings don't fit the tide model, not used" : "readings don't fit the station's tide, not used"
     case 'no_recent_reading':
       return 'no recent depth readings to calibrate with'
     case 'no_tide_curve':
-      return "the station's predictions don't cover the readings"
+      return isPoint ? "the tide model's predictions don't cover the readings" : "the station's predictions don't cover the readings"
     case 'working_it_out':
       return 'working out the calibration'
     case 'no_clearance_set':

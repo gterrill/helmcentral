@@ -693,7 +693,7 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 		return "The operator is on the Anchor Watch page." + state + " Questions about depth, \"too shallow\", the water under the keel or \"here\" " +
 			"are about the boat's current position, not the swing circle or another place. Call get_vessel_status and answer from its " +
 			"anchor.low_water figures, in this order: the depth now, the estimated depth at the next low (with its time) and the method that gave it " +
-			"(the tide station's prediction, or calibrated against the sounder's readings here: for a calibrated figure give the hours of readings " +
+			"(the tide station's prediction, or the tide model's when tide_is_model is true, or calibrated against the sounder's readings here: for a calibrated figure give the hours of readings " +
 			"and quote its \"plus or minus\" half width), less the draft, compared with the operator's clearance (the margin they set). " +
 			"Say so when the shallowest sounded spot or the tide-match note matters. When it is too shallow, end by linking " +
 			"[Anchor Watch settings](/settings/anchor-watch). Do not offer to check whether a watch is running: this sentence says.\n\n"
