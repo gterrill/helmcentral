@@ -1316,3 +1316,49 @@ func TestStationFigureIsForTheSameLowAsTheLocalOne(t *testing.T) {
 		t.Errorf("station fall = %.3f m, want %.3f m to the station low at %s", res.StationFallM, want, stationLow)
 	}
 }
+
+// A minute stored while the stay is being read from the store is neither lost
+// nor held up by the read, and a minute the read already saw is not doubled.
+func TestAMinuteStoredDuringTheStayLoadIsKeptAndNotBlocked(t *testing.T) {
+	resetTideCalState(t)
+	store := newTestPassageStore(t)
+	curve := loadKeppelCurve(t)
+	rs := readingsUntil(keppelMinutes(t, curve), keppelDrop.Add(time.Hour))
+	for _, r := range rs {
+		if err := store.appendTideCalReading(keppelDrop, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	late := rs[len(rs)-1]
+	late.At = late.At.Add(time.Minute)
+	later := late
+	later.At = later.At.Add(time.Minute)
+	tideCalAfterRead = func() {
+		// The recorder stores a minute after the read, and appends it.
+		if err := store.appendTideCalReading(keppelDrop, late); err != nil {
+			t.Error(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			tideCalStayAppend(store, keppelDrop, late)
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("the recorder's append waited on the stay load")
+		}
+	}
+	t.Cleanup(func() { tideCalAfterRead = nil })
+	if _, err := tideCalStayLoaded(keppelWatch(), store); err != nil {
+		t.Fatal(err)
+	}
+	tideCalAfterRead = nil
+	tideCalStayAppend(store, keppelDrop, later)
+	tideCalStayMu.Lock()
+	n := len(tideCalStayCur.readings)
+	tideCalStayMu.Unlock()
+	if n != len(rs)+2 {
+		t.Errorf("the stay holds %d minutes, want %d", n, len(rs)+2)
+	}
+}
