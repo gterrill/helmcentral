@@ -129,10 +129,16 @@ thresholds. So it's never counted as something to look at, and it doesn't change
 the title of a notification. Mate may mention it, but won't treat it as a finding
 or give a cause. When Helmcentral can't judge, the block says why, for example
 "Port engine: coolant temperature is switched off, so this engine cannot be
-judged." When you have no InfluxDB set up, the block isn't shown at all. When the
+judged." Under each stretch are three buttons, **Real**, **Normal** and **Don't know**,
+for telling Helmcentral what you think of it. Your answer shows under the stretch,
+and you can change it. **Normal** means Helmcentral won't point out those minutes
+again. The same pattern on another day can still be raised, until the engine has
+run that way enough to learn it. Reports made before the buttons existed show the sentence
+alone. When you have no InfluxDB set up, the block isn't shown at all. When the
 engines didn't run, or ran and nothing stood out, it isn't shown either. A watch
 that was away for more than a week judges only the last 7 days and says so. See
-[Anomaly detection](anomaly-detection.md#unusual-engine-readings).
+[Anomaly detection](anomaly-detection.md#unusual-engine-readings) for what each
+answer does.
 
 The report covers the time since the watch last ran. The first report covers the
 last 24 hours and says so.

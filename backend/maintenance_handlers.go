@@ -434,8 +434,11 @@ type maintenanceLogPartRequest struct {
 }
 
 type maintenanceLogEntryRequest struct {
-	EquipmentID *string                     `json:"equipment_id"`
-	PerformedAt string                      `json:"performed_at"`
+	EquipmentID *string `json:"equipment_id"`
+	PerformedAt string  `json:"performed_at"`
+	// StartedAt is when a repair's fault first showed (YYYY-MM-DD), blank for
+	// none. Only a repair takes one, and not after PerformedAt.
+	StartedAt   string                      `json:"started_at"`
 	Hours       *float64                    `json:"hours"`
 	Kind        string                      `json:"kind"`
 	Description string                      `json:"description"`
@@ -451,14 +454,40 @@ type maintenanceLogEntryRequest struct {
 	NewDueDate string `json:"new_due_date"`
 }
 
+// isCalendarDate says s is a real day written YYYY-MM-DD: 2026-02-30 matches
+// the pattern and is not one.
+func isCalendarDate(s string) bool {
+	if !installDatePattern.MatchString(s) {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
 // validateMaintenanceLogEntryCore validates the fields every log-entry
-// write shares (performed_at, hours, cost, parts) - kind and equipment_id
-// are each caller's own job, since the three call sites (standalone
+// write shares (performed_at, started_at, hours, cost, parts). kind is the
+// caller's already-resolved kind, which only started_at is checked against
+// (a repair alone has a fault to date); equipment_id is each caller's own job, since the three call sites (standalone
 // create, update, complete) each source them differently.
-func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest) (maintenanceLogEntryInput, *inventoryValidationError) {
+func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest, kind string) (maintenanceLogEntryInput, *inventoryValidationError) {
+	// The kind comes first: everything else, started_at included, is read in its light.
+	if !validMaintenanceLogKinds[kind] {
+		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "kind", Message: "kind must be maintenance, repair or improvement"}
+	}
 	performedAt := strings.TrimSpace(req.PerformedAt)
-	if performedAt == "" || !installDatePattern.MatchString(performedAt) {
+	if performedAt == "" || !isCalendarDate(performedAt) {
 		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "performed_at", Message: "performed_at is required and must be YYYY-MM-DD"}
+	}
+	startedAt := strings.TrimSpace(req.StartedAt)
+	if startedAt != "" && !isCalendarDate(startedAt) {
+		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "started_at", Message: "started_at must be YYYY-MM-DD"}
+	}
+	// Both are YYYY-MM-DD, so the strings order as the dates do.
+	if startedAt != "" && kind != "repair" {
+		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "started_at", Message: "started_at only applies to a repair"}
+	}
+	if startedAt != "" && startedAt > performedAt {
+		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "started_at", Message: "started_at cannot be after performed_at"}
 	}
 	if req.Hours != nil && *req.Hours < 0 {
 		return maintenanceLogEntryInput{}, &inventoryValidationError{Field: "hours", Message: "hours cannot be negative"}
@@ -494,6 +523,7 @@ func validateMaintenanceLogEntryCore(req maintenanceLogEntryRequest) (maintenanc
 
 	return maintenanceLogEntryInput{
 		PerformedAt: performedAt,
+		StartedAt:   startedAt,
 		Hours:       req.Hours,
 		Description: strings.TrimSpace(req.Description),
 		Who:         strings.TrimSpace(req.Who),
@@ -1154,7 +1184,8 @@ func createMaintenanceLogEntryHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	in, verr := validateMaintenanceLogEntryCore(req)
+	kind := strings.TrimSpace(req.Kind)
+	in, verr := validateMaintenanceLogEntryCore(req, kind)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
 	}
@@ -1162,10 +1193,6 @@ func createMaintenanceLogEntryHandler(c echo.Context) error {
 	equipmentID := trimStringPtr(req.EquipmentID)
 	if equipmentID == nil {
 		return writeInventoryValidationError(c, &inventoryValidationError{Field: "equipment_id", Message: "equipment_id is required"})
-	}
-	kind := strings.TrimSpace(req.Kind)
-	if !validMaintenanceLogKinds[kind] {
-		return writeInventoryValidationError(c, &inventoryValidationError{Field: "kind", Message: "kind must be maintenance, repair or improvement"})
 	}
 	in.EquipmentID = equipmentID
 	in.Kind = kind
@@ -1212,13 +1239,10 @@ func updateMaintenanceLogEntryHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	in, verr := validateMaintenanceLogEntryCore(req)
+	kind := strings.TrimSpace(req.Kind)
+	in, verr := validateMaintenanceLogEntryCore(req, kind)
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
-	}
-	kind := strings.TrimSpace(req.Kind)
-	if !validMaintenanceLogKinds[kind] {
-		return writeInventoryValidationError(c, &inventoryValidationError{Field: "kind", Message: "kind must be maintenance, repair or improvement"})
 	}
 	in.Kind = kind
 
@@ -1439,7 +1463,7 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 	// logged, gaugeToTrueHours - maintenance_hours.go), never the raw
 	// gauge reading the operator actually typed in; named explicitly so
 	// the export is never ambiguous read back later.
-	if err := w.Write([]string{"date", "item", "rule", "kind", "hours (true)", "description", "who", "cost", "currency", "parts", "schedule"}); err != nil {
+	if err := w.Write([]string{"date", "item", "rule", "kind", "hours (true)", "description", "who", "cost", "currency", "parts", "schedule", "started showing"}); err != nil {
 		return err
 	}
 	for _, e := range entries {
@@ -1463,7 +1487,11 @@ func exportMaintenanceLogCSVHandler(c echo.Context) error {
 		for i, p := range e.Parts {
 			parts[i] = fmt.Sprintf("%s x%s", p.EquipmentName, strconv.FormatFloat(p.Quantity, 'f', -1, 64))
 		}
-		row := []string{e.PerformedAt, itemName, ruleDescription, e.Kind, hours, e.Description, e.Who, cost, e.Currency, strings.Join(parts, "; "), schedule}
+		startedShowing := ""
+		if e.StartedAt != nil {
+			startedShowing = *e.StartedAt
+		}
+		row := []string{e.PerformedAt, itemName, ruleDescription, e.Kind, hours, e.Description, e.Who, cost, e.Currency, strings.Join(parts, "; "), schedule, startedShowing}
 		if err := w.Write(row); err != nil {
 			return err
 		}

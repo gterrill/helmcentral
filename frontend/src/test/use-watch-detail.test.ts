@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
-import { invalidateWatches, useWatchDetail } from '@/hooks/use-watches'
+import { invalidateWatches, useWatchDetail, watchesApi } from '@/hooks/use-watches'
 import { resetQueryStore } from '@/lib/api-query'
 import type { WatchRun } from '@/lib/watches'
 
@@ -84,6 +84,51 @@ describe('useWatchDetail paging', () => {
     expect(result.current.runs).toHaveLength(24)
     server = server.filter((r) => r.id !== 'r2')
     await act(async () => { await invalidateWatches() })
+    expect(ids(result.current.runs)).not.toContain('r2')
+  })
+
+  it('shows an answer on every loaded run, older pages included, once the pool is read again', async () => {
+    // Two runs whose stretches overlap: answering one answers the other.
+    server = Array.from({ length: 25 }, (_, i) => run(i))
+    server[24] = { ...server[24], unusual_answers: [''] }
+    server[2] = { ...server[2], unusual_answers: [''] }
+    stub()
+    const { result } = renderHook(() => useWatchDetail('w1'))
+    await waitFor(() => expect(result.current.runs).toHaveLength(20))
+    await act(async () => { await result.current.showOlder() })
+    const answers = (id: string) => result.current.runs.find((r) => r.id === id)?.unusual_answers
+    expect(answers('r24')).toEqual([''])
+    expect(answers('r2')).toEqual([''])
+
+    server[24] = { ...server[24], unusual_answers: ['normal'] }
+    server[2] = { ...server[2], unusual_answers: ['normal'] }
+    await act(async () => { await result.current.refreshRuns() })
+    expect(answers('r24')).toEqual(['normal'])
+    expect(answers('r2')).toEqual(['normal'])
+    expect(result.current.runs).toHaveLength(25)
+  })
+
+  it('reads the history once, not twice, after an answer', async () => {
+    server = Array.from({ length: 5 }, (_, i) => run(i))
+    stub()
+    const { result } = renderHook(() => useWatchDetail('w1'))
+    await waitFor(() => expect(result.current.runs).toHaveLength(5))
+    urls.length = 0
+    await act(async () => {
+      await watchesApi.answerUnusual({ id: 'r1', watch_id: 'w1' }, 0, 'real')
+      await result.current.refreshRuns()
+    })
+    expect(urls.filter((u) => u.includes('/api/watches/w1?'))).toHaveLength(1)
+  })
+
+  it('does not bring back a deleted run when it reads the pool again', async () => {
+    server = Array.from({ length: 25 }, (_, i) => run(i))
+    stub()
+    const { result } = renderHook(() => useWatchDetail('w1'))
+    await waitFor(() => expect(result.current.runs).toHaveLength(20))
+    await act(async () => { await result.current.showOlder() })
+    act(() => { result.current.dropRun('r2') })
+    await act(async () => { await result.current.refreshRuns() })
     expect(ids(result.current.runs)).not.toContain('r2')
   })
 

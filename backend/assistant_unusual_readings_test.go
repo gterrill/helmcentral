@@ -30,9 +30,10 @@ func unusualToolDeps(res unusualResult, fixed bool) (assistantToolDeps, *unusual
 		vesselView: func() (vesselView, error) {
 			return vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"}}}, nil
 		},
-		displayUnits: func() (string, error) { return "metric", nil },
+		displayUnits:   func() (string, error) { return "metric", nil },
+		unusualAnswers: func() ([]normalAnswer, error) { return nil, nil },
 		// Like scoreUnusualReadings, the stand-in cuts a window past seven days.
-		unusualReadings: func(ctx context.Context, since, until time.Time, engine string) unusualResult {
+		unusualReadings: func(ctx context.Context, since, until time.Time, engine string, _ []normalAnswer) unusualResult {
 			*call = unusualToolCall{since: since, until: until, engine: engine, ctx: ctx}
 			r := res
 			r.Since, r.Until = since, until

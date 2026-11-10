@@ -86,7 +86,7 @@ const rule = (): MaintenanceRule => ({
 })
 
 const entry = (): MaintenanceLogEntry => ({
-  id: 'log-1', equipment_id: 'eq-1', rule_id: null, performed_at: '2026-06-01',
+  id: 'log-1', equipment_id: 'eq-1', rule_id: null, performed_at: '2026-06-01', started_at: null,
   hours: 100, kind: 'repair', description: 'Replaced belt', who: 'Skipper',
   cost: null, currency: '', created_at: '', updated_at: '', parts: [], photo_ids: [],
 })

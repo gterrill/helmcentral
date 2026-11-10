@@ -24,6 +24,9 @@ type unusualStretchView struct {
 	Band      string   `json:"band"`
 	Summary   string   `json:"summary"`
 	Direction string   `json:"direction,omitempty"`
+	// OperatorAnswer is what the operator said about the stretch: real, normal or
+	// unknown. Set by the tool, not by describeUnusualStretch.
+	OperatorAnswer string `json:"operator_answer,omitempty"`
 }
 
 // describeDisplayFor is how a reading is converted for the operator, a variable

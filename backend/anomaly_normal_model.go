@@ -1,9 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"sync"
 	"time"
 )
@@ -66,6 +63,9 @@ type normalRegime struct {
 
 type normalSubjectModel struct {
 	Name string `json:"name"`
+	// EquipmentID is the inventory item the subject was linked to when it was
+	// learned, so a change of link is noticed (wakeNormalIfEnginesChanged).
+	EquipmentID string `json:"equipment_id,omitempty"`
 	// GatedMinutes are the minutes this subject was learned from, after the
 	// gate and the alarm exclusions.
 	GatedMinutes int                    `json:"gated_minutes"`
@@ -74,8 +74,18 @@ type normalSubjectModel struct {
 	Problem string `json:"problem,omitempty"`
 }
 
-// normalExcluded is a stretch of one subject's history taken out of training.
-// PR 2 adds reasons ("labelled normal", "fault") with the same shape.
+// Why a stretch is in Excluded or Labelled.
+const (
+	normalReasonAlarm          = "alarm"
+	normalReasonAnsweredReal   = "answered real"
+	normalReasonAnsweredNormal = "answered normal"
+	normalReasonRepair         = "repair"
+)
+
+// normalExcluded is a stretch of one subject's history. In Excluded it was taken
+// out of training (an alarm, a stretch answered real, a repair's fault range). In
+// Labelled it was kept even where the reweighting pass would have dropped it
+// (a stretch answered normal).
 type normalExcluded struct {
 	Subject string    `json:"subject"`
 	From    time.Time `json:"from"`
@@ -92,6 +102,9 @@ type normalSubsystemModel struct {
 	Subjects  map[string]normalSubjectModel `json:"subjects"`
 	Regimes   map[string]normalRegime       `json:"regimes"`
 	Excluded  []normalExcluded              `json:"excluded"`
+	// Labelled are the stretches the operator answered normal. They stay in
+	// training, so they are not Excluded, whose entries all mean "taken out".
+	Labelled []normalExcluded `json:"labelled"`
 }
 
 type normalModelFile struct {
@@ -127,16 +140,9 @@ func (m normalSubsystemModel) judgedRegimes() int {
 // yet and loads empty. A file that exists and does not parse is corrupt, which
 // is an error the report and the tool say, and never an empty model.
 func loadNormalModel(path string) (normalModelFile, error) {
-	raw, err := os.ReadFile(path)
+	m, _, err := readJSONFile[normalModelFile](path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return normalModelFile{Subsystems: map[string]normalSubsystemModel{}}, nil
-		}
-		return normalModelFile{}, fmt.Errorf("reading %s: %w", path, err)
-	}
-	var m normalModelFile
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return normalModelFile{}, fmt.Errorf("parsing %s: %w", path, err)
+		return normalModelFile{}, err
 	}
 	if m.Subsystems == nil {
 		m.Subsystems = map[string]normalSubsystemModel{}

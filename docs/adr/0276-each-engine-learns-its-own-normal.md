@@ -30,6 +30,38 @@ band's usual value, in the operator's units.
 It is a suggestion and never an alarm. Nothing is raised, acknowledged or
 notified, and nothing is scored live.
 
+### The measure
+
+For one band of one engine with d readings, let x be a minute's readings, μ and s the
+band's learned means and standard deviations, and R the learned correlation matrix. The
+standardised minute is z = (x − μ) / s, and its squared Mahalanobis distance is
+
+    D² = zᵀ (R + λI)⁻¹ z,    λ = 0.1
+
+The ridge λ lives in correlation space, so it means the same for rpm as for oil
+pressure. Because R carries how the readings move together, a minute whose readings
+each sit inside their own spread can still score high when the combination is wrong,
+and two readings that rise together are not counted twice.
+
+D² splits across readings. With w = (R + λI)⁻¹ z, reading j contributes zⱼ·wⱼ, and the
+parts sum to D² exactly. A contribution can be negative, so the named reading is the one
+with the largest summed contribution over the stretch, among readings that may be named
+(never rpm). A minute is unusual when D² is above the band's threshold,
+max(P99.5 of the band's training D², χ²₀.₉₉(d)). The first term is what 1 in 200 of the
+band's own minutes exceeded. The second is what chance alone passes 1 time in 100 if the
+readings were normal, and it keeps a band with few distinct minutes from learning a line
+that is too low.
+
+Training fits twice. The first fit scores every row; rows above χ²₀.₉₉₉(d) are dropped,
+except rows the operator answered normal, and the second fit, whose training D² set the
+threshold, is the one that is saved. A standard deviation is the larger of the sample's
+and max(observed step, MinChange) for that reading.
+
+Mahalanobis rather than a z-score per reading, because the faults this is for are
+readings that are each ordinary and wrong together (see Context), and a per-reading
+z-score cannot see a correlation. Rather than k-means, because the regime is known from
+rpm (see Rejected).
+
 ### A generic core, with engines first
 
 `anomaly_normal.go` knows no engine and no path. A subsystem is a list of
@@ -107,7 +139,8 @@ fits without it and lists it as joining.
 - The correlation matrix takes a ridge of 0.1 on its diagonal, so two readings that
   move together cannot make it singular.
 - **One reweighting pass** drops rows above chi-square 0.999 and refits, so an
-  unlabelled fault in history does not become normal. One constant switches it off.
+  unlabelled fault in history does not become normal. Rows the operator answered
+  normal are kept. One constant switches it off.
 - **The threshold** is the larger of the 99.5th percentile of the band's training
   distances and chi-square 0.99 for its number of readings, saved with the band.
 - **Contributions.** The distance splits across readings; the parts sum to it. The
@@ -244,6 +277,84 @@ back on. Gating on an ignored sender is not allowed, because it may be a dead on
 - **A band with too little history:** "Not judged: 1,400 to 1,600 rpm has 22 minutes of
   history, needs 60", when nothing else was judged.
 
+## Feedback
+
+The operator can tell the model what a stretch was, and the maintenance log can say when
+a fault started. Both change the next training and nothing else: nothing is rescored
+and no model is edited by hand.
+
+- **Answers.** The watch report's Unusual block keeps its `lines` as sentences and gains
+  `stretches`, indexed like them, each with the stretch's id, subsystem, subject, engine
+  name, start and end. An answer is recorded from those without scoring again. The
+  operator answers real, normal or unknown, and can change it.
+  `PUT /api/anomaly/normal/answers` takes `{watch_id, run_id, index, answer}`. The server
+  reads the stretch from the stored run's `stretches[index]` and uses its subsystem,
+  subject and times, so a client cannot answer a range it invented, and no id has to be
+  escaped in a path. It refuses with a 400 a bad answer, a run that is not there, a line
+  with no stretch, and an engine that is no longer set up ("This engine is no longer set
+  up. It may have been renumbered or removed."). The file `data/anomaly-normal-answers.json`
+  keeps one engine's answers as ranges that never overlap: the latest answer replaces the
+  parts of earlier ones it overlaps, trimming or splitting them, so training, scoring, the
+  page and Mate all read the same set. It cannot be rebuilt. The run as the page reads it
+  carries `unusual_answers`, indexed like the stretches, read when the run is read
+  (`watchRunsForPage`), so a changed answer shows on reload and the stored report is never
+  rewritten. That read cannot fail the page: when the answers or a report cannot be read,
+  the run says so in `unusual_answers_problem` and shows no buttons. A report saved before
+  this has no stretches and so no buttons. Mate is told the lines only.
+- **Real** is a fault. The stretch's minutes are left out of training like an alarm's,
+  with no padding: the stretch's end is already the instant after its last minute. The
+  entry in `excluded` reads `answered real`. Every range in `excluded` now includes its
+  start and not its end, so an alarm's saved end is one minute later than it was, the
+  same minutes as before.
+- **Normal** is kept. The reweighting pass drops a row above chi-square 0.999, so an
+  answered row carries a keep flag through `normalFitOptions.Keep` and is never
+  dropped. `excluded` means taken out, and every entry in it is, so these go in a
+  sibling list, `labelled`, with the reason `answered normal`. An alarm, a real answer
+  or a repair wins over a normal answer for the same minute. Scoring also never flags a
+  minute inside a range answered normal for that engine, so the answer takes effect at
+  once and does not wait for the next training to widen the band.
+- **Unknown** is recorded and changes nothing.
+- **Repairs.** A log entry of kind repair gains an optional `started_at`, a date no
+  later than `performed_at`. When the entry is on an engine's equipment item, the
+  engine's minutes from the start of `started_at` to the end of `performed_at`, on the
+  boat's clock, are left out (`repair`, with the entry id). Each date takes the offset
+  in force on it, but the boat keeps no history of the zones it has been in, so a repair
+  dated before the boat changed zone is read in the zone it is in now. The inventory has no
+  containment between items, so only the engine item itself counts. Writing or deleting
+  an entry that has, or had, a start date on a configured engine's item wakes the trainer;
+  a repair on any other item wakes nothing. Training reads only the
+  repairs that have a start date, not whole log entries. The log's CSV export carries the
+  date in a last column, "started showing". The only importer reads another program's
+  export, which has no such field, so there is no import to round-trip it.
+- **Failure.** An answers file or a maintenance log that cannot be read stops the run
+  and is recorded in `last_attempt`, as an unopened alarm log is. Neither is replaced by
+  "no answers". A repair whose dates cannot be placed because the boat's zone is unknown
+  stops the run the same way, with "The boat's time zone is unknown, so repair dates
+  could not be placed.", and only when there is a repair to place.
+- **Carry-forward.** One rule, `usableCarry`, serves every path that reuses an old regime
+  (a thin band, and a subject with no usable minutes or a problem): an old regime is never
+  reused if a real answer or a repair for that engine overlaps the window it was learned
+  from, however old that window is. An alarm never stops it, since that fit left the alarm
+  out too. A band not reused shows its thin or not-learned reason, and the answers and
+  repairs used for the check are not cut to the current window. A repair that ended before
+  the oldest window this run or any old regime was learned from is dropped by date alone,
+  so it never asks for the boat's zone, and neither does a repair on another item.
+- **Overlap.** The page and the Mate tool show a stretch the answer covering most of its
+  minutes, and on a tie the later one (`overlappingAnswer`), so a stretch straddling two
+  answers shows the larger. Training and scoring use the answers minute by minute: scoring
+  sorts them once and walks them alongside the minutes. An engine's linked equipment item
+  is saved with the model, so relinking it wakes the trainer. A model saved before this
+  change retrains once on the first equipment save after the upgrade.
+- **Mate.** `get_unusual_engine_readings` gives each stretch the operator's answer
+  (`operator_answer`) from the latest answer whose range overlaps it, not only an exact
+  id, since a stretch's start can move a minute between two scorings. A stretch called
+  normal is not raised again.
+- **What the replay found.** In the captured month, with a 20 minute oil pressure fault
+  bent into the held-out week, an answer of real leaves exactly those minutes out. An
+  answer of normal leaves nothing inside the answered range flagged, once the training
+  has learned it as ordinary and scoring has been told to clear it. Training alone left a
+  last four minutes a hair over the line, which is why scoring clears the range itself.
+
 ## Rejected
 
 - **k-means.** The regime is known: the rpm band. Clustering would find regimes the
@@ -287,9 +398,14 @@ while the healthy one is at 1,800.
 
 ## Follow-ups
 
-- **Feedback (next change).** Fault ranges from the maintenance log, a real, normal or
-  don't-know label on a stretch by its id, labels joining the excluded list with new
-  reasons, and a replay of how early the score rose over a labelled range.
+- **Feedback.** Built; see Feedback below. A replay of how early the score rose over a
+  labelled range is still open.
+- **Refresh cost.** After an answer, `refreshRuns` reads every loaded run again, older pages
+  included, in pages of 100. That is fine for a handful of pages; a cheaper read waits for a
+  watch with a long history.
+- **Engine renumbering.** An answer is saved against an engine instance. If the instance is
+  later given to another engine, the answer applies to the new one. Answers do not follow
+  an engine through a renumbering, and nothing yet asks.
 - **House electrical (later).** Charging sources by state of charge, with a gate of
   about ten minutes of a stable source set, in the same file and with the same trainer.
 - **A drift line and live scoring** are out of this change.

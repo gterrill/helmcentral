@@ -273,7 +273,7 @@ func TestGatherWatchReportInput_ReadsUnusualReadingsOnlyForAWatchThatChecksInstr
 	d.alarmLog = func() *alarmLogStore { return nil }
 	var asked []time.Duration
 	var engine string
-	d.unusualReadings = func(_ context.Context, since, until time.Time, eng string) unusualResult {
+	d.unusualReadings = func(_ context.Context, since, until time.Time, eng string, _ []normalAnswer) unusualResult {
 		asked = append(asked, until.Sub(since))
 		engine = eng
 		return unusualResultWith(stretchAt(2, 30))

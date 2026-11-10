@@ -74,12 +74,19 @@ type trainHarness struct {
 	engines []vesselEngineSetting
 	alarms  []alarmLogEntry
 	alarmEr error
-	ignored map[string]bool
-	source  normalSource
-	srcErr  error
-	minErr  error
-	now     time.Time
-	asked   []normalSource
+	// answers and repairs are the operator's answers and the maintenance log.
+	answers    []normalAnswer
+	answersErr error
+	repairs    []maintenanceRepair
+	repairsErr error
+	boatLoc    *time.Location
+	boatLocErr error
+	ignored    map[string]bool
+	source     normalSource
+	srcErr     error
+	minErr     error
+	now        time.Time
+	asked      []normalSource
 	// requested is the paths of each read, one entry per read.
 	requested [][]string
 }
@@ -110,6 +117,9 @@ func (h *trainHarness) deps() normalTrainDeps {
 		Vessel:   func() (vesselView, error) { return vesselView{Engines: h.engines}, nil },
 		Ignored:  func() map[string]bool { return h.ignored },
 		Alarms:   func(from, to time.Time) ([]alarmLogEntry, error) { return h.alarms, h.alarmEr },
+		Answers:  func() ([]normalAnswer, error) { return h.answers, h.answersErr },
+		Repairs:  func() ([]maintenanceRepair, error) { return h.repairs, h.repairsErr },
+		BoatLoc:  func() (*time.Location, error) { return h.boatLoc, h.boatLocErr },
 		Classify: classifyRange,
 	}
 }
@@ -204,9 +214,11 @@ func TestTrain_AnAlarmForOneEngineTakesOutOnlyThatEnginesMinutes(t *testing.T) {
 	if len(m.Excluded) != 1 {
 		t.Fatalf("excluded = %+v", m.Excluded)
 	}
+	// An excluded range includes its start and not its end, so the last minute taken
+	// out is the one before To.
 	ex := m.Excluded[0]
 	if ex.Subject != "port" || ex.Reason != "alarm" || ex.Ref != "a1" || ex.Title != "Port Engine Oil Pressure Low" ||
-		!ex.From.Equal(r1.Add(40*time.Minute)) || !ex.To.Equal(cleared.Add(5*time.Minute)) {
+		!ex.From.Equal(r1.Add(40*time.Minute)) || !ex.To.Equal(cleared.Add(5*time.Minute+time.Minute)) {
 		t.Errorf("excluded entry = %+v", ex)
 	}
 }
@@ -226,7 +238,7 @@ func TestTrain_AnOpenAlarmTakesOutADayAfterItWasRaised(t *testing.T) {
 	if got := m.Subjects["port"].GatedMinutes; got != 130 {
 		t.Fatalf("minutes left = %d, want 130", got)
 	}
-	if len(m.Excluded) != 1 || !m.Excluded[0].To.Equal(r1.Add(60*time.Minute+24*time.Hour)) {
+	if len(m.Excluded) != 1 || !m.Excluded[0].To.Equal(r1.Add(60*time.Minute+24*time.Hour+time.Minute)) {
 		t.Fatalf("excluded = %+v", m.Excluded)
 	}
 }

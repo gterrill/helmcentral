@@ -175,8 +175,12 @@ type assistantToolDeps struct {
 	// unusualReadings is get_unusual_engine_readings' and the watch report's
 	// reader of the learned normal (ADR 0276): a past window scored against the
 	// saved model, for every engine or the one named. Production wires
-	// scoreUnusualReadings; nil is not wired, and the tool says so.
-	unusualReadings func(ctx context.Context, since, until time.Time, engine string) unusualResult
+	// scoreUnusualReadings, given the operator's answers; nil is not wired, and the
+	// tool says so.
+	unusualReadings func(ctx context.Context, since, until time.Time, engine string, answers []normalAnswer) unusualResult
+	// unusualAnswers is the operator's answers about unusual stretches, so the tool can say which stretches were already answered. nil is not
+	// wired; an error is an unreadable store. Neither reads as no answers.
+	unusualAnswers func() ([]normalAnswer, error)
 	// influxLastRecorded is get_last_recorded's only I/O dependency: the most
 	// recent recorded point for every measurement/source pair matching a
 	// path-prefix and/or source filter, within a lookback window. Production
@@ -415,9 +419,10 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		anomalyReading:    globalAnomalySlot.get,
 		anchorWatch:       currentAnchorWatch,
 		overnight:         overnightForStatus,
-		unusualReadings: func(ctx context.Context, since, until time.Time, engine string) unusualResult {
-			return scoreUnusualReadings(ctx, normalEnginesSubsystem(), productionNormalScoreDeps(settingsPath), since, until, engine)
+		unusualReadings: func(ctx context.Context, since, until time.Time, engine string, answers []normalAnswer) unusualResult {
+			return scoreUnusualReadings(ctx, normalEnginesSubsystem(), productionNormalScoreDeps(settingsPath), since, until, engine, answers)
 		},
+		unusualAnswers: listNormalAnswers,
 	}
 }
 

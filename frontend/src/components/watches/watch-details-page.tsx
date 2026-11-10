@@ -20,12 +20,14 @@ import {
   hasDraftErrors,
   MAX_LOOK_OUT_FOR,
   MAX_WATCH_NAME,
+  answerThenRefresh,
   newWatchDraft,
   oneOffTimeLabel,
   runTimeLabel,
   sameDraft,
   validateWatchDraft,
   WATCH_SECTIONS,
+  type UnusualAnswer,
   type WatchDraft,
   type WatchDraftErrors,
   type WatchRecord,
@@ -288,6 +290,15 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
     : undefined), [onAskMate, recordName])
   // A question Mate asked in a review: a draft in a new chat about this run, never sent from here.
   // Not offered to a read-only session: the sheet would open with nothing to send.
+  // One function for both places a run is shown, so a run's memoised body holds.
+  const { refreshRuns } = detail
+  const answerUnusual = useMemo(
+    () => (canWrite
+      ? (run: WatchRun, index: number, a: UnusualAnswer) =>
+          answerThenRefresh(() => watchesApi.answerUnusual(run, index, a), refreshRuns)
+      : undefined),
+    [canWrite, refreshRuns],
+  )
   const answer = useMemo(() => (onAskMate && recordName !== undefined && canWrite
     ? (run: WatchRun, question: string) => {
         onAskMate(`About "${question}": `, {
@@ -471,6 +482,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
                 highlighted={highlighted}
                 onAskMate={askMate}
                 onAnswer={answer}
+                onAnswerUnusual={answerUnusual}
               />
             </>
           ) : linked.gone ? (
@@ -492,6 +504,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
         onShowOlder={() => { void detail.showOlder() }}
         onAskMate={askMate}
         onAnswer={answer}
+        onAnswerUnusual={answerUnusual}
         onDeleteRun={async (run) => {
           await watchesApi.removeRun(mode.id, run.id)
           detail.dropRun(run.id)

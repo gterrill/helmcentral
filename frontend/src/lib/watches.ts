@@ -176,6 +176,42 @@ export function notCheckedEntries(report: Pick<WatchSectionsReport, 'sections'> 
   return entries
 }
 
+export type UnusualAnswer = 'real' | 'normal' | 'unknown'
+
+/** The button for each answer, and what is said beneath the line once it is given. */
+export const UNUSUAL_ANSWERS: { answer: UnusualAnswer; label: string; said: string }[] = [
+  { answer: 'real', label: 'Real', said: 'You said: real' },
+  { answer: 'normal', label: 'Normal', said: 'You said: normal' },
+  { answer: 'unknown', label: "Don't know", said: "You said: don't know" },
+]
+
+/** The answer was saved, and only the page's refresh afterwards failed. */
+export class UnusualSavedError extends Error {}
+
+/**
+ * Saves an answer, then reads the history again. A refresh that fails after a good
+ * save is an UnusualSavedError, so it is not shown as a lost answer.
+ */
+export async function answerThenRefresh(answer: () => Promise<void>, refresh: () => Promise<void>): Promise<void> {
+  await answer()
+  try {
+    await refresh()
+  } catch (err) {
+    throw new UnusualSavedError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** What an answer needs to know about the stretch a line is about. */
+export interface WatchUnusualStretch {
+  stretch_id: string
+  subsystem: string
+  subject: string
+  /** The subject as the operator names it, for the buttons' labels. */
+  engine: string
+  from: string
+  to: string
+}
+
 /**
  * A learned normal's suggestions (ADR 0276): engine readings that were unusual
  * for that engine. A field of the report, not a section and not a finding, so it
@@ -184,6 +220,8 @@ export function notCheckedEntries(report: Pick<WatchSectionsReport, 'sections'> 
 export interface WatchUnusual {
   /** At most two sentences, each a whole stretch. */
   lines?: string[]
+  /** Indexed like lines. Absent from reports made before answers. */
+  stretches?: WatchUnusualStretch[]
   /** What was left out, or why nothing could be judged. */
   note?: string
   judged_minutes: number
@@ -244,6 +282,10 @@ export interface WatchRun {
   /** The review's opening sentence and the remainder (markdown), split by the server. Absent without a review. */
   review_opening?: string
   review_rest?: string
+  /** The operator's answer to each of the report's unusual stretches, indexed like them, "" for none. */
+  unusual_answers?: string[]
+  /** Why the answers could not be read, so the stretches show no buttons. */
+  unusual_answers_problem?: string
   review_problem: string | null
   /** What Mate asked the skipper in its review. Absent on a run saved before questions were kept. */
   questions?: string[]

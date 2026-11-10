@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, apiRequest, declareQuery, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import type {
+  UnusualAnswer,
   WatchDetail,
   WatchDraft,
   WatchList,
@@ -173,6 +174,29 @@ export function useWatchDetail(id: string | null) {
     })
   }, [])
 
+  // Reads every loaded run again, older pages included, newest to oldest by cursor
+  // up to the oldest one shown. An answer changes the answers of every run whose
+  // stretch it overlaps, and only the first page is read again on its own.
+  const refreshRuns = useCallback(async () => {
+    const last = oldestRef.current
+    if (id === null || last === null) return
+    const fresh: WatchRun[] = []
+    let before = ''
+    for (;;) {
+      const page = await apiRequest<WatchDetail>(`${WATCHES_PATH}/${encodeURIComponent(id)}?limit=100${before}`)
+      fresh.push(...page.runs)
+      const tail = page.runs[page.runs.length - 1]
+      if (!page.has_older || !tail || page.runs.some((r) => r.id === last.id)) break
+      before = `&before=${encodeURIComponent(tail.started_at)},${encodeURIComponent(tail.id)}`
+    }
+    setPool((prev) => {
+      if (prev.id !== id) return prev
+      const next = new Map(prev.runs)
+      for (const r of fresh) if (!prev.deleted.has(r.id)) next.set(r.id, r)
+      return { ...prev, runs: next }
+    })
+  }, [id])
+
   return {
     watch: data?.watch ?? null,
     runs,
@@ -184,6 +208,7 @@ export function useWatchDetail(id: string | null) {
     loadingOlder,
     olderError,
     dropRun,
+    refreshRuns,
   }
 }
 
@@ -214,6 +239,21 @@ export const watchesApi = {
     } finally {
       await invalidateWatches()
     }
+  },
+  /**
+   * Says what the operator thinks of the run's unusual stretch at `index` (ADR
+   * 0276). The server reads the stretch from the stored run; no times are sent. A
+   * real or normal answer changes what the next training learns, so the server wakes it.
+   */
+  async answerUnusual(run: Pick<WatchRun, 'id' | 'watch_id'>, index: number, answer: UnusualAnswer): Promise<void> {
+    await apiRequest<unknown>('/api/anomaly/normal/answers', {
+      method: 'PUT',
+      json: { watch_id: run.watch_id, run_id: run.id, index, answer },
+    })
+    // The history is read again by useWatchDetail's refreshRuns, so only a run a
+    // link points at is refreshed here: reading the whole watch again would fetch
+    // the first page twice.
+    await invalidateQueries([WATCHES_PATH, run.watch_id, 'run'])
   },
   async removeRun(id: string, runId: string): Promise<void> {
     await apiRequest<void>(`${WATCHES_PATH}/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' })

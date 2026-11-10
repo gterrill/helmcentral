@@ -159,11 +159,14 @@ Here's how it works:
   minutes the engine ran steadily. That means at or above 900 rpm, coolant above
   65°C, ten minutes into the run, and rpm and coolant steady for the last five
   minutes. Minutes close to an alarm for that engine are left out, so a fault
-  isn't learned as normal.
+  isn't learned as normal. So are the minutes of a stretch you've said was real,
+  and the days of a repair you've logged with a start date. See
+  [Telling it what you think](#telling-it-what-you-think).
 - **How much it needs:** An hour of steady running from at least two separate
   runs at an rpm band before it judges that band. Until then the report says so,
   for example "Not judged: 1,400 to 1,600 rpm has 22 minutes of history, needs
-  60". A band you stop using keeps its last normal for about six months.
+  60". A band you stop using keeps its last normal for about six months,
+  unless you've since marked a stretch real, or logged a repair, from the time it was learned.
 - **When it updates:** Every 24 hours, and straight away when you change the
   InfluxDB settings, add, remove or re-number an engine, or switch a reading on
   or off.
@@ -174,6 +177,66 @@ InfluxDB is not set up." If you keep a bucket of
 one-minute averages, name it in **One-minute bucket (optional)**. Otherwise
 Helmcentral works the minutes out from your main bucket. See
 [Keep a longer history in InfluxDB](../how-to/keep-longer-history-in-influxdb.md).
+
+### How it decides a minute is unusual
+
+Helmcentral measures each steady minute against what that engine usually does at
+that speed, using a measure called Mahalanobis distance. Here's how it works:
+
+- **What it learns:** For each engine and each 200 rpm band, it learns the usual
+  value of each reading, and how the readings move together. Oil pressure falls
+  as the coolant warms, for example.
+- **The score:** Each steady minute gets a distance from the band's usual. It's
+  measured in the readings' own usual spread, and it allows for readings that
+  normally move together. Two readings that rise together don't count twice.
+- **Why that matters:** A minute can be unusual when every reading is inside its
+  own limits but the combination isn't. Say oil pressure is normal for the rpm,
+  but low for that coolant temperature. Checking each reading on its own would
+  miss it.
+- **The line:** A minute is unusual when its distance is past the larger of two
+  figures. One is the distance that only 1 in 200 of the band's own training
+  minutes went over. The other is the distance that chance alone would pass 1
+  time in 100.
+- **A stretch:** Three unusual minutes in a row make a stretch. The reading named
+  in the report is the one that added most to the distance.
+- **Faults in the history:** Once it has learned a band, it drops the most extreme
+  of the training minutes and learns again, so a fault nobody noticed doesn't
+  become normal.
+
+### Telling it what you think
+
+A stretch in a watch report has three small buttons under it: **Real**,
+**Normal** and **Don't know**. Your answer shows under the stretch afterwards, as
+"You said: real", and you can change it at any time. A stretch that falls across
+two of your answers shows the one that covers most of it. (For **Don't know** it reads
+"You said: don't know".) Here's what each answer does
+the next time Helmcentral learns:
+
+- **Real:** You agree something was wrong. Helmcentral leaves those minutes out of
+  what it learns, the same way it leaves out minutes near an alarm, so the fault
+  isn't learned as normal.
+- **Normal:** That's how the engine runs. Helmcentral never points out those
+  minutes again, and it keeps them in what it learns, even where it would otherwise
+  have set them aside as strange. That promise is for those minutes only. The same
+  pattern on another day can be raised again, until the engine has run that way
+  enough for Helmcentral to learn it. An alarm for that engine still wins: the
+  minutes near one stay out of what it learns.
+- **Don't know:** Helmcentral keeps your answer and changes nothing.
+
+A **Real** or **Normal** answer starts a new round of learning within a minute. Mate
+sees your answer too, so it won't raise a stretch you called normal as worth a look
+again.
+
+A repair you log can tell it the same thing. When you log a repair on an engine
+(**Inventory → Equipment**, the engine's own page, **Add log entry**), the **Started
+showing** date says when the fault first showed. The engine's readings from the
+start of that day until the end of the repair's date are left out of what it learns.
+The days run on the boat's clock. Leave the date blank and nothing is left out.
+
+If the engine is renumbered or removed before you answer, Helmcentral says the
+engine is no longer set up and keeps nothing. If the boat's time zone isn't known
+when it learns, a repair's dates can't be placed. It says so, and keeps the normal
+it had.
 
 ### Which readings it uses
 

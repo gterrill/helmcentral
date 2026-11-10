@@ -38,7 +38,11 @@ belongs in the item's history.
 3. Choose **Repair** or **Improvement**, then fill in the date, the hours off
    the gauge, the description, who did it, the cost and the parts, as they
    apply.
-4. Save, then add photos if you like.
+4. For a repair, you can set **Started showing** to the date the fault first
+   showed. If the item is an engine, its readings from that day until the date
+   of the repair are left out of what Helmcentral learns as that engine's normal.
+   The date can't be later than the repair's own.
+5. Save, then add photos if you like.
 
 ## Edit or delete a log entry
 
@@ -57,4 +61,5 @@ photos.
    the item, the rule it was against, what was done, who did it, the cost and
    any parts used. The hours column is the true running total (the gauge
    reading plus any meter replacement's offset), not the raw gauge figure
-   typed in on the day.
+   typed in on the day. A last column, **started showing**, gives a repair's
+   "Started showing" date, and is blank for the rest.

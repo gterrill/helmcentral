@@ -40,3 +40,15 @@ export function addMonthsISO(dateISO: string, months: number): string {
   const d = new Date(year, month - 1 + months, day)
   return todayISO(d)
 }
+
+/** What a repair form says when the fault is dated after the repair. */
+export const STARTED_AFTER_REPAIR = "Started showing can't be after the repair date."
+
+/**
+ * Whether a repair's "Started showing" date is after the repair's own date, both
+ * YYYY-MM-DD. Only a repair has one, and a blank date is no problem. The server
+ * refuses it, so the forms say so first (ADR 0276).
+ */
+export function startedAfterRepair(kind: string, startedAt: string, performedAt: string): boolean {
+  return kind === 'repair' && startedAt !== '' && performedAt !== '' && startedAt > performedAt
+}

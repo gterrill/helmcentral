@@ -57,6 +57,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   least two separate runs, so bands fill in as the boat motors at different
   speeds, and the report says so when it can't judge. See
   [Anomaly detection](docs/features/anomaly-detection.md#unusual-engine-readings).
+- **You can tell Helmcentral what you think of an unusual stretch.** Under each
+  stretch in a watch report there are now three buttons: **Real**, **Normal** and
+  **Don't know**. Your answer shows under the stretch, and you can change it. A
+  stretch you call real is left out of what the engine learns as normal, so the
+  fault isn't learned. A stretch you call normal is never pointed out again for
+  those minutes, and it's kept in what the engine learns. The same pattern on
+  another day can still be raised until the engine has run that way enough to learn
+  it. Mate sees your answers, so it won't raise a stretch you called normal again. Your answers are saved in `data/anomaly-normal-answers.json`, which
+  can't be rebuilt, so include it in your backups. See
+  [Anomaly detection](docs/features/anomaly-detection.md#telling-it-what-you-think).
+- **A repair can say when the fault started showing.** When you log a repair, a new
+  **Started showing** date says when the fault first showed. For an engine, its
+  readings from that day until the repair are left out of what Helmcentral learns
+  as normal. When you log a repair by hand, leave it blank and nothing changes.
+  Completing an open job as a repair fills it with the day you opened the job, so
+  clear it if the fault didn't show then. See
+  [Log a service](docs/how-to/log-a-service.md).
 - **Mate and outside assistants can ask for the unusual engine readings.** The
   new lookup gives the same stretches for the last day or up to 7 days, and counts
   the minutes it couldn't judge, with the reason. Outside assistants don't get it

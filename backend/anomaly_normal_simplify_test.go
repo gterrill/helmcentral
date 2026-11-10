@@ -185,7 +185,7 @@ func TestGatherWatchReportInput_NoInfluxLeavesTheUnusualBlockOut(t *testing.T) {
 			env := newProposalEnv(t)
 			d := statusTestDeps(t)
 			d.alarmLog = func() *alarmLogStore { return nil }
-			d.unusualReadings = func(context.Context, time.Time, time.Time, string) unusualResult { return tc.res }
+			d.unusualReadings = func(context.Context, time.Time, time.Time, string, []normalAnswer) unusualResult { return tc.res }
 			w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Sections: []string{"instruments"}, Thresholds: defaultWatchThresholds()}
 			in, err := gatherWatchReportInput(context.Background(), d, env.docs, w, vesselStatusTestNow, time.UTC)
 			if err != nil {
@@ -216,11 +216,15 @@ func TestNormalInputsChangedBySave_RolesNoLongerWakeTheTrainer(t *testing.T) {
 	}
 }
 
+// modelEquipment is the equipment item each engine id was linked to when the saved
+// model was learned. An engine not in it was linked to none.
+var modelEquipment map[string]string
+
 func saveModelWithEngines(t *testing.T, path string, ids ...string) {
 	t.Helper()
 	sm := normalSubsystemModel{Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}}
 	for _, id := range ids {
-		sm.Subjects[id] = normalSubjectModel{Name: id}
+		sm.Subjects[id] = normalSubjectModel{Name: id, EquipmentID: modelEquipment[id]}
 	}
 	if err := saveNormalModel(path, normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: sm}}); err != nil {
 		t.Fatal(err)
@@ -244,6 +248,8 @@ func TestReseedAfterAnItemSave_WakesTheTrainerOnlyWhenTheEnginesChange(t *testin
 		t.Fatal(err)
 	}
 
+	modelEquipment = map[string]string{"port": port.ID}
+	t.Cleanup(func() { modelEquipment = nil })
 	saveModelWithEngines(t, modelPath, "port")
 	drainNormalWake()
 	reseedAnomalyRulesAfterItemSave(port.ID)
@@ -260,6 +266,7 @@ func TestReseedAfterAnItemSave_WakesTheTrainerOnlyWhenTheEnginesChange(t *testin
 	if _, err := store.UpdateEquipment(stbd.ID, stbd); err != nil {
 		t.Fatal(err)
 	}
+	modelEquipment["starboard"], modelEquipment["stbd"] = stbd.ID, stbd.ID
 	reseedAnomalyRulesAfterItemSave(stbd.ID)
 	if !woke() {
 		t.Fatal("a new engine must wake the trainer")

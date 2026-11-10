@@ -47,8 +47,10 @@ func statusTestDeps(t *testing.T) assistantToolDeps {
 	tel := statusTestTelemetry()
 	minus150 := -150.0
 	return assistantToolDeps{
-		now:       func() time.Time { return vesselStatusTestNow },
-		telemetry: func(time.Time) (telemetryReader, error) { return tel, nil },
+		// No answers about unusual stretches by default.
+		unusualAnswers: func() ([]normalAnswer, error) { return nil, nil },
+		now:            func() time.Time { return vesselStatusTestNow },
+		telemetry:      func(time.Time) (telemetryReader, error) { return tel, nil },
 		vesselView: func() (vesselView, error) {
 			return vesselView{
 				HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.512"},
@@ -930,7 +932,9 @@ func TestVesselStatus_AnchorLowWaterDependenciesAreRequiredAndUnreadableSettings
 	}
 
 	d := lowWaterStatusDeps(t)
-	d.anchorSettings = func() (anchorageBoatSettings, error) { return anchorageBoatSettings{}, errors.New("settings are unreadable") }
+	d.anchorSettings = func() (anchorageBoatSettings, error) {
+		return anchorageBoatSettings{}, errors.New("settings are unreadable")
+	}
 	a := runStatus(t, d).Boat.Anchor
 	if a.LowWater != nil || !strings.Contains(a.LowWaterMissing, "settings are unreadable") {
 		t.Errorf("settings unreadable: %+v", a)

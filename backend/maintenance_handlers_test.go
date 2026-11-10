@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -996,5 +997,39 @@ func TestExportMaintenanceLogCSVHandler(t *testing.T) {
 	}
 	if !strings.Contains(body, "2026-06-01,Generator,,repair,,Replaced belt,Skipper,,,") {
 		t.Fatalf("expected the entry row, got %q", body)
+	}
+}
+
+// A repair's "started showing" date goes out with the log, in the last column so
+// the columns people already read keep their places.
+func TestExportMaintenanceLogCSVHandler_CarriesStartedShowing(t *testing.T) {
+	withTestDocumentStore(t)
+	engine := mustCreateHandlerTestEquipment(t, "Generator")
+	for _, in := range []maintenanceLogEntryInput{
+		{EquipmentID: &engine.ID, PerformedAt: "2026-06-08", StartedAt: "2026-06-01", Kind: "repair", Description: "New sender"},
+		{EquipmentID: &engine.ID, PerformedAt: "2026-06-09", Kind: "maintenance", Description: "Oil"},
+	} {
+		if _, err := globalDocumentStore.CreateMaintenanceLogEntry(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/log/export.csv", "", "")
+	if err := exportMaintenanceLogCSVHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows %v err %v", rows, err)
+	}
+	col := len(rows[0]) - 1
+	if rows[0][col] != "started showing" {
+		t.Fatalf("header = %v", rows[0])
+	}
+	byDesc := map[string]string{}
+	for _, r := range rows[1:] {
+		byDesc[r[5]] = r[col]
+	}
+	if byDesc["New sender"] != "2026-06-01" || byDesc["Oil"] != "" {
+		t.Fatalf("started showing = %v", byDesc)
 	}
 }

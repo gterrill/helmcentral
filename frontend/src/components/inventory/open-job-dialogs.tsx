@@ -30,7 +30,7 @@ import {
 } from '@/hooks/use-open-jobs'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { errorMessage } from '@/lib/errors'
-import { todayISO } from '@/lib/local-date'
+import { STARTED_AFTER_REPAIR, startedAfterRepair, todayISO } from '@/lib/local-date'
 
 // ADR 0269: the three dialogs behind the Open jobs list. Add/edit takes the
 // job's own fields and then its photos (a job needs an id before a photo can
@@ -219,6 +219,8 @@ export function OpenJobDialog({ open, job, presetEquipmentId, onClose }: OpenJob
 
 interface DoneFormState {
   performedAt: string
+  /** A repair's "started showing" date, blank for none. */
+  startedAt: string
   kind: MaintenanceLogKind
   hours: string
   description: string
@@ -228,8 +230,9 @@ interface DoneFormState {
   parts: MaintenanceLogPartInput[]
 }
 
-function blankDoneForm(): DoneFormState {
-  return { performedAt: todayISO(), kind: 'repair', hours: '', description: '', who: '', cost: '', currency: '', parts: [] }
+/** The day the job was opened is the first guess at when the fault started showing. */
+function blankDoneForm(job?: OpenJob | null): DoneFormState {
+  return { performedAt: todayISO(), startedAt: job?.opened_on ?? '', kind: 'repair', hours: '', description: '', who: '', cost: '', currency: '', parts: [] }
 }
 
 interface OpenJobDoneDialogProps {
@@ -250,7 +253,7 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
 
   useEffect(() => {
     if (job) {
-      setForm(blankDoneForm())
+      setForm(blankDoneForm(job))
       setError(null)
       setLogged(false)
     }
@@ -258,13 +261,19 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
 
   const update = (patch: Partial<DoneFormState>) => setForm((prev) => ({ ...prev, ...patch }))
 
+  // The job's open date is only a first guess, so a repair date before it is the
+  // operator's to fix here, not a refusal from the server on a field they never touched.
+  const startedTooLate = startedAfterRepair(form.kind, form.startedAt, form.performedAt)
+
   const handleSave = async () => {
-    if (!job) return
+    if (!job || startedTooLate) return
     setSaving(true)
     setError(null)
     try {
       await completeOpenJob(job.id, {
         performed_at: form.performedAt,
+        // Only a repair has a fault to date; the server refuses it on anything else.
+        started_at: form.kind === 'repair' ? form.startedAt : '',
         kind: form.kind,
         hours: form.hours.trim() === '' ? null : Number(form.hours),
         description: form.description.trim(),
@@ -320,6 +329,22 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
                   </Select>
                 </Field>
               </div>
+              {form.kind === 'repair' && (
+                <Field>
+                  <FieldLabel htmlFor="open-job-done-started">Started showing</FieldLabel>
+                  <Input
+                    id="open-job-done-started"
+                    type="date"
+                    max={form.performedAt || undefined}
+                    value={form.startedAt}
+                    onChange={(e) => update({ startedAt: e.target.value })}
+                  />
+                  <FieldDescription>
+                    When the fault first showed. Engine readings from then until this repair are left out of what the engine learns as normal.
+                  </FieldDescription>
+                  {startedTooLate && <FieldError errors={[{ message: STARTED_AFTER_REPAIR }]} />}
+                </Field>
+              )}
               {job?.equipment_id && (
                 <Field>
                   <FieldLabel htmlFor="open-job-done-hours">Hours (gauge reading)</FieldLabel>
@@ -356,7 +381,7 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
             {error && <FieldError errors={[{ message: error }]} />}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-              <Button type="button" disabled={saving || form.performedAt === ''} onClick={() => { void handleSave() }}>
+              <Button type="button" disabled={saving || form.performedAt === '' || startedTooLate} onClick={() => { void handleSave() }}>
                 {saving ? 'Saving...' : 'Mark done'}
               </Button>
             </DialogFooter>

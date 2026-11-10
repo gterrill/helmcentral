@@ -76,7 +76,7 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 		// it runs out the block says so and the rest of the report goes on.
 		// The budget is taken from the run's own context, so a shutdown ends it too.
 		budget, cancel := context.WithTimeout(ctx, watchUnusualBudget)
-		res := d.unusualReadings(budget, in.Since, now, "")
+		res := scoreWithAnswers(d, budget, in.Since, now)
 		// A result that came back whole is kept, even if the deadline passed as it
 		// did. Only one that failed for want of time is replaced.
 		if res.ProblemKind != "" {
@@ -97,6 +97,20 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 		}
 	}
 	return in, nil
+}
+
+// scoreWithAnswers scores the window with the operator's answers. Answers that
+// are not wired or cannot be read are the reason nothing was scored, so a
+// stretch the operator already called normal is never shown again.
+func scoreWithAnswers(d assistantToolDeps, ctx context.Context, since, until time.Time) unusualResult {
+	if d.unusualAnswers == nil {
+		return unusualResult{Since: since, Until: until, ProblemKind: unusualError, Problem: "the operator's answers are not wired"}
+	}
+	answers, err := d.unusualAnswers()
+	if err != nil {
+		return unusualResult{Since: since, Until: until, ProblemKind: unusualError, Problem: "the answers about unusual stretches could not be read: " + firstErrorLine(err)}
+	}
+	return d.unusualReadings(ctx, since, until, "", answers)
 }
 
 // watchRaisedAlarms counts the alarms raised in [since, now] by title from the

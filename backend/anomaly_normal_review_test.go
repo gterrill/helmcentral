@@ -75,7 +75,7 @@ func TestGatherWatchReportInput_AUnusualReadingThatTakesTooLongIsCutOffAndSaid(t
 	env := newProposalEnv(t)
 	d := statusTestDeps(t)
 	d.alarmLog = func() *alarmLogStore { return nil }
-	d.unusualReadings = func(ctx context.Context, _, _ time.Time, _ string) unusualResult {
+	d.unusualReadings = func(ctx context.Context, _, _ time.Time, _ string, _ []normalAnswer) unusualResult {
 		<-ctx.Done()
 		return unusualResult{ProblemKind: unusualError, Problem: ctx.Err().Error()}
 	}
@@ -135,7 +135,7 @@ func TestScore_TheMinuteInProgressIsNotJudged(t *testing.T) {
 	// Run minutes are at :00. Ending at 40 s past the 60th judged minute must not
 	// pull in that minute's partial mean.
 	until := scoreRunStart.Add(60*time.Minute + 40*time.Second)
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(-time.Hour), until, "")
+	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(-time.Hour), until, "", nil)
 	if !res.Until.Equal(scoreRunStart.Add(60 * time.Minute)) {
 		t.Fatalf("until = %v", res.Until)
 	}

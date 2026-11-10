@@ -938,6 +938,8 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 		`ALTER TABLE inventory_zones ADD COLUMN polygon TEXT`,
 		`ALTER TABLE inventory_bins ADD COLUMN pin_x REAL`,
 		`ALTER TABLE inventory_bins ADD COLUMN pin_y REAL`,
+		// ADR 0276: the date a repair's fault first showed, null when not said.
+		`ALTER TABLE maintenance_log_entries ADD COLUMN started_at TEXT`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {

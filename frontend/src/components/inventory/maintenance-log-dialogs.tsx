@@ -29,7 +29,7 @@ import {
 } from '@/hooks/use-maintenance'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { documentViewerHref } from '@/lib/document-citation'
-import { addMonthsISO, todayISO } from '@/lib/local-date'
+import { addMonthsISO, STARTED_AFTER_REPAIR, startedAfterRepair, todayISO } from '@/lib/local-date'
 import { errorMessage } from '@/lib/errors'
 
 // ADR 0138: the service log's own two write dialogs - completing a rule
@@ -123,6 +123,8 @@ export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
 
 interface LogFormState {
   performedAt: string
+  /** A repair's "started showing" date, blank for none. */
+  startedAt: string
   hours: string
   description: string
   who: string
@@ -134,6 +136,7 @@ interface LogFormState {
 function blankForm(prefillHours?: number | null): LogFormState {
   return {
     performedAt: todayISO(),
+    startedAt: '',
     hours: prefillHours != null ? String(prefillHours) : '',
     description: '',
     who: '',
@@ -146,6 +149,7 @@ function blankForm(prefillHours?: number | null): LogFormState {
 function formFromEntry(entry: MaintenanceLogEntry): LogFormState {
   return {
     performedAt: entry.performed_at,
+    startedAt: entry.started_at ?? '',
     hours: entry.hours != null ? String(entry.hours) : '',
     description: entry.description,
     who: entry.who,
@@ -475,6 +479,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   }, [open, entry?.id])
 
   const isEditing = Boolean(entry)
+  const startedTooLate = startedAfterRepair(kind, form.startedAt, form.performedAt)
 
   const updateForm = (updater: (prev: LogFormState) => LogFormState) => {
     setForm(updater)
@@ -490,7 +495,11 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     setSaving(true)
     setError(null)
     try {
-      const result = await onSave({ ...toInput(form), equipment_id: equipmentId, kind }, savedEntry?.id ?? null)
+      // Only a repair has a fault to date; the server refuses it on anything else.
+      const result = await onSave(
+        { ...toInput(form), started_at: kind === 'repair' ? form.startedAt : '', equipment_id: equipmentId, kind },
+        savedEntry?.id ?? null,
+      )
       setSavedEntry(result)
       setDirty(false)
     } catch (err) {
@@ -574,6 +583,22 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
               </Select>
             </Field>
           </div>
+          {kind === 'repair' && (
+            <Field>
+              <FieldLabel htmlFor="maintenance-log-started">Started showing</FieldLabel>
+              <Input
+                id="maintenance-log-started"
+                type="date"
+                max={form.performedAt || undefined}
+                value={form.startedAt}
+                onChange={(e) => updateForm((p) => ({ ...p, startedAt: e.target.value }))}
+              />
+              {startedTooLate && <FieldError errors={[{ message: STARTED_AFTER_REPAIR }]} />}
+              <FieldDescription>
+                When the fault first showed. Engine readings from then until this repair are left out of what the engine learns as normal.
+              </FieldDescription>
+            </Field>
+          )}
           <Field>
             <FieldLabel htmlFor="maintenance-log-hours">Hours (gauge reading)</FieldLabel>
             <Input id="maintenance-log-hours" type="number" inputMode="decimal" value={form.hours} onChange={(e) => updateForm((p) => ({ ...p, hours: e.target.value }))} />
@@ -633,7 +658,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
             {savedEntry && !dirty ? 'Done' : 'Cancel'}
           </Button>
           {(!savedEntry || dirty) && (
-            <Button type="button" disabled={saving} onClick={() => { void handleSave() }}>
+            <Button type="button" disabled={saving || startedTooLate} onClick={() => { void handleSave() }}>
               {saving ? 'Saving...' : 'Save'}
             </Button>
           )}
