@@ -36,39 +36,54 @@ type depthTrendPoint struct {
 // is read only once the settings say Influx is enabled, so a disabled
 // Influx never touches the store at all.
 func loadInfluxSettings(settingsPath string) (url, org, bucket, token string, ok bool, err error) {
+	c, ok, err := loadInfluxConfig(settingsPath)
+	return c.URL, c.Org, c.Bucket, c.Token, ok, err
+}
+
+// influxConfig is the "influxdb" section with the token. MinuteBucket is the
+// optional bucket of one-minute means the learned normal reads (ADR 0276).
+type influxConfig struct {
+	URL, Org, Bucket, Token, MinuteBucket string
+}
+
+// loadInfluxConfig is loadInfluxSettings with the optional minute bucket, from
+// one read of the settings. Disabled InfluxDB gives the zero config. Enabled
+// but missing a value or the token gives the values read and ok false.
+func loadInfluxConfig(settingsPath string) (cfg influxConfig, ok bool, err error) {
 	settings, readErr := readSettings(settingsPath)
 	if readErr != nil {
-		return "", "", "", "", false, nil
+		return influxConfig{}, false, nil
 	}
 
 	influxMap, isMap := settings["influxdb"].(map[string]any)
 	if !isMap {
-		return "", "", "", "", false, nil
+		return influxConfig{}, false, nil
 	}
 
 	enabled, _ := influxMap["enabled"].(bool)
 	if !enabled {
-		return "", "", "", "", false, nil
+		return influxConfig{}, false, nil
 	}
 
-	url = trimEnvValue(coerceString(influxMap["url"]))
-	org = trimEnvValue(coerceString(influxMap["org"]))
-	bucket = trimEnvValue(coerceString(influxMap["bucket"]))
+	cfg.URL = trimEnvValue(coerceString(influxMap["url"]))
+	cfg.Org = trimEnvValue(coerceString(influxMap["org"]))
+	cfg.Bucket = trimEnvValue(coerceString(influxMap["bucket"]))
+	cfg.MinuteBucket = trimEnvValue(coerceString(influxMap["minute_bucket"]))
 
 	// Reached only once settings say Influx is enabled, so a nil store here
 	// is a programming error rather than "Influx is off" - treat it as one.
 	// See loadSignalKCredentials for the same reasoning.
 	if globalSecretsStore == nil {
-		return "", "", "", "", false, fmt.Errorf("secrets store unavailable, cannot read INFLUXDB_TOKEN")
+		return influxConfig{}, false, fmt.Errorf("secrets store unavailable, cannot read INFLUXDB_TOKEN")
 	}
 	storedToken, _, getErr := globalSecretsStore.Get("INFLUXDB_TOKEN")
 	if getErr != nil {
-		return "", "", "", "", false, fmt.Errorf("reading INFLUXDB_TOKEN: %w", getErr)
+		return influxConfig{}, false, fmt.Errorf("reading INFLUXDB_TOKEN: %w", getErr)
 	}
-	token = trimEnvValue(storedToken)
+	cfg.Token = trimEnvValue(storedToken)
 
-	ok = url != "" && org != "" && bucket != "" && token != ""
-	return url, org, bucket, token, ok, nil
+	ok = cfg.URL != "" && cfg.Org != "" && cfg.Bucket != "" && cfg.Token != ""
+	return cfg, ok, nil
 }
 
 // influxTelemetryConfigured wraps loadInfluxSettings with the default

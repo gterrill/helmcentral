@@ -13,6 +13,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The impossible-reading check now also covers exhaust temperature and fuel
+  rate.** A sender that reports an exhaust temperature above 827°C or below
+  −23°C, or a fuel rate below zero or above 1,800 litres an hour, raises the same
+  card as any other impossible reading, with an **Ignore** action. A sender you
+  have already ignored stays ignored.
 - **The Anchor Watch tide panel is shorter and easier to read.** Under the depth
   you now get the tide and its direction, then one line with the next high and
   the next low at your boat, each with its time and depth, and the clearance
@@ -30,6 +35,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Watch reports can point out engine readings that look unusual for that
+  engine.** Helmcentral learns each engine's usual coolant temperature, oil
+  pressure, boost, load, fuel rate and the rest at each rpm from your InfluxDB
+  history. When a stretch of three minutes or more falls outside that, the watch
+  report shows an **Unusual** block under **Needs a look**, for example "Port
+  engine oil pressure ran low from 2.10 AM to 2.40 AM: 280 kPa against a usual
+  340 kPa at 1,800 to 2,000 rpm". It's a suggestion, never an alarm, and it isn't
+  counted as something to look at. It works on a boat with one engine. It needs
+  InfluxDB, and a report from a boat without it leaves the block out. A speed band is judged once it has an hour of steady running from at
+  least two separate runs, so bands fill in as the boat motors at different
+  speeds, and the report says so when it can't judge. See
+  [Anomaly detection](docs/features/anomaly-detection.md#unusual-engine-readings).
+- **Mate and outside assistants can ask for the unusual engine readings.** The
+  new lookup gives the same stretches for the last day or up to 7 days, and counts
+  the minutes it couldn't judge, with the reason. Outside assistants don't get it
+  until you switch it on for a token in **Settings, Outside assistants**.
+- **A new optional setting, One-minute bucket, under Settings → InfluxDB.** If
+  you keep a bucket of one-minute averages, name it and Helmcentral learns from
+  it. Left blank, it works the minutes out from your main bucket. Under it,
+  **Learned normal** shows when and from where Helmcentral learned, and lists each
+  engine's readings with a switch and the reason beside any it left out. A switch
+  uses the **Ignored sensors** list, so a reading you turn off there is also left
+  out of the frozen and impossible-reading checks.
 - **A new help page shows how to keep a longer history in InfluxDB.** You set
   it up in InfluxDB yourself: full readings for 90 days, and one-minute
   averages for two years. Then the readings from the start of a slow fault are

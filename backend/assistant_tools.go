@@ -172,6 +172,11 @@ type assistantToolDeps struct {
 	// history (ADR 0226). Production returns globalAlarmLogStore; nil, or a nil
 	// store, is reported as absent, never as an empty history.
 	alarmLog func() *alarmLogStore
+	// unusualReadings is get_unusual_engine_readings' and the watch report's
+	// reader of the learned normal (ADR 0276): a past window scored against the
+	// saved model, for every engine or the one named. Production wires
+	// scoreUnusualReadings; nil is not wired, and the tool says so.
+	unusualReadings func(ctx context.Context, since, until time.Time, engine string) unusualResult
 	// influxLastRecorded is get_last_recorded's only I/O dependency: the most
 	// recent recorded point for every measurement/source pair matching a
 	// path-prefix and/or source filter, within a lookback window. Production
@@ -410,6 +415,9 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		anomalyReading:    globalAnomalySlot.get,
 		anchorWatch:       currentAnchorWatch,
 		overnight:         overnightForStatus,
+		unusualReadings: func(ctx context.Context, since, until time.Time, engine string) unusualResult {
+			return scoreUnusualReadings(ctx, normalEnginesSubsystem(), productionNormalScoreDeps(settingsPath), since, until, engine)
+		},
 	}
 }
 
@@ -596,6 +604,7 @@ var mateTools = []mateTool{
 	mateToolGetNearbyVessels,
 	mateToolGetActiveAlarms,
 	mateToolGetAlarmContext,
+	mateToolGetUnusualEngineReadings,
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,

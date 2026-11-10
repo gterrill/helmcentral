@@ -87,6 +87,31 @@ func TestTwinGateHoldsForThreeEngines(t *testing.T) {
 	}
 }
 
+// engineGateHolds is one engine's half of the twin gate: the same thresholds,
+// with no peer to compare against, so a one-engine boat can use it.
+func TestEngineGateHoldsForOneSteadyWarmEngine(t *testing.T) {
+	if !engineGateHolds(steadyTwinPair()[0]) {
+		t.Fatal("a steady, warmed-up engine at 2,000 rpm must pass the gate on its own")
+	}
+}
+
+func TestEngineGateHoldsFailsEachCondition(t *testing.T) {
+	cases := map[string]func(e *engineTwinState){
+		"below 900 rpm":      func(e *engineTwinState) { e.RPMHz = 800.0 / 60 },
+		"coolant under 65 C": func(e *engineTwinState) { e.CoolantK = 330 },
+		"running under 10 m": func(e *engineTwinState) { e.RunningFor = 9 * time.Minute },
+		"rpm not steady":     func(e *engineTwinState) { e.RPMSteady = false },
+		"coolant not steady": func(e *engineTwinState) { e.CoolantSteady = false },
+	}
+	for name, mutate := range cases {
+		e := steadyTwinPair()[0]
+		mutate(&e)
+		if engineGateHolds(e) {
+			t.Errorf("%s: the gate must fail", name)
+		}
+	}
+}
+
 // --- Residual arithmetic -------------------------------------------------
 
 func TestResidualQuantityAbsentWithNoLearnedOffset(t *testing.T) {

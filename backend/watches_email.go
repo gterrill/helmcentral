@@ -48,6 +48,16 @@ func watchEmailHTML(m watchReportMessage) string {
 		}
 		b.WriteString("</ul>")
 	}
+	if u := m.unusual(); u != nil {
+		b.WriteString("<h3>Unusual</h3><ul>")
+		for _, l := range u.Lines {
+			b.WriteString("<li>" + e(l) + "</li>")
+		}
+		b.WriteString("</ul>")
+		if u.Note != "" {
+			b.WriteString("<p>" + e(u.Note) + "</p>")
+		}
+	}
 	if m.Review != nil && strings.TrimSpace(*m.Review) != "" {
 		b.WriteString("<h3>Mate's review</h3><p>" + strings.ReplaceAll(e(strings.TrimSpace(*m.Review)), "\n", "<br>") + "</p>")
 	}

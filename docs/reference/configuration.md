@@ -166,6 +166,7 @@ they're resolved against it.
 | `ANCHOR_PLACEMARKS_FILE` | `data/anchor_placemarks.json` |
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
 | `ALARM_RULES_FILE` | `data/alarm-rules.json` (see below) |
+| `ANOMALY_NORMAL_FILE` | `data/anomaly-normal.json` |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |
 | `SECRETS_KEY_PATH` | `data/secrets.key` |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
@@ -186,6 +187,24 @@ read or written again, and your rules are edited in the Alarms drawer as before.
 If the file can't be read, Helmcentral won't start and leaves it as it is. It
 also won't start if `alarm-rules.json.imported` is already there, so move the
 older copy aside first.
+
+## InfluxDB
+
+The `influxdb:` block in `settings.yaml` is set under **Settings → InfluxDB**.
+Its keys are `enabled`, `url`, `org` and `bucket`, and one that's optional:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `minute_bucket` | blank | A bucket that already holds one-minute averages of your readings. Helmcentral learns each engine's usual readings from it for [unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings). Leave it blank and Helmcentral works the minutes out from the main bucket. |
+
+If you name a bucket and Helmcentral can't read it, it says so and keeps the
+normal it learned before. It doesn't quietly read the main bucket instead. The
+name can't contain `$` or `{`. To make a bucket of one-minute averages, see
+[Keep a longer history in InfluxDB](../how-to/keep-longer-history-in-influxdb.md).
+
+What Helmcentral learns is saved in `data/anomaly-normal.json`. It's rebuilt
+every 24 hours from your InfluxDB history. If you delete the file, it comes back
+at the next run.
 
 ## Secrets
 

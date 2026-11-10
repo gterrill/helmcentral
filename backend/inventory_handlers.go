@@ -486,6 +486,9 @@ func reseedAnomalyRulesAfterItemSave(equipmentIDs ...string) {
 		log.Printf("could not load vessel view for anomaly rule seeding: %v", err)
 		return
 	}
+	// The learned normal trains on the engines. One added, removed or given a new
+	// instance wakes it; any other item changes nothing it learns from.
+	wakeNormalIfEnginesChanged(vessel)
 	// The house bank is found by its role, not by the resolved view: an item
 	// that has lost its source (or been deleted) no longer resolves, and that
 	// is exactly when the rules that follow it must be emptied.

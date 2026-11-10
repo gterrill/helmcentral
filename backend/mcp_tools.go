@@ -136,6 +136,10 @@ var mcpToolPolicies = []mcpToolPolicy{
 		Description: "List every alarm rule the boat is watching: id, label, path, op (above, below, equal, notEqual, stale), value and clear_value " +
 			"in the operator's unit (display_unit), severity (state), dwell_seconds, enabled, and origin (own, built-in, or derived from tank " +
 			"levels or a gauge zone). Use it to say what the boat monitors. It is read-only: you cannot change a rule."},
+	{Name: "get_unusual_engine_readings", Plain: "Unusual engine readings", Status: mcpOfferedOff,
+		Reason: "A learned normal's suggestion, not a rule, and easy to over-read. It starts off and the operator opts in per token.",
+		Extra: "Each stretch is a suggestion to mention as worth a look, in the operator's units as given. Never call it a fault and never give a cause. " +
+			"Say what was not judged instead of filling it in. If learned_normal_missing is given, say that and its reason."},
 	{Name: "estimate_passage", Plain: "Passage estimate", Status: mcpOfferedOff,
 		Reason: mcpPassageDecision},
 	{Name: "plan_tidal_departure", Plain: "Tidal departure", Status: mcpOfferedOff,

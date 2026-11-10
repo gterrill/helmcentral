@@ -616,6 +616,9 @@ func main() {
 	go startSourceDeviceRefresher(streamCtx, sourceDeviceRefreshInterval)
 	go startAnomalyDetector(streamCtx, anomalyDetectorInterval)
 	go startTwinBaselineRefresher(streamCtx, anomalyBaselineRefreshInterval)
+	// The learned normal (ADR 0276): trains each engine's usual readings from
+	// InfluxDB history every 24 hours and when the InfluxDB settings change.
+	go startNormalTrainer(streamCtx, getEnv("SETTINGS_FILE", "../settings.yaml"), normalTrainInterval)
 	// Gust ladder + solar Influx queries (Tier 1 #1): buildVesselStatePayload
 	// and buildSolarStatePayload used to run these live on every call, up to
 	// several times a second per stream client. This refreshes them once on
@@ -680,6 +683,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, secretsRoutes()...)
 	routes = append(routes, pluginRoutes()...)
 	routes = append(routes, alarmRoutes()...)
+	routes = append(routes, anomalyNormalRoutes()...)
 	routes = append(routes, alarmTransportRoutes()...)
 	routes = append(routes, nearbyVesselRoutes()...)
 	routes = append(routes, placeNameRoutes()...)

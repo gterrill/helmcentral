@@ -103,6 +103,10 @@ type watchReport struct {
 	SinceAt   string               `json:"since_at"`
 	SinceNote string               `json:"since_note,omitempty"`
 	Sections  []watchReportSection `json:"sections"`
+	// Unusual is the learned normal's suggestion (ADR 0276). It is a field of
+	// the report, not a section and not a finding, so it is never counted as an
+	// issue. Reports made before it have none.
+	Unusual *watchUnusual `json:"unusual,omitempty"`
 }
 
 // watchStayForecast is what the planned stay's forecast says against the
@@ -136,6 +140,9 @@ type watchReportInput struct {
 	Previous   *watchReport
 	PreviousAt time.Time
 	Stay       watchStayForecast
+	// Unusual is the window scored against the learned normal, nil when the
+	// watch does not check instruments. Its figures use Status.Units.
+	Unusual *unusualResult
 }
 
 var watchSectionTitles = map[string]string{
@@ -190,7 +197,28 @@ func buildWatchReport(w savedWatch, in watchReportInput) (watchReport, []watchFi
 	if findings == nil {
 		findings = []watchFinding{}
 	}
+	if in.Unusual != nil {
+		report.Unusual = watchUnusualFor(in, loc)
+	}
 	return report, findings
+}
+
+// watchUnusualFor words the learned normal's stretches in the units the boat's
+// status gives. With stretches to word and no known units it says so and shows
+// no figure, rather than guess a system.
+func watchUnusualFor(in watchReportInput, loc *time.Location) *watchUnusual {
+	system := ""
+	if in.Status != nil {
+		system = in.Status.Units
+	}
+	if system == "" && len(in.Unusual.Stretches) > 0 {
+		why := in.StatusProblem
+		if why == "" {
+			why = "the boat's units are not known"
+		}
+		return &watchUnusual{Note: "Unusual readings could not be worded: " + endedSentence(why), JudgedMinutes: in.Unusual.JudgedMinutes}
+	}
+	return buildWatchUnusual(*in.Unusual, system, loc, in.Now)
 }
 
 // watchClock is a time on the boat's clock, with its zone.

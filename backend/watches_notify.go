@@ -461,6 +461,15 @@ func buildWatchReportMessage(w savedWatch, run watchRun, vessel, linkBase string
 	return m
 }
 
+// unusual is the report's Unusual block, nil when the run has none to show. The
+// email carries it after the findings. It is never counted in the title.
+func (m watchReportMessage) unusual() *watchUnusual {
+	if m.Report == nil {
+		return nil
+	}
+	return m.Report.Unusual
+}
+
 // watchIssueCount is how many things a run has to look at: its findings that
 // do not extend another. A finding of Mate's that adds to a rule's finding is
 // more about the same issue.
@@ -524,6 +533,16 @@ func watchEmailText(m watchReportMessage) string {
 					b.WriteString("  Chart left out: " + c.Problem + "\n")
 				}
 			}
+		}
+		b.WriteString("\n")
+	}
+	if u := m.unusual(); u != nil {
+		b.WriteString("Unusual\n")
+		for _, l := range u.Lines {
+			b.WriteString("- " + l + "\n")
+		}
+		if u.Note != "" {
+			b.WriteString(u.Note + "\n")
 		}
 		b.WriteString("\n")
 	}

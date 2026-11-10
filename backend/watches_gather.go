@@ -17,7 +17,11 @@ import (
 // watchFirstRunWindow is how far back a watch's first report looks.
 const watchFirstRunWindow = 24 * time.Hour
 
-func gatherWatchReportInput(d assistantToolDeps, store *documentStore, w savedWatch, now time.Time, loc *time.Location) (watchReportInput, error) {
+// watchUnusualBudget is how long a watch report waits for the learned normal's
+// scoring. The report goes out on time without it.
+var watchUnusualBudget = 90 * time.Second
+
+func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *documentStore, w savedWatch, now time.Time, loc *time.Location) (watchReportInput, error) {
 	in := watchReportInput{Now: now, Loc: loc}
 
 	var prev watchRun
@@ -64,6 +68,33 @@ func gatherWatchReportInput(d assistantToolDeps, store *documentStore, w savedWa
 	}
 	if wants[watchSectionWeather] && in.Status != nil {
 		in.Stay = watchStayForecastFor(d, in.Status.PlannedStay, now)
+	}
+	// The learned normal's suggestions belong with the instruments. A watch that
+	// does not check them does not pay for the Influx reads.
+	if wants[watchSectionInstruments] && d.unusualReadings != nil {
+		// Slow InfluxDB must not hold the report: scoring gets a budget, and when
+		// it runs out the block says so and the rest of the report goes on.
+		// The budget is taken from the run's own context, so a shutdown ends it too.
+		budget, cancel := context.WithTimeout(ctx, watchUnusualBudget)
+		res := d.unusualReadings(budget, in.Since, now, "")
+		// A result that came back whole is kept, even if the deadline passed as it
+		// did. Only one that failed for want of time is replaced.
+		if res.ProblemKind != "" {
+			switch {
+			case ctx.Err() != nil:
+				res.Problem = "Helmcentral was stopping"
+			case budget.Err() != nil:
+				res = unusualResult{Since: in.Since, Until: now, ProblemKind: unusualError,
+					Problem: fmt.Sprintf("it took longer than %d seconds", int(watchUnusualBudget/time.Second))}
+			}
+		}
+		cancel()
+		// A boat with no InfluxDB has nothing to say here: the block stays out of
+		// the report, and Settings says why. A configured InfluxDB that fails
+		// still shows its error.
+		if res.ProblemKind != unusualNoInflux {
+			in.Unusual = &res
+		}
 	}
 	return in, nil
 }

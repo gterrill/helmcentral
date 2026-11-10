@@ -305,6 +305,9 @@ const draftFields = {
   influxdbUrl: text(['influxdb', 'url'], '', { trim: true }),
   influxdbOrg: text(['influxdb', 'org'], '', { trim: true }),
   influxdbBucket: text(['influxdb', 'bucket'], '', { trim: true }),
+  // Optional: a bucket that already holds one-minute means. Blank rolls up the
+  // main bucket. The learned normal reads it (ADR 0276).
+  influxdbMinuteBucket: text(['influxdb', 'minute_bucket'], '', { trim: true }),
 
   authMode: choice<'none' | 'signalk'>(['auth', 'mode'], 'none', ['none', 'signalk']),
 

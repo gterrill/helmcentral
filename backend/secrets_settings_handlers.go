@@ -45,6 +45,10 @@ func updateSecretsSettingsHandler(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save secret"})
 		}
 	}
+	// The learned normal reads InfluxDB with this token (ADR 0276).
+	if _, saved := req["INFLUXDB_TOKEN"]; saved {
+		normalInputsChanged()
+	}
 
 	state, err := globalSecretsStore.All()
 	if err != nil {

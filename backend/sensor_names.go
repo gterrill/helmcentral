@@ -376,6 +376,10 @@ func sensorQuantity(path string) string {
 		return "gear oil pressure"
 	case "transmission.oilTemperature":
 		return "gear oil temperature"
+	case "exhaustTemperature":
+		return "exhaust temperature"
+	case "fuel.rate":
+		return "fuel rate"
 	}
 	return ""
 }
@@ -710,7 +714,6 @@ func (n *sensorNamer) identifierEntry(identifier string) sensorHealthEntry {
 	return e
 }
 
-
 // --- Impossible readings -----------------------------------------------------
 
 // sensorLimitUnit is the SI unit of each physicalLimits quantity.
@@ -722,6 +725,8 @@ var sensorLimitUnit = map[string]string{
 	"engineLoad":                  "ratio",
 	"transmission.oilPressure":    "Pa",
 	"transmission.oilTemperature": "K",
+	"exhaustTemperature":          "K",
+	"fuel.rate":                   "m3/s",
 	"voltage":                     "V",
 	"current":                     "A",
 	"capacity.stateOfCharge":      "ratio",
@@ -737,6 +742,8 @@ var sensorLimitWhy = map[string][2]string{
 	"engineLoad":                  {"below the %s a load reading can show", "above the %s a load reading can reach"},
 	"transmission.oilPressure":    {"below the %s a gear oil sender reads", "above the %s a gearbox oil circuit reaches"},
 	"transmission.oilTemperature": {"below the %s a gearbox reads", "above the %s gear oil reaches"},
+	"exhaustTemperature":          {"below the %s an exhaust sender reads", "above the %s a diesel exhaust reaches"},
+	"fuel.rate":                   {"below the %s a fuel flow can show", "above the %s any marine engine burns"},
 	"voltage":                     {"below the %s a bank cannot go under", "above the %s any 12, 24 or 48 V bank reaches"},
 	"current":                     {"below the %s any bank shunt measures", "above the %s any bank shunt measures"},
 	"capacity.stateOfCharge":      {"below the %s a charge reading can show", "above the %s a charge reading can reach"},

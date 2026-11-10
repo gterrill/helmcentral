@@ -18,14 +18,14 @@ var (
 	pinnedReviewReadTools = []string{
 		"check_signalk_paths", "get_active_alarms", "get_alarm_context",
 		"get_cruise_summary", "get_last_recorded", "get_path_history",
-		"get_planned_stay", "get_tides", "get_vessel_particulars",
-		"get_vessel_status", "get_wind_forecast", "list_alarm_rules",
-		"list_passages",
+		"get_planned_stay", "get_tides", "get_unusual_engine_readings",
+		"get_vessel_particulars", "get_vessel_status", "get_wind_forecast",
+		"list_alarm_rules", "list_passages",
 	}
 	pinnedWatchReviewReadTools = append(append([]string{}, pinnedReviewReadTools...), "search_web")
 	pinnedMCPOfferedOff        = []string{
 		"assess_passage_window", "check_signalk_paths", "estimate_passage",
-		"list_alarm_rules", "plan_tidal_departure",
+		"get_unusual_engine_readings", "list_alarm_rules", "plan_tidal_departure",
 	}
 )
 

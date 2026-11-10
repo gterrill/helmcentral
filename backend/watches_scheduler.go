@@ -365,7 +365,7 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 		config: func() (watchConfig, error) { return readWatchConfig(settingsPath) },
 		boat:   func() (*time.Location, error) { return watchBoatLocation() },
 		report: func(ctx context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error) {
-			return productionWatchReport(settingsPath, w, now, loc)
+			return productionWatchReport(ctx, settingsPath, w, now, loc)
 		},
 		review: runWatchReview,
 		skipperReplies: func(runID string) ([]string, error) {
@@ -427,7 +427,7 @@ var watchBoatLocation = func() (*time.Location, error) {
 }
 
 // productionWatchReport reads the boat and builds the report.
-func productionWatchReport(settingsPath string, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error) {
+func productionWatchReport(ctx context.Context, settingsPath string, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error) {
 	store := globalDocumentStore
 	if store == nil {
 		return watchReport{}, nil, errWatchesNoStore
@@ -436,7 +436,7 @@ func productionWatchReport(settingsPath string, w savedWatch, now time.Time, loc
 	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 	d := assistantProductionToolDeps(settingsPath)
 	d.today = today
-	in, err := gatherWatchReportInput(d, store, w, now, loc)
+	in, err := gatherWatchReportInput(ctx, d, store, w, now, loc)
 	if err != nil {
 		return watchReport{}, nil, err
 	}

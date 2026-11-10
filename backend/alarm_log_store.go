@@ -493,6 +493,36 @@ func (s *alarmLogStore) ChangedBetween(from, to time.Time, exceptRuleID string) 
 	return out, rows.Err()
 }
 
+// OverlappingBetween lists every occurrence that was open at some moment of
+// [from, to], oldest first: raised by the end of the window and not cleared
+// before its start. ChangedBetween misses an alarm that began before the window
+// and is still open or ended after it, and caps its rows; training the learned
+// normal (ADR 0276) needs neither limit, because an alarm that spans a minute
+// takes that minute out of what is learned.
+func (s *alarmLogStore) OverlappingBetween(from, to time.Time) ([]alarmLogEntry, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT `+alarmLogColumns+` FROM alarm_log
+		WHERE raised_at <= ? AND (cleared_at IS NULL OR cleared_at >= ?)
+		ORDER BY raised_at ASC, id ASC`, to.UTC().Unix(), from.UTC().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("read alarm log: %w", err)
+	}
+	defer rows.Close()
+	var out []alarmLogEntry
+	for rows.Next() {
+		e, err := scanAlarmLogRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan alarm log: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // alarmRaisedGroup is how often one alarm title was raised in a window.
 type alarmRaisedGroup struct {
 	Title       string

@@ -1,8 +1,9 @@
 import { FormSection, SettingsLayout } from '@/components/patterns'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
+import { LearnedNormalStatus } from '@/components/settings/sections/learned-normal-status'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 
 interface InfluxdbSectionProps {
@@ -16,7 +17,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
       <FormSection title="InfluxDB (optional)">
           <Field orientation="horizontal">
             <Switch checked={draft.influxdbEnabled} onCheckedChange={(checked) => onChange({ influxdbEnabled: checked })} />
-            <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer</FieldLabel>
+            <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer, and to learn each engine&apos;s usual readings</FieldLabel>
           </Field>
 
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
@@ -50,7 +51,21 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               />
             </Field>
           </div>
+
+          <Field>
+            <FieldLabel htmlFor="influxdb-minute-bucket">One-minute bucket (optional)</FieldLabel>
+            <Input
+              id="influxdb-minute-bucket"
+              value={draft.influxdbMinuteBucket}
+              onChange={(e) => onChange({ influxdbMinuteBucket: e.target.value })}
+            />
+            <FieldDescription>
+              Leave blank to roll up the main bucket. Helmcentral learns each engine&apos;s usual readings from it.
+            </FieldDescription>
+          </Field>
       </FormSection>
+
+      <LearnedNormalStatus />
 
       <FormSection title="InfluxDB Token">
         <SecretFieldGroup fields={[{ key: 'INFLUXDB_TOKEN', label: 'InfluxDB Token' }]} />

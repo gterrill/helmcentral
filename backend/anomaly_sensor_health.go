@@ -61,6 +61,8 @@ var physicalLimits = map[string]physicalLimit{
 	"engineLoad":                  {0, 1.05},    // ratio, 0-100% with a little sensor headroom
 	"transmission.oilPressure":    {0, 3500000}, // Pa: gear oil runs much higher, 0-3500 kPa
 	"transmission.oilTemperature": {250, 410},   // K
+	"exhaustTemperature":          {250, 1100},  // K: up to 827 degC, above any diesel's exhaust
+	"fuel.rate":                   {0, 5e-4},    // m3/s: 0 to 1800 L/h, above any marine engine's fuel burn
 	"voltage":                     {0, 70},      // V: covers 12/24/48V systems with margin
 	"current":                     {-800, 800},  // A: bank shunt, either direction
 	"capacity.stateOfCharge":      {0, 1.05},    // ratio

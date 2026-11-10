@@ -88,6 +88,10 @@ influxdb:
   url: http://localhost:8086
   org: my-org
   bucket: SignalK_Data
+  # Optional. A bucket that already holds one-minute averages of your readings.
+  # Helmcentral learns each engine's usual readings from it. Blank rolls the main
+  # bucket up to one minute instead.
+  minute_bucket: ""
 
 # The Overpass server used for place names (the position tile), Mate's place
 # search, and the Nearby tile's osm-overpass plugin is that plugin's own
