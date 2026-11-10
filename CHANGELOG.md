@@ -30,6 +30,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A new help page shows how to keep a longer history in InfluxDB.** You set
+  it up in InfluxDB yourself: full readings for 90 days, and one-minute
+  averages for two years. Then the readings from the start of a slow fault are
+  still there when you look for them. Nothing changes until you follow the
+  steps. See [Keep a longer history in InfluxDB](docs/how-to/keep-longer-history-in-influxdb.md).
 - **Anchor Watch shows where nearby boats have anchored.** Once a boat near you has
   swung round far enough, the map draws a small anchor at its estimated anchor
   position and a dashed circle for where it may swing, drawn like your own alarm
