@@ -8,10 +8,10 @@ for and how you put one on a page.
 
 ## Built-in tiles
 
-There are nineteen: Vessel, Wind, Depth & Tide, Position, Today & Now,
+There are twenty: Vessel, Wind, Depth & Tide, Position, Today & Now,
 Anchor Watch, Tanks, Route, Nearby Vessels, Battery & Power,
 Solar, Alternator, Generator, Switches, Hot Water, Autopilot, Clock, Current
-Conditions and Forecast Conditions. Each one can appear once per page.
+Conditions, Forecast Conditions and Current. Each one can appear once per page.
 
 **Add Tile** groups all of these, plus the configurable types below, by what
 they are for: Navigation, Weather, Situational, Power, Engine, Systems, At a
@@ -27,6 +27,11 @@ strip. Nothing stops you placing them on an ordinary page too.
   "Next waypoint" until the place has a name. It reads `--` when nothing is set.
   It reads `--` with "Route unavailable" when the route can't be read. Tapping
   it does nothing, so you start and stop routes on your plotter.
+- **Current**: the water current against the bow: its speed, the angle it
+  comes from (S35 is 35 degrees off the starboard bow), and whether it's
+  helping or hindering your progress along the course. It reads only while
+  motoring or sailing. It sits in Navigation in **Add Tile**, and it isn't on
+  any page until you add it. See [Current](../features/dashboard.md#current).
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its

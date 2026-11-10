@@ -6,6 +6,8 @@ import { computeCornerMasks, type ClusterCanvasConfig } from '@/lib/cluster-canv
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
+import { classifyCurrentEffect, currentEffectColorClass } from '@/lib/current-effect'
+import { norm360 } from '@/lib/geo'
 import { GUST_WINDOW_LABELS, GUST_WINDOW_SPOKEN, nextGustWindow, parseGustWindow, type GustWindow } from '@/lib/gust-windows'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
@@ -233,10 +235,6 @@ function parseOrientation(value: string | null): WindOrientation | null {
   return value === 'course-up' || value === 'north-up' ? value : null
 }
 
-function normalizeDeg(value: number): number {
-  return ((value % 360) + 360) % 360
-}
-
 type WindToggleChipProps = {
   /** Prefix for each label span's data-testid, e.g. "wind-mode-chip". */
   testId: string
@@ -349,7 +347,7 @@ export const WindTile = memo(function WindTile({
   }, [orientation])
 
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
-  const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
+  const setDegreesLabel = currentSetDeg !== null ? `${Math.round(norm360(currentSetDeg))}°` : '—'
   // North Up: the ring holds true north at 12 o'clock, so the set arrow
   // points at the current's absolute compass bearing directly. Course Up:
   // the ring (and the bow triangle beside it) turns with heading instead, so
@@ -361,13 +359,12 @@ export const WindTile = memo(function WindTile({
   const setArrowRotation = currentSetDeg === null
     ? null
     : orientation === 'north-up'
-      ? normalizeDeg(currentSetDeg)
+      ? norm360(currentSetDeg)
       : headingTrue !== null
-        ? normalizeDeg(currentSetDeg - headingTrue)
+        ? norm360(currentSetDeg - headingTrue)
         : null
   const setArrowTitle = `Set direction ${setDirectionLabel}${setArrowRotation === null && currentSetDeg !== null ? ' — heading unavailable' : ''}`
-  const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
-  const currentColorClass = currentFavorable === null ? '' : currentFavorable ? 'text-gauge-secondary' : 'text-amber-600'
+  const currentColorClass = currentEffectColorClass(classifyCurrentEffect(currentDriftImpactKts))
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
   const driftLabel = currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—'
   const formatGustValue = (kts: number | null): ReactNode => kts !== null ? kts.toFixed(1) : '—'
@@ -396,7 +393,7 @@ export const WindTile = memo(function WindTile({
     bowRotationDeg = headingTrue
     arrowAngleDeg = windMode === 'true'
       ? windDirectionTrueDeg
-      : (headingTrue !== null && windAngleApparentDeg !== null ? normalizeDeg(headingTrue + windAngleApparentDeg) : null)
+      : (headingTrue !== null && windAngleApparentDeg !== null ? norm360(headingTrue + windAngleApparentDeg) : null)
   } else {
     bowRotationDeg = 0
     arrowAngleDeg = windMode === 'true' ? windAngleTrueDeg : windAngleApparentDeg

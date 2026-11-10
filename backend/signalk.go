@@ -85,7 +85,7 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
 		// return before the payload is even parsed (the stream having no
 		// self tree yet) must never read as "just measured".
-		DepthLastUpdateAge: -1, PositionLastUpdateAge: -1, WindLastUpdateAge: -1,
+		DepthLastUpdateAge: -1, PositionLastUpdateAge: -1, WindLastUpdateAge: -1, CurrentLastUpdateAge: -1,
 	}
 
 	// A stream outage lands here the same way an unreachable REST server does,
@@ -216,6 +216,7 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel v
 	// priority list above) so the tile's age tracks whichever of
 	// speedApparent/angleApparent actually updated most recently.
 	state.WindLastUpdateAge = subtreeAgeSeconds(t, "environment.wind", state.Datetime)
+	state.CurrentLastUpdateAge = currentLeavesAgeSeconds(t, state.Datetime)
 
 	windDataRecent := isRecentTimestamp(windTimestamp, defaultWindMaxAge)
 	if !windDataRecent {
@@ -391,6 +392,21 @@ func readEngineRPM(t telemetryReader, instance string) (float64, bool) {
 	return 0, false
 }
 
+// currentLeavesAgeSeconds is the age of the current readings the Current tile
+// shows: the oldest of the setTrue and drift leaves that parseSignalKCurrent
+// reads. A live setMagnetic or driftImpact must not mask a frozen set or
+// drift, so the rest of environment.current is not consulted. A leaf with no
+// timestamp is ignored; with neither, the age is unknown (-1).
+func currentLeavesAgeSeconds(t telemetryReader, ref time.Time) float64 {
+	oldest := -1.0
+	for _, path := range []string{"environment.current.setTrue", "environment.current.drift"} {
+		if age := subtreeAgeSeconds(t, path, ref); age > oldest {
+			oldest = age
+		}
+	}
+	return oldest
+}
+
 func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 	const current = "environment.current"
 
@@ -399,7 +415,8 @@ func parseSignalKCurrent(t telemetryReader) (float64, float64, *float64) {
 		drift = v
 		if drift >= 0 && drift <= 20 {
 			drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
-		} else if drift < 0 {
+		} else {
+			// Negative, or above 20 m/s (about 39 kt): not a current.
 			drift = -1
 		}
 	}

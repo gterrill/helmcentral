@@ -20,6 +20,7 @@ export const DASHBOARD_WIDGET_IDS = [
   'clock',
   'current-conditions',
   'forecast-conditions',
+  'water-current',
 ] as const
 
 /** A widget baked into the app, with a fixed id and at most one instance per page. */
@@ -79,6 +80,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'clock': 'Clock',
   'current-conditions': 'Current Conditions',
   'forecast-conditions': 'Forecast Conditions',
+  'water-current': 'Current',
 }
 
 export type WidgetCategory =
@@ -126,6 +128,7 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
   'depth-tide': 'navigation',
   'route': 'navigation',
   'autopilot': 'navigation',
+  'water-current': 'navigation',
   'wind': 'weather',
   'current-conditions': 'weather',
   'forecast-conditions': 'weather',
@@ -213,6 +216,7 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   // and wider than its own WIDGET_CONSTRAINTS floor (4x6) since that floor
   // is the tightest fit, not the comfortable one.
   'forecast-conditions': { w: 6, h: 7 },
+  'water-current': { w: 4, h: 4 },
 }
 
 export interface EmbedWidgetConfig {

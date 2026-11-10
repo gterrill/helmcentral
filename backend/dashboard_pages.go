@@ -37,6 +37,7 @@ var validDashboardWidgetIDs = map[string]bool{
 	"clock":               true,
 	"current-conditions":  true,
 	"forecast-conditions": true,
+	"water-current":       true,
 }
 
 // Widget ids that existed in a previous release and have been retired. Saved

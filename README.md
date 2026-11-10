@@ -119,8 +119,8 @@ rest of Helmcentral works without any of it.
 ## What it does
 
 **[The dashboard](docs/features/dashboard.md).** You build pages of tiles for
-each job: anchored, under way, an engine watch. Nineteen tiles come built in,
-from Vessel and Wind through Battery & Power, Autopilot and Forecast
+each job: anchored, under way, an engine watch. Twenty tiles come built in,
+from Vessel and Wind through Current, Battery & Power, Autopilot and Forecast
 Conditions. You can add gauges for any reading the boat publishes, an
 [Engine Cluster](docs/features/engine-cluster.md) tile per engine, and embed
 tiles for anything with a URL, such as a camera feed. Pages are saved on the

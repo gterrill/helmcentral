@@ -1021,6 +1021,21 @@ func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 	}
 }
 
+func TestParseSignalKCurrent_DriftAboveTwentyMetresPerSecondIsImpossible(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift": map[string]any{"value": 25.0},
+			},
+		},
+	}
+
+	drift, _, _ := parseSignalKCurrent(telemetryViewFromTree(payload, time.Time{}))
+	if drift != -1 {
+		t.Fatalf("expected an impossible drift to read as unknown (-1), got %v", drift)
+	}
+}
+
 func TestParseSignalKCurrent_DoesNotTreatSetMagneticAsTrue(t *testing.T) {
 	payload := map[string]any{
 		"environment": map[string]any{
@@ -2026,6 +2041,80 @@ func TestFetchSignalKVesselState_ReportsWindLastUpdateAge(t *testing.T) {
 
 	if !approxEqual(state.WindLastUpdateAge, 30, 0.01) {
 		t.Fatalf("expected wind age to track the freshest wind timestamp (30s), got %v", state.WindLastUpdateAge)
+	}
+}
+
+// TestFetchSignalKVesselState_ReportsCurrentLastUpdateAge covers the Current
+// tile's age, scoped to environment.current only: wind is a different sensor.
+func TestFetchSignalKVesselState_ReportsCurrentLastUpdateAge(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {
+			"wind": {"speedApparent": {"value": 5.1, "timestamp": "2026-09-04T23:59:59Z"}},
+			"current": {
+				"setTrue": {"value": 1.0, "timestamp": "2026-09-04T23:59:15Z"},
+				"drift": {"value": 0.5, "timestamp": "2026-09-04T23:59:00Z"}
+			}
+		}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if !approxEqual(state.CurrentLastUpdateAge, 60, 0.01) {
+		t.Fatalf("expected current age to be the oldest of setTrue and drift (60s), got %v", state.CurrentLastUpdateAge)
+	}
+}
+
+// A live setMagnetic or driftImpact must not hide a frozen setTrue and drift:
+// the tile shows only the latter two.
+func TestFetchSignalKVesselState_CurrentAgeIgnoresLeavesTheTileDoesNotShow(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {
+			"current": {
+				"setMagnetic": {"value": 1.0, "timestamp": "2026-09-04T23:59:59Z"},
+				"driftImpact": {"value": 0.1, "timestamp": "2026-09-04T23:59:59Z"},
+				"setTrue": {"value": 1.0, "timestamp": "2026-09-04T23:50:00Z"},
+				"drift": {"value": 0.5, "timestamp": "2026-09-04T23:50:00Z"}
+			}
+		}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if !approxEqual(state.CurrentLastUpdateAge, 600, 0.01) {
+		t.Fatalf("expected the frozen setTrue/drift age (600s), got %v", state.CurrentLastUpdateAge)
+	}
+}
+
+func TestFetchSignalKVesselState_CurrentLastUpdateAgeUnknownWithoutTimestamp(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {"current": {"drift": {"value": 0.5}}}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.CurrentLastUpdateAge != -1 {
+		t.Fatalf("expected unknown current age (-1) with no timestamp present, got %v", state.CurrentLastUpdateAge)
 	}
 }
 

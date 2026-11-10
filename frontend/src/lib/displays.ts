@@ -213,10 +213,11 @@ export interface DisplayFeedContext {
   navigationState: string | null
 }
 
-function normalizeDisplayState(state: string | null): string | null {
+export function normalizeDisplayState(state: string | null): string | null {
   if (typeof state !== 'string') return null
   const normalized = state.trim().toLowerCase().replace(/_/g, ' ')
   if (normalized === 'under way using engine') return 'motoring'
+  if (normalized === 'under way sailing') return 'sailing'
   return normalized || null
 }
 
