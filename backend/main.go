@@ -51,6 +51,11 @@ func main() {
 		os.Exit(runConvertProfileRulesCommand(os.Args[2:]))
 	}
 
+	// flux runs one read-only Flux script against the real InfluxDB.
+	if len(os.Args) > 1 && os.Args[1] == "flux" {
+		os.Exit(runFluxCommand(os.Args[2:]))
+	}
+
 	e := echo.New()
 	e.IPExtractor = clientIPExtractor()
 	port := getEnv("PORT", "8080")

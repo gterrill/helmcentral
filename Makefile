@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop prune-merged check-vite-config check-frontend-deps check-backend check-frontend
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop flux prune-merged check-vite-config check-frontend-deps check-backend check-frontend
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -96,6 +96,12 @@ preview-backend:
 
 preview-backend-stop:
 	@sh scripts/preview-backend.sh stop "$(NAME)"
+
+# Runs the Flux script FILE (or - for stdin) against the boat's InfluxDB,
+# read-only. See scripts/flux.sh.
+flux:
+	@test -n "$(FILE)" || { echo "usage: make flux FILE=<file|->" >&2; exit 2; }
+	@sh scripts/flux.sh "$(FILE)"
 
 # Exits 1 and lists each package whose installed version differs from
 # DIR's package-lock.json. DIR defaults to this checkout's frontend.

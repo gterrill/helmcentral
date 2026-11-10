@@ -48,6 +48,10 @@ Run every suite the change touches:
 - `CHANGELOG.md`: `sh scripts/check-changelog.sh`. A rebase merges this file
   without a conflict, so this is what catches an entry left in a released section.
 
+Any new or changed Flux runs once through `scripts/flux.sh` against the box
+(`INFLUX_URL=http://<reachable-host>:8086` if the settings address is
+unreachable), and its output, or the error, goes in the PR body.
+
 A UI change is previewed now, before review, following "Preview from a
 worktree" in the `run-dashboard` skill, at desktop and phone widths. Fixes the
 preview prompts go through this step again.

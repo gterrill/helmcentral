@@ -114,6 +114,10 @@ notification queue deleted from the copy. Nothing it saves reaches
 `backend/data`. Its SignalK points at a black hole, so tiles show `—`
 placeholders. `LIVE=1` keeps the boat's address for live data, and then
 setting an anchor publishes to the real SignalK: use it only to look.
+The start stops when the copied InfluxDB address does not answer, which the
+Tailscale one in `settings.yaml` does not from the Mac: add
+`INFLUX_URL=http://<reachable-host>:8086` to replace it in the copy, or
+`INFLUX_URL=none` to run the preview without InfluxDB.
 
 Ports 5173 and 5174 belong to the dev and e2e stacks; go up from 5175 if another
 worktree already holds it. Stop the server and the preview backend once the
