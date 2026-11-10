@@ -10,6 +10,7 @@ import {
   displayFoldPx,
   displayRowMargin,
   displayFeed,
+  normalizeDisplayState,
   nextDisplayIndex,
   prevDisplayIndex,
   displayFit,
@@ -297,5 +298,22 @@ describe('displayFit', () => {
 
   it('is unknown without a measurement', () => {
     expect(displayFit(display(tv), undefined)).toEqual({ status: 'unmeasured' })
+  })
+})
+
+describe('normalizeDisplayState', () => {
+  it.each([
+    ['under way using engine', 'motoring'],
+    ['UNDER_WAY_USING_ENGINE', 'motoring'],
+    ['under way sailing', 'sailing'],
+    ['UNDER_WAY_SAILING', 'sailing'],
+    [' Anchored ', 'anchored'],
+  ])('maps %s to %s', (input, expected) => {
+    expect(normalizeDisplayState(input)).toBe(expected)
+  })
+
+  it('is null for a missing or blank state', () => {
+    expect(normalizeDisplayState(null)).toBeNull()
+    expect(normalizeDisplayState('  ')).toBeNull()
   })
 })

@@ -19,6 +19,7 @@ import { LivePoiMapTile } from '@/components/poi-map-tile'
 import { LivePositionTile } from '@/components/position-tile'
 import { LiveRouteTile } from '@/components/route-tile'
 import { LiveSolarTile } from '@/components/solar-tile'
+import { LiveWaterCurrentTile } from '@/components/water-current-tile'
 import { LiveTanksTile } from '@/components/tanks-tile'
 import { LiveTodayNowTile } from '@/components/today-now-tile'
 import { LiveWindTile } from '@/components/wind-tile'
@@ -223,6 +224,8 @@ export const WidgetHost = memo(function WidgetHost({
       return <LiveNearbyVesselsTile distanceUnits={distanceUnits} />
     case 'battery-power':
       return <LiveBatteryPowerTile onOpenRoles={actions.onOpenHouseBankRoles} />
+    case 'water-current':
+      return <LiveWaterCurrentTile />
     case 'solar':
       return <LiveSolarTile />
     case 'alternator':

@@ -39,8 +39,8 @@ can't tell you what they're doing.
 
 ## Instrument tiles
 
-Nineteen built-in tiles cover the boat's core systems, from Vessel and Wind
-through Battery & Power, Autopilot and Forecast Conditions. You can also build
+Twenty built-in tiles cover the boat's core systems, from Vessel and Wind
+through Current, Battery & Power, Autopilot and Forecast Conditions. You can also build
 six more types yourself, including these:
 
 - **Gauge:** Shows any single reading that has no dedicated tile of its own.
@@ -280,6 +280,46 @@ The footer projects the same state of charge at sunrise, the **Dawn figure**, so
 you can tell whether the bank holds until morning. See [Battery & Power
 fields](../reference/tiles.md#battery--power-fields) for what each card shows
 and how the Dawn figure is worked out.
+
+## Current
+
+The Current tile tells you at a glance whether the water is helping the boat
+along or holding it back. You add it from the tile picker, and it reads only
+while you're under way, motoring or sailing. At anchor or on a mooring it shows
+`—` and says "Shows under way", because the small set and drift you'd see there
+is noise.
+
+- **Speed and From:** The speed of the current in knots, and the angle it comes
+  from, measured off the bow the way the Wind tile measures wind. S35 means the
+  water is coming from 35 degrees off the bow on the starboard side, and P35
+  means the same on the port side. Dead ahead reads "Ahead" and dead astern
+  reads "Astern".
+- **Helping or Hindering:** The large figure is the speed the current adds to
+  your progress or takes off it, along your course, with a word above it.
+  "Helping +0.4 kt" in teal means you're gaining four tenths of a knot from the
+  water. "Hindering −1.8 kt" in amber means the water is costing you nearly two
+  knots. When the current adds or takes off less than a twentieth of a knot, the
+  word is "No effect" in a plain colour.
+- **Still water:** When the current is under a twentieth of a knot, the Speed
+  reads 0.0 and the word is "No current". The From angle reads `—`, because
+  still water has no direction worth naming.
+- **When it can't tell you:** With no current reading, the tile shows `—` and
+  says "No current reading". With no compass heading, it still shows the speed
+  and the helping or hindering figure, and the From angle reads `—` with "No
+  heading".
+- **No navigation state:** If Helmcentral isn't getting a navigation state at
+  all, the tile can't tell whether you're under way. It shows `—` and says "No
+  navigation state", rather than claiming the boat isn't moving.
+- **Stale readings:** Like the other tiles, it gets an amber outline and a
+  `STALE` marker when the current stops updating, but only while it's showing
+  readings. A tile left blank has nothing to go stale. See [When a source goes
+  quiet](#when-a-source-goes-quiet).
+
+Helmcentral works the current out by comparing your speed through the water, from
+the log, and your heading, from the compass, against your movement over the
+ground, from GPS. A log that reads high therefore shows up as a foul current
+that isn't there. If the tile always says Hindering, check the log calibration
+before you believe it.
 
 ## Tanks
 

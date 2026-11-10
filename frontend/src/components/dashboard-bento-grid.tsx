@@ -139,6 +139,11 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'clock': { minW: 2, minH: 6 },
   'current-conditions': { minW: 3, minH: 6 },
   'forecast-conditions': { minW: 4, minH: 6 },
+  // Content is ~163px (card chrome 32, two cards 57, effect label and
+  // figure 46 with an 8px gap, reason line 20); four rows are 176px. Two
+  // cards holding "Astern" at text-2xl need ~260px, which three columns
+  // do not give on a laptop board.
+  'water-current': { minW: 4, minH: 4 },
 }
 
 // The hero's uniform enlargement (ADR 0072). Applied as a CSS transform rather

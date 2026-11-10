@@ -3,6 +3,7 @@
 // map applies it each frame; nothing here touches the map.
 
 import { trackHeading, trackIndex } from '@/lib/boat-model'
+import { norm360 } from '@/lib/geo'
 import type { Timeline } from '@/lib/passages'
 import type { CameraMode, ResolvedShot } from '@/lib/replay-clock'
 
@@ -93,9 +94,6 @@ export const easeInOut = (t: number) => {
   const x = Math.max(0, Math.min(1, t))
   return x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2
 }
-
-/** An angle brought into 0..360. */
-export const norm360 = (d: number) => ((d % 360) + 360) % 360
 
 /** The short way round from one bearing to another, in -180..180 degrees. */
 export const shortTurn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180

@@ -50,6 +50,7 @@ interface VesselState {
   depth_last_update_age_s: number
   position_last_update_age_s: number
   wind_last_update_age_s: number
+  current_last_update_age_s: number
   source: string
 }
 
@@ -64,6 +65,7 @@ export interface VesselStateValue {
   depthLastUpdateAgeS: number | null
   positionLastUpdateAgeS: number | null
   windLastUpdateAgeS: number | null
+  currentLastUpdateAgeS: number | null
   // The Rode Planner's swing radius fallback source when settings.anchor.loa_m
   // is unset (ADR 0047). Backend already nils this out when unpublished, so
   // no >= 0 guard is needed here, unlike the sentinel-bearing fields below.
@@ -138,6 +140,7 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
   depthLastUpdateAgeS: null,
   positionLastUpdateAgeS: null,
   windLastUpdateAgeS: null,
+  currentLastUpdateAgeS: null,
   vesselLengthOverallM: null,
   vesselDraftM: null,
   currentDriftKts: null,
@@ -177,7 +180,7 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
   source: null,
 }
 
-const AGE_FIELDS: readonly VesselStateField[] = ['depthLastUpdateAgeS', 'positionLastUpdateAgeS', 'windLastUpdateAgeS']
+const AGE_FIELDS: readonly VesselStateField[] = ['depthLastUpdateAgeS', 'positionLastUpdateAgeS', 'windLastUpdateAgeS', 'currentLastUpdateAgeS']
 const LADDER_FIELDS: readonly VesselStateField[] = ['maxGustKts', 'maxGustTrueKts']
 
 const nonNegative = (value: unknown): number | null => (typeof value === 'number' && value >= 0 ? value : null)
@@ -225,6 +228,7 @@ function parseVesselState(data: VesselState): VesselStateValue {
     depthLastUpdateAgeS: ageFromPayload(data.depth_last_update_age_s),
     positionLastUpdateAgeS: ageFromPayload(data.position_last_update_age_s),
     windLastUpdateAgeS: ageFromPayload(data.wind_last_update_age_s),
+    currentLastUpdateAgeS: ageFromPayload(data.current_last_update_age_s),
     windSpeedApparentKts: nonNegative(data.wind_speed_apparent_kts),
     windAngleApparentDeg: nonNegative(data.wind_angle_apparent_deg),
     windSide: sideOrNull(data.wind_side),

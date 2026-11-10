@@ -511,3 +511,27 @@ describe('WindTile gust card background', () => {
     }
   })
 })
+
+describe('WindTile DRIFT card colour', () => {
+  const withCurrent = (currentDriftImpactKts: number | null) => ({
+    ...baseProps,
+    currentSetDeg: 200,
+    currentDriftKts: 1.2,
+    currentDriftImpactKts,
+  })
+
+  test.each([
+    [0.4, 'text-gauge-secondary'],
+    [-0.4, 'text-amber-600'],
+  ])('an impact of %s is coloured %s', (impact, colour) => {
+    render(<WindTile {...withCurrent(impact)} />)
+    expect(screen.getAllByText('1.2')[0].className).toContain(colour)
+  })
+
+  test.each([0, 0.03, -0.04, null])('an impact of %s that rounds to zero or is missing has no colour', (impact) => {
+    render(<WindTile {...withCurrent(impact)} />)
+    const cls = screen.getAllByText('1.2')[0].className
+    expect(cls).not.toContain('text-gauge-secondary')
+    expect(cls).not.toContain('text-amber-600')
+  })
+})

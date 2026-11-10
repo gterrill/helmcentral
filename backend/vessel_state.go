@@ -89,7 +89,10 @@ type vesselStateData struct {
 	// environment.current is a different sensor with its own health and
 	// must not be folded in. -1 when environment.wind carries no timestamp.
 	// Shared by true and apparent wind: both live in the same subtree.
-	WindLastUpdateAge           float64
+	WindLastUpdateAge float64
+	// CurrentLastUpdateAge is the same for environment.current (set and
+	// drift), scoped to that subtree. -1 when it carries no timestamp.
+	CurrentLastUpdateAge        float64
 	GeneratorState              string
 	GeneratorManualStart        bool
 	GeneratorManualStartTimer   float64
@@ -191,6 +194,7 @@ func buildVesselStatePayload() map[string]any {
 		DepthLastUpdateAge:    -1,
 		PositionLastUpdateAge: -1,
 		WindLastUpdateAge:     -1,
+		CurrentLastUpdateAge:  -1,
 	}
 	source := "backend-fallback"
 
@@ -333,6 +337,7 @@ func buildVesselStatePayload() map[string]any {
 		"wind_angle_true_relative_deg":   state.WindAngleTrueRelativeDeg,
 		"wind_direction_true_deg":        state.WindDirectionTrueDeg,
 		"wind_last_update_age_s":         state.WindLastUpdateAge,
+		"current_last_update_age_s":      state.CurrentLastUpdateAge,
 		"max_gust_kts":                   maxGustKts,
 		"max_gust_true_kts":              maxGustTrueKts,
 		"generator_state":                state.GeneratorState,

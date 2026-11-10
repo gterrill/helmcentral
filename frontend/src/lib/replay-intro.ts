@@ -11,8 +11,8 @@
 
 import type { Map as MapLibreMap } from 'maplibre-gl'
 
-import { latOfMercatorY, lonOfMercatorX, mercatorX, mercatorY } from '@/lib/geo'
-import { norm360, shortTurn, type Camera } from '@/lib/replay-camera'
+import { latOfMercatorY, lonOfMercatorX, mercatorX, mercatorY, norm360 } from '@/lib/geo'
+import { shortTurn, type Camera } from '@/lib/replay-camera'
 
 /** The zoom the opening move starts from: the whole earth in view. */
 export const INTRO_START_ZOOM = 1.5

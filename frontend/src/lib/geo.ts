@@ -1,6 +1,9 @@
 /** Metres in one nautical mile. */
 export const METRES_PER_NM = 1852
 
+/** An angle in degrees brought into 0..360. */
+export const norm360 = (d: number) => ((d % 360) + 360) % 360
+
 // ── Haversine distance (m) ──────────────────────────────────────────────────
 export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000
