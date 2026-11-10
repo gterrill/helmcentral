@@ -62,6 +62,9 @@ A new token can use these:
 These start switched off, and you switch them on for a token when you want them:
 
 - Live SignalK paths and the list of alarm thresholds.
+- Unusual engine readings. These are suggestions from what Helmcentral has
+  learned about each engine, and they're easy to over-read, so you choose which
+  programs get them.
 - Passage estimate, tidal departure and passage window. These help decide when
   and whether to go, so you choose which programs get them.
 

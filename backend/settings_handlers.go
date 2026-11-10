@@ -102,6 +102,9 @@ type settingsPayload struct {
 		URL     string `json:"url"`
 		Org     string `json:"org"`
 		Bucket  string `json:"bucket"`
+		// MinuteBucket is an optional bucket that already holds one-minute
+		// means. Blank means the learned normal rolls up the main bucket.
+		MinuteBucket string `json:"minute_bucket"`
 	} `json:"influxdb"`
 	// Assistant configures the onboard OpenRouter-backed assistant, Mate
 	// (ADR 0093): off by default, BYOK (the key lives in the secrets store,
@@ -310,6 +313,10 @@ func updateSettingsHandler(c echo.Context) error {
 		}
 	}
 
+	// The learned normal reads InfluxDB and the engines the roles name (ADR 0276).
+	// A change to either wakes the trainer once the settings are saved, below.
+	inputsChanged := normalInputsChangedBySave(current, normalized)
+
 	settings["signalk"] = map[string]any{
 		"address": normalized.Signalk.Address,
 		"port":    normalized.Signalk.Port,
@@ -364,6 +371,9 @@ func updateSettingsHandler(c echo.Context) error {
 		"url":     normalized.Influxdb.URL,
 		"org":     normalized.Influxdb.Org,
 		"bucket":  normalized.Influxdb.Bucket,
+		// Always written, blank included: a missing key reads blank, and a
+		// saved blank must not look like a field the operator never saw.
+		"minute_bucket": normalized.Influxdb.MinuteBucket,
 	}
 	// Helmcentral dropped its radar integration (ADR 0270); a settings.yaml
 	// written before that still carries this key, and every save drops it.
@@ -417,6 +427,9 @@ func updateSettingsHandler(c echo.Context) error {
 		// status right after this save and must see the new switch.
 		globalCoastlineManager.SettingsChanged()
 	}
+	if inputsChanged {
+		normalInputsChanged()
+	}
 
 	// A house bank may have just been chosen or changed: move the alarm rules
 	// that follow it, then seed whichever anomaly-v1 sub-sets that unlocks. A
@@ -451,6 +464,14 @@ func updateSettingsHandler(c echo.Context) error {
 	sweepDocumentsInBackground()
 
 	return c.JSON(http.StatusOK, normalized)
+}
+
+// normalInputsChangedBySave says a settings save changes what the learned normal
+// trains on: the InfluxDB block. The engines it trains on are equipment items
+// and wake the trainer from the item save (wakeNormalIfEnginesChanged), not
+// from the roles, which only name a house bank or an alternator.
+func normalInputsChangedBySave(current, next settingsPayload) bool {
+	return current.Influxdb != next.Influxdb
 }
 
 // settingsValidationError identifies which field of a bulk settings save was
@@ -504,6 +525,19 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		return &settingsValidationError{
 			Field:   "anchor.transducer_depth_m",
 			Message: fmt.Sprintf("transducer depth must be between 0 and %g m (0 leaves it unset)", maxTransducerDepthM),
+		}
+	}
+
+	// Flux reads ${...} inside a string literal, so a bucket name that carries
+	// it is refused here, where the operator can fix it, and not at query time.
+	// The organization never enters a literal. Only a name being changed is
+	// checked: one already stored must not block a save of something else.
+	for _, f := range []struct{ field, label, value, stored string }{
+		{"influxdb.bucket", "the bucket name", next.Influxdb.Bucket, current.Influxdb.Bucket},
+		{"influxdb.minute_bucket", "the one-minute bucket name", next.Influxdb.MinuteBucket, current.Influxdb.MinuteBucket},
+	} {
+		if f.value != f.stored && containsFluxInterpolationSyntax(f.value) {
+			return &settingsValidationError{Field: f.field, Message: f.label + " must not contain '$' or '{'"}
 		}
 	}
 
@@ -682,6 +716,7 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.Influxdb.URL = strings.TrimSpace(coerceString(influxMap["url"]))
 		payload.Influxdb.Org = strings.TrimSpace(coerceString(influxMap["org"]))
 		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
+		payload.Influxdb.MinuteBucket = strings.TrimSpace(coerceString(influxMap["minute_bucket"]))
 	}
 
 	if assistantMap, ok := settings["assistant"].(map[string]any); ok {
@@ -869,6 +904,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
 	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
 	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
+	normalized.Influxdb.MinuteBucket = strings.TrimSpace(req.Influxdb.MinuteBucket)
 
 	normalized.Assistant.Enabled = req.Assistant.Enabled
 	normalized.Assistant.Model = strings.TrimSpace(req.Assistant.Model)

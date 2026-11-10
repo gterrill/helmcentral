@@ -64,6 +64,8 @@ export type SettingsPayload = {
     url?: string
     org?: string
     bucket?: string
+    // ADR 0276: an optional bucket of one-minute means. Blank rolls up the main one.
+    minute_bucket?: string
   }
   auth?: {
     mode?: string

@@ -36,7 +36,7 @@ export function IgnoredSensorsList() {
   return (
     <FormSection
       title="Ignored sensors"
-      description={'Sensors excluded from the frozen, impossible-reading and silent-source checks, added from each alarm card\'s own "Ignore this sensor" action.'}
+      description={'Sensors excluded from the frozen, impossible-reading and silent-source checks, and from the learned normal of each engine\'s readings (Settings, InfluxDB). Added from each alarm card\'s own "Ignore this sensor" action or from a switch there.'}
     >
       <div className="flex flex-col gap-1.5">
         {loading && <p className="text-sm text-muted-foreground">Loading…</p>}

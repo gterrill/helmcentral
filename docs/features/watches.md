@@ -120,6 +120,20 @@ why when it can't.
   dates.
 - **Instruments:** Any sensor that has frozen, gone out of range, or gone silent.
 
+A watch that covers Instruments also gets an **Unusual** block, under **Needs a
+look**. It lists up to two stretches where an engine's readings were out of the
+ordinary for that engine. For example, "Port engine oil pressure ran low from
+2.10 AM to 2.40 AM: 280 kPa against a usual 340 kPa at 1,800 to 2,000 rpm". It's
+a suggestion from what Helmcentral has learned about each engine, not one of your
+thresholds. So it's never counted as something to look at, and it doesn't change
+the title of a notification. Mate may mention it, but won't treat it as a finding
+or give a cause. When Helmcentral can't judge, the block says why, for example
+"Port engine: coolant temperature is switched off, so this engine cannot be
+judged." When you have no InfluxDB set up, the block isn't shown at all. When the
+engines didn't run, or ran and nothing stood out, it isn't shown either. A watch
+that was away for more than a week judges only the last 7 days and says so. See
+[Anomaly detection](anomaly-detection.md#unusual-engine-readings).
+
 The report covers the time since the watch last ran. The first report covers the
 last 24 hours and says so.
 

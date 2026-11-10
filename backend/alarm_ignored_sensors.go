@@ -54,13 +54,32 @@ func ignoreSensor(identifier string) error {
 	if identifier == "" {
 		return fmt.Errorf("identifier required")
 	}
-	return globalIgnoreStore.add(ignoredSensorsList, identifier, time.Now().UTC())
+	if err := globalIgnoreStore.add(ignoredSensorsList, identifier, time.Now().UTC()); err != nil {
+		return err
+	}
+	normalReadingsChanged(identifier)
+	return nil
+}
+
+// normalReadingsChanged tells the learned-normal trainer when the ignore list
+// changes for a reading it learns from: the list is also the switch that turns a
+// reading off for the learned normal (ADR 0276), so the model is updated soon
+// and not at the next daily run.
+func normalReadingsChanged(identifier string) {
+	if normalPathMatters(identifier) {
+		normalInputsChanged()
+	}
 }
 
 // unignoreSensor removes identifier from the ignore list. Also idempotent:
 // removing an identifier that was never ignored is a no-op.
 func unignoreSensor(identifier string) error {
-	return globalIgnoreStore.remove(ignoredSensorsList, strings.TrimSpace(identifier))
+	identifier = strings.TrimSpace(identifier)
+	if err := globalIgnoreStore.remove(ignoredSensorsList, identifier); err != nil {
+		return err
+	}
+	normalReadingsChanged(identifier)
+	return nil
 }
 
 // ignoredSensorsResponse is the body of every ignored-sensors endpoint:

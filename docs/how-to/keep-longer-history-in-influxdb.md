@@ -106,6 +106,22 @@ and stop on midnight. For example,
 week, and so on up to now. A stop time in the middle of a minute would leave
 that minute's average built from only part of its readings.
 
+## Tell Helmcentral about it
+
+Helmcentral learns each engine's usual readings from one-minute averages, for
+the [unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings)
+suggestion. You don't have to name the bucket. Left blank, it works the minutes
+out from the main bucket. To read the one-minute bucket instead, which is quicker
+and reaches back further:
+
+1. Open **Settings → InfluxDB**.
+2. In **One-minute bucket (optional)**, type the bucket's name, for example
+   `SignalK_1m`.
+3. Choose **Save** in the bar across the top of the screen.
+
+If Helmcentral can't read that bucket, it says so under **Learned normal** and
+carries on with what it learned before.
+
 ## Check that it works
 
 1. After the first hour, open **Tasks**, click the task and look at its runs.

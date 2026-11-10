@@ -22,6 +22,7 @@ import {
   type WatchSamplesReport,
   type WatchSectionsReport,
   type WatchSeriesReport,
+  type WatchUnusual,
 } from '@/lib/watches'
 import { errorMessage } from '@/lib/errors'
 
@@ -161,6 +162,30 @@ function SectionBody({ section }: { section: WatchReportSection }) {
     return <ReadingRows rows={rows} />
   }
   return <>{(section.lines ?? []).map((line, i) => <p key={i} className="min-w-0 text-sm text-foreground">{line}</p>)}</>
+}
+
+/**
+ * A learned normal's suggestions (ADR 0276). Quiet on purpose: no accent, no
+ * count, and nothing at all when there is no line and no note.
+ */
+function UnusualBlock({ unusual }: { unusual: WatchUnusual }) {
+  const lines = unusual.lines ?? []
+  if (lines.length === 0 && !unusual.note) return null
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 border-t border-border pt-4" data-testid="watch-run-unusual">
+      <p className={MICRO_LABEL}>Unusual</p>
+      {lines.length > 0 && (
+        <ul className="flex flex-col gap-1" aria-label="Unusual readings">
+          {lines.map((line, i) => (
+            <li key={i} className="min-w-0 text-sm text-foreground">
+              {line}
+            </li>
+          ))}
+        </ul>
+      )}
+      {unusual.note && <p className="min-w-0 text-sm text-muted-foreground">{unusual.note}</p>}
+    </div>
+  )
 }
 
 /** What the report could not check. It is never folded away, so a gap in the report is seen. */
@@ -371,6 +396,8 @@ const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: Ru
           </ul>
         </div>
       )}
+
+      {sections?.unusual && <UnusualBlock unusual={sections.unusual} />}
 
       {notChecked.length > 0 && <NotChecked entries={notChecked} />}
 

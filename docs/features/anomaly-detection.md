@@ -10,10 +10,13 @@ is what they cover:
   has finished charging.
 - **Engine pairs:** One engine of a pair pulling away from its twin at the same
   rpm.
+- **Unusual engine readings:** A stretch where one engine's readings, taken
+  together, look different from how that engine normally runs.
 
-Each one raises an ordinary alarm, with severity, dwell, acknowledge,
-notifications and the alarm log behind it. See [Alarms](alarms.md) for how the
-alarm system itself behaves.
+Apart from the last one, each raises an ordinary alarm, with severity, dwell,
+acknowledge, notifications and the alarm log behind it. Unusual engine readings
+are a suggestion in your watch reports and never an alarm. See
+[Alarms](alarms.md) for how the alarm system itself behaves.
 
 See [Set up your vessel](../how-to/set-up-your-vessel.md) for picking the
 engines and house bank that each check below watches.
@@ -129,6 +132,87 @@ moment the numbers touch back down.
 
 It needs at least two engine items assigned to propulsion sources in Settings →
 SignalK.
+
+## Unusual engine readings
+
+Helmcentral learns what's normal for each engine from that engine's own
+history, and points out a stretch when its readings stop looking like that. It's
+a suggestion to take a look. It never raises an alarm, and it never says why.
+Here's how it works:
+
+- **What it learns:** For each engine, at each 200 rpm band, it learns the usual
+  coolant temperature, oil pressure, boost, load and fuel rate. It also learns
+  gear oil pressure and temperature and exhaust temperature. It learns how they
+  move together too. That's how it notices oil pressure that's fine on its own
+  but low for that load. It works with a single engine, because the engine is
+  compared with itself.
+- **What counts as unusual:** Three minutes or more in a row. Helmcentral names
+  the reading that stood out most. It gives that figure against the usual one at
+  that rpm, in your units. For example: "Port engine oil pressure ran low from
+  2.10 AM to 2.40 AM: 280 kPa against a usual 340 kPa at 1,800 to 2,000 rpm."
+- **Where you see it:** In an **Unusual** block of a [watch report](watches.md),
+  below what needs a look, and only when the watch covers Instruments. It's never
+  counted as something to look at. You can also ask Mate, and an
+  [outside assistant](outside-assistants.md) can read it once you switch that on
+  for its token.
+- **What it learns from:** Your InfluxDB history over the last 90 days, for the
+  minutes the engine ran steadily. That means at or above 900 rpm, coolant above
+  65°C, ten minutes into the run, and rpm and coolant steady for the last five
+  minutes. Minutes close to an alarm for that engine are left out, so a fault
+  isn't learned as normal.
+- **How much it needs:** An hour of steady running from at least two separate
+  runs at an rpm band before it judges that band. Until then the report says so,
+  for example "Not judged: 1,400 to 1,600 rpm has 22 minutes of history, needs
+  60". A band you stop using keeps its last normal for about six months.
+- **When it updates:** Every 24 hours, and straight away when you change the
+  InfluxDB settings, add, remove or re-number an engine, or switch a reading on
+  or off.
+
+It needs InfluxDB set up under **Settings → InfluxDB**. Without it the watch
+report leaves the block out, and Settings and Mate say "No learned normal:
+InfluxDB is not set up." If you keep a bucket of
+one-minute averages, name it in **One-minute bucket (optional)**. Otherwise
+Helmcentral works the minutes out from your main bucket. See
+[Keep a longer history in InfluxDB](../how-to/keep-longer-history-in-influxdb.md).
+
+### Which readings it uses
+
+Helmcentral decides from the readings themselves. It leaves a reading out in
+five cases:
+
+- **It never changes:** A sender stuck on one value.
+- **It's often missing:** It's absent from more than a fifth of the steady running minutes.
+- **It's impossible:** It reports values no real sender could give.
+- **Two devices report it:** Both send the same minutes at the same time, so
+  Helmcentral can't tell which one to believe.
+- **The sender changed:** The reading moved to a new device that has less than an
+  hour of history. Helmcentral keeps the bands it has, without that reading, and
+  starts to use it once the new device has an hour of running. It reads that one
+  device from then on and never a second one in its place. If that device goes
+  quiet while the engine runs, the report says so and Helmcentral relearns at the
+  next update.
+
+**Settings → InfluxDB** lists each engine's readings with the reason beside any it
+left out. A sender you repair starts to count by itself once it has an hour of
+running.
+
+You can also switch a reading off there yourself. The switch uses the same list
+as **Ignored sensors**, so a sender you ignore is left out here as well. A reading
+you switch off is never judged or named, even in a band learned before you
+switched it off. That band says it is relearning at the next update. The rpm and
+coolant readings are what Helmcentral uses to tell when the engine is running
+steadily. If you switch one off, the engine isn't judged, the page says which
+reading is off, and the switch stays there for you to turn it back on.
+
+### Where it stops
+
+- **A change in how you run:** A new propeller, a different fuel or a new habit
+  changes what's normal. Until Helmcentral has learned it, it can read as unusual.
+- **A cause:** It says which reading and which way. It doesn't say what's wrong.
+- **A live alarm:** It looks at a stretch afterwards, when a report or Mate asks.
+- **Small changes:** A change smaller than about 1°C or 10 kPa is never called
+  unusual, however steady the reading has been. A coolant sender that sits on one
+  value and now and then dips a degree won't set it off.
 
 ## Engine stumble
 

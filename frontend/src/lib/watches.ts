@@ -176,6 +176,19 @@ export function notCheckedEntries(report: Pick<WatchSectionsReport, 'sections'> 
   return entries
 }
 
+/**
+ * A learned normal's suggestions (ADR 0276): engine readings that were unusual
+ * for that engine. A field of the report, not a section and not a finding, so it
+ * is never counted as something to look at. Absent from reports made before it.
+ */
+export interface WatchUnusual {
+  /** At most two sentences, each a whole stretch. */
+  lines?: string[]
+  /** What was left out, or why nothing could be judged. */
+  note?: string
+  judged_minutes: number
+}
+
 export interface WatchSectionsReport {
   kind: string
   generated_at: string
@@ -183,6 +196,7 @@ export interface WatchSectionsReport {
   since: string
   since_note?: string
   sections: WatchReportSection[]
+  unusual?: WatchUnusual
 }
 
 export interface WatchSeriesReport {

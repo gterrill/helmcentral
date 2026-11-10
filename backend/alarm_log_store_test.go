@@ -365,6 +365,68 @@ func TestAlarmLogStore_ChangedBetweenExcludesTheRuleBeforeTheLimit(t *testing.T)
 	}
 }
 
+// OverlappingBetween lists every occurrence that was open at some moment of
+// [from, to]: raised by the end and not cleared before the start. Unlike
+// ChangedBetween it finds an alarm that began before the window and ended after
+// it, or one that is still open, and it has no row cap.
+func TestAlarmLogStore_OverlappingBetweenFindsOpenAndSpanningAlarmsWithNoCap(t *testing.T) {
+	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "alarm-log.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	from := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	raise := func(id, rule string, at time.Time) {
+		t.Helper()
+		if _, err := store.RecordRaised(alarmLogEntry{ID: id, RuleID: rule, Label: rule, Path: "propulsion.port.oilPressure", State: "warn", RaisedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raise("before", "r-before", from.Add(-3*time.Hour))
+	raise("spanning", "r-span", from.Add(-2*time.Hour))
+	raise("open", "r-open", from.Add(-time.Hour))
+	raise("inside", "r-inside", from.Add(10*time.Minute))
+	raise("after", "r-after", to.Add(time.Minute))
+	raise("touching-end", "r-end", to)
+	if err := store.MarkCleared("r-before", from.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkCleared("r-span", to.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkCleared("r-inside", from.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.OverlappingBetween(from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, e := range got {
+		ids[e.ID] = true
+	}
+	for _, want := range []string{"spanning", "open", "inside", "touching-end"} {
+		if !ids[want] {
+			t.Errorf("%s must overlap the window, got %v", want, ids)
+		}
+	}
+	for _, not := range []string{"before", "after"} {
+		if ids[not] {
+			t.Errorf("%s must not overlap the window, got %v", not, ids)
+		}
+	}
+
+	for i := 0; i < 260; i++ {
+		raise(fmt.Sprintf("bulk%03d", i), fmt.Sprintf("bulk%03d", i), from.Add(time.Duration(i)*time.Second))
+	}
+	got, err = store.OverlappingBetween(from, to)
+	if err != nil || len(got) < 260 {
+		t.Fatalf("no row cap: got %d rows, err %v", len(got), err)
+	}
+}
+
 func TestAlarmLogStore_IndexesClearedAt(t *testing.T) {
 	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "alarm-log.sqlite"))
 	if err != nil {

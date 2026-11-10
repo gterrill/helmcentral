@@ -341,6 +341,19 @@ check and choose **Ignore** followed by the sensor's name (for example
 To see everything currently ignored, or to bring one back, open **Settings →
 Alarms** and look under **Ignored sensors**.
 
+The same list decides which engine readings Helmcentral learns from. Open
+**Settings → InfluxDB** and look under **Learned normal**. Each engine's readings
+are listed there with a switch and the reason beside any Helmcentral has left
+out by itself, such as a sender that never changes. Turn a switch off and that
+reading is added to **Ignored sensors**, so it's left out of the learned normal
+and of the frozen check. Turn it back on and it's removed from the list. The
+rpm and coolant readings can't be switched off, because Helmcentral uses them to
+tell when the engine is running steadily.
+
+Every reading starts switched on. You don't have to visit this page for a sender
+you've just repaired, because Helmcentral starts using it once it has an hour of
+running.
+
 ## Owner and insurance
 
 Mate fills in insurance declarations and marina applications from these, so

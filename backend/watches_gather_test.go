@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -134,7 +135,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in, err := gatherWatchReportInput(d, env.docs, w, now, time.UTC)
+	in, err := gatherWatchReportInput(context.Background(), d, env.docs, w, now, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	in, err = gatherWatchReportInput(d, env.docs, w, now, time.UTC)
+	in, err = gatherWatchReportInput(context.Background(), d, env.docs, w, now, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 func TestGatherWatchReportInput_NoLiveDataIsAReasonNotAnEmptyBoat(t *testing.T) {
 	env := newProposalEnv(t)
 	w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Sections: []string{"power"}, Thresholds: defaultWatchThresholds()}
-	in, err := gatherWatchReportInput(assistantToolDeps{}, env.docs, w, vesselStatusTestNow, time.UTC)
+	in, err := gatherWatchReportInput(context.Background(), assistantToolDeps{},env.docs, w, vesselStatusTestNow, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

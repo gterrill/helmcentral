@@ -65,6 +65,10 @@ func TestClassifyRangeFlagsImpossibleReadings(t *testing.T) {
 		{"engine load over 100%", "propulsion.port.engineLoad", 3.0},
 		{"pack voltage impossibly high", "electrical.batteries.512.voltage", 400},
 		{"SoC over 100%", "electrical.batteries.512.capacity.stateOfCharge", 4.0},
+		{"exhaust colder than anywhere on earth", "propulsion.port.exhaustTemperature", 100},
+		{"exhaust hotter than a diesel runs", "propulsion.port.exhaustTemperature", 1500},
+		{"negative fuel rate", "propulsion.port.fuel.rate", -0.00001},
+		{"fuel rate of a small ship's whole tank per second", "propulsion.port.fuel.rate", 0.5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,6 +76,41 @@ func TestClassifyRangeFlagsImpossibleReadings(t *testing.T) {
 				t.Fatalf("classifyRange(%q, %v) = %v, want rangeOutOfRange", tc.path, tc.value, got)
 			}
 		})
+	}
+}
+
+func TestClassifyRangeAcceptsOrdinaryExhaustAndFuelRate(t *testing.T) {
+	cases := []struct {
+		path  string
+		value float64
+	}{
+		{"propulsion.port.exhaustTemperature", 650}, // K, about 377 degC
+		{"propulsion.port.fuel.rate", 2.5e-5},
+		{"propulsion.starboard.fuel.rate", 0}, // stopped
+	}
+	for _, c := range cases {
+		if got := classifyRange(c.path, c.value); got != rangeValid {
+			t.Errorf("classifyRange(%q, %v) = %v, want rangeValid", c.path, c.value, got)
+		}
+	}
+}
+
+// A new limit must be named for the operator wherever the sensor-health card
+// names one: a quantity, a unit and the reason a reading beyond it is impossible.
+func TestNewLimitsAreNamedForTheSensorHealthCard(t *testing.T) {
+	for _, suffix := range []string{"exhaustTemperature", "fuel.rate"} {
+		if _, ok := physicalLimits[suffix]; !ok {
+			t.Fatalf("no physical limit for %s", suffix)
+		}
+		if sensorLimitUnit[suffix] == "" {
+			t.Errorf("%s: no unit for the impossible-reading card", suffix)
+		}
+		if why := sensorLimitWhy[suffix]; why[0] == "" || why[1] == "" {
+			t.Errorf("%s: no reason wording for the impossible-reading card", suffix)
+		}
+		if sensorQuantity("propulsion.port."+suffix) == "" {
+			t.Errorf("%s: no plain name", suffix)
+		}
 	}
 }
 

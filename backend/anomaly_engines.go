@@ -54,6 +54,23 @@ type engineTwinState struct {
 	CoolantSteady bool
 }
 
+// engineGateHolds is one engine's half of the twin gate: at or above 900 rpm,
+// coolant at or above 65 degC, running for at least 10 minutes, and rpm and
+// coolant each steady over their own window. It needs no peer, so the learned
+// normal (anomaly_normal_engines.go) judges a one-engine boat with it.
+func engineGateHolds(e engineTwinState) bool {
+	if e.RPMHz < twinGateMinRPMHz {
+		return false
+	}
+	if e.CoolantK < twinGateMinCoolantK {
+		return false
+	}
+	if e.RunningFor < twinGateMinRunFor {
+		return false
+	}
+	return e.RPMSteady && e.CoolantSteady
+}
+
 // twinGateHolds reports whether the engine differential detector's gate
 // holds across every engine in engines: every engine at or above 900 rpm
 // and all within 50 rpm of each other, rpm and coolant each steady over
@@ -67,16 +84,7 @@ func twinGateHolds(engines []engineTwinState) bool {
 
 	minRPM, maxRPM := math.Inf(1), math.Inf(-1)
 	for _, e := range engines {
-		if e.RPMHz < twinGateMinRPMHz {
-			return false
-		}
-		if e.CoolantK < twinGateMinCoolantK {
-			return false
-		}
-		if e.RunningFor < twinGateMinRunFor {
-			return false
-		}
-		if !e.RPMSteady || !e.CoolantSteady {
+		if !engineGateHolds(e) {
 			return false
 		}
 		if e.RPMHz < minRPM {
@@ -324,11 +332,18 @@ func learnTwinBaseline(series []engineSeries) (map[string][]engineBaselineBucket
 // minute and the next (a missing stretch of data is not evidence the engine
 // kept running through it). minutes must be sorted ascending.
 func runningDurationsAt(minutes []time.Time, rpmByMinute map[time.Time]float64, idleHz float64) []time.Duration {
+	return runningDurationsWithin(minutes, rpmByMinute, idleHz, time.Minute)
+}
+
+// runningDurationsWithin is runningDurationsAt where a step between two
+// minutes of up to maxStep still counts as one run. The twin detector's own
+// value is one minute.
+func runningDurationsWithin(minutes []time.Time, rpmByMinute map[time.Time]float64, idleHz float64, maxStep time.Duration) []time.Duration {
 	out := make([]time.Duration, len(minutes))
 	var runSince time.Time
 	running := false
 	for i, minute := range minutes {
-		gapped := i > 0 && minute.Sub(minutes[i-1]) > time.Minute
+		gapped := i > 0 && minute.Sub(minutes[i-1]) > maxStep
 		if rpmByMinute[minute] <= idleHz || gapped {
 			running = false
 		}
