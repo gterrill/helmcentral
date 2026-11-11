@@ -38,8 +38,9 @@ The tile picks whichever arrangement draws larger in the space it has. On a
 squarer tile, such as one on the dashboard, the four footer readings sit in a
 row under the dial. On a short, wide tile, such as one on a wall display, the
 footer moves into a column of four cards beside the readout cards, one card
-beside each readout. That column is on the side away from the dial, so the
-whole card is shorter and the dial can be larger.
+beside each readout. That column is on the side opposite the dial. With the
+footer moved up beside the readouts, the whole card is shorter and the dial can
+be larger.
 
 The card always fits inside its tile. If the tile is wider than the card needs,
 the dial and the fuel arcs keep their size. The readout cards, and the footer
@@ -49,8 +50,8 @@ cards in the column, stretch to fill the extra width.
 
 Choose **Port** or **Starboard** for each tile. A starboard tile is a mirror
 image. The fuel arcs sit on the outer edge and the readout cards sit on the
-side facing the other engine. That way a pair placed side by side reads
-symmetrically.
+side of the card facing the other engine. That way a pair of tiles placed side
+by side reads symmetrically.
 
 ## The settings dialog is the card
 
@@ -63,9 +64,12 @@ you click.
 - **Across the top:** Choose the **Engine**, give the tile a **Title**, and
   pick the **Engine side**. A blank title shows the engine's name. **Fill from
   profile** replaces the ring, the hours, the two arcs, the readout cards and
-  the gearbox pressure with the profile's. Any readout you added or changed is
-  gone. The alternator, the starter battery, the exhaust and the fuel
-  rail stay as you set them, and it fills any alternator row that is still blank.
+  the gearbox pressure with the profile's. A readout you added is removed, and
+  a reading you changed goes back to the profile's. Bands you set stay, with
+  their unit and scale. It also sets the **Engine side** back to the engine's
+  own. The alternator, the starter battery, the exhaust and the fuel rail stay
+  as you set them. Fill from profile also fills any alternator row that is
+  still blank.
 - **The picture:** It shows the fuel rail, the ring with its hours, the two
   arcs and the readout cards. Under them sit the starter battery, the
   alternator and its five rows, the gearbox pressure and the exhaust. A
@@ -83,11 +87,11 @@ you click.
   unit are under **Units and quantity**, closed until you open them. They come
   from the profile for a reading the profile covers. There's no **Display**
   choice, because the tile draws each part its own way.
-- **Add readout:** Below the readout cards, **Add readout** puts up another card,
-  to a limit of four.
+- **Add readout:** Below the readout cards, **Add readout** puts another card
+  in the picture, up to four.
 - **Zone conflicts:** If a limit on the tile disagrees with the profile's, that
   part gets an amber outline and the choice appears in its settings. You can't
-  save until you make it.
+  save until you've made that choice.
 
 If **Save** is greyed out, the line beside it names the part that's missing a
 reading, and that part has the amber outline.
@@ -102,9 +106,9 @@ can't disagree.
 The supplied engine profile gives only the green normal range. It doesn't
 guess your warning and alarm limits. A reading outside the normal range with no
 limit set shows amber, never red. Helmcentral can't know the reading has
-crossed a limit, only that it has left the usual range. Set your own limits from your
-engine manual. They belong to the equipment's profile, so the tile and the
-alarms always agree.
+crossed a limit, only that it has left the normal range. Set your own limits
+from your engine manual. They belong to the equipment's profile, so the tile
+and the alarms always agree.
 
 A wet (water-injected) exhaust reads tens of degrees, so its scale runs 0 to
 100 °C. On the exhaust equipment's profile, add a red band above the
@@ -134,16 +138,17 @@ stage and charge current limit. Here's how the choice behaves:
   **Settings → SignalK**. It follows the **Engine side**: Starboard gets the
   starboard alternator and Port gets the port one. If the side isn't set, it
   comes from the engine. If you haven't named an alternator, or you said the
-  boat has none, the alternator stays empty until you choose it.
-- **If you change the side:** The alternator follows the **Engine side** you pick
-  for as long as you haven't chosen the alternator yourself. Once you have, it
-  stays where you put it. A starboard tile can use the port alternator, and
-  Helmcentral doesn't warn you about it.
+  boat has none, the alternator stays blank until you choose it.
+- **If you change the side:** The alternator follows the **Engine side** you
+  pick for as long as you haven't chosen the alternator yourself. Once you
+  have, it stays where you put it. A starboard tile can use the port
+  alternator, and Helmcentral doesn't warn you about it.
 - **Which readings it fills:** Helmcentral looks at what the alternator is
   sending and fills in each part with the reading that part expects. A part the
   alternator doesn't send stays blank and is left off the tile, and its row in
-  the picture says **Not sending**. The charge current limit has no expected reading,
-  so it stays blank until you choose one, and its row says **Not shown**.
+  the picture says **Not sending**. The charge current limit has no expected
+  reading, so it stays blank until you choose one, and its row says
+  **Not shown**.
 - **If you swap alternators:** A part keeps its reading if the new alternator
   sends it. If it doesn't, the part goes back to the reading it expects, or goes
   blank if the new alternator isn't sending that either.
@@ -163,12 +168,12 @@ reading that part needs, the field says so and lists what it does send. You
 can't save a battery or exhaust part that has equipment but no reading. Pick a
 reading, or clear the equipment to leave the part out.
 
-You can type a reading on an alternator part yourself. Helmcentral checks it
-against what the alternator is sending, and against the alternator's profile.
-The part's own expected reading always passes. If your reading is none of
-those, you can't save, and the line beside **Save** names it. Pick one the
-alternator sends, or clear it. If Helmcentral can't read what the boat is
-sending, it doesn't block you.
+You can type in a reading for an alternator part yourself. Helmcentral checks
+it against what the alternator is sending, and against the alternator's
+profile. The part's own expected reading always passes. If your reading is none
+of those, you can't save, and the line beside **Save** names it. Pick one of
+the readings the alternator sends, or clear it. If Helmcentral can't read what
+the boat is sending, it doesn't stop you.
 
 ## What it does not do
 
@@ -176,7 +181,7 @@ sending, it doesn't block you.
   no sensor for it. The right-hand arc is the gearbox oil temperature, which is
   a different reading.
 - **Charge stage:** It shows the state the regulator reports. If Helmcentral
-  doesn't recognise a state, the tile shows it as its number.
+  doesn't recognise a state, the tile shows its number.
 - **Alternator trace:** It needs history recording switched on. Without that,
   the tile says so instead of drawing a flat line.
 
