@@ -17,7 +17,7 @@ vi.mock('@/hooks/use-inventory', async (importOriginal) => {
 
 function makeEntry(overrides: Partial<MaintenanceLogEntry> = {}): MaintenanceLogEntry {
   return {
-    id: 'log-1', equipment_id: 'eq-1', rule_id: null, performed_at: '2026-06-01',
+    id: 'log-1', equipment_id: 'eq-1', rule_id: null, performed_at: '2026-06-01', started_at: null,
     hours: 100, kind: 'repair', description: 'Replaced belt', who: 'Skipper',
     cost: null, currency: '', created_at: '', updated_at: '', parts: [], photo_ids: [],
     ...overrides,
@@ -85,6 +85,58 @@ describe('MaintenanceLogEntryDialog: editing an existing entry', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('MaintenanceLogEntryDialog: Started showing (ADR 0276)', () => {
+  it('asks when the fault first showed, on a repair only, and says what it is for', () => {
+    const { unmount } = render(
+      <MaintenanceLogEntryDialog entry={makeEntry({ kind: 'repair' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
+    )
+    expect(screen.getByLabelText('Started showing')).toBeInTheDocument()
+    expect(screen.getByText(/Engine readings from then until this repair are left out of what the engine learns as normal/)).toBeInTheDocument()
+    unmount()
+    render(
+      <MaintenanceLogEntryDialog entry={makeEntry({ kind: 'improvement' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
+    )
+    expect(screen.queryByLabelText('Started showing')).not.toBeInTheDocument()
+  })
+
+  it('shows the saved date and sends a changed one with the repair', async () => {
+    const onSave = vi.fn().mockResolvedValue(makeEntry({ started_at: '2026-05-28' }))
+    render(
+      <MaintenanceLogEntryDialog entry={makeEntry({ started_at: '2026-05-20' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={onSave} onDelete={vi.fn()} />,
+    )
+    expect(screen.getByLabelText('Started showing')).toHaveValue('2026-05-20')
+    fireEvent.change(screen.getByLabelText('Started showing'), { target: { value: '2026-05-28' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ kind: 'repair', started_at: '2026-05-28' })
+  })
+
+  it('sends it blank when the date is cleared, and for a kind that has no fault to date', async () => {
+    const onSave = vi.fn().mockResolvedValue(makeEntry())
+    render(
+      <MaintenanceLogEntryDialog entry={makeEntry({ started_at: '2026-05-20' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={onSave} onDelete={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByLabelText('Started showing'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ started_at: '' })
+  })
+})
+
+describe('MaintenanceLogEntryDialog: Started showing after the repair date', () => {
+  it('says so on the field and holds Save, instead of leaving the server to refuse it', () => {
+    render(
+      <MaintenanceLogEntryDialog entry={makeEntry({ started_at: '2026-05-20' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-05-10' } })
+    expect(screen.getByRole('alert')).toHaveTextContent("Started showing can't be after the repair date.")
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Started showing'), { target: { value: '' } })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
   })
 })
 

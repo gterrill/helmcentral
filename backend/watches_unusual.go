@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,11 +20,45 @@ show; a case with nothing to show hides the block.
 const watchUnusualMaxLines = 2
 
 // watchUnusual is the block. Lines are whole sentences, Note one more sentence
-// saying what was left out or why nothing could be judged.
+// saying what was left out or why nothing could be judged. Stretches is indexed
+// like Lines and says which stretch each line is, so the operator can answer it
+// without scoring again. A report saved before answers has none.
 type watchUnusual struct {
-	Lines         []string `json:"lines,omitempty"`
-	Note          string   `json:"note,omitempty"`
-	JudgedMinutes int      `json:"judged_minutes"`
+	Lines         []string              `json:"lines,omitempty"`
+	Stretches     []watchUnusualStretch `json:"stretches,omitempty"`
+	Note          string                `json:"note,omitempty"`
+	JudgedMinutes int                   `json:"judged_minutes"`
+}
+
+// watchUnusualStretch is what an answer needs to know about a line's stretch.
+type watchUnusualStretch struct {
+	StretchID string `json:"stretch_id"`
+	Subsystem string `json:"subsystem"`
+	Subject   string `json:"subject"`
+	// Engine is the subject as the operator names it, for the buttons' labels.
+	Engine string    `json:"engine"`
+	From   time.Time `json:"from"`
+	To     time.Time `json:"to"`
+}
+
+// unusualStretchesOf is the stretches a stored run's Unusual block names, in the
+// order of its lines. A run with no block, or none of this kind, has none.
+func unusualStretchesOf(r watchRun) ([]watchUnusualStretch, error) {
+	if len(r.Report) == 0 || r.ReportKind == watchReportKindSamples {
+		return nil, nil
+	}
+	var rep struct {
+		Unusual *struct {
+			Stretches []watchUnusualStretch `json:"stretches"`
+		} `json:"unusual"`
+	}
+	if err := json.Unmarshal(r.Report, &rep); err != nil {
+		return nil, err
+	}
+	if rep.Unusual == nil {
+		return nil, nil
+	}
+	return rep.Unusual.Stretches, nil
 }
 
 // endedSentence is s with exactly one full stop at the end.
@@ -85,6 +120,9 @@ func buildWatchUnusual(res unusualResult, system string, loc *time.Location, now
 			return &watchUnusual{Note: "Unusual readings could not be worded: " + endedSentence(err.Error()), JudgedMinutes: res.JudgedMinutes}
 		}
 		u.Lines = append(u.Lines, v.Summary)
+		u.Stretches = append(u.Stretches, watchUnusualStretch{
+			StretchID: st.ID, Subsystem: st.Subsystem, Subject: st.Subject, Engine: st.SubjectName, From: st.Start.UTC(), To: st.End.UTC(),
+		})
 	}
 	if len(res.Stretches) == 0 && res.JudgedMinutes == 0 {
 		if why := unusualNotJudgedNote(res.NotJudged); why != "" {

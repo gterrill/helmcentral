@@ -124,8 +124,10 @@ service log and resets the rule so it counts down again from today. Afterward
 you can add photos to the entry: a data plate, a worn part, the finished job.
 
 You can log repairs and improvements that aren't tied to a scheduled rule the
-same way, from an item's own page, at any time. See
-[Log a service](../how-to/log-a-service.md).
+same way, from an item's own page, at any time. A repair can also say when the
+fault **Started showing**. For an engine, Helmcentral then leaves those days out
+of what it learns as the engine's normal, so the fault isn't learned as ordinary.
+See [Log a service](../how-to/log-a-service.md).
 
 ## Open jobs
 
@@ -146,7 +148,9 @@ only in your head.
 - **Done:** **Done** opens the same form as completing a rule: the date, the
   hours off the gauge, what you did, who did it, the cost and any parts. Saving
   writes one line to the service log, as a repair unless you choose improvement
-  or maintenance, and closes the job. The job's photos go onto that line.
+  or maintenance, and closes the job. The job's photos go onto that line. For a
+  repair the form also asks **Started showing**, filled in with the day you opened
+  the job. Change it to the day the fault really began, or clear it if the fault didn't show then.
 - **Drop:** **Drop** closes a job without a log line, for something that fixed
   itself or isn't worth doing. You can say why, and you don't have to.
 - **Closed jobs:** A closed job leaves the group. **Show closed** lists it again

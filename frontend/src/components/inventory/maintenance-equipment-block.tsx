@@ -388,7 +388,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{entry.description || entry.kind}</p>
-              <p className="truncate text-xs text-muted-foreground">{entry.performed_at} - {entry.kind}</p>
+              <p className="truncate text-xs text-muted-foreground">{entry.performed_at} - {entry.kind}{entry.started_at ? `, showing since ${entry.started_at}` : ''}</p>
             </div>
             {entry.cost != null && (
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{entry.cost} {entry.currency}</span>

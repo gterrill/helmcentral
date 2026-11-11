@@ -235,7 +235,8 @@ func planMaintenanceCompletion(rule maintenanceRule, in maintenanceLogEntryInput
 // back-filled old service converts with the offset that applied then, never
 // today's.
 func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req maintenanceLogEntryRequest) (maintenanceRule, maintenanceLogEntry, error) {
-	in, verr := validateMaintenanceLogEntryCore(req)
+	// Completing a rule is a service, which has no fault to date.
+	in, verr := validateMaintenanceLogEntryCore(req, "maintenance")
 	if verr != nil {
 		return maintenanceRule{}, maintenanceLogEntry{}, verr
 	}

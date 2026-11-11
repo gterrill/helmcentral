@@ -29,7 +29,17 @@ type normalTrainDeps struct {
 	Ignored func() map[string]bool
 	// Alarms lists the occurrences open at some moment of [from, to]. A log that
 	// is not open is an error: training without it would learn faults as normal.
-	Alarms   func(from, to time.Time) ([]alarmLogEntry, error)
+	Alarms func(from, to time.Time) ([]alarmLogEntry, error)
+	// Answers are the operator's answers about unusual stretches. A store that
+	// cannot be read is an error: training without it would forget what was said.
+	Answers func() ([]normalAnswer, error)
+	// Repairs are the maintenance log's repairs that say when the fault started
+	// showing, each a fault range for the item it is on. A log that is not open
+	// is an error, as the alarm log is.
+	Repairs func() ([]maintenanceRepair, error)
+	// BoatLoc is the boat's clock, which a repair's dates are days of. An unknown
+	// or unreadable zone is an error, asked for only when a repair needs placing.
+	BoatLoc  func() (*time.Location, error)
 	Classify func(path string, v float64) rangeVerdict
 }
 
@@ -47,6 +57,23 @@ func productionNormalTrainDeps(settingsPath string) normalTrainDeps {
 				return nil, errors.New("the alarm log is not open")
 			}
 			return globalAlarmLogStore.OverlappingBetween(from, to)
+		},
+		Answers: listNormalAnswers,
+		Repairs: func() ([]maintenanceRepair, error) {
+			if globalDocumentStore == nil {
+				return nil, errors.New("the maintenance log is not open")
+			}
+			return globalDocumentStore.ListMaintenanceRepairs()
+		},
+		BoatLoc: func() (*time.Location, error) {
+			bt := boatTimeLastFix(false)
+			if bt.Err != nil {
+				return nil, bt.Err
+			}
+			if bt.NoFix {
+				return nil, errors.New("no position fix has been seen yet")
+			}
+			return bt.Loc, nil
 		},
 		Classify: classifyRange,
 	}
@@ -75,6 +102,11 @@ func trainNormal(ctx context.Context, path string, deps normalTrainDeps) error {
 	// recorded.
 	src, srcErr := deps.Source()
 	deps.Source = func() (normalSource, error) { return src, srcErr }
+	// The answers and the maintenance log are read once for the whole run too.
+	answers, answersErr := deps.Answers()
+	deps.Answers = func() ([]normalAnswer, error) { return answers, answersErr }
+	repairs, repairsErr := deps.Repairs()
+	deps.Repairs = func() ([]maintenanceRepair, error) { return repairs, repairsErr }
 	record := func(runErr error) error {
 		// A shutdown is not a failed attempt: the record stays as it was, so the
 		// operator is not shown "context canceled" and the next start does not
@@ -143,15 +175,16 @@ func wakeNormalIfEnginesChanged(vessel vesselView) {
 		return
 	}
 	learned := file.Subsystems[normalSubsystemEngines].Subjects
-	now := map[string]bool{}
+	now := map[string]string{} // instance to its equipment item
 	for _, e := range vessel.Engines {
 		if e.Instance != "" {
-			now[e.Instance] = true
+			now[e.Instance] = e.EquipmentID
 		}
 	}
 	changed := len(now) != len(learned)
-	for id := range now {
-		if _, ok := learned[id]; !ok {
+	for id, equipment := range now {
+		// A different item moves where the engine's repairs are read from.
+		if sm, ok := learned[id]; !ok || sm.EquipmentID != equipment {
 			changed = true
 		}
 	}
@@ -290,6 +323,40 @@ func trainSubsystem(ctx context.Context, sub normalSubsystem, deps normalTrainDe
 	if err != nil {
 		return normalSubsystemModel{}, fmt.Errorf("the alarm log could not be read: %w", err)
 	}
+	answers, err := deps.Answers()
+	if err != nil {
+		return normalSubsystemModel{}, fmt.Errorf("the answers about unusual stretches could not be read: %w", err)
+	}
+	logged, err := deps.Repairs()
+	if err != nil {
+		return normalSubsystemModel{}, fmt.Errorf("the maintenance log could not be read: %w", err)
+	}
+	// Only a repair on one of these subjects' items can matter, so only those ask
+	// for the boat's zone.
+	items := map[string]bool{}
+	for _, sj := range subjects {
+		if sj.EquipmentID != "" {
+			items[sj.EquipmentID] = true
+		}
+	}
+	// A repair that ended before the oldest window this run or an old normal was
+	// learned from has nothing to leave out and nothing to block. The zone is two
+	// days of margin wide (zones are at most 14 hours from UTC), so these are judged
+	// by date alone and never need it.
+	oldest := window.From
+	for _, r := range prev.Regimes {
+		if r.Window.From.Before(oldest) {
+			oldest = r.Window.From
+		}
+	}
+	cutoff := oldest.AddDate(0, 0, -2).Format("2006-01-02")
+	logged = slices.DeleteFunc(slices.Clone(logged), func(r maintenanceRepair) bool {
+		return !items[r.EquipmentID] || r.PerformedAt < cutoff
+	})
+	repairs, err := normalRepairRanges(logged, deps.BoatLoc)
+	if err != nil {
+		return normalSubsystemModel{}, err
+	}
 	var ignored map[string]bool
 	if deps.Ignored != nil {
 		ignored = deps.Ignored()
@@ -297,13 +364,13 @@ func trainSubsystem(ctx context.Context, sub normalSubsystem, deps normalTrainDe
 
 	model := normalSubsystemModel{
 		TrainedAt: stamp, Window: window, Source: src,
-		Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}, Excluded: []normalExcluded{},
+		Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}, Excluded: []normalExcluded{}, Labelled: []normalExcluded{},
 	}
 	for _, subject := range subjects {
 		if err := ctx.Err(); err != nil {
 			return normalSubsystemModel{}, err
 		}
-		if err := trainSubject(ctx, sub, subject, deps, trainContext{stamp: stamp, window: window, src: src, alarms: alarms, ignored: ignored, prev: prev}, &model); err != nil {
+		if err := trainSubject(ctx, sub, subject, deps, trainContext{stamp: stamp, window: window, src: src, alarms: alarms, answers: answers, repairs: repairs, ignored: ignored, prev: prev}, &model); err != nil {
 			return normalSubsystemModel{}, err
 		}
 	}
@@ -315,14 +382,62 @@ type trainContext struct {
 	window  normalWindow
 	src     normalSource
 	alarms  []alarmLogEntry
+	answers []normalAnswer
+	repairs []normalRepairRange
 	ignored map[string]bool
 	prev    normalSubsystemModel
 }
 
+// normalRepairRange is the fault range of one repair: from the start of the day
+// the fault first showed to the end of the day it was repaired, on the boat's
+// clock. To is the instant after, so a minute that starts there is not in it.
+type normalRepairRange struct {
+	EntryID     string
+	EquipmentID string
+	Title       string
+	From, To    time.Time
+}
+
+// normalRepairZoneProblem is the reason a run cannot place a repair's dates.
+const normalRepairZoneProblem = "The boat's time zone is unknown, so repair dates could not be placed."
+
+// normalRepairRanges are the fault ranges the maintenance log's repairs give. A
+// date that does not parse stops the run and names the entry.
+//
+// A date is a day on the boat's clock, read in the zone the boat is in at
+// training (an IANA zone, so summer time on that date is right). Helmcentral keeps
+// no history of the zones the boat has been in, so a repair dated before the boat
+// crossed into another zone is read in the new one, up to a few hours out.
+func normalRepairRanges(repairs []maintenanceRepair, boatLoc func() (*time.Location, error)) ([]normalRepairRange, error) {
+	var out []normalRepairRange
+	var loc *time.Location
+	for _, e := range repairs {
+		if loc == nil {
+			var err error
+			if loc, err = boatLoc(); err != nil {
+				log.Printf("anomaly normal: could not place repair dates: %v", err)
+				return nil, errors.New(normalRepairZoneProblem)
+			}
+		}
+		from, err := time.ParseInLocation("2006-01-02", e.StartedAt, loc)
+		if err != nil {
+			return nil, fmt.Errorf("the maintenance log entry %s has a start date that is not a date: %w", e.ID, err)
+		}
+		last, err := time.ParseInLocation("2006-01-02", e.PerformedAt, loc)
+		if err != nil {
+			return nil, fmt.Errorf("the maintenance log entry %s has a date that is not a date: %w", e.ID, err)
+		}
+		out = append(out, normalRepairRange{EntryID: e.ID, EquipmentID: e.EquipmentID, Title: e.Description, From: from, To: last.AddDate(0, 0, 1)})
+	}
+	return out, nil
+}
+
 type bandMinutes struct {
-	label    string
-	idx      []int // indexes into the joined minutes, usable ones
-	excluded int   // gated minutes in the band that an alarm took out
+	label string
+	idx   []int // indexes into the joined minutes, usable ones
+	// keep is parallel to idx: the operator said the minute is normal.
+	keep     []bool
+	excluded int // gated minutes in the band that an alarm, an answer or a repair took out
 }
 
 func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubject, deps normalTrainDeps, tc trainContext, model *normalSubsystemModel) error {
@@ -378,7 +493,11 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 			}
 		}
 	}
-	excludedAt := make([]bool, len(minutes))
+	// Everything that takes this subject's minutes out of training, as ranges that
+	// include their start and not their end: an alarm, a stretch the operator
+	// answered real (a fault), and a repair's fault range from the maintenance log.
+	var out []normalExcluded
+	inWindow := func(from, to time.Time) bool { return from.Before(tc.window.To) && to.After(tc.window.From) }
 	for _, a := range tc.alarms {
 		owner, ok := sub.AlarmOwns(a.Path)
 		if !ok || owner != subject.ID {
@@ -399,10 +518,58 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 			// exclusion ends a day after it was raised.
 			to = capped
 		}
-		model.Excluded = append(model.Excluded, normalExcluded{Subject: subject.ID, From: from, To: to, Reason: "alarm", Ref: a.ID, Title: a.Label})
-		lo := sort.Search(len(minutes), func(i int) bool { return !minutes[i].At.Before(from) })
-		for i := lo; i < len(minutes) && !minutes[i].At.After(to); i++ {
+		// The padded end is the last minute taken out, so the range ends a minute on.
+		out = append(out, normalExcluded{Subject: subject.ID, From: from, To: to.Truncate(time.Minute).Add(time.Minute), Reason: normalReasonAlarm, Ref: a.ID, Title: a.Label})
+	}
+	// faults are every real answer and repair for this subject, however old: they
+	// decide whether an old normal may be reused (usableCarry), so they are not cut
+	// to the current window. Those inside it are also left out of this run.
+	var faults, labelled []normalExcluded
+	for _, a := range tc.answers {
+		if a.Subsystem != sub.Name || a.Subject != subject.ID {
+			continue
+		}
+		switch a.Answer {
+		case normalAnswerReal:
+			faults = append(faults, normalExcluded{Subject: subject.ID, From: a.From, To: a.To, Reason: normalReasonAnsweredReal, Ref: a.StretchID})
+		case normalAnswerNormal:
+			if inWindow(a.From, a.To) {
+				labelled = append(labelled, normalExcluded{Subject: subject.ID, From: a.From, To: a.To, Reason: normalReasonAnsweredNormal, Ref: a.StretchID})
+			}
+		}
+	}
+	for _, r := range tc.repairs {
+		if subject.EquipmentID != "" && r.EquipmentID == subject.EquipmentID {
+			faults = append(faults, normalExcluded{Subject: subject.ID, From: r.From, To: r.To, Reason: normalReasonRepair, Ref: r.EntryID, Title: r.Title})
+		}
+	}
+	for _, f := range faults {
+		if inWindow(f.From, f.To) {
+			out = append(out, f)
+		}
+	}
+	// span is the minutes [lo, hi) that fall in [from, to).
+	span := func(from, to time.Time) (lo, hi int) {
+		lo = sort.Search(len(minutes), func(i int) bool { return !minutes[i].At.Before(from) })
+		hi = sort.Search(len(minutes), func(i int) bool { return !minutes[i].At.Before(to) })
+		return lo, hi
+	}
+	excludedAt := make([]bool, len(minutes))
+	for _, e := range out {
+		model.Excluded = append(model.Excluded, e)
+		lo, hi := span(e.From, e.To)
+		for i := lo; i < hi; i++ {
 			excludedAt[i] = true
+		}
+	}
+	// A minute the operator called normal is kept through reweighting, unless one
+	// of the above already took it out.
+	keptAt := make([]bool, len(minutes))
+	for _, n := range labelled {
+		model.Labelled = append(model.Labelled, n)
+		lo, hi := span(n.From, n.To)
+		for i := lo; i < hi; i++ {
+			keptAt[i] = !excludedAt[i]
 		}
 	}
 	var usable []int
@@ -414,14 +581,14 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		}
 	}
 
-	sm := normalSubjectModel{Name: subject.Name, GatedMinutes: len(usable)}
+	sm := normalSubjectModel{Name: subject.Name, EquipmentID: subject.EquipmentID, GatedMinutes: len(usable)}
 	haveVerdicts := len(usable) > 0
 	var used []string // keys in subject order
 	switch {
 	case gateCount == 0:
 		sm.Problem = fmt.Sprintf("no steady running minutes in the last %d days", int(normalTrainWindow/(24*time.Hour)))
 	case len(usable) == 0:
-		sm.Problem = fmt.Sprintf("all %s steady running minutes were within an alarm", commaInt(gateCount))
+		sm.Problem = fmt.Sprintf("all %s steady running minutes were left out (alarms, answers marked real or repairs)", commaInt(gateCount))
 	}
 	var runningTimes []time.Time
 	for i, m := range minutes {
@@ -474,6 +641,7 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		for _, i := range usable {
 			if b, ok := bandOf(i); ok {
 				b.idx = append(b.idx, i)
+				b.keep = append(b.keep, keptAt[i])
 			}
 		}
 		for i, g := range gate {
@@ -498,7 +666,7 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 			minSD[key] = normalMinSD(minChange[key], smallestStep(vals))
 		}
 		for key, b := range bands {
-			model.Regimes[key] = fitBand(subject.ID, key, b, minutes, runIDs, used, byKey, minSD, tc)
+			model.Regimes[key] = fitBand(subject.ID, key, b, minutes, runIDs, used, byKey, minSD, faults, tc)
 		}
 	}
 
@@ -510,7 +678,7 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		if _, done := model.Regimes[key]; done {
 			continue
 		}
-		if usableCarry(r, tc.stamp, used, haveVerdicts) {
+		if usableCarry(r, tc.stamp, used, haveVerdicts, faults) {
 			model.Regimes[key] = carried(r)
 		}
 	}
@@ -529,8 +697,16 @@ func carried(r normalRegime) normalRegime {
 // not expired, and every reading it describes is still in use. When this run
 // had no steady minutes at all, what is in use is not known and the regime is
 // carried until it expires.
-func usableCarry(r normalRegime, now time.Time, used []string, usedKnown bool) bool {
+//
+// It is never reused if a real answer or a repair for the subject (faults)
+// overlaps the window it was learned from, however old that is: the fault was in
+// it. An alarm never stops it, since the fit left the alarm out already. This is
+// the one rule on every path that reuses an old regime.
+func usableCarry(r normalRegime, now time.Time, used []string, usedKnown bool, faults []normalExcluded) bool {
 	if !r.Judged || now.Sub(r.LearnedAt) > normalRegimeExpiry {
+		return false
+	}
+	if slices.ContainsFunc(faults, func(f normalExcluded) bool { return f.From.Before(r.Window.To) && f.To.After(r.Window.From) }) {
 		return false
 	}
 	if !usedKnown {
@@ -545,10 +721,10 @@ func usableCarry(r normalRegime, now time.Time, used []string, usedKnown bool) b
 }
 
 // fitBand fits one regime of one subject, or says why not.
-func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runIDs []int, used []string, verdicts map[string]normalFeatureVerdict, minSD map[string]float64, tc trainContext) normalRegime {
-	collect := func(keys []string) (rows [][]float64, runs int) {
+func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runIDs []int, used []string, verdicts map[string]normalFeatureVerdict, minSD map[string]float64, faults []normalExcluded, tc trainContext) normalRegime {
+	collect := func(keys []string) (rows [][]float64, keep []bool, runs int) {
 		seenRun := map[int]bool{}
-		for _, i := range b.idx {
+		for n, i := range b.idx {
 			row := make([]float64, len(keys))
 			complete := true
 			for j, k := range keys {
@@ -561,16 +737,17 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 			}
 			if complete {
 				rows = append(rows, row)
+				keep = append(keep, b.keep[n])
 				seenRun[runIDs[i]] = true
 			}
 		}
-		return rows, len(seenRun)
+		return rows, keep, len(seenRun)
 	}
 	enough := func(rows [][]float64, runs int) bool { return len(rows) >= normalMinMinutes && runs >= normalMinRuns }
 
 	base := normalRegime{Subject: subjectID, Label: b.label, LearnedAt: tc.stamp, Window: tc.window, ExcludedMinutes: b.excluded}
 	prevR, hadPrev := tc.prev.Regimes[key]
-	carry := hadPrev && usableCarry(prevR, tc.stamp, used, true)
+	carry := hadPrev && usableCarry(prevR, tc.stamp, used, true, faults)
 
 	var late []string
 	for _, k := range used {
@@ -578,8 +755,8 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 			late = append(late, k)
 		}
 	}
-	fullRows, fullRuns := collect(used)
-	keys, rows, runs := used, fullRows, fullRuns
+	fullRows, fullKeep, fullRuns := collect(used)
+	keys, rows, keep, runs := used, fullRows, fullKeep, fullRuns
 	var joining []string
 	joiningMinutes := 0
 	if !enough(fullRows, fullRuns) && len(late) > 0 {
@@ -590,7 +767,7 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 			return c
 		}
 		keys = slices.DeleteFunc(slices.Clone(used), func(k string) bool { return slices.Contains(late, k) })
-		rows, runs = collect(keys)
+		rows, keep, runs = collect(keys)
 	}
 	if !enough(rows, runs) {
 		if carry {
@@ -601,7 +778,7 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 		return base
 	}
 
-	opts := normalFitOptions{Ridge: normalRidge, Reweight: normalReweight, MinSD: make([]float64, len(keys))}
+	opts := normalFitOptions{Ridge: normalRidge, Reweight: normalReweight, MinSD: make([]float64, len(keys)), Keep: keep}
 	for j, k := range keys {
 		opts.MinSD[j] = minSD[k]
 	}

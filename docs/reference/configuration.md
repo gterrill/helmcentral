@@ -167,6 +167,7 @@ they're resolved against it.
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
 | `ALARM_RULES_FILE` | `data/alarm-rules.json` (see below) |
 | `ANOMALY_NORMAL_FILE` | `data/anomaly-normal.json` |
+| `ANOMALY_NORMAL_ANSWERS_FILE` | `data/anomaly-normal-answers.json` |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |
 | `SECRETS_KEY_PATH` | `data/secrets.key` |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
@@ -205,6 +206,11 @@ name can't contain `$` or `{`. To make a bucket of one-minute averages, see
 What Helmcentral learns is saved in `data/anomaly-normal.json`. It's rebuilt
 every 24 hours from your InfluxDB history. If you delete the file, it comes back
 at the next run.
+
+Your answers to unusual stretches (**Real**, **Normal**, **Don't know**) are saved in
+`data/anomaly-normal-answers.json`. Unlike the learned normal, they can't be
+rebuilt, so keep that file in your backups. If it can't be read, learning stops and
+says why, rather than forgetting what you said.
 
 ## Secrets
 

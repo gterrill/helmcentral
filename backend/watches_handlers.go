@@ -418,7 +418,9 @@ func runWatchHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, run.forPage())
+	runs := []watchRun{*run}
+	watchRunsForPage(runs)
+	return c.JSON(http.StatusOK, runs[0])
 }
 
 type watchPreviewTime struct {
@@ -495,7 +497,8 @@ func getWatchRunHandler(c echo.Context) error {
 	}); err != nil {
 		return watchError(c, err)
 	}
-	runs := []watchRun{run.forPage()}
+	runs := []watchRun{run}
+	watchRunsForPage(runs)
 	if err := attachWatchNotifyPending(run.WatchID, runs); err != nil {
 		log.Printf("watches: could not read the notifications still being retried for run %s: %v", run.ID, err)
 	}

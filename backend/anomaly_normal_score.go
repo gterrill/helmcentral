@@ -50,8 +50,8 @@ type normalScoreDeps struct {
 
 func productionNormalScoreDeps(settingsPath string) normalScoreDeps {
 	return normalScoreDeps{
-		Now:     func() time.Time { return time.Now().UTC() },
-		Source:  func() (normalSource, error) { return resolveNormalSource(settingsPath, true) },
+		Now:    func() time.Time { return time.Now().UTC() },
+		Source: func() (normalSource, error) { return resolveNormalSource(settingsPath, true) },
 		Minutes: func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
 			return queryNormalMinutes(ctx, settingsPath, src, paths, start, stop)
 		},
@@ -74,6 +74,7 @@ type unusualReading struct {
 
 type unusualStretch struct {
 	ID          string
+	Subsystem   string
 	Subject     string
 	SubjectName string
 	Start       time.Time
@@ -136,9 +137,10 @@ func rankStretches(s []unusualStretch) {
 }
 
 // scoreUnusualReadings judges [since, until) for every subject of the
-// subsystem, or only subjectFilter when it is set. A window longer than
+// subsystem, or only subjectFilter when it is set. A minute covered by the
+// operator's latest answer being normal is judged but never flagged. A window longer than
 // normalScoreMaxSince is cut to its newest part and the result says so.
-func scoreUnusualReadings(ctx context.Context, sub normalSubsystem, deps normalScoreDeps, since, until time.Time, subjectFilter string) unusualResult {
+func scoreUnusualReadings(ctx context.Context, sub normalSubsystem, deps normalScoreDeps, since, until time.Time, subjectFilter string, answers []normalAnswer) unusualResult {
 	// Minutes are labelled by their first instant, so the minute in progress is
 	// left out by ending the window on the last whole minute.
 	until = until.Truncate(time.Minute)
@@ -200,7 +202,7 @@ func scoreUnusualReadings(ctx context.Context, sub normalSubsystem, deps normalS
 		subjects = only
 	}
 	for _, subject := range subjects {
-		if err := scoreSubject(ctx, sub, subject, deps, src, model, since, until, &res); err != nil {
+		if err := scoreSubject(ctx, sub, subject, deps, src, model, since, until, answers, &res); err != nil {
 			return fail(unusualError, err)
 		}
 	}
@@ -217,7 +219,7 @@ type scoredMinute struct {
 	contrib []float64 // each reading's part of the distance, same order
 }
 
-func scoreSubject(ctx context.Context, sub normalSubsystem, subject normalSubject, deps normalScoreDeps, src normalSource, model normalSubsystemModel, since, until time.Time, res *unusualResult) error {
+func scoreSubject(ctx context.Context, sub normalSubsystem, subject normalSubject, deps normalScoreDeps, src normalSource, model normalSubsystemModel, since, until time.Time, answers []normalAnswer, res *unusualResult) error {
 	engineProblem := func(reason string) {
 		res.NotJudged = append(res.NotJudged, unusualNotJudged{Kind: "engine_problem", Subject: subject.ID, SubjectName: subject.Name, Reason: reason})
 	}
@@ -328,6 +330,12 @@ func scoreSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		deps.Wake()
 	}
 
+	// Only this subject's answers matter below. They never overlap (loadNormalAnswers
+	// refuses a file where they do), so sorted once they are walked alongside the
+	// minutes, which joinNormalMinutes returns sorted by time: one pass over each.
+	mine := slices.DeleteFunc(slices.Clone(answers), func(a normalAnswer) bool { return a.Subsystem != sub.Name || a.Subject != subject.ID })
+	slices.SortFunc(mine, func(a, b normalAnswer) int { return a.From.Compare(b.From) })
+	next := 0
 	scorers := map[string]*normalScorer{}
 	notSteady := 0
 	thin := map[string]*unusualNotJudged{}
@@ -429,7 +437,12 @@ func scoreSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		if err != nil {
 			return fmt.Errorf("%s: %w", reg.Label, err)
 		}
-		scored = append(scored, scoredMinute{at: m.At, unusual: d2 > reg.Threshold, ratio: d2 / reg.Threshold, reg: reg, x: x, contrib: contrib})
+		// A minute the operator called normal is judged but never flagged.
+		for next < len(mine) && !mine[next].To.After(m.At) {
+			next++
+		}
+		cleared := next < len(mine) && !mine[next].From.After(m.At) && mine[next].Answer == normalAnswerNormal
+		scored = append(scored, scoredMinute{at: m.At, unusual: d2 > reg.Threshold && !cleared, ratio: d2 / reg.Threshold, reg: reg, x: x, contrib: contrib})
 		res.JudgedMinutes++
 	}
 
@@ -494,8 +507,8 @@ func readingsText(n int) string {
 func buildStretch(sub normalSubsystem, subject normalSubject, features map[string]normalFeature, minutes []scoredMinute) unusualStretch {
 	first, last := minutes[0], minutes[len(minutes)-1]
 	st := unusualStretch{
-		ID:      fmt.Sprintf("%s:%s@%s", sub.Name, subject.ID, first.at.UTC().Format(time.RFC3339)),
-		Subject: subject.ID, SubjectName: subject.Name,
+		ID:        stretchIDFor(sub.Name, subject.ID, first.at),
+		Subsystem: sub.Name, Subject: subject.ID, SubjectName: subject.Name,
 		Start: first.at, End: last.at.Add(time.Minute), Minutes: len(minutes),
 	}
 	sums := map[string]float64{}

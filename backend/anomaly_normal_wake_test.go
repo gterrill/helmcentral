@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,5 +125,68 @@ func TestIgnoringAnEngineReadingWakesTheTrainerAndOtherSensorsDoNot(t *testing.T
 	}
 	if !woke() {
 		t.Fatal("switching it on again must too")
+	}
+}
+
+// Linking an engine to another equipment item moves where its repairs are read
+// from, so it is a change the trainer must hear, though the instance is the same.
+func TestWakeNormalIfEnginesChanged_NoticesAChangeOfEquipmentItem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "anomaly-normal.json")
+	t.Setenv("ANOMALY_NORMAL_FILE", path)
+	if err := saveNormalModel(path, normalModelFile{Subsystems: map[string]normalSubsystemModel{
+		normalSubsystemEngines: {Subjects: map[string]normalSubjectModel{"0": {Name: "Port engine", EquipmentID: "eq-a"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	engines := func(instance, equipment string) vesselView {
+		return vesselView{Engines: []vesselEngineSetting{{Instance: instance, EquipmentID: equipment}}}
+	}
+	drainNormalWake()
+	wakeNormalIfEnginesChanged(engines("0", "eq-a"))
+	if woke() {
+		t.Fatal("the same engine on the same item wakes nothing")
+	}
+	wakeNormalIfEnginesChanged(engines("0", "eq-b"))
+	if !woke() {
+		t.Fatal("another equipment item must wake the trainer")
+	}
+	wakeNormalIfEnginesChanged(engines("1", "eq-a"))
+	if !woke() {
+		t.Fatal("another instance must wake the trainer")
+	}
+}
+
+// Deleting an engine's equipment item takes its repairs with it, and the engine
+// out of the vessel: either way the trainer has to hear.
+func TestDeletingAnEnginesEquipmentItemWakesTheTrainer(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	modelPath := filepath.Join(t.TempDir(), "anomaly-normal.json")
+	t.Setenv("ANOMALY_NORMAL_FILE", modelPath)
+	withTempAlarmRules(t)
+	store := vesselFixtureStore(t)
+	port, err := store.CreateEquipment(equipmentItem{Name: "Port engine", System: "propulsion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port.SignalKSource = "propulsion.port"
+	if _, err := store.UpdateEquipment(port.ID, port); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateMaintenanceLogEntry(maintenanceLogEntryInput{EquipmentID: &port.ID, PerformedAt: "2026-11-08", StartedAt: "2026-11-01", Kind: "repair"}); err != nil {
+		t.Fatal(err)
+	}
+	// The model was learned with this engine linked to its item.
+	modelEquipment = map[string]string{"port": port.ID}
+	t.Cleanup(func() { modelEquipment = nil })
+	saveModelWithEngines(t, modelPath, "port")
+	drainNormalWake()
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+port.ID, "", port.ID)
+	if err := deleteEquipmentHandler(c); err != nil || rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %v %d %s", err, rec.Code, rec.Body)
+	}
+	if !woke() {
+		t.Fatal("deleting an engine's item must wake the trainer")
 	}
 }

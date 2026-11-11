@@ -397,16 +397,13 @@ func cmdDropOpenJob(tx *sql.Tx, now, today time.Time, id, reason string) (openJo
 // given. Gauge hours are converted the way every log line's are. The job's
 // photos are shown on the line too. A refusal anywhere leaves the job open.
 func cmdCompleteOpenJob(tx *sql.Tx, now time.Time, id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
-	in, verr := validateMaintenanceLogEntryCore(req)
-	if verr != nil {
-		return openJob{}, maintenanceLogEntry{}, verr
-	}
 	kind := strings.TrimSpace(req.Kind)
 	if kind == "" {
 		kind = "repair"
 	}
-	if !validMaintenanceLogKinds[kind] {
-		return openJob{}, maintenanceLogEntry{}, &inventoryValidationError{Field: "kind", Message: "kind must be maintenance, repair or improvement"}
+	in, verr := validateMaintenanceLogEntryCore(req, kind)
+	if verr != nil {
+		return openJob{}, maintenanceLogEntry{}, verr
 	}
 	job, err := openJobForClose(tx, id)
 	if err != nil {
@@ -489,6 +486,9 @@ func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryReq
 		job, entry, err := cmdCompleteOpenJob(tx, now, id, req)
 		return completedOpenJob{job, entry}, err
 	})
+	if err == nil {
+		wakeNormalForRepairRange(done.entry.EquipmentID, done.entry.StartedAt != nil)
+	}
 	return done.job, done.entry, err
 }
 

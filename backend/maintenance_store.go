@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -87,10 +88,14 @@ type maintenanceLogPart struct {
 // always populate both, never lazily (the same "always the keys" contract
 // equipmentItem's own doc comment follows for PhotoIDs).
 type maintenanceLogEntry struct {
-	ID          string               `json:"id"`
-	EquipmentID *string              `json:"equipment_id"`
-	RuleID      *string              `json:"rule_id"`
-	PerformedAt string               `json:"performed_at"`
+	ID          string  `json:"id"`
+	EquipmentID *string `json:"equipment_id"`
+	RuleID      *string `json:"rule_id"`
+	PerformedAt string  `json:"performed_at"`
+	// StartedAt is the date a repair's fault first showed, null when not said.
+	// The learned normal leaves the item's engine readings from then until
+	// PerformedAt out of what it learns.
+	StartedAt   *string              `json:"started_at"`
 	Hours       *float64             `json:"hours"`
 	Kind        string               `json:"kind"`
 	Description string               `json:"description"`
@@ -140,6 +145,8 @@ type maintenanceLogPartInput struct {
 type maintenanceLogEntryInput struct {
 	EquipmentID *string
 	PerformedAt string
+	// StartedAt is "" for none; only a repair has one.
+	StartedAt   string
 	Hours       *float64
 	Kind        string
 	Description string
@@ -490,15 +497,15 @@ func (s *documentStore) SetMaintenanceRuleProcedureNote(id, noteID string) (main
 
 // ── service log ──────────────────────────────────────────────────────────
 
-const maintenanceLogEntryColumns = `id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at`
+const maintenanceLogEntryColumns = `id, equipment_id, rule_id, performed_at, started_at, hours, kind, description, who, cost, currency, created_at, updated_at`
 
 func scanMaintenanceLogEntry(row rowScanner) (maintenanceLogEntry, error) {
 	var e maintenanceLogEntry
-	var equipmentID, ruleID sql.NullString
+	var equipmentID, ruleID, startedAt sql.NullString
 	var createdAt, updatedAt int64
 
 	if err := row.Scan(
-		&e.ID, &equipmentID, &ruleID, &e.PerformedAt, &e.Hours, &e.Kind, &e.Description, &e.Who, &e.Cost, &e.Currency,
+		&e.ID, &equipmentID, &ruleID, &e.PerformedAt, &startedAt, &e.Hours, &e.Kind, &e.Description, &e.Who, &e.Cost, &e.Currency,
 		&createdAt, &updatedAt,
 	); err != nil {
 		return maintenanceLogEntry{}, err
@@ -511,6 +518,7 @@ func scanMaintenanceLogEntry(row rowScanner) (maintenanceLogEntry, error) {
 		v := ruleID.String
 		e.RuleID = &v
 	}
+	e.StartedAt = nullStringPtr(startedAt)
 	e.CreatedAt = time.Unix(createdAt, 0).UTC()
 	e.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return e, nil
@@ -676,7 +684,31 @@ func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (
 	if err != nil {
 		return maintenanceLogEntry{}, err
 	}
+	wakeNormalForRepairRange(created.EquipmentID, created.StartedAt != nil)
 	return created, nil
+}
+
+// wakeNormalForRepairRange asks the learned normal to train again when a log
+// entry that has, or had, a "started showing" date was written on a configured
+// engine's item: only those are a fault range it reads (ADR 0276). A repair on
+// the watermaker wakes nothing. It must be called without the store's lock held.
+func wakeNormalForRepairRange(equipmentID *string, involved bool) {
+	if !involved || equipmentID == nil {
+		return
+	}
+	items, err := listSourceItems()
+	if err != nil {
+		// Waking on doubt costs one debounced run.
+		log.Printf("anomaly normal: could not tell whether %s is an engine, so the trainer is woken: %v", *equipmentID, err)
+		normalInputsChanged()
+		return
+	}
+	for _, it := range items {
+		if it.Group == sourceEngine && it.Instance != "" && it.ID == *equipmentID {
+			normalInputsChanged()
+			return
+		}
+	}
 }
 
 // insertMaintenanceLogEntryTx is the standalone insert inside a transaction
@@ -695,9 +727,9 @@ func insertMaintenanceLogEntryTx(tx *sql.Tx, now time.Time, in maintenanceLogEnt
 
 	id := uuid.NewString()
 	if _, err := tx.Exec(`
-		INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, hours, kind, description, who, cost, currency, created_at, updated_at)
-		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, nullableString(in.EquipmentID), in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
+		INSERT INTO maintenance_log_entries (id, equipment_id, rule_id, performed_at, started_at, hours, kind, description, who, cost, currency, created_at, updated_at)
+		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, nullableString(in.EquipmentID), in.PerformedAt, nilIfEmpty(in.StartedAt), in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), now.Unix(),
 	); err != nil {
 		return maintenanceLogEntry{}, fmt.Errorf("create log entry: %w", err)
 	}
@@ -717,19 +749,21 @@ func insertMaintenanceLogEntryTx(tx *sql.Tx, now time.Time, in maintenanceLogEnt
 // not an oversight - see ADR 0138's consequences).
 func (s *documentStore) UpdateMaintenanceLogEntry(id string, in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
 	var updated maintenanceLogEntry
+	var before sql.NullString
 	err := s.RunTx("update log entry", func(tx *sql.Tx, now time.Time) error {
-		ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, id)
+		// The existence check also reads the start date the entry had.
+		err := tx.QueryRow(`SELECT started_at FROM maintenance_log_entries WHERE id = ?`, id).Scan(&before)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errMaintenanceLogEntryNotFound
+		}
 		if err != nil {
 			return fmt.Errorf("update log entry: check exists: %w", err)
 		}
-		if !ok {
-			return errMaintenanceLogEntryNotFound
-		}
 
 		if _, err := tx.Exec(`
-			UPDATE maintenance_log_entries SET performed_at = ?, hours = ?, kind = ?, description = ?, who = ?, cost = ?, currency = ?, updated_at = ?
+			UPDATE maintenance_log_entries SET performed_at = ?, started_at = ?, hours = ?, kind = ?, description = ?, who = ?, cost = ?, currency = ?, updated_at = ?
 			WHERE id = ?`,
-			in.PerformedAt, in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), id,
+			in.PerformedAt, nilIfEmpty(in.StartedAt), in.Hours, in.Kind, in.Description, in.Who, in.Cost, in.Currency, now.Unix(), id,
 		); err != nil {
 			return fmt.Errorf("update log entry: %w", err)
 		}
@@ -746,6 +780,7 @@ func (s *documentStore) UpdateMaintenanceLogEntry(id string, in maintenanceLogEn
 	if err != nil {
 		return maintenanceLogEntry{}, err
 	}
+	wakeNormalForRepairRange(updated.EquipmentID, before.Valid || updated.StartedAt != nil)
 	return updated, nil
 }
 
@@ -754,14 +789,29 @@ func (s *documentStore) UpdateMaintenanceLogEntry(id string, in maintenanceLogEn
 // unlink only, the same "never destroy a document as a side effect"
 // discipline equipment photos follow (ADR 0127's 2026-09-25 amendment).
 func (s *documentStore) DeleteMaintenanceLogEntry(id string) error {
+	equipmentID, startedAt, err := s.deleteMaintenanceLogEntry(id)
+	if err != nil {
+		return err
+	}
+	wakeNormalForRepairRange(equipmentID, startedAt)
+	return nil
+}
+
+// deleteMaintenanceLogEntry deletes under the lock and says what it removed: the
+// item it was on, and whether it had a "started showing" date.
+func (s *documentStore) deleteMaintenanceLogEntry(id string) (equipmentID *string, hadStart bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(`DELETE FROM maintenance_log_entries WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete log entry: %w", err)
+	var item, startedAt sql.NullString
+	err = s.db.QueryRow(`DELETE FROM maintenance_log_entries WHERE id = ? RETURNING equipment_id, started_at`, id).Scan(&item, &startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, errMaintenanceLogEntryNotFound
 	}
-	return checkRowsAffected(res, errMaintenanceLogEntryNotFound)
+	if err != nil {
+		return nil, false, fmt.Errorf("delete log entry: %w", err)
+	}
+	return nullStringPtr(item), startedAt.Valid, nil
 }
 
 // GetMaintenanceLogEntry reads a single entry with its parts/photos joined.
@@ -769,6 +819,41 @@ func (s *documentStore) GetMaintenanceLogEntry(id string) (maintenanceLogEntry, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return maintenanceLogEntryByID(s.db, id)
+}
+
+// maintenanceRepair is a repair that says when its fault started showing, which
+// is all the learned normal reads of the log (ADR 0276).
+type maintenanceRepair struct {
+	ID          string
+	EquipmentID string
+	Description string
+	StartedAt   string
+	PerformedAt string
+}
+
+// ListMaintenanceRepairs returns the repairs on an item that have a "started
+// showing" date, without the parts and photos a log entry carries.
+func (s *documentStore) ListMaintenanceRepairs() ([]maintenanceRepair, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT id, equipment_id, description, started_at, performed_at FROM maintenance_log_entries
+		WHERE kind = 'repair' AND started_at IS NOT NULL AND equipment_id IS NOT NULL ORDER BY performed_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list repairs: %w", err)
+	}
+	defer rows.Close()
+	var out []maintenanceRepair
+	for rows.Next() {
+		var r maintenanceRepair
+		if err := rows.Scan(&r.ID, &r.EquipmentID, &r.Description, &r.StartedAt, &r.PerformedAt); err != nil {
+			return nil, fmt.Errorf("list repairs: scan: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list repairs: %w", err)
+	}
+	return out, nil
 }
 
 // maintenanceLogFilter is ListMaintenanceLogEntries' input - blank

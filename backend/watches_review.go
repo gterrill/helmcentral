@@ -389,8 +389,28 @@ func watchReportForModel(stored json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(stored, &report); err != nil {
 		return nil, fmt.Errorf("the stored report is not readable: %w", err)
 	}
+	// The stretches' ids and times are for the page; Mate reads the lines.
+	var unusual map[string]json.RawMessage
+	if raw, ok := report["unusual"]; ok {
+		if err := json.Unmarshal(raw, &unusual); err != nil {
+			return nil, fmt.Errorf("the stored report's unusual block is not readable: %w", err)
+		}
+		if _, has := unusual["stretches"]; has {
+			delete(unusual, "stretches")
+			trimmed, err := json.Marshal(unusual)
+			if err != nil {
+				return nil, err
+			}
+			report["unusual"] = trimmed
+		} else {
+			unusual = nil
+		}
+	}
 	rawSections, ok := report["sections"]
 	if !ok {
+		if unusual != nil {
+			return json.Marshal(report)
+		}
 		return stored, nil
 	}
 	var sections []map[string]json.RawMessage

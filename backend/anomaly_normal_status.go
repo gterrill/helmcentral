@@ -108,5 +108,8 @@ func normalStatusHandler(c echo.Context) error {
 func anomalyNormalRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/anomaly/normal/status", tierRead, normalStatusHandler},
+		{http.MethodPut, "/api/anomaly/normal/answers", tierWrite, func(c echo.Context) error {
+			return normalAnswerHandler(productionNormalAnswerDeps(getEnv("SETTINGS_FILE", "../settings.yaml")))(c)
+		}},
 	}
 }

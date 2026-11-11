@@ -6,6 +6,7 @@ import { ConfirmDelete } from '@/components/patterns'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { WatchChart } from '@/components/watches/watch-chart'
 import {
   channelLabel,
@@ -14,6 +15,7 @@ import {
   notCheckedEntries,
   runCostLabel,
   runTimeLabel,
+  UNUSUAL_ANSWERS,
   WATCH_SECTIONS,
   type WatchFinding,
   type WatchReportRow,
@@ -22,7 +24,10 @@ import {
   type WatchSamplesReport,
   type WatchSectionsReport,
   type WatchSeriesReport,
+  UnusualSavedError,
+  type UnusualAnswer,
   type WatchUnusual,
+  type WatchUnusualStretch,
 } from '@/lib/watches'
 import { errorMessage } from '@/lib/errors'
 
@@ -165,24 +170,106 @@ function SectionBody({ section }: { section: WatchReportSection }) {
 }
 
 /**
+ * One unusual stretch, and the operator's say on it. The answer shows beneath the
+ * sentence, quietly, and can be changed. It is the server's answer; only the one
+ * being saved is held here. A stretch from an old report has no buttons, and they
+ * are left out where the page cannot write.
+ */
+function UnusualLine({
+  text,
+  stretch,
+  answer,
+  onAnswer,
+}: {
+  text: string
+  stretch?: WatchUnusualStretch
+  answer: string
+  /** Answers this line; left out where it cannot be answered. */
+  onAnswer?: (answer: UnusualAnswer) => Promise<void>
+}) {
+  const [pending, setPending] = useState<UnusualAnswer | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // An answer saved while the page could not refresh: shown until the page's own
+  // answer changes, which is the refresh arriving.
+  const [kept, setKept] = useState<{ base: string; value: UnusualAnswer; note: string } | null>(null)
+  const keptNow = kept && kept.base === answer ? kept : null
+  const shown = pending ?? keptNow?.value ?? answer
+  const said = UNUSUAL_ANSWERS.find((a) => a.answer === shown)?.said
+  const choose = async (next: UnusualAnswer | undefined) => {
+    // Pressing the chosen button again would clear it; an answer is changed, not cleared.
+    if (!stretch || !onAnswer || !next || pending || next === shown) return
+    setPending(next)
+    setError(null)
+    setKept(null)
+    try {
+      await onAnswer(next)
+    } catch (err) {
+      if (err instanceof UnusualSavedError) setKept({ base: answer, value: next, note: `Saved. The page could not refresh: ${err.message}` })
+      else setError(errorMessage(err))
+    } finally {
+      setPending(null)
+    }
+  }
+  return (
+    <li className="flex min-w-0 flex-col gap-1 text-sm text-foreground">
+      <span className="min-w-0">{text}</span>
+      {said && (
+        <span className="min-w-0 text-xs text-muted-foreground" data-testid="unusual-answer">
+          {said}
+        </span>
+      )}
+      {stretch && onAnswer && (
+        <ToggleGroup
+          variant="outline"
+          size="sm"
+          aria-label={`Your answer for the ${stretch.engine} stretch`}
+          value={shown ? [shown] : []}
+          disabled={pending !== null}
+          onValueChange={(v) => { void choose(v[0] as UnusualAnswer | undefined) }}
+          className="flex-wrap"
+        >
+          {UNUSUAL_ANSWERS.map((a) => (
+            <ToggleGroupItem key={a.answer} value={a.answer} className="text-xs" aria-label={`${a.label}: ${stretch.engine} stretch`}>
+              {a.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      )}
+      {keptNow && <span role="status" className="min-w-0 text-xs text-muted-foreground">{keptNow.note}</span>}
+      {error && <span role="alert" className="min-w-0 text-xs text-destructive">{error}</span>}
+    </li>
+  )
+}
+
+/**
  * A learned normal's suggestions (ADR 0276). Quiet on purpose: no accent, no
  * count, and nothing at all when there is no line and no note.
  */
-function UnusualBlock({ unusual }: { unusual: WatchUnusual }) {
+function UnusualBlock({
+  run,
+  unusual,
+  onAnswer,
+}: {
+  run: WatchRun
+  unusual: WatchUnusual
+  onAnswer?: (run: WatchRun, index: number, answer: UnusualAnswer) => Promise<void>
+}) {
+  const answers = run.unusual_answers ?? []
+  // Where the answers could not be read, the lines say so in place of the buttons.
+  const problem = run.unusual_answers_problem
   const lines = unusual.lines ?? []
   if (lines.length === 0 && !unusual.note) return null
   return (
     <div className="flex min-w-0 flex-col gap-1.5 border-t border-border pt-4" data-testid="watch-run-unusual">
       <p className={MICRO_LABEL}>Unusual</p>
       {lines.length > 0 && (
-        <ul className="flex flex-col gap-1" aria-label="Unusual readings">
+        <ul className="flex flex-col gap-2" aria-label="Unusual readings">
           {lines.map((line, i) => (
-            <li key={i} className="min-w-0 text-sm text-foreground">
-              {line}
-            </li>
+            <UnusualLine key={unusual.stretches?.[i]?.stretch_id ?? i} text={line} stretch={unusual.stretches?.[i]} answer={answers[i] ?? ''} onAnswer={onAnswer && !problem ? (a) => onAnswer(run, i, a) : undefined} />
           ))}
         </ul>
       )}
+      {problem && <p className="min-w-0 text-xs text-muted-foreground" data-testid="unusual-answers-problem">{problem}</p>}
       {unusual.note && <p className="min-w-0 text-sm text-muted-foreground">{unusual.note}</p>}
     </div>
   )
@@ -285,6 +372,8 @@ export interface WatchRunCardProps {
   onAskMate?: (run: WatchRun) => void
   /** Opens Mate with an unsent draft about one of the run's questions. Without it the questions show with no button. */
   onAnswer?: (run: WatchRun, question: string) => void
+  /** Says what the operator thinks of an unusual stretch. Without it the stretches show with no buttons. */
+  onAnswerUnusual?: (run: WatchRun, index: number, answer: UnusualAnswer) => Promise<void>
 }
 
 /**
@@ -317,6 +406,8 @@ interface RunBodyProps {
   run: WatchRun
   onAskMate?: (run: WatchRun) => void
   onAnswer?: (run: WatchRun, question: string) => void
+  /** Says what the operator thinks of an unusual stretch. Left out where the page cannot write. */
+  onAnswerUnusual?: (run: WatchRun, index: number, answer: UnusualAnswer) => Promise<void>
   /** Left out where the run can't be deleted. */
   onDelete?: (run: WatchRun) => void
 }
@@ -326,7 +417,7 @@ interface RunBodyProps {
  * told, and the actions. Memoised so opening one run doesn't redraw the charts
  * of the others.
  */
-const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: RunBodyProps) {
+const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onAnswerUnusual, onDelete }: RunBodyProps) {
   const sections = run.report && run.report_kind === 'sections' ? (run.report as WatchSectionsReport) : null
   const samples = run.report && run.report_kind === 'samples' ? (run.report as WatchSamplesReport) : null
   // The server owns the sentences: the opening is its split of the review, and
@@ -397,7 +488,7 @@ const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: Ru
         </div>
       )}
 
-      {sections?.unusual && <UnusualBlock unusual={sections.unusual} />}
+      {sections?.unusual && <UnusualBlock run={run} unusual={sections.unusual} onAnswer={onAnswerUnusual} />}
 
       {notChecked.length > 0 && <NotChecked entries={notChecked} />}
 
@@ -488,7 +579,7 @@ const RunBody = memo(function RunBody({ run, onAskMate, onAnswer, onDelete }: Ru
 })
 
 /** A run shown fully open, as the linked run is pinned above the list. */
-export function WatchRunCard({ run, highlighted = false, onAskMate, onAnswer }: WatchRunCardProps) {
+export function WatchRunCard({ run, highlighted = false, onAskMate, onAnswer, onAnswerUnusual }: WatchRunCardProps) {
   return (
     <article
       className={`flex min-w-0 flex-col gap-4 rounded-md border bg-card p-4 transition-colors ${
@@ -502,7 +593,7 @@ export function WatchRunCard({ run, highlighted = false, onAskMate, onAnswer }: 
       <h3 className="flex">
         <RunSummary run={run} />
       </h3>
-      <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} />
+      <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} onAnswerUnusual={onAnswerUnusual} />
     </article>
   )
 }
@@ -516,6 +607,7 @@ export interface WatchRunListProps {
   onShowOlder: () => void
   onAskMate?: (run: WatchRun) => void
   onAnswer?: (run: WatchRun, question: string) => void
+  onAnswerUnusual?: (run: WatchRun, index: number, answer: UnusualAnswer) => Promise<void>
   /** Deletes the run; a refusal throws with the server's own words. */
   onDeleteRun: (run: WatchRun) => Promise<void>
   /** Open the newest run when it arrives. Off while a linked run is pinned above the list. */
@@ -531,6 +623,7 @@ export function WatchRunList({
   onShowOlder,
   onAskMate,
   onAnswer,
+  onAnswerUnusual,
   onDeleteRun,
   expandNewest,
 }: WatchRunListProps) {
@@ -601,7 +694,7 @@ export function WatchRunList({
                 <RunSummary run={run} opening={openIds.includes(run.id) ? undefined : run.review_opening} />
               </AccordionTrigger>
               <AccordionContent className="pb-4 pt-2">
-                <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} onDelete={canWrite ? askToDelete : undefined} />
+                <RunBody run={run} onAskMate={onAskMate} onAnswer={onAnswer} onAnswerUnusual={onAnswerUnusual} onDelete={canWrite ? askToDelete : undefined} />
               </AccordionContent>
             </AccordionItem>
           </Fragment>

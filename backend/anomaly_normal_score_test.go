@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,7 @@ type scoreCase struct {
 	ctx     context.Context // the context of the last read
 	ignored map[string]bool // the ignored-sensor list at score time
 	wakes   int             // how often scoring asked for a training run
+	answers []normalAnswer  // the operator's answers about stretches
 }
 
 func newScoreCase(model normalModelFile, feed map[string][]normalMinuteRow, engines ...string) *scoreCase {
@@ -88,7 +90,7 @@ func (c *scoreCase) deps() normalScoreDeps {
 }
 
 func (c *scoreCase) score(since time.Duration) unusualResult {
-	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-since), trainNow, "")
+	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-since), trainNow, "", c.answers)
 }
 
 // bend changes one reading over minutes [from, to) of the run.
@@ -226,7 +228,7 @@ func TestScore_MinutesBeforeTheGateAreCountedAsNotRunningSteadily(t *testing.T) 
 // the minutes before it. Scoring reads a lead-in and judges only the window.
 func TestScore_AWindowThatStartsMidRunIsJudgedFromItsFirstMinute(t *testing.T) {
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(37))
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(60*time.Minute), trainNow, "")
+	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(60*time.Minute), trainNow, "", nil)
 	if res.JudgedMinutes != 60 {
 		t.Fatalf("judged %d, want the whole 60 minute window", res.JudgedMinutes)
 	}
@@ -306,7 +308,7 @@ func TestScore_OnlyTheNamedEngineIsRead(t *testing.T) {
 	feed := mergeFeeds(synthFeed("port", 41, []synthRun{{Start: scoreRunStart, Minutes: 120, RPM: 1900}}),
 		synthFeed("starboard", 42, []synthRun{{Start: scoreRunStart, Minutes: 120, RPM: 1900}}))
 	c := newScoreCase(trainedPort(t), feed, "port", "starboard")
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "starboard")
+	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "starboard", nil)
 	// Starboard has no model, so none of its minutes are judged; port is not read.
 	if res.JudgedMinutes != 0 {
 		t.Fatalf("judged = %d", res.JudgedMinutes)
@@ -379,14 +381,14 @@ func TestScore_ModelInfoCarriesTheLearnedDateAndBands(t *testing.T) {
 // The window is cut to seven days inside the score, and the result says so.
 func TestScore_AWindowOverSevenDaysIsCutAndSaidSo(t *testing.T) {
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(45))
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-30*24*time.Hour), trainNow, "")
+	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-30*24*time.Hour), trainNow, "", nil)
 	if !res.Clipped || !res.Since.Equal(trainNow.Add(-7*24*time.Hour)) {
 		t.Fatalf("clipped %v since %v", res.Clipped, res.Since)
 	}
 	if want := trainNow.Add(-7*24*time.Hour - normalScoreLeadIn); !c.since.Equal(want) {
 		t.Fatalf("the read starts at %v, want %v", c.since, want)
 	}
-	if res = scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, ""); res.Clipped {
+	if res = scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil); res.Clipped {
 		t.Fatal("a day is not clipped")
 	}
 }
@@ -396,11 +398,78 @@ func TestScore_OneReadWithTheCallersContext(t *testing.T) {
 	type key struct{}
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(46))
 	ctx := context.WithValue(context.Background(), key{}, "mark")
-	scoreUnusualReadings(ctx, normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "")
+	scoreUnusualReadings(ctx, normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil)
 	if c.asked != 1 || len(c.paths) < 5 {
 		t.Fatalf("%d reads of %v, want 1 read of the engine's readings", c.asked, c.paths)
 	}
 	if c.ctx == nil || c.ctx.Value(key{}) != "mark" {
 		t.Fatal("the caller's context did not reach the read")
+	}
+}
+
+func answeredPort(from, to int, answer string) normalAnswer {
+	return normalAnswer{
+		StretchID: "engines:port@x", Subsystem: normalSubsystemEngines, Subject: "port", Answer: answer,
+		From: scoreRunStart.Add(time.Duration(from) * time.Minute), To: scoreRunStart.Add(time.Duration(to) * time.Minute),
+	}
+}
+
+func TestScore_MinutesAnsweredNormalAreNeverFlagged(t *testing.T) {
+	feed := steadyScoreFeed(32)
+	bend(feed, "propulsion.port.oilPressure", 40, 70, halve)
+
+	c := newScoreCase(trainedPort(t), feed)
+	c.answers = []normalAnswer{answeredPort(40, 70, normalAnswerNormal)}
+	res := c.score(24 * time.Hour)
+	if len(res.Stretches) != 0 || res.JudgedMinutes != 110 {
+		t.Fatalf("answered normal: stretches %+v, judged %d", res.Stretches, res.JudgedMinutes)
+	}
+
+	// Only the minutes inside the range are cleared; the rest of the fault still shows.
+	c.answers = []normalAnswer{answeredPort(40, 60, normalAnswerNormal)}
+	res = c.score(24 * time.Hour)
+	if len(res.Stretches) != 1 || res.Stretches[0].Minutes != 10 || !res.Stretches[0].Start.Equal(scoreRunStart.Add(60*time.Minute)) {
+		t.Fatalf("partly answered: stretches %+v", res.Stretches)
+	}
+}
+
+func TestScore_OnlyANormalAnswerForThisEngineClearsMinutes(t *testing.T) {
+	feed := steadyScoreFeed(32)
+	bend(feed, "propulsion.port.oilPressure", 40, 70, halve)
+	other := answeredPort(40, 70, normalAnswerNormal)
+	other.Subject = "starboard"
+	elsewhere := answeredPort(40, 70, normalAnswerNormal)
+	elsewhere.Subsystem = "house"
+	c := newScoreCase(trainedPort(t), feed)
+	c.answers = []normalAnswer{other, elsewhere, answeredPort(40, 70, normalAnswerReal), answeredPort(40, 70, normalAnswerUnknown)}
+	if res := c.score(24 * time.Hour); len(res.Stretches) != 1 || res.Stretches[0].Minutes != 30 {
+		t.Fatalf("stretches = %+v", res.Stretches)
+	}
+}
+
+// A normal answer with a real one over part of it, saved as the file saves them:
+// the real answer takes its minutes, so those are flagged again.
+func TestScore_ARealAnswerOverPartOfANormalOneFlagsThoseMinutesAgain(t *testing.T) {
+	feed := steadyScoreFeed(32)
+	bend(feed, "propulsion.port.oilPressure", 40, 70, halve)
+	normal := answeredPort(40, 70, normalAnswerNormal)
+	normal.AnsweredAt = trainNow.Add(-2 * time.Hour)
+	real := answeredPort(50, 60, normalAnswerReal)
+	real.StretchID = "engines:port@y"
+	real.AnsweredAt = trainNow.Add(-time.Hour)
+	path := filepath.Join(t.TempDir(), "answers.json")
+	for _, a := range []normalAnswer{normal, real} {
+		if _, err := saveNormalAnswer(path, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := newScoreCase(trainedPort(t), feed)
+	var err error
+	if c.answers, err = loadNormalAnswersList(path); err != nil {
+		t.Fatal(err)
+	}
+	res := c.score(24 * time.Hour)
+	if len(res.Stretches) != 1 || res.Stretches[0].Minutes != 10 || !res.Stretches[0].Start.Equal(scoreRunStart.Add(50*time.Minute)) {
+		t.Fatalf("stretches = %+v", res.Stretches)
 	}
 }
