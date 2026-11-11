@@ -61,7 +61,8 @@ type unusualToolResult struct {
 }
 
 const unusualToolNote = "These are suggestions from a normal learned from this engine's own history, not a rule and not a diagnosis. " +
-	"Mention one as worth a look, in the operator's units, and never give a cause for it. Minutes that were not judged are counted in not_judged: never fill them in."
+	"Mention one as worth a look, in the operator's units, and never give a cause for it. Minutes that were not judged are counted in not_judged: never fill them in. " +
+	"A stretch with an operator_answer has been answered: \"normal\" means the operator says it is the engine's usual, so do not raise it again; \"real\" means they agree something was wrong; \"unknown\" means they could not say."
 
 func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -109,7 +110,14 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 	if err != nil {
 		return "", fmt.Errorf("get_unusual_engine_readings: the display units could not be read: %w", err)
 	}
-	res := d.unusualReadings(ctx, since, now, engineID)
+	if d.unusualAnswers == nil {
+		return "", errors.New("get_unusual_engine_readings: the operator's answers are not wired")
+	}
+	answers, err := d.unusualAnswers()
+	if err != nil {
+		return "", fmt.Errorf("get_unusual_engine_readings: the answers about unusual stretches could not be read: %w", err)
+	}
+	res := d.unusualReadings(ctx, since, now, engineID, answers)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -143,6 +151,7 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 		if err != nil {
 			return "", fmt.Errorf("get_unusual_engine_readings: %w", err)
 		}
+		v.OperatorAnswer = overlappingAnswer(answers, st.Subsystem, st.Subject, st.Start, st.End)
 		out.Stretches = append(out.Stretches, v)
 	}
 	for _, n := range res.NotJudged {
@@ -199,7 +208,8 @@ var mateToolGetUnusualEngineReadings = mateTool{
 			"most, its value against the usual one in the operator's units, and the rpm band. These are suggestions to mention as worth a look, " +
 			"never a diagnosis and never a cause. It also says when the normal was learned and counts the minutes it could not judge, with the " +
 			"reason (not running steadily, too little history for a band, a reading missing). If there is no learned normal, " +
-			"learned_normal_missing says why: never fill it in. Times are boat time with the UTC instant beside them.",
+			"learned_normal_missing says why: never fill it in. A stretch the operator has answered carries operator_answer (real, normal or unknown). " +
+			"Times are boat time with the UTC instant beside them.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {` +
 			`"since_iso": {"type": "string", "description": "Start of the window as an RFC 3339 time. Default 24 hours ago; at most 7 days back."},` +
 			`"engine": {"type": "string", "description": "One engine, by its name or instance. Default: every engine."},` +

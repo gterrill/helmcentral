@@ -87,15 +87,27 @@ func replayVessel() func() (vesselView, error) {
 
 func replayTrain(t *testing.T, feed map[string][]normalMinuteRow, split time.Time) normalSubsystemModel {
 	t.Helper()
+	return replayTrainWith(t, feed, split, nil, nil)
+}
+
+// replayTrainWith trains as replayTrain does, with the operator's answers and the
+// maintenance log's entries. Port is the item "eq-port" in the inventory.
+func replayTrainWith(t *testing.T, feed map[string][]normalMinuteRow, now time.Time, answers []normalAnswer, repairs []maintenanceRepair) normalSubsystemModel {
+	t.Helper()
 	model, err := trainSubsystem(context.Background(), normalEnginesSubsystem(), normalTrainDeps{
-		Now: func() time.Time { return split },
+		Now: func() time.Time { return now },
 		Source: func() (normalSource, error) {
 			return normalSource{Kind: normalSourceMinuteBucket, Bucket: "capture"}, nil
 		},
-		Minutes:  windowOf(feed),
-		Vessel:   replayVessel(),
+		Minutes: windowOf(feed),
+		Vessel: func() (vesselView, error) {
+			return vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port", EquipmentID: "eq-port"}, {Instance: "starboard", Name: "Starboard", EquipmentID: "eq-starboard"}}}, nil
+		},
 		Ignored:  func() map[string]bool { return nil },
 		Alarms:   func(time.Time, time.Time) ([]alarmLogEntry, error) { return nil, nil },
+		Answers:  func() ([]normalAnswer, error) { return answers, nil },
+		Repairs:  func() ([]maintenanceRepair, error) { return repairs, nil },
+		BoatLoc:  func() (*time.Location, error) { return time.UTC, nil },
 		Classify: classifyRange,
 	}, normalSubsystemModel{})
 	if err != nil {
@@ -106,6 +118,12 @@ func replayTrain(t *testing.T, feed map[string][]normalMinuteRow, split time.Tim
 
 func replayScore(t *testing.T, feed map[string][]normalMinuteRow, model normalSubsystemModel, from, to time.Time) unusualResult {
 	t.Helper()
+	return replayScoreWith(t, feed, model, from, to, nil)
+}
+
+// replayScoreWith scores as replayScore does, knowing the operator's answers.
+func replayScoreWith(t *testing.T, feed map[string][]normalMinuteRow, model normalSubsystemModel, from, to time.Time, answers []normalAnswer) unusualResult {
+	t.Helper()
 	deps := normalScoreDeps{
 		Now:     func() time.Time { return to },
 		Source:  func() (normalSource, error) { return normalSource{Kind: normalSourceMainBucket}, nil },
@@ -115,7 +133,7 @@ func replayScore(t *testing.T, feed map[string][]normalMinuteRow, model normalSu
 			return normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: model}}, nil
 		},
 	}
-	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), deps, from, to, "")
+	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), deps, from, to, "", answers)
 }
 
 // runningMinutes counts the minutes an engine was above 900 rpm in [from, to).

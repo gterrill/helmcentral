@@ -198,6 +198,8 @@ export interface MaintenanceLogEntry {
   equipment_id: string | null
   rule_id: string | null
   performed_at: string
+  /** When a repair's fault first showed, null when not said (ADR 0276). */
+  started_at: string | null
   hours: number | null
   kind: MaintenanceLogKind
   description: string
@@ -223,6 +225,8 @@ export interface MaintenanceLogPartInput {
 export interface MaintenanceLogEntryInput {
   equipment_id?: string | null
   performed_at: string
+  /** A repair's "started showing" date; blank or absent for none. Only a repair takes one. */
+  started_at?: string
   hours: number | null
   kind: MaintenanceLogKind
   description: string

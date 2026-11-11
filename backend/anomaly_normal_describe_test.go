@@ -8,7 +8,7 @@ import (
 
 func oilStretch(start time.Time, minutes int) unusualStretch {
 	return unusualStretch{
-		ID: "engines:port@" + start.Format(time.RFC3339), Subject: "port", SubjectName: "Port engine",
+		ID: "engines:port@" + start.Format(time.RFC3339), Subsystem: "engines", Subject: "port", SubjectName: "Port engine",
 		Start: start, End: start.Add(time.Duration(minutes) * time.Minute), Minutes: minutes, Band: "1,800 to 2,000 rpm",
 		Top: unusualReading{Key: "oilPressure", Path: "propulsion.port.oilPressure", SIUnit: "Pa", Direction: "low", StretchMean: 280000, Usual: 340000},
 	}

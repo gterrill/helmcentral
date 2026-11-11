@@ -85,7 +85,7 @@ func normalEngineSubjects(vessel vesselView) []normalSubject {
 		if taken[name] > 1 {
 			name = enginePositionPrefix(e.Instance) + " " + name
 		}
-		s := normalSubject{ID: e.Instance, Name: name}
+		s := normalSubject{ID: e.Instance, Name: name, EquipmentID: e.EquipmentID}
 		for _, c := range normalEngineCandidates {
 			c.Path, c.SIUnit = "propulsion."+e.Instance+"."+c.Key, sensorLimitUnit[c.Key]
 			s.Features = append(s.Features, c)

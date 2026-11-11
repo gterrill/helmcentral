@@ -159,11 +159,17 @@ type watchRun struct {
 	Questions []string `json:"questions,omitempty"`
 	// ReviewOpening and ReviewRest are Review in two parts, worked out when a
 	// run is read for the page (forPage) and never stored.
-	ReviewOpening string   `json:"review_opening,omitempty"`
-	ReviewRest    string   `json:"review_rest,omitempty"`
-	CostUSD       *float64 `json:"cost_usd"`
-	CostKnown     bool     `json:"cost_known"`
-	Model         string   `json:"model,omitempty"`
+	ReviewOpening string `json:"review_opening,omitempty"`
+	ReviewRest    string `json:"review_rest,omitempty"`
+	// UnusualAnswers are the operator's answers to the report's unusual
+	// stretches, indexed like them ("" for unanswered). Worked out when a run is
+	// read for the page and never stored.
+	UnusualAnswers []string `json:"unusual_answers,omitempty"`
+	// UnusualAnswersProblem says why the answers could not be read for this run.
+	UnusualAnswersProblem string   `json:"unusual_answers_problem,omitempty"`
+	CostUSD               *float64 `json:"cost_usd"`
+	CostKnown             bool     `json:"cost_known"`
+	Model                 string   `json:"model,omitempty"`
 	// BoatTime is when the run started on the boat's clock as it was then, and
 	// Timezone is that clock's offset ("UTC+12"). With no boat position they
 	// are the UTC time, said to be UTC, and "": the page never shows a time on
@@ -214,9 +220,42 @@ func (r watchRun) forPage() watchRun {
 	return r
 }
 
+// watchRunsForPage readies runs for the page: the review in two parts, and the
+// operator's current answer for each unusual stretch (UnusualAnswers, indexed like
+// the report's stretches, "" for none), so a changed answer shows on the next
+// read. The answers are read once, and only when some run has a stretch.
+//
+// It cannot fail the page. When the answers cannot be read, or a run's report
+// cannot be parsed, that run says so in UnusualAnswersProblem and shows no
+// buttons; the run itself still shows.
 func watchRunsForPage(runs []watchRun) {
+	var answers []normalAnswer
+	var answersErr error
+	loaded := false
 	for i := range runs {
 		runs[i] = runs[i].forPage()
+		stretches, err := unusualStretchesOf(runs[i])
+		if err != nil {
+			runs[i].UnusualAnswersProblem = "This report could not be read: " + firstErrorLine(err)
+			continue
+		}
+		if len(stretches) > 0 {
+			if !loaded {
+				answers, answersErr = listNormalAnswers()
+				loaded = true
+			}
+			if answersErr != nil {
+				runs[i].UnusualAnswersProblem = "Your answers could not be read: " + firstErrorLine(answersErr)
+				continue
+			}
+		}
+		if len(stretches) == 0 {
+			continue
+		}
+		runs[i].UnusualAnswers = make([]string, len(stretches))
+		for j, st := range stretches {
+			runs[i].UnusualAnswers[j] = overlappingAnswer(answers, st.Subsystem, st.Subject, st.From, st.To)
+		}
 	}
 }
 

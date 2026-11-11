@@ -131,7 +131,10 @@ func joinNormalMinutes(features []normalFeature, values map[string]map[time.Time
 
 type normalSubject struct {
 	ID, Name string
-	Features []normalFeature
+	// EquipmentID is the inventory item the subject is, "" when it has none. A
+	// repair logged against that item leaves out the subject's fault range.
+	EquipmentID string
+	Features    []normalFeature
 }
 
 // normalMinute is one minute of one subject: each feature's mean, by Key.
@@ -176,6 +179,9 @@ type normalFitOptions struct {
 	// the reading's resolution seen across the whole subject. A reading that
 	// holds still inside one band has no resolution of its own to take.
 	MinSD []float64
+	// Keep, when it has an entry per row, marks rows the reweighting pass must
+	// not drop: minutes the operator said are normal.
+	Keep []bool
 }
 
 // normalRegimeStats is a regime's learned normal: standardising constants,
@@ -250,12 +256,12 @@ func fitRegime(rows [][]float64, opts normalFitOptions) (normalRegimeStats, erro
 		}
 		cut := distuv.ChiSquared{K: float64(d)}.Quantile(normalTrimChiSquare)
 		kept = make([][]float64, 0, len(rows))
-		for _, r := range rows {
+		for i, r := range rows {
 			d2, _, err := scorer.score(r)
 			if err != nil {
 				return normalRegimeStats{}, err
 			}
-			if d2 <= cut {
+			if d2 <= cut || (len(opts.Keep) == len(rows) && opts.Keep[i]) {
 				kept = append(kept, r)
 			}
 		}

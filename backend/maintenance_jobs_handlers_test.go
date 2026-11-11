@@ -414,7 +414,7 @@ func TestCSVExportLabelsJobsFromTheirEffectiveDescription(t *testing.T) {
 		return rec.Body.String()
 	}
 	out := csv()
-	if !strings.Contains(out, "schedule") || !strings.Contains(out, "Raw water impeller,maintenance") || !strings.HasSuffix(strings.Split(strings.TrimSpace(out), "\n")[1], ",profile") {
+	if !strings.Contains(out, "schedule") || !strings.Contains(out, "Raw water impeller,maintenance") || !strings.HasSuffix(strings.Split(strings.TrimSpace(out), "\n")[1], ",profile,") {
 		t.Fatalf("unexpected CSV: %s", out)
 	}
 	// Live profile text shows at once.

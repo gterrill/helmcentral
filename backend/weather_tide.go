@@ -225,6 +225,24 @@ func writeJSONFileAtomic(path string, value any) error {
 	return os.Rename(tmpPath, path)
 }
 
+// readJSONFile reads what writeJSONFileAtomic wrote. A missing file is ok=false
+// with no error; a file that exists and cannot be read or parsed is an error,
+// never an empty value.
+func readJSONFile[T any](path string) (value T, ok bool, err error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return value, false, nil
+		}
+		return value, false, fmt.Errorf("reading %s: %w", path, err)
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		var zero T
+		return zero, false, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return value, true, nil
+}
+
 func weakETagForJSON(value any) (string, error) {
 	payload, err := json.Marshal(value)
 	if err != nil {
