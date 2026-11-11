@@ -25,10 +25,10 @@ function liveRoute(router: AppRouter): PassagesRoute {
   return router.resume('passages').route
 }
 
+// The filter a view belongs to; the views that carry none list everything.
 function filterOf(route: PassagesRoute): PassagesFilter {
-  if (route.view === 'cruise') return { kind: 'cruise', id: route.id }
-  if (route.view === 'inbox' || route.view === 'upload') return { kind: 'all' }
-  return route.filter
+  if ('filter' in route) return route.filter
+  return route.view === 'cruise' ? { kind: 'cruise', id: route.id } : { kind: 'all' }
 }
 
 /** Passages' slice of the app location (ADR 0171). */

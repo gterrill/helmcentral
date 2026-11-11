@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { errorMessage } from '@/lib/errors'
 import { inboxApi } from '@/lib/inbox-api'
-import { prepareFile, summariseTally, uploadFiles, type UploadTally } from '@/lib/inbox-upload'
+import { hashFile, prepareFile, summariseTally, uploadFiles, type UploadTally } from '@/lib/inbox-upload'
 import { selectTimeZone, selectTimeZoneSource } from '@/lib/vessel-time'
 
 export interface InboxUploadPageProps {
@@ -23,6 +24,7 @@ export function InboxUploadPage({ canWrite, onBack, onOpenInbox }: InboxUploadPa
   const stop = useRef<AbortController | null>(null)
   const [tally, setTally] = useState<UploadTally | null>(null)
   const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   // A boat that has no fix yet reports UTC as a placeholder, which would put a
   // photo with no zone of its own hours out; so it is treated as unknown.
   const boatZone = useVesselStateSelector(selectTimeZone)
@@ -38,16 +40,24 @@ export function InboxUploadPage({ canWrite, onBack, onOpenInbox }: InboxUploadPa
     const controller = new AbortController()
     stop.current = controller
     setRunning(true)
+    setError(null)
     try {
       const final = await uploadFiles(files, {
-        prepare: (file) => prepareFile(file, { boatTimeZone }),
-        upload: (p) => inboxApi.upload(p.blob, p.filename, p.meta),
+        hash: hashFile,
+        known: inboxApi.known,
+        prepare: (file, sourceSha256) => prepareFile(file, sourceSha256, { boatTimeZone }),
+        upload: (p) => inboxApi.upload(p.blob, p.filename, p.meta, p.thumb),
         onProgress: setTally,
+        onCheckpoint: () => { void inboxApi.refreshCount() },
         signal: controller.signal,
       })
       setTally(final)
+    } catch (err) {
+      setError(errorMessage(err))
     } finally {
       setRunning(false)
+      // Once, now the batch is done: the list and the badge pick up everything stored.
+      void inboxApi.refresh()
     }
   }
 
@@ -67,7 +77,8 @@ export function InboxUploadPage({ canWrite, onBack, onOpenInbox }: InboxUploadPa
       <div className="flex max-w-xl flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Pick photos and PDFs from this device. Photos are shrunk here before they are sent, and each one is checked
-          against what is already in the Inbox and Documents, so picking the same ones twice is harmless.
+          against what is already in the Inbox or has been filed from it, and the boat turns away a file Documents
+          already holds, so picking the same ones twice is harmless.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="lg" disabled={!canWrite || running} onClick={() => fileInput.current?.click()}>
@@ -80,11 +91,16 @@ export function InboxUploadPage({ canWrite, onBack, onOpenInbox }: InboxUploadPa
           </Button>
         </div>
         {!canWrite && <p role="status" className="text-sm text-muted-foreground">Your sign-in can look but not change anything, so it cannot share to the Inbox.</p>}
+        {error && <p role="alert" className="text-sm text-destructive">Nothing was sent: {error}</p>}
 
         {tally && (
           <section aria-label="Upload progress" className="flex flex-col gap-2 rounded-md border border-border p-3">
             <p role="status" className="text-sm font-medium text-foreground tabular-nums">
-              {running ? `Sending ${Math.min(tally.done + 1, tally.total)} of ${tally.total}` : summariseTally(tally)}
+              {running
+                ? tally.stage === 'checking'
+                  ? `Checking ${Math.min(tally.checked + 1, tally.total)} of ${tally.total} against what is already here`
+                  : `Sending ${Math.min(tally.done + 1, tally.total)} of ${tally.total}`
+                : summariseTally(tally)}
             </p>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <div className="h-full bg-primary transition-[width]" style={{ width: `${tally.total === 0 ? 0 : (tally.done / tally.total) * 100}%` }} />

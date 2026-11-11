@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { InboxItem } from '@/lib/inbox-api'
-import { findBlurry, findDuplicates, groupInbox, nearestEdge, placementOptions } from '@/lib/inbox-groups'
+import { findBlurry, findDuplicates, groupInbox, nearestEdgeMs, placementOptions } from '@/lib/inbox-groups'
 import { formatLocalDate, type PassageSummary } from '@/lib/passages'
 
 const T0 = Date.UTC(2026, 9, 14, 0, 0, 0)
@@ -16,9 +16,7 @@ function item(over: Partial<InboxItem> = {}): InboxItem {
     mime: 'image/jpeg',
     size_bytes: 1000,
     capture_ms: T0,
-    capture_offset_min: 600,
     bearing_deg: null,
-    has_bearing: false,
     fingerprint: '0000000000000000',
     sharpness: 100,
     created_ms: T0 + seq,
@@ -105,9 +103,9 @@ describe('findDuplicates', () => {
     const c = item({ id: 'c', capture_ms: T0 + 4000, fingerprint: '00ff00ff00ff00ff', sharpness: 70 })
     const other = item({ id: 'd', capture_ms: T0 + 3000, fingerprint: 'ffffffffffffffff', sharpness: 300 })
     const dup = findDuplicates([a, b, c, other])
-    expect(dup.get('b')).toEqual({ keeperId: 'b', isKeeper: true, size: 3 })
-    expect(dup.get('a')).toEqual({ keeperId: 'b', isKeeper: false, size: 3 })
-    expect(dup.get('c')).toEqual({ keeperId: 'b', isKeeper: false, size: 3 })
+    expect(dup.get('b')).toEqual({ isKeeper: true, size: 3 })
+    expect(dup.get('a')).toEqual({ isKeeper: false, size: 3 })
+    expect(dup.get('c')).toEqual({ isKeeper: false, size: 3 })
     expect(dup.has('d')).toBe(false)
   })
 
@@ -166,13 +164,13 @@ describe('placement', () => {
   const p2 = passage('p2', T0 + 600 * min, T0 + 700 * min, 'Back')
 
   it('finds the nearest end of the nearest passage', () => {
-    expect(nearestEdge(T0 + 125 * min, [p1, p2])).toEqual({ passageId: 'p1', edge: 'end', tMs: T0 + 120 * min })
-    expect(nearestEdge(T0 + 590 * min, [p1, p2])).toEqual({ passageId: 'p2', edge: 'start', tMs: T0 + 600 * min })
-    expect(nearestEdge(T0 - 30 * min, [p1, p2])).toEqual({ passageId: 'p1', edge: 'start', tMs: T0 })
+    expect(nearestEdgeMs(T0 + 125 * min, [p1, p2])).toBe(T0 + 120 * min)
+    expect(nearestEdgeMs(T0 + 590 * min, [p1, p2])).toBe(T0 + 600 * min)
+    expect(nearestEdgeMs(T0 - 30 * min, [p1, p2])).toBe(T0)
   })
 
   it('has nothing to offer with no passages', () => {
-    expect(nearestEdge(T0, [])).toBeNull()
+    expect(nearestEdgeMs(T0, [])).toBeNull()
     expect(placementOptions([])).toEqual([])
   })
 

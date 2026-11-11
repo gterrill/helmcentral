@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,14 +175,14 @@ func TestInboxUploadStoresThenSkipsAnIdenticalFile(t *testing.T) {
 	w := newInboxWorld(t)
 	jpg := inboxTestJPEG(t, 10)
 	code, body := inboxUpload(t, jpg, "IMG_1.jpg", map[string]string{
-		"capture_ms": "1760400000000", "capture_offset_min": "600", "bearing_deg": "123.5",
+		"capture_ms": "1760400000000", "bearing_deg": "123.5",
 		"phone_lat": "-20.1", "phone_lon": "149.2", "fingerprint": "00ff00ff00ff00ff", "sharpness": "42.5",
 	})
 	if code != http.StatusCreated || body["status"] != "stored" {
 		t.Fatal(code, body)
 	}
 	item := body["item"].(map[string]any)
-	if item["has_bearing"] != true || item["bearing_deg"] != 123.5 || item["capture_ms"] != float64(1760400000000) || item["mime"] != "image/jpeg" || item["filename"] != "IMG_1.jpg" {
+	if _, has := item["has_bearing"]; has || item["bearing_deg"] != 123.5 || item["capture_ms"] != float64(1760400000000) || item["mime"] != "image/jpeg" || item["filename"] != "IMG_1.jpg" {
 		t.Fatalf("%v", item)
 	}
 	names := dirNames(t, inboxDirPath())
@@ -382,6 +383,91 @@ func TestInboxBinRemovesRowsAndFiles(t *testing.T) {
 	}
 	if code, _ := send(t, binInboxHandler, http.MethodPost, `{"ids":[]}`); code != 400 {
 		t.Errorf("empty bin: %d", code)
+	}
+}
+
+func TestInboxBinLeavesAnItemBeingFiled(t *testing.T) {
+	w := newInboxWorld(t)
+	var ids []string
+	for shade := uint8(70); shade < 72; shade++ {
+		_, body := inboxUpload(t, inboxTestJPEG(t, shade), "a.jpg", nil)
+		ids = append(ids, body["item"].(map[string]any)["id"].(string))
+	}
+	if _, err := w.inbox.Claim(ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	code, body := send(t, binInboxHandler, http.MethodPost, `{"ids":["`+ids[0]+`","`+ids[1]+`"]}`)
+	if code != 200 || body["deleted"] != float64(1) {
+		t.Fatal(code, body)
+	}
+	busy, _ := body["busy"].([]any)
+	if len(busy) != 1 || busy[0].(map[string]any)["id"] != ids[0] || busy[0].(map[string]any)["error"] != errInboxBusy.Error() {
+		t.Errorf("busy %v", body["busy"])
+	}
+	if _, err := w.inbox.Get(ids[0]); err != nil {
+		t.Errorf("claimed item gone: %v", err)
+	}
+	if names := dirNames(t, inboxDirPath()); len(names) != 1 {
+		t.Errorf("only the claimed item's file should stay: %v", names)
+	}
+}
+
+func TestInboxUploadsOfOneOriginalStoreOneItem(t *testing.T) {
+	newInboxWorld(t)
+	src := strings.Repeat("ab", 32)
+	var wg sync.WaitGroup
+	for shade := uint8(80); shade < 86; shade++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			parts := []documentUploadField{
+				{name: "source_sha256", content: []byte(src)},
+				{name: "file", filename: "a.jpg", content: inboxTestJPEG(t, shade)},
+			}
+			c, _ := newDocumentUploadContext(t, parts)
+			if err := uploadInboxHandler(c); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if items := inboxList(t); len(items) != 1 {
+		t.Fatalf("%d items stored for one original", len(items))
+	}
+	if names := dirNames(t, inboxDirPath()); len(names) != 1 {
+		t.Errorf("files: %v", names)
+	}
+}
+
+func TestInboxDuplicateUploadKeepsTheExistingThumbnail(t *testing.T) {
+	newInboxWorld(t)
+	jpg := inboxTestJPEG(t, 90)
+	oldThumb := append([]byte{0xFF, 0xD8, 0xFF}, []byte("old")...)
+	newThumb := append([]byte{0xFF, 0xD8, 0xFF}, []byte("new")...)
+	up := func(thumb []byte) int {
+		parts := []documentUploadField{
+			{name: "thumb", filename: "t.jpg", content: thumb},
+			{name: "file", filename: "a.jpg", content: jpg},
+		}
+		c, rec := newDocumentUploadContext(t, parts)
+		if err := uploadInboxHandler(c); err != nil {
+			t.Fatal(err)
+		}
+		return rec.Code
+	}
+	if code := up(oldThumb); code != http.StatusCreated {
+		t.Fatal(code)
+	}
+	if code := up(newThumb); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	items, _ := globalInboxStore.List()
+	got, err := os.ReadFile(inboxThumbPath(items[0].SHA256))
+	if err != nil || !bytes.Equal(got, oldThumb) {
+		t.Errorf("thumb %q %v", got, err)
+	}
+	if names := dirNames(t, inboxDirPath()); len(names) != 2 {
+		t.Errorf("files: %v", names)
 	}
 }
 
@@ -643,6 +729,8 @@ func TestInboxRoutesAreAuthTiered(t *testing.T) {
 		"GET /api/inbox/count":              tierRead,
 		"GET /api/inbox/suggested-titles":   tierRead,
 		"GET /api/inbox/:id/content":        tierRead,
+		"GET /api/inbox/:id/thumb":          tierRead,
+		"POST /api/inbox/known":             tierRead,
 		"POST /api/inbox":                   tierWrite,
 		"POST /api/inbox/bin":               tierWrite,
 		"POST /api/inbox/file-to-passage":   tierWrite,

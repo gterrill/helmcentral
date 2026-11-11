@@ -22,13 +22,21 @@ Open **Passages**, tap **Inbox**, then **Share photos**. The same page is at
 open it like an app. Tap **Choose photos and files** and pick as many as you
 want. Photos and PDFs are accepted, and nothing else.
 
-Helmcentral sends them one at a time and keeps count while it works. When it's
-done it tells you how many arrived and how many it left out. It reads like this:
-"12 uploaded, 3 already in Helmcentral". A photo is left out in three cases.
-The Inbox already holds it. You've already put it on a passage or sent it to
-Documents. Or Documents holds exactly the same file. Helmcentral recognises
-the photo itself, not the shrunk copy, so picking the same photos twice does no
-harm. A photo you deleted from the Inbox is new again if you share it again.
+Helmcentral first checks your photos against what the boat already has, which
+shows as "Checking" and takes a little while on a big roll. Then it sends the
+rest one at a time and keeps count while it works. When it's done it tells you
+how many arrived and how many it left out. It reads like this: "12 uploaded, 3
+already in Helmcentral". A photo is left out in three cases. The Inbox already
+holds it. You've already put it on a passage or sent it to Documents. Or
+Documents holds exactly the same file. Helmcentral recognises the photo itself,
+not the shrunk copy, so picking the same photos twice does no harm. A photo the
+Inbox holds, or that you've already filed from it, is skipped before it's
+shrunk, so a second go at the same roll is quick. A file Documents holds is
+turned away by the boat after it arrives, so it costs the shrinking and the
+send. A photo you deleted from the Inbox is new again if you share it again.
+
+If the boat can't be reached for that check, nothing is sent and the page tells
+you why. Try again once the connection is back.
 
 Here is what happens to each photo before it leaves the phone:
 
@@ -36,11 +44,14 @@ Here is what happens to each photo before it leaves the phone:
   facing and where the phone says it was, if the phone shares that.
 - The photo is shrunk to 2560 pixels on its longest side. A photo in the iPhone's
   HEIC format is turned into an ordinary JPEG at the same time.
+- A small preview of about 400 pixels is made and sent with it. The Inbox shows
+  these, so it loads quickly even over a weak link.
 - Helmcentral works out how sharp the photo is and a short fingerprint of what's
   in it. These are what let the Inbox spot a burst of near-identical shots and a
   blurred one.
 
-PDFs are sent as they are.
+PDFs are sent as they are, with no preview. In the Inbox they show a file icon
+and their name.
 
 Android phones often hide a photo's location when you pick it in a browser. The
 photo then says nothing about where it was taken or which way the phone faced,
@@ -75,7 +86,8 @@ a few small marks:
 - A compass: The phone gave the direction it was facing. Its tooltip gives the
   bearing.
 - A warning triangle: The phone said it was more than a nautical mile from where
-  the boat's track was at that time. That nearly always means the phone's clock
+  the boat's track was at that time, allowing for how far the boat could have
+  gone since the last recorded position. That nearly always means the phone's clock
   or time zone is wrong, so the photo may sit in the wrong place. Check the
   phone's date and time settings.
 - **Duplicate**, **Best of 3**: These are shots that look alike and were taken
@@ -123,13 +135,15 @@ standard folder for receipts, so you choose.
 ## Deleting
 
 **Delete** asks you to confirm and then removes the marked items from the boat
-for good. Your phone still has the originals.
+for good. Your phone still has the originals. An item that is being filed at
+that moment is left alone, and Helmcentral says how many it left: "2 deleted, 1
+is being filed".
 
 ## Where it stops
 
 - The Inbox keeps items until you act on them. Nothing expires.
-- Helmcentral doesn't make thumbnails, so a long contact sheet loads slowly over
-  a weak link.
+- The previews are only made on the phone, so a photo that reaches the Inbox some
+  other way has none.
 - Anyone who can make changes can share, and an item doesn't say who sent it.
 - Photos can't yet be sent to a piece of equipment or an open job from the Inbox.
 - Sharing straight from the phone's share menu isn't there yet. Use the upload

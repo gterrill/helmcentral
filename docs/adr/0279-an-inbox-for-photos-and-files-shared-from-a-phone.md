@@ -39,20 +39,33 @@ Four facts shaped the design.
 **The Inbox is its own store, and an item is not a Document.** `inbox_items` is a
 table in `helmcentral.sqlite`, created in place. The bytes live in a directory of
 their own, `INBOX_DIR`, default `data/inbox`, named by sha256. A row holds the
-file's name, type and size, the capture time and its zone offset, the facing and
-the phone's position when real, the fingerprint, the sharpness score and the time
-it arrived. A `suggested_title` column is reserved for Mate and unused here. An
-item stays until the operator files or deletes it, with no expiry. Deleting
+file's name, type and size, the capture time, the facing and the phone's position
+when real, the fingerprint, the sharpness score, the time it arrived, and whether
+a preview is stored beside the file. The photo's own zone offset stays on the
+phone, because only the phone needs it to turn a camera's clock into an instant.
+An item stays until the operator files or deletes it, with no expiry. Deleting
 removes the row and the file for good, after a confirmation; the original is on
 the phone.
 
 **The phone does the image work.** The upload page reads the EXIF block from the
 original before anything else, because the re-encode that shrinks the photo
-throws it away. It then shrinks the photo to 2560 pixels on the long edge at JPEG
-quality 0.85, converting HEIC on the way, and computes two numbers from a 256
-pixel grey copy: a 64-bit difference hash and the variance of the Laplacian. The
-hash is sent as 16 hex characters. A PDF goes up untouched. `downscaleImage`
-already took the size as an argument, so nothing was forked.
+throws it away. It then decodes the photo once and makes three things from that
+one bitmap: the photo shrunk to 2560 pixels on the long edge at JPEG quality 0.85
+(converting HEIC on the way), a preview 400 pixels across at quality 0.7, and two
+numbers from a 256 pixel grey copy, a 64-bit difference hash and the variance of
+the Laplacian. The hash is sent as 16 hex characters. A PDF goes up untouched and
+has no preview. `downscaleImage` already took the size as an argument, so its
+decode and its encode were split rather than forked.
+
+**The phone asks before it works.** Shrinking a 12 megapixel photo is the slow
+part of a share, and most of a re-shared roll is already on the box. So the page
+hashes every picked photo's original first, asks `POST /api/inbox/known` which of
+those hashes the Inbox holds or has filed (500 at a time, a read call because it
+changes nothing), and skips those photos before they are decoded, shrunk or sent.
+They count as "already in Helmcentral". If the box cannot be asked, the batch
+stops with the error and sends nothing, because sending everything blind would
+bring the cost back. The upload still checks the same hashes on the box, so a
+photo that arrives in the gap between the question and the send is caught there.
 
 **A zeroed GPS block is missing.** `exif-gps.ts` counts a latitude or longitude
 only when its reference letter is N, S, E or W, a bearing only when its reference
@@ -61,8 +74,9 @@ the compass. A latitude without a longitude is dropped, not half used. The serve
 applies the same rule to the phone's position and stores both or neither.
 
 **One file per request, and the server answers whether it was new.** `POST
-/api/inbox` takes one multipart file and its fields through the same
-`receiveUploadedFile` intake as documents. It answers 201 `stored`, or 200
+/api/inbox` takes one multipart file, its fields and the preview (a JPEG of at
+most 512 KB, stored beside the file and served at `GET /api/inbox/:id/thumb`)
+through the same `receiveUploadedFile` intake as documents. It answers 201 `stored`, or 200
 `already_uploaded` with `where` set to `inbox`, `documents` or `filed`. Two checks
 decide it. The content hash of the stored bytes is compared with items and with
 Documents. The hash of the original file as the phone held it, `source_sha256`
@@ -70,9 +84,12 @@ Documents. The hash of the original file as the phone held it, `source_sha256`
 compared with waiting items and with `inbox_filed`, a table of originals already
 sent to a passage or Documents. The second check is what recognises a photo
 shrunk twice by different browsers, or one already filed whose copy has left the
-Inbox. A deleted photo is not remembered, so sharing it again brings it back. The
-phone sends files in order, counts each answer, and shows "12 uploaded, 3 already
-in Helmcentral". A file that fails is recorded and the rest go on. Only JPEG, PNG, GIF, WebP and PDF are accepted, so a HEIC that
+Inbox. The upload holds the lock of both hashes, in sorted order, so two shrinks
+of one original cannot both be stored. A deleted photo is not remembered, so sharing it again brings it back. The
+phone sends the files that remain in order, counts each answer, and shows "12
+uploaded, 3 already in Helmcentral". It refreshes the Inbox list once the batch
+ends, and the count every ten stored files, rather than after every file. A file
+that fails is recorded and the rest go on. Only JPEG, PNG, GIF, WebP and PDF are accepted, so a HEIC that
 reaches the server unconverted is refused loudly with a 415.
 
 **The list says where each item belongs, by time alone.** `GET /api/inbox` returns
@@ -94,8 +111,9 @@ passage on the next read after it is recorded. Nothing is assigned automatically
 
 **A phone clock that disagrees with the track is flagged.** When the phone sent a
 real position and the track has a point within fifteen minutes before the capture
-time, the item is flagged `gps_mismatch` if the two are more than a nautical mile
-apart. The phone's position is never used to place anything. The track is the
+time, the item is flagged `gps_mismatch` if the two are farther apart than a
+nautical mile plus how far the boat could have gone since that point (its speed
+over ground times the point's age). The phone's position is never used to place anything. The track is the
 boat's position; the phone's only job is to say the clock or zone may be wrong.
 
 **Filing is per item and fails per item.** `POST /api/inbox/file-to-passage` takes
@@ -108,9 +126,13 @@ step an upload takes, creates the sign with the default visibility and show time
 and the photo moment on, and finally removes the item. A failure at any step
 leaves the item in the Inbox and is reported against its id; a library copy made
 for a sign that then failed is deleted again. The other items still go through.
-An item is claimed in memory while it is filed, so two requests for it cannot both
-make a sign. If the sign exists but clearing the item failed, a retry finds a sign
-already using the photo, clears the item and makes no second one. Errors that
+An item is claimed in its own row while it is filed (a `filing_ms` time set by a
+conditional update, which changes a row for only one of two racing requests), so
+two requests for it cannot both make a sign. A claim older than five minutes, left
+by a crash, is taken over, and a request releases only the claim it took (the
+release matches the claim's timestamp), so a slow request cannot clear its
+successor's. Bin skips a claimed item and reports it as being filed; an item filed and removed in the meantime is left out of the answer. If the sign exists but clearing the item failed, a retry finds a sign
+already using the photo, clears the item and reports it as filed, making no second sign. Errors that
 carry paths or database detail are logged, and the operator sees a short message.
 `POST /api/inbox/file-to-documents` does the same into a chosen folder, with an
 optional title, and leaves the indexer to read the new Document. It refuses an
@@ -125,8 +147,9 @@ no default and must be placed by hand.
 **Titles without Mate are the nearest named place.** `GET
 /api/inbox/suggested-titles` looks up the last track point at or before each
 capture time, within fifteen minutes, and names it with the place-name resolver
-the passage names use, cut to the sign title limit. Lookups run four at a time
-and the request stops waiting after eight seconds. It answers an empty string
+the passage names use, cut to the sign title limit. Photos taken within about 100 metres of one another share one lookup, so a burst
+at an anchorage asks once. Lookups run four at a time and the request stops
+waiting after eight seconds; a lookup that finishes later writes nothing. It answers an empty string
 where there is no time, no track point, no name or no answer in time. The dialog shows them in an
 editable list; a sign is made only on confirm.
 
@@ -150,12 +173,17 @@ without complaint when storage is blocked.
 - A photo sits on the box twice for a while: once in the Inbox and, once filed,
   as a Document. Filing copies and then removes, because the two directories may
   be on different disks. The Inbox directory is part of the data to back up.
-- The contact sheet loads the 2560 pixel files themselves. The box makes no
-  thumbnails, by design, so a large Inbox is slow on a weak link until a thumbnail
-  step is added.
+- The contact sheet and the assign dialog load the 400 pixel previews. The
+  full-size file is served at `GET /api/inbox/:id/content` for anywhere a picture
+  is shown large, though no view does yet. The box makes no previews, by design:
+  it stores the one the phone sent and deletes it when the item is filed or
+  deleted. A PDF has none and shows a file icon.
 - Two Pixel behaviours still need a real run: whether a share-target share keeps
   the location and bearing, and how the GPS block looks then. The compass mark on
   an item records whether a bearing arrived, so the first real share answers it.
+- Hashing every picked photo before anything is sent means a big roll shows
+  "Checking" for a while with nothing sent, and the pure-TypeScript hash is slower
+  than Web Crypto. That is the price of never shrinking a photo the box has.
 - A photo that is in the library under other bytes is not a duplicate. Only an
   identical file is skipped. The fingerprint finds near-duplicates inside the
   Inbox, not against Documents.

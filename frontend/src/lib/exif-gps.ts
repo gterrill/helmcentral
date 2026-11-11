@@ -1,4 +1,4 @@
-import { exifDamaged, findExifTiff, guardExif } from '@/lib/exif-time'
+import { damagedExif, findExifTiff, guardExif, openTiff } from '@/lib/exif-tiff'
 
 // The phone's position and facing from a photo's GPS block. Android hides the
 // location of a photo picked in the browser by writing the block with every
@@ -23,7 +23,6 @@ const TAG_LON_REF = 3
 const TAG_LON = 4
 const TAG_DIR_REF = 16
 const TAG_DIR = 17
-const TYPE_ASCII = 2
 const TYPE_RATIONAL = 5
 
 /**
@@ -34,24 +33,9 @@ export function readExifGps(buffer: ArrayBuffer): ExifGps {
   return guardExif(() => {
     const tiff = findExifTiff(buffer)
     if (!tiff) return NONE
-    const { view, base, end } = tiff
-    if (base + 8 > end) throw exifDamaged()
-    const order = view.getUint16(base)
-    if (order !== 0x4949 && order !== 0x4d4d) throw exifDamaged()
-    const le = order === 0x4949
-    const u16 = (at: number) => { if (at + 2 > end) throw exifDamaged(); return view.getUint16(at, le) }
-    const u32 = (at: number) => { if (at + 4 > end) throw exifDamaged(); return view.getUint32(at, le) }
-    if (u16(base + 2) !== 42) throw exifDamaged()
+    const { u16, u32, entries, rootEntries, ascii, dataAt, within } = openTiff(tiff)
 
-    const entries = (ifdOffset: number): Map<number, number> => {
-      const at = base + ifdOffset
-      const n = u16(at)
-      const out = new Map<number, number>()
-      for (let i = 0; i < n; i++) out.set(u16(at + 2 + i * 12), at + 2 + i * 12)
-      return out
-    }
-    const root = entries(u32(base + 4))
-    const pointer = root.get(TAG_GPS_IFD)
+    const pointer = rootEntries().get(TAG_GPS_IFD)
     if (pointer === undefined) return NONE
     const gpsAt = u32(pointer + 8)
     if (gpsAt === 0) return NONE
@@ -59,26 +43,15 @@ export function readExifGps(buffer: ArrayBuffer): ExifGps {
 
     const letter = (tag: number): string => {
       const entry = gps.get(tag)
-      if (entry === undefined) return ''
-      if (u16(entry + 2) !== TYPE_ASCII) throw exifDamaged()
-      const count = u32(entry + 4)
-      const from = count <= 4 ? entry + 8 : base + u32(entry + 8)
-      if (from + count > end) throw exifDamaged()
-      let s = ''
-      for (let i = 0; i < count; i++) {
-        const c = view.getUint8(from + i)
-        if (c === 0) break
-        s += String.fromCharCode(c)
-      }
-      return s.trim().toUpperCase()
+      return entry === undefined ? '' : ascii(entry).trim().toUpperCase()
     }
     // The rationals of an entry as numbers, or null when any has a zero denominator.
     const rationals = (tag: number, want: number): number[] | null => {
       const entry = gps.get(tag)
       if (entry === undefined) return null
-      if (u16(entry + 2) !== TYPE_RATIONAL || u32(entry + 4) !== want) throw exifDamaged()
-      const from = base + u32(entry + 8)
-      if (from + want * 8 > end) throw exifDamaged()
+      if (u16(entry + 2) !== TYPE_RATIONAL || u32(entry + 4) !== want) throw damagedExif()
+      const from = dataAt(entry)
+      within(from, want * 8)
       const out: number[] = []
       for (let i = 0; i < want; i++) {
         const num = u32(from + i * 8)

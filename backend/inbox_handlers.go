@@ -1,17 +1,18 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,12 @@ const (
 	inboxTrackGap = passageBackdateMaxGap
 
 	inboxMaxBatch = 500
+
+	// inboxThumbMaxBytes caps the preview the phone sends beside a photo (it
+	// makes a JPEG about 400 px across, a few tens of kilobytes).
+	inboxThumbMaxBytes = 512 << 10
+
+	passagePhotosFolderName = "Passage photos"
 )
 
 // inboxPlaceLookup names the place at a position. A var so tests can stand in.
@@ -49,9 +56,14 @@ var inboxPlaceLookup = func(lat, lon float64) string {
 // the step fail after the photo has been copied into the library.
 var inboxCreateSign = func(s *passageStore, in replaySign) (replaySign, error) { return s.CreateSign(in) }
 
-var inboxUploadMIME = map[string]bool{
-	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true, "application/pdf": true,
-}
+// inboxUploadMIME is what the Inbox takes: the photos a sign can show, and PDFs.
+var inboxUploadMIME = func() map[string]bool {
+	m := map[string]bool{"application/pdf": true}
+	for mime := range signPhotoMIME {
+		m[mime] = true
+	}
+	return m
+}()
 
 // ── JSON shapes ──────────────────────────────────────────────────────────
 
@@ -62,31 +74,34 @@ type inboxGroupJSON struct {
 }
 
 type inboxItemJSON struct {
-	ID               string         `json:"id"`
-	Filename         string         `json:"filename"`
-	MIME             string         `json:"mime"`
-	SizeBytes        int64          `json:"size_bytes"`
-	CaptureMs        *int64         `json:"capture_ms"`
-	CaptureOffsetMin *int           `json:"capture_offset_min"`
-	BearingDeg       *float64       `json:"bearing_deg"`
-	HasBearing       bool           `json:"has_bearing"`
-	Fingerprint      string         `json:"fingerprint"`
-	Sharpness        float64        `json:"sharpness"`
-	CreatedMs        int64          `json:"created_ms"`
-	ContentURL       string         `json:"content_url"`
-	Group            inboxGroupJSON `json:"group"`
+	ID          string   `json:"id"`
+	Filename    string   `json:"filename"`
+	MIME        string   `json:"mime"`
+	SizeBytes   int64    `json:"size_bytes"`
+	CaptureMs   *int64   `json:"capture_ms"`
+	BearingDeg  *float64 `json:"bearing_deg"`
+	Fingerprint string   `json:"fingerprint"`
+	Sharpness   float64  `json:"sharpness"`
+	CreatedMs   int64    `json:"created_ms"`
+	ContentURL  string   `json:"content_url"`
+	// ThumbURL is the small preview, absent for an item with none (a PDF).
+	ThumbURL string         `json:"thumb_url,omitempty"`
+	Group    inboxGroupJSON `json:"group"`
 	// GPSMismatch says the phone's own position was more than a nautical mile
 	// from the boat's track at the capture time: the clock or zone is wrong.
 	GPSMismatch bool `json:"gps_mismatch"`
 }
 
 func toInboxItemJSON(it inboxItem, group inboxGroupJSON, mismatch bool) inboxItemJSON {
-	return inboxItemJSON{
+	out := inboxItemJSON{
 		ID: it.ID, Filename: it.Filename, MIME: it.MIME, SizeBytes: it.SizeBytes, CaptureMs: it.CaptureMs,
-		CaptureOffsetMin: it.CaptureOffsetMin, BearingDeg: it.BearingDeg, HasBearing: it.BearingDeg != nil,
-		Fingerprint: it.Fingerprint, Sharpness: it.Sharpness, CreatedMs: it.CreatedMs,
+		BearingDeg: it.BearingDeg, Fingerprint: it.Fingerprint, Sharpness: it.Sharpness, CreatedMs: it.CreatedMs,
 		ContentURL: "/api/inbox/" + it.ID + "/content", Group: group, GPSMismatch: mismatch,
 	}
+	if it.HasThumb {
+		out.ThumbURL = "/api/inbox/" + it.ID + "/thumb"
+	}
+	return out
 }
 
 func inboxStoreOrError(c echo.Context) (*inboxStore, bool) {
@@ -101,50 +116,99 @@ func inboxError(c echo.Context, status int, msg string) error {
 	return c.JSON(status, map[string]string{"error": msg})
 }
 
-// ── the track at a capture time ──────────────────────────────────────────
-
-// inboxTrackAt is the last track point at or before tMs, no older than
-// inboxTrackGap, or nil when the boat recorded nothing near then.
-func inboxTrackAt(ps *passageStore, tMs int64) (*recordedTrackPoint, error) {
-	p, err := scanTrackPoint(ps.db.QueryRow(
-		`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms <= ? AND t_ms >= ? ORDER BY t_ms DESC, id DESC LIMIT 1`,
-		tMs, tMs-inboxTrackGap.Milliseconds()))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
+// inboxHTTPError is a failure with the status and words the caller should see.
+// Anything else that reaches inboxRespond is logged and answered as a 500.
+type inboxHTTPError struct {
+	status int
+	msg    string
 }
 
-// lastPassageEndMs is the end of the latest passage, hidden or not, or 0 with
-// none. Filing accepts a time inside a hidden passage, so grouping counts it too.
-func lastPassageEndMs(ps *passageStore) (int64, error) {
-	var end sql.NullInt64
-	if err := ps.db.QueryRow(`SELECT MAX(end_ms) FROM passages`).Scan(&end); err != nil {
-		return 0, err
+func (e inboxHTTPError) Error() string { return e.msg }
+
+func inboxRespond(c echo.Context, err error) error {
+	var he inboxHTTPError
+	if errors.As(err, &he) {
+		return inboxError(c, he.status, he.msg)
 	}
-	return end.Int64, nil
+	log.Printf("inbox: %v", err)
+	return inboxError(c, http.StatusInternalServerError, "the Inbox could not do that; the Helmcentral log says why")
+}
+
+// validHex says s is lowercase hex of minLen to maxLen characters.
+func validHex(s string, minLen, maxLen int) bool {
+	if len(s) < minLen || len(s) > maxLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if ch := s[i]; !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// ── the track at a capture time ──────────────────────────────────────────
+
+// inboxTrack answers "where was the boat at this time" for many times from the
+// few stretches of track they fall in, read once each.
+type inboxTrack struct {
+	fixes []trackFix // oldest first
+}
+
+// loadInboxTrack reads the track from inboxTrackGap before the earliest time
+// to the latest. Times far apart read only the stretches around them, so one
+// stray old photo does not pull in months of track.
+func loadInboxTrack(ps *passageStore, times []int64) (*inboxTrack, error) {
+	sorted := append([]int64(nil), times...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	gap := inboxTrackGap.Milliseconds()
+	tr := &inboxTrack{}
+	for i := 0; i < len(sorted); {
+		start, end := sorted[i]-gap, sorted[i]
+		for i++; i < len(sorted) && sorted[i]-gap <= end; i++ {
+			end = sorted[i]
+		}
+		fixes, err := ps.trackFixesIn(start, end)
+		if err != nil {
+			return nil, err
+		}
+		tr.fixes = append(tr.fixes, fixes...)
+	}
+	return tr, nil
+}
+
+// at is the last fix at or before tMs, no older than inboxTrackGap, or nil
+// when the boat recorded nothing near then.
+func (tr *inboxTrack) at(tMs int64) *trackFix {
+	i := sort.Search(len(tr.fixes), func(i int) bool { return tr.fixes[i].TMs > tMs }) - 1
+	if i < 0 || tr.fixes[i].TMs < tMs-inboxTrackGap.Milliseconds() {
+		return nil
+	}
+	return &tr.fixes[i]
+}
+
+func captureTimes(items []inboxItem) []int64 {
+	var out []int64
+	for _, it := range items {
+		if it.CaptureMs != nil {
+			out = append(out, *it.CaptureMs)
+		}
+	}
+	return out
 }
 
 // ── POST /api/inbox ──────────────────────────────────────────────────────
 
-var inboxHexRE = regexp.MustCompile(`^[0-9a-f]{0,64}$`)
-
 // inboxMeta is what the phone sends beside the file, already checked.
 type inboxMeta struct {
-	captureMs        *int64
-	captureOffsetMin *int
-	bearingDeg       *float64
-	phoneLat         *float64
-	phoneLon         *float64
-	fingerprint      string
-	sharpness        float64
-	sourceSHA256     string
+	captureMs    *int64
+	bearingDeg   *float64
+	phoneLat     *float64
+	phoneLon     *float64
+	fingerprint  string
+	sharpness    float64
+	sourceSHA256 string
 }
-
-var inboxSHA256RE =regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func parseInboxMeta(f map[string]string) (inboxMeta, error) {
 	var m inboxMeta
@@ -165,13 +229,6 @@ func parseInboxMeta(f map[string]string) (inboxMeta, error) {
 			return m, errors.New("capture_ms must be a Unix time in milliseconds")
 		}
 		m.captureMs = &v
-	}
-	if raw := strings.TrimSpace(f["capture_offset_min"]); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < -14*60 || v > 14*60 {
-			return m, errors.New("capture_offset_min must be minutes between -840 and 840")
-		}
-		m.captureOffsetMin = &v
 	}
 	var err error
 	if m.bearingDeg, err = num("bearing_deg"); err != nil {
@@ -211,21 +268,111 @@ func parseInboxMeta(f map[string]string) (inboxMeta, error) {
 		m.sharpness = *sharp
 	}
 	if raw := strings.TrimSpace(f["source_sha256"]); raw != "" {
-		if !inboxSHA256RE.MatchString(raw) {
+		if !validHex(raw, 64, 64) {
 			return m, errors.New("source_sha256 must be 64 lowercase hex characters")
 		}
 		m.sourceSHA256 = raw
 	}
 	m.fingerprint = strings.TrimSpace(f["fingerprint"])
-	if !inboxHexRE.MatchString(m.fingerprint) {
+	if !validHex(m.fingerprint, 0, 64) {
 		return m, errors.New("fingerprint must be hex, at most 64 characters")
 	}
 	return m, nil
 }
 
 var inboxFieldNames = map[string]bool{
-	"capture_ms": true, "capture_offset_min": true, "bearing_deg": true, "phone_lat": true,
+	"capture_ms": true, "bearing_deg": true, "phone_lat": true,
 	"phone_lon": true, "fingerprint": true, "sharpness": true, "source_sha256": true,
+}
+
+// looksLikeJPEG checks the three bytes every JPEG starts with.
+func looksLikeJPEG(b []byte) bool {
+	return len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF
+}
+
+// inboxDuplicateWhere says where these bytes are already held: "inbox" (this
+// file, or the same original shrunk another way), "filed" (the original left
+// the Inbox before), "documents", or "" when they are new.
+func inboxDuplicateWhere(store *inboxStore, docs *documentStore, sourceSHA, sha string) (string, error) {
+	if sourceSHA != "" {
+		if where, err := store.SourceWhere(sourceSHA); err != nil || where != inboxWhereNone {
+			return where, err
+		}
+	}
+	if _, found, err := store.GetBySHA(sha); err != nil {
+		return "", err
+	} else if found {
+		return inboxWhereInbox, nil
+	}
+	if _, found, err := docs.GetBySHA(sha); err != nil {
+		return "", err
+	} else if found {
+		return "documents", nil
+	}
+	return inboxWhereNone, nil
+}
+
+// acceptInboxUpload checks a received upload and stores it. It returns the new
+// item, or the place the bytes were already held. The caller removes up's temp
+// file, which is gone once the bytes are stored.
+func acceptInboxUpload(store *inboxStore, docs *documentStore, up uploadedFile, fields map[string]string, thumb []byte, thumbTooBig bool) (item inboxItem, where string, err error) {
+	meta, err := parseInboxMeta(fields)
+	if err != nil {
+		return item, "", inboxHTTPError{http.StatusBadRequest, err.Error()}
+	}
+	if thumbTooBig || (thumb != nil && !looksLikeJPEG(thumb)) {
+		return item, "", inboxHTTPError{http.StatusBadRequest, fmt.Sprintf("thumb must be a JPEG of at most %d bytes", inboxThumbMaxBytes)}
+	}
+	mimeType := detectDocumentMIME(up.head, up.filename)
+	if !inboxUploadMIME[mimeType] {
+		return item, "", inboxHTTPError{http.StatusUnsupportedMediaType, "only photos (JPEG, PNG, GIF, WebP) and PDFs can be shared to the Inbox; this file reads as " + mimeType}
+	}
+
+	// Two shrinks of one original have different bytes, so the bytes' lock alone
+	// would let both through: the original's hash is locked too, in sorted order
+	// so two uploads cannot wait on each other.
+	locks := []string{up.sha}
+	if meta.sourceSHA256 != "" && meta.sourceSHA256 != up.sha {
+		locks = append(locks, meta.sourceSHA256)
+		sort.Strings(locks)
+	}
+	for _, sha := range locks {
+		defer lockDocumentSHA(sha)()
+	}
+	if where, err = inboxDuplicateWhere(store, docs, meta.sourceSHA256, up.sha); err != nil || where != inboxWhereNone {
+		return item, where, err
+	}
+
+	final := inboxFilePath(up.sha)
+	if err := os.Rename(up.tmpPath, final); err != nil {
+		return item, "", fmt.Errorf("store upload: %w", err)
+	}
+	item, err = store.Insert(inboxItem{
+		SHA256: up.sha, Filename: filepathBase(up.filename), MIME: mimeType, SizeBytes: up.size,
+		CaptureMs: meta.captureMs, BearingDeg: meta.bearingDeg, PhoneLat: meta.phoneLat, PhoneLon: meta.phoneLon,
+		Fingerprint: meta.fingerprint, Sharpness: meta.sharpness, SourceSHA256: meta.sourceSHA256, HasThumb: thumb != nil,
+	})
+	if errors.Is(err, errInboxDuplicate) {
+		// Lost a race to an identical upload: its files, thumbnail included, are
+		// the ones in place, and this one wrote nothing beside them.
+		return item, inboxWhereInbox, nil
+	}
+	if err != nil {
+		os.Remove(final)
+		return item, "", err
+	}
+	// The preview is written only once the row is ours, so a duplicate never
+	// touches the existing item's.
+	if thumb != nil {
+		if err := os.WriteFile(inboxThumbPath(up.sha), thumb, 0o644); err != nil {
+			if derr := store.Delete(item.ID); derr != nil {
+				log.Printf("inbox: undo %s: %v", item.ID, derr)
+			}
+			os.Remove(final)
+			return inboxItem{}, "", fmt.Errorf("store thumbnail: %w", err)
+		}
+	}
+	return item, inboxWhereNone, nil
 }
 
 // uploadInboxHandler takes one file per request. A file whose bytes are
@@ -247,8 +394,15 @@ func uploadInboxHandler(c echo.Context) error {
 	}
 
 	fields := map[string]string{}
+	var thumb []byte
+	thumbTooBig := false
 	up, err := receiveUploadedFile(c, dir, func(name string, part *multipart.Part) error {
 		defer part.Close()
+		if name == "thumb" {
+			b, rerr := io.ReadAll(io.LimitReader(part, inboxThumbMaxBytes+1))
+			thumb, thumbTooBig = b, len(b) > inboxThumbMaxBytes
+			return rerr
+		}
 		if !inboxFieldNames[name] {
 			return nil
 		}
@@ -259,85 +413,53 @@ func uploadInboxHandler(c echo.Context) error {
 		fields[name] = string(b)
 		return nil
 	})
-	if err != nil {
+	if err != nil || c.Response().Committed { // the intake already answered
 		return err
 	}
-	meta, err := parseInboxMeta(fields)
-	if err != nil {
-		os.Remove(up.tmpPath)
-		return inboxError(c, http.StatusBadRequest, err.Error())
-	}
-	mimeType := detectDocumentMIME(up.head, up.filename)
-	if !inboxUploadMIME[mimeType] {
-		os.Remove(up.tmpPath)
-		return inboxError(c, http.StatusUnsupportedMediaType, "only photos (JPEG, PNG, GIF, WebP) and PDFs can be shared to the Inbox; this file reads as "+mimeType)
-	}
+	// Gone already once the bytes are stored, so this only ever cleans up a refusal.
+	defer os.Remove(up.tmpPath)
 
-	unlock := lockDocumentSHA(up.sha)
-	defer unlock()
-	// The same original, however it was shrunk, is not a new photo.
-	if meta.sourceSHA256 != "" {
-		inInbox, err := store.HasSource(meta.sourceSHA256)
-		if err == nil && inInbox {
-			os.Remove(up.tmpPath)
-			return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": "inbox"})
-		}
-		filed := false
-		if err == nil {
-			filed, err = store.SourceFiled(meta.sourceSHA256)
-		}
-		if err != nil {
-			os.Remove(up.tmpPath)
-			log.Printf("inbox: %v", err)
-			return inboxError(c, http.StatusInternalServerError, "could not check the Inbox")
-		}
-		if filed {
-			os.Remove(up.tmpPath)
-			return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": "filed"})
-		}
-	}
-	if _, found, err := store.GetBySHA(up.sha); err != nil {
-		os.Remove(up.tmpPath)
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not check the Inbox")
-	} else if found {
-		os.Remove(up.tmpPath)
-		return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": "inbox"})
-	}
-	if _, found, err := docs.GetBySHA(up.sha); err != nil {
-		os.Remove(up.tmpPath)
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not check Documents")
-	} else if found {
-		os.Remove(up.tmpPath)
-		return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": "documents"})
-	}
-
-	final := inboxFilePath(up.sha)
-	if err := os.Rename(up.tmpPath, final); err != nil {
-		os.Remove(up.tmpPath)
-		log.Printf("inbox: store upload: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "failed to store upload")
-	}
-	item, err := store.Insert(inboxItem{
-		SHA256: up.sha, Filename: filepathBase(up.filename), MIME: mimeType, SizeBytes: up.size,
-		CaptureMs: meta.captureMs, CaptureOffsetMin: meta.captureOffsetMin, BearingDeg: meta.bearingDeg,
-		PhoneLat: meta.phoneLat, PhoneLon: meta.phoneLon, Fingerprint: meta.fingerprint, Sharpness: meta.sharpness,
-		SourceSHA256: meta.sourceSHA256,
-	})
-	if errors.Is(err, errInboxDuplicate) {
-		// Lost a race to an identical upload: its file is the one in place.
-		return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": "inbox"})
-	}
-	if err != nil {
-		os.Remove(final)
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "failed to record the upload")
+	item, where, err := acceptInboxUpload(store, docs, up, fields, thumb, thumbTooBig)
+	switch {
+	case err != nil:
+		return inboxRespond(c, err)
+	case where != inboxWhereNone:
+		return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": where})
 	}
 	return c.JSON(http.StatusCreated, map[string]any{
 		"status": "stored",
 		"item":   toInboxItemJSON(item, inboxGroupJSON{Kind: inboxGroupNoTime}, false),
 	})
+}
+
+// ── POST /api/inbox/known ────────────────────────────────────────────────
+
+// inboxKnownHandler answers which of the given original-file hashes the Inbox
+// already holds or has filed, so the phone can skip shrinking and sending them.
+func inboxKnownHandler(c echo.Context) error {
+	store, ok := inboxStoreOrError(c)
+	if !ok {
+		return nil
+	}
+	var body struct {
+		Hashes []string `json:"hashes"`
+	}
+	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
+		return err
+	}
+	if len(body.Hashes) == 0 || len(body.Hashes) > inboxMaxBatch {
+		return inboxError(c, http.StatusBadRequest, fmt.Sprintf("hashes must hold 1 to %d entries", inboxMaxBatch))
+	}
+	for _, h := range body.Hashes {
+		if !validHex(h, 64, 64) {
+			return inboxError(c, http.StatusBadRequest, "every hash must be 64 lowercase hex characters")
+		}
+	}
+	known, err := store.KnownSources(body.Hashes)
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"known": known})
 }
 
 // ── GET /api/inbox ───────────────────────────────────────────────────────
@@ -367,18 +489,19 @@ func listInboxHandler(c echo.Context) error {
 	}
 	items, err := store.List()
 	if err != nil {
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not list the Inbox")
+		return inboxRespond(c, err)
 	}
 	passages, err := ps.ListPassages()
 	if err != nil {
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not read the passages")
+		return inboxRespond(c, err)
 	}
-	lastEnd, err := lastPassageEndMs(ps)
+	lastEnd, err := ps.LastPassageEndMs()
 	if err != nil {
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not read the passages")
+		return inboxRespond(c, err)
+	}
+	track, err := loadInboxTrack(ps, captureTimes(items))
+	if err != nil {
+		return inboxRespond(c, err)
 	}
 	out := make([]inboxItemJSON, 0, len(items))
 	for _, it := range items {
@@ -386,11 +509,7 @@ func listInboxHandler(c echo.Context) error {
 		mismatch := false
 		if it.CaptureMs != nil {
 			t := *it.CaptureMs
-			pt, err := inboxTrackAt(ps, t)
-			if err != nil {
-				log.Printf("inbox: %v", err)
-				return inboxError(c, http.StatusInternalServerError, "could not read the track")
-			}
+			pt := track.at(t)
 			group = inboxGroupJSON{Kind: inboxGroupOffPassage}
 			for _, p := range passages { // newest start first
 				if p.Start.UnixMilli() <= t && t <= p.End.UnixMilli() {
@@ -403,7 +522,12 @@ func listInboxHandler(c echo.Context) error {
 				group = inboxGroupJSON{Kind: inboxGroupUnderway}
 			}
 			if pt != nil && it.PhoneLat != nil && it.PhoneLon != nil {
-				mismatch = haversineMeters(*it.PhoneLat, *it.PhoneLon, pt.Lat, pt.Lon) > inboxMismatchMeters
+				// The fix may be minutes old: allow for the boat's travel since.
+				allowance := inboxMismatchMeters
+				if pt.SOGKts != nil {
+					allowance += *pt.SOGKts * inboxMismatchMeters * float64(t-pt.TMs) / float64(time.Hour.Milliseconds())
+				}
+				mismatch = haversineMeters(*it.PhoneLat, *it.PhoneLon, pt.Lat, pt.Lon) > allowance
 			}
 		}
 		out = append(out, toInboxItemJSON(it, group, mismatch))
@@ -419,10 +543,24 @@ func inboxCountHandler(c echo.Context) error {
 	}
 	n, err := store.Count()
 	if err != nil {
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not count the Inbox")
+		return inboxRespond(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]int{"count": n})
+}
+
+// serveInboxFile sends one of an item's stored files.
+func serveInboxFile(c echo.Context, it inboxItem, path, contentType string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		log.Printf("inbox: open %s: %v", it.ID, err)
+		return inboxError(c, http.StatusInternalServerError, "the file is missing from Inbox storage")
+	}
+	defer f.Close()
+	h := c.Response().Header()
+	h.Set(echo.HeaderContentType, contentType)
+	h.Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(c.Response(), c.Request(), it.Filename, time.UnixMilli(it.CreatedMs), f)
+	return nil
 }
 
 // inboxContentHandler is GET /api/inbox/:id/content.
@@ -436,35 +574,50 @@ func inboxContentHandler(c echo.Context) error {
 		return inboxError(c, http.StatusNotFound, err.Error())
 	}
 	if err != nil {
-		log.Printf("inbox: %v", err)
-		return inboxError(c, http.StatusInternalServerError, "could not read the item")
+		return inboxRespond(c, err)
 	}
-	f, err := os.Open(inboxFilePath(it.SHA256))
+	return serveInboxFile(c, it, inboxFilePath(it.SHA256), it.MIME)
+}
+
+// inboxThumbHandler is GET /api/inbox/:id/thumb, the small preview of a photo.
+func inboxThumbHandler(c echo.Context) error {
+	store, ok := inboxStoreOrError(c)
+	if !ok {
+		return nil
+	}
+	it, err := store.Get(c.Param("id"))
+	if errors.Is(err, errInboxItemNotFound) {
+		return inboxError(c, http.StatusNotFound, err.Error())
+	}
 	if err != nil {
-		log.Printf("inbox: open %s: %v", it.ID, err)
-		return inboxError(c, http.StatusInternalServerError, "the file is missing from Inbox storage")
+		return inboxRespond(c, err)
 	}
-	defer f.Close()
-	h := c.Response().Header()
-	h.Set(echo.HeaderContentType, it.MIME)
-	h.Set("X-Content-Type-Options", "nosniff")
-	http.ServeContent(c.Response(), c.Request(), it.Filename, time.UnixMilli(it.CreatedMs), f)
-	return nil
+	if !it.HasThumb {
+		return inboxError(c, http.StatusNotFound, "this item has no preview")
+	}
+	return serveInboxFile(c, it, inboxThumbPath(it.SHA256), "image/jpeg")
 }
 
 // ── POST /api/inbox/bin ──────────────────────────────────────────────────
 
-// removeInboxItem deletes the row, then the file, under the content's lock.
+// removeInboxFiles deletes an item's stored file and its preview.
+func removeInboxFiles(it inboxItem) error {
+	for _, p := range []string{inboxFilePath(it.SHA256), inboxThumbPath(it.SHA256)} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove inbox file: %w", err)
+		}
+	}
+	return nil
+}
+
+// removeInboxItem deletes the row, then the files, under the content's lock.
 func removeInboxItem(store *inboxStore, it inboxItem) error {
 	unlock := lockDocumentSHA(it.SHA256)
 	defer unlock()
 	if err := store.Delete(it.ID); err != nil {
 		return err
 	}
-	if err := os.Remove(inboxFilePath(it.SHA256)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove inbox file: %w", err)
-	}
-	return nil
+	return removeInboxFiles(it)
 }
 
 // binInboxHandler deletes the given items outright. Ids already gone are
@@ -483,25 +636,56 @@ func binInboxHandler(c echo.Context) error {
 	if len(body.IDs) == 0 || len(body.IDs) > inboxMaxBatch {
 		return inboxError(c, http.StatusBadRequest, fmt.Sprintf("ids must hold 1 to %d items", inboxMaxBatch))
 	}
-	deleted := 0
-	for _, id := range body.IDs {
-		it, err := store.Get(id)
-		if errors.Is(err, errInboxItemNotFound) {
-			continue
-		}
-		if err == nil {
-			err = removeInboxItem(store, it)
-		}
-		if errors.Is(err, errInboxItemNotFound) {
-			continue
-		}
-		if err != nil {
-			log.Printf("inbox: bin %s: %v", id, err)
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "could not remove every item", "deleted": deleted})
-		}
-		deleted++
+	found, err := store.GetMany(body.IDs)
+	if err != nil {
+		return inboxRespond(c, err)
 	}
-	return c.JSON(http.StatusOK, map[string]int{"deleted": deleted})
+	items := make([]inboxItem, 0, len(found))
+	ids := make([]string, 0, len(found))
+	for id, it := range found {
+		items, ids = append(items, it), append(ids, id)
+	}
+	// Locked in one order, so two bins that overlap cannot wait on each other.
+	sort.Slice(items, func(i, j int) bool { return items[i].SHA256 < items[j].SHA256 })
+	for _, it := range items {
+		defer lockDocumentSHA(it.SHA256)()
+	}
+	removed, err := store.DeleteUnclaimed(ids)
+	if err != nil {
+		log.Printf("inbox: bin: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "could not remove every item", "deleted": 0})
+	}
+	gone := make(map[string]bool, len(removed))
+	for _, id := range removed {
+		gone[id] = true
+	}
+	// An item left alone and still there is being filed; its files stay with it.
+	// One filed (and so removed) since it was read is neither deleted nor busy,
+	// and is left out of the answer.
+	var left []string
+	for _, it := range items {
+		if !gone[it.ID] {
+			left = append(left, it.ID)
+		}
+	}
+	stillThere, err := store.GetMany(left)
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	busy := []inboxResult{}
+	for _, it := range items {
+		if !gone[it.ID] {
+			if _, ok := stillThere[it.ID]; ok {
+				busy = append(busy, inboxResult{ID: it.ID, Error: errInboxBusy.Error()})
+			}
+			continue
+		}
+		if err := removeInboxFiles(it); err != nil {
+			log.Printf("inbox: bin %s: %v", it.ID, err)
+			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "could not remove every item", "deleted": len(removed)})
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"deleted": len(removed), "busy": busy})
 }
 
 // ── filing ───────────────────────────────────────────────────────────────
@@ -530,26 +714,8 @@ func inboxFail(id string, err error) inboxResult {
 	return inboxResult{ID: id, Error: msg}
 }
 
-// inboxClaims holds the ids being filed right now, so a double tap or a retry
-// that overlaps cannot make two signs from one photo.
-var inboxClaims sync.Map
-
-func claimInboxItem(id string) (release func(), err error) {
-	if _, busy := inboxClaims.LoadOrStore(id, struct{}{}); busy {
-		return nil, refusedf("this item is already being filed")
-	}
-	return func() { inboxClaims.Delete(id) }, nil
-}
-
 // inboxRemoveItem clears a filed item from the Inbox. A var so a test can make it fail.
 var inboxRemoveItem = removeInboxItem
-
-// signCount is how many signs show this library document.
-func signCountForDocument(ps *passageStore, docID string) (int, error) {
-	var n int
-	err := ps.db.QueryRow(`SELECT COUNT(*) FROM replay_signs WHERE document_id = ?`, docID).Scan(&n)
-	return n, err
-}
 
 // inboxRefusal is a plain-words reason an item cannot be filed as asked.
 type inboxRefusal struct{ msg string }
@@ -558,52 +724,74 @@ func (e inboxRefusal) Error() string { return e.msg }
 
 func refusedf(format string, a ...any) error { return inboxRefusal{fmt.Sprintf(format, a...)} }
 
-var passagePhotosFolderMu sync.Mutex
-
-const passagePhotosFolderName = "Passage photos"
-
-// passagePhotosFolderID finds the root folder the sign editor also uses (by
-// name, ignoring capitals) or makes it.
-func passagePhotosFolderID(docs *documentStore) (string, error) {
-	passagePhotosFolderMu.Lock()
-	defer passagePhotosFolderMu.Unlock()
-	find := func() (string, error) {
-		folders, _, err := docs.ListFolder(nil)
-		if err != nil {
-			return "", err
-		}
-		for _, f := range folders {
-			if strings.EqualFold(f.Name, passagePhotosFolderName) {
-				return f.ID, nil
-			}
-		}
-		return "", nil
+// withClaimedInboxItem holds the filing claim on an item while file runs, so a
+// double tap or an overlapping retry cannot make two signs from one photo. The
+// item is read after the claim, so one another request just filed is gone.
+func withClaimedInboxItem(store *inboxStore, id string, file func(it inboxItem) (inboxResult, error)) (inboxResult, error) {
+	token, err := store.Claim(id)
+	if errors.Is(err, errInboxBusy) {
+		return inboxResult{}, refusedf("%s", err.Error())
+	} else if err != nil {
+		return inboxResult{}, err
 	}
-	if id, err := find(); err != nil || id != "" {
-		return id, err
-	}
-	f, err := docs.CreateFolder(passagePhotosFolderName, nil)
-	if errors.Is(err, errFolderNameTaken) {
-		if id, ferr := find(); ferr != nil || id != "" {
-			return id, ferr
+	defer func() {
+		if err := store.Release(id, token); err != nil {
+			log.Printf("inbox: %v", err)
 		}
-	}
+	}()
+	it, err := store.Get(id)
 	if err != nil {
-		return "", err
+		return inboxResult{}, err
 	}
-	return f.ID, nil
+	return file(it)
 }
 
-// inboxCopyToLibrary makes a Document of an item's file, through the same
-// store-and-dedupe step an upload takes, so the indexer picks it up. created
-// is false when the library already held these bytes, in which case existing
-// is that document.
-func inboxCopyToLibrary(it inboxItem, folderID *string, title string) (doc document, created bool, err error) {
+// finishFiled is the tail both ways of filing share: remember the original
+// before clearing, so a failure to clear still leaves the photo recognised if
+// it is shared again; clear the item; wake the indexer. A failed clear comes
+// back as a refusal saying clearFailed.
+func finishFiled(store *inboxStore, it inboxItem, clearFailed string) error {
+	if err := store.MarkFiled(it.SourceSHA256); err != nil {
+		log.Printf("inbox: %v", err)
+	}
+	if err := inboxRemoveItem(store, it); err != nil {
+		log.Printf("inbox: clearing %s: %v", it.ID, err)
+		return refusedf("%s", clearFailed)
+	}
+	wakeDocumentIndexer()
+	return nil
+}
+
+// inboxLibrary copies Inbox files into Documents. What a request needs from the
+// library is worked out on first use and kept, so a batch asks once however
+// many items it files, and a batch that files nothing creates nothing.
+type inboxLibrary struct {
+	photosFolder func() (string, error)
+	enrich       func() (bool, error)
+}
+
+func newInboxLibrary(docs *documentStore) *inboxLibrary {
+	return &inboxLibrary{
+		photosFolder: sync.OnceValues(func() (string, error) {
+			f, err := docs.FindOrCreateRootFolder(passagePhotosFolderName)
+			return f.ID, err
+		}),
+		enrich: sync.OnceValues(func() (bool, error) {
+			enrich, _, err := documentEnrichFlag("inbox: file")
+			return enrich, err
+		}),
+	}
+}
+
+// copy makes a Document of an item's file, through the same store-and-dedupe
+// step an upload takes, so the indexer picks it up. created is false when the
+// library already held these bytes, in which case doc is that document.
+func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string) (doc document, created bool, err error) {
 	dir := documentsDirPath()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return document{}, false, fmt.Errorf("prepare document storage: %w", err)
 	}
-	enrich, _, err := documentEnrichFlag("inbox: file")
+	enrich, err := l.enrich()
 	if err != nil {
 		return document{}, false, err
 	}
@@ -635,7 +823,7 @@ func inboxCopyToLibrary(it inboxItem, folderID *string, title string) (doc docum
 	return doc, created, err
 }
 
-// inboxDiscardDocument undoes inboxCopyToLibrary for a document it just made.
+// inboxDiscardDocument undoes copy for a document it just made.
 func inboxDiscardDocument(docs *documentStore, doc document) {
 	unlock := lockDocumentSHA(doc.SHA256)
 	defer unlock()
@@ -648,6 +836,36 @@ func inboxDiscardDocument(docs *documentStore, doc document) {
 	}
 }
 
+// runInboxBatch is the shape both filing calls share. It binds the body, checks
+// how many items it holds, lets start refuse the request or prepare what the
+// batch shares (and return the function that files one item), then files each
+// item on its own: a failure leaves that item in the Inbox and is reported
+// against its id, and the others still go through.
+func runInboxBatch[B, R any](c echo.Context, itemsOf func(*B) []R, idOf func(R) string,
+	start func(*B) (func(R) (inboxResult, error), error)) error {
+	var body B
+	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
+		return err
+	}
+	items := itemsOf(&body)
+	if len(items) == 0 || len(items) > inboxMaxBatch {
+		return inboxError(c, http.StatusBadRequest, fmt.Sprintf("items must hold 1 to %d entries", inboxMaxBatch))
+	}
+	file, err := start(&body)
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	results := make([]inboxResult, 0, len(items))
+	for _, req := range items {
+		res, err := file(req)
+		if err != nil {
+			res = inboxFail(idOf(req), err)
+		}
+		results = append(results, res)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"results": results})
+}
+
 type inboxPassageRequest struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -656,87 +874,69 @@ type inboxPassageRequest struct {
 	TMs *int64 `json:"t_ms"`
 }
 
-func fileInboxItemToPassage(store *inboxStore, ps *passageStore, docs *documentStore, req inboxPassageRequest) (inboxResult, error) {
-	release, err := claimInboxItem(req.ID)
-	if err != nil {
-		return inboxResult{}, err
-	}
-	defer release()
-	// Read after the claim, so an item another request just filed is gone.
-	it, err := store.Get(req.ID)
-	if err != nil {
-		return inboxResult{}, err
-	}
-	title := strings.TrimSpace(req.Title)
-	if n := utf8.RuneCountInString(title); n == 0 || n > signTitleMax {
-		return inboxResult{}, refusedf("a title of 1 to %d characters is required", signTitleMax)
-	}
-	if !signPhotoMIME[it.MIME] {
-		return inboxResult{}, refusedf("only photos can be signs; this is a %s", it.MIME)
-	}
-	var tMs int64
-	switch {
-	case req.TMs != nil:
-		tMs = *req.TMs
-	case it.CaptureMs != nil:
-		tMs = *it.CaptureMs
-	default:
-		return inboxResult{}, refusedf("this photo has no capture time; choose a time on a passage")
-	}
-	if err := timeInsideAPassage(ps.db, tMs); err != nil {
-		return inboxResult{}, refusedf("that time is not inside any recorded passage")
-	}
-	folder, err := passagePhotosFolderID(docs)
-	if err != nil {
-		return inboxResult{}, err
-	}
-	doc, created, err := inboxCopyToLibrary(it, &folder, "")
-	if err != nil {
-		return inboxResult{}, err
-	}
-	if !created {
-		// The library already held this photo. If a sign shows it, an earlier
-		// filing got as far as the sign and failed to clear the item: finish
-		// that, rather than make a second sign.
-		n, cerr := signCountForDocument(ps, doc.ID)
-		if cerr != nil {
-			return inboxResult{}, cerr
+func fileInboxItemToPassage(store *inboxStore, ps *passageStore, docs *documentStore, lib *inboxLibrary, req inboxPassageRequest) (inboxResult, error) {
+	return withClaimedInboxItem(store, req.ID, func(it inboxItem) (inboxResult, error) {
+		title := strings.TrimSpace(req.Title)
+		if n := utf8.RuneCountInString(title); n == 0 || n > signTitleMax {
+			return inboxResult{}, refusedf("a title of 1 to %d characters is required", signTitleMax)
 		}
-		if n > 0 {
-			if rerr := inboxRemoveItem(store, it); rerr != nil {
-				log.Printf("inbox: clearing %s: %v", it.ID, rerr)
-				return inboxResult{}, refusedf("a sign already uses this photo, but it could not be cleared from the Inbox; delete it there")
+		if !signPhotoMIME[it.MIME] {
+			return inboxResult{}, refusedf("only photos can be signs; this is a %s", it.MIME)
+		}
+		var tMs int64
+		switch {
+		case req.TMs != nil:
+			tMs = *req.TMs
+		case it.CaptureMs != nil:
+			tMs = *it.CaptureMs
+		default:
+			return inboxResult{}, refusedf("this photo has no capture time; choose a time on a passage")
+		}
+		if err := timeInsideAPassage(ps.db, tMs); errors.Is(err, errPassageInvalid) {
+			return inboxResult{}, refusedf("that time is not inside any recorded passage")
+		} else if err != nil {
+			return inboxResult{}, err // a database failure, logged by inboxFail
+		}
+		folder, err := lib.photosFolder()
+		if err != nil {
+			return inboxResult{}, err
+		}
+		doc, created, err := lib.copy(it, &folder, "")
+		if err != nil {
+			return inboxResult{}, err
+		}
+		if !created {
+			// The library already held this photo. If a sign shows it, an earlier
+			// filing got as far as the sign and failed to clear the item: finish
+			// that, rather than make a second sign.
+			n, err := ps.SignCountForDocument(doc.ID)
+			if err != nil {
+				return inboxResult{}, err
 			}
-			if merr := store.MarkFiled(it.SourceSHA256); merr != nil {
-				log.Printf("inbox: %v", merr)
+			if n > 0 {
+				if err := finishFiled(store, it, "a sign already uses this photo, but it could not be cleared from the Inbox; delete it there"); err != nil {
+					return inboxResult{}, err
+				}
+				// Cleared, which is what the operator asked for.
+				return inboxResult{ID: it.ID, OK: true, DocumentID: doc.ID}, nil
 			}
-			return inboxResult{}, refusedf("a sign already uses this photo, so it was cleared from the Inbox")
 		}
-	}
-	moment := true
-	sign, err := inboxCreateSign(ps, replaySign{TMs: tMs, Title: title, DocumentID: &doc.ID, Visibility: signPassing, ShowS: signShowDef, PhotoMoment: &moment})
-	if err != nil {
-		if created {
-			inboxDiscardDocument(docs, doc)
+		moment := true
+		sign, err := inboxCreateSign(ps, replaySign{TMs: tMs, Title: title, DocumentID: &doc.ID, Visibility: signPassing, ShowS: signShowDef, PhotoMoment: &moment})
+		if err != nil {
+			if created {
+				inboxDiscardDocument(docs, doc)
+			}
+			return inboxResult{}, err
 		}
-		return inboxResult{}, err
-	}
-	// Remember the original before clearing, so a failure to clear still
-	// leaves the photo recognised if it is shared again.
-	if merr := store.MarkFiled(it.SourceSHA256); merr != nil {
-		log.Printf("inbox: %v", merr)
-	}
-	if err := inboxRemoveItem(store, it); err != nil {
-		log.Printf("inbox: clearing %s after its sign: %v", it.ID, err)
-		return inboxResult{}, refusedf("the sign was made, but the item could not be cleared from the Inbox; delete it there")
-	}
-	wakeDocumentIndexer()
-	return inboxResult{ID: it.ID, OK: true, SignID: sign.ID, DocumentID: doc.ID}, nil
+		if err := finishFiled(store, it, "the sign was made, but the item could not be cleared from the Inbox; delete it there"); err != nil {
+			return inboxResult{}, err
+		}
+		return inboxResult{ID: it.ID, OK: true, SignID: sign.ID, DocumentID: doc.ID}, nil
+	})
 }
 
-// fileInboxToPassageHandler is POST /api/inbox/file-to-passage. Each item is
-// filed on its own: a failure leaves that item in the Inbox and is reported
-// against its id, and the others still go through.
+// fileInboxToPassageHandler is POST /api/inbox/file-to-passage.
 func fileInboxToPassageHandler(c echo.Context) error {
 	store, ok := inboxStoreOrError(c)
 	if !ok {
@@ -750,24 +950,18 @@ func fileInboxToPassageHandler(c echo.Context) error {
 	if err != nil {
 		return inboxError(c, http.StatusServiceUnavailable, err.Error())
 	}
-	var body struct {
+	type body struct {
 		Items []inboxPassageRequest `json:"items"`
 	}
-	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
-		return err
-	}
-	if len(body.Items) == 0 || len(body.Items) > inboxMaxBatch {
-		return inboxError(c, http.StatusBadRequest, fmt.Sprintf("items must hold 1 to %d entries", inboxMaxBatch))
-	}
-	results := make([]inboxResult, 0, len(body.Items))
-	for _, req := range body.Items {
-		res, err := fileInboxItemToPassage(store, ps, docs, req)
-		if err != nil {
-			res = inboxFail(req.ID, err)
-		}
-		results = append(results, res)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"results": results})
+	return runInboxBatch(c,
+		func(b *body) []inboxPassageRequest { return b.Items },
+		func(r inboxPassageRequest) string { return r.ID },
+		func(*body) (func(inboxPassageRequest) (inboxResult, error), error) {
+			lib := newInboxLibrary(docs)
+			return func(req inboxPassageRequest) (inboxResult, error) {
+				return fileInboxItemToPassage(store, ps, docs, lib, req)
+			}, nil
+		})
 }
 
 type inboxDocumentRequest struct {
@@ -775,32 +969,20 @@ type inboxDocumentRequest struct {
 	Title string `json:"title"`
 }
 
-func fileInboxItemToDocuments(store *inboxStore, folderID string, req inboxDocumentRequest) (inboxResult, error) {
-	release, err := claimInboxItem(req.ID)
-	if err != nil {
-		return inboxResult{}, err
-	}
-	defer release()
-	it, err := store.Get(req.ID)
-	if err != nil {
-		return inboxResult{}, err
-	}
-	doc, created, err := inboxCopyToLibrary(it, &folderID, strings.TrimSpace(req.Title))
-	if err != nil {
-		return inboxResult{}, err
-	}
-	if !created {
-		return inboxResult{}, refusedf("these bytes are already in Documents as %q; bin this copy", firstNonEmpty(doc.Title, doc.Filename))
-	}
-	if merr := store.MarkFiled(it.SourceSHA256); merr != nil {
-		log.Printf("inbox: %v", merr)
-	}
-	if err := inboxRemoveItem(store, it); err != nil {
-		log.Printf("inbox: clearing %s after its document: %v", it.ID, err)
-		return inboxResult{}, refusedf("the document was made, but the item could not be cleared from the Inbox; delete it there")
-	}
-	wakeDocumentIndexer()
-	return inboxResult{ID: it.ID, OK: true, DocumentID: doc.ID}, nil
+func fileInboxItemToDocuments(store *inboxStore, lib *inboxLibrary, folderID string, req inboxDocumentRequest) (inboxResult, error) {
+	return withClaimedInboxItem(store, req.ID, func(it inboxItem) (inboxResult, error) {
+		doc, created, err := lib.copy(it, &folderID, strings.TrimSpace(req.Title))
+		if err != nil {
+			return inboxResult{}, err
+		}
+		if !created {
+			return inboxResult{}, refusedf("these bytes are already in Documents as %q; bin this copy", firstNonEmpty(doc.Title, doc.Filename))
+		}
+		if err := finishFiled(store, it, "the document was made, but the item could not be cleared from the Inbox; delete it there"); err != nil {
+			return inboxResult{}, err
+		}
+		return inboxResult{ID: it.ID, OK: true, DocumentID: doc.ID}, nil
+	})
 }
 
 // fileInboxToDocumentsHandler is POST /api/inbox/file-to-documents.
@@ -809,34 +991,38 @@ func fileInboxToDocumentsHandler(c echo.Context) error {
 	if !ok {
 		return nil
 	}
-	if _, err := requireDocumentStore("inbox filing"); err != nil {
+	docs, err := requireDocumentStore("inbox filing")
+	if err != nil {
 		return inboxError(c, http.StatusServiceUnavailable, err.Error())
 	}
-	var body struct {
-		FolderID string                `json:"folder_id"`
+	type body struct {
+		FolderID string                 `json:"folder_id"`
 		Items    []inboxDocumentRequest `json:"items"`
 	}
-	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
-		return err
-	}
-	if strings.TrimSpace(body.FolderID) == "" {
-		return inboxError(c, http.StatusBadRequest, "folder_id is required")
-	}
-	if len(body.Items) == 0 || len(body.Items) > inboxMaxBatch {
-		return inboxError(c, http.StatusBadRequest, fmt.Sprintf("items must hold 1 to %d entries", inboxMaxBatch))
-	}
-	results := make([]inboxResult, 0, len(body.Items))
-	for _, req := range body.Items {
-		res, err := fileInboxItemToDocuments(store, body.FolderID, req)
-		if err != nil {
-			res = inboxFail(req.ID, err)
-		}
-		results = append(results, res)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"results": results})
+	return runInboxBatch(c,
+		func(b *body) []inboxDocumentRequest { return b.Items },
+		func(r inboxDocumentRequest) string { return r.ID },
+		func(b *body) (func(inboxDocumentRequest) (inboxResult, error), error) {
+			if strings.TrimSpace(b.FolderID) == "" {
+				return nil, inboxHTTPError{http.StatusBadRequest, "folder_id is required"}
+			}
+			lib := newInboxLibrary(docs)
+			return func(req inboxDocumentRequest) (inboxResult, error) {
+				return fileInboxItemToDocuments(store, lib, b.FolderID, req)
+			}, nil
+		})
 }
 
 // ── GET /api/inbox/suggested-titles ──────────────────────────────────────
+
+// inboxPlaceCell is a position rounded to about 100 m, so a burst of shots in
+// one spot makes one place lookup.
+type inboxPlaceCell struct{ lat, lon int64 }
+
+type inboxPlaceAsk struct {
+	lat, lon float64 // the first item's own position in the cell
+	ids      []string
+}
 
 // inboxSuggestedTitlesHandler answers ?ids=a,b with the nearest named place
 // to the boat at each item's capture time, or "" when the item has no time,
@@ -850,87 +1036,103 @@ func inboxSuggestedTitlesHandler(c echo.Context) error {
 	if !ok {
 		return nil
 	}
-	ids := strings.Split(c.QueryParam("ids"), ",")
 	titles := map[string]string{}
-	type lookup = inboxLookup
-	var lookups []lookup
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
+	var ids []string
+	for _, id := range strings.Split(c.QueryParam("ids"), ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if _, dup := titles[id]; dup {
 			continue
 		}
 		if len(titles) >= inboxMaxBatch {
 			return inboxError(c, http.StatusBadRequest, fmt.Sprintf("at most %d ids", inboxMaxBatch))
 		}
-		it, err := store.Get(id)
-		if errors.Is(err, errInboxItemNotFound) {
-			titles[id] = ""
-			continue
-		}
-		if err != nil {
-			log.Printf("inbox: %v", err)
-			return inboxError(c, http.StatusInternalServerError, "could not read the item")
-		}
 		titles[id] = ""
+		ids = append(ids, id)
+	}
+	items, err := store.GetMany(ids)
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	found := make([]inboxItem, 0, len(items))
+	for _, id := range ids { // in the order asked, so the lookups are too
+		if it, ok := items[id]; ok {
+			found = append(found, it)
+		}
+	}
+	track, err := loadInboxTrack(ps, captureTimes(found))
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	cells := map[inboxPlaceCell]*inboxPlaceAsk{}
+	var asks []*inboxPlaceAsk
+	for _, it := range found {
 		if it.CaptureMs == nil {
 			continue
 		}
-		pt, err := inboxTrackAt(ps, *it.CaptureMs)
-		if err != nil {
-			log.Printf("inbox: %v", err)
-			return inboxError(c, http.StatusInternalServerError, "could not read the track")
-		}
+		pt := track.at(*it.CaptureMs)
 		if pt == nil {
 			continue
 		}
-		lookups = append(lookups, lookup{id, pt.Lat, pt.Lon})
+		cell := inboxPlaceCell{int64(math.Round(pt.Lat * 1000)), int64(math.Round(pt.Lon * 1000))}
+		ask, seen := cells[cell]
+		if !seen {
+			ask = &inboxPlaceAsk{lat: pt.Lat, lon: pt.Lon}
+			cells[cell] = ask
+			asks = append(asks, ask)
+		}
+		ask.ids = append(ask.ids, it.ID)
 	}
 
 	// The place lookups can be slow (a public Overpass server may time out), so
 	// run a few at once and stop waiting at the deadline. A title still
 	// outstanding then is left blank for the operator to type; the request does
-	// not fail.
-	lookupName, deadline := inboxPlaceLookup, inboxTitleDeadline
+	// not fail. A lookup cannot be cancelled, so one that outlives the handler
+	// finds the result closed and writes nothing.
+	lookupPlace, deadline := inboxPlaceLookup, inboxTitleDeadline
+	ctx, cancel := context.WithTimeout(c.Request().Context(), deadline)
+	defer cancel()
 	var mu sync.Mutex
-	found := map[string]string{}
-	work := make(chan lookup)
-	var wg sync.WaitGroup
-	for i := 0; i < inboxTitleWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for l := range work {
-				name := joinTitle(lookupName(l.lat, l.lon))
-				mu.Lock()
-				found[l.id] = name
-				mu.Unlock()
-			}
-		}()
-	}
+	closed := false
+	finished := make(chan struct{})
 	go func() {
-		for _, l := range lookups {
-			work <- l
+		defer close(finished)
+		sem := make(chan struct{}, inboxTitleWorkers)
+		var wg sync.WaitGroup
+		defer wg.Wait()
+		for _, ask := range asks {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				name := joinTitle(lookupPlace(ask.lat, ask.lon))
+				mu.Lock()
+				defer mu.Unlock()
+				if closed {
+					return
+				}
+				for _, id := range ask.ids {
+					titles[id] = name
+				}
+			}()
 		}
-		close(work)
 	}()
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
 	select {
-	case <-done:
-	case <-time.After(deadline):
+	case <-finished:
+	case <-ctx.Done():
 		log.Printf("inbox: place names not all found within %s; the rest are left blank", deadline)
 	}
 	mu.Lock()
-	for id, name := range found {
-		titles[id] = name
-	}
+	closed = true
+	out := maps.Clone(titles)
 	mu.Unlock()
-	return c.JSON(http.StatusOK, map[string]any{"titles": titles})
-}
-
-type inboxLookup struct {
-	id       string
-	lat, lon float64
+	return c.JSON(http.StatusOK, map[string]any{"titles": out})
 }
 
 const inboxTitleWorkers = 4
@@ -945,6 +1147,9 @@ func inboxRoutes() []apiRoute {
 		{http.MethodGet, "/api/inbox/count", tierRead, inboxCountHandler},
 		{http.MethodGet, "/api/inbox/suggested-titles", tierRead, inboxSuggestedTitlesHandler},
 		{http.MethodGet, "/api/inbox/:id/content", tierRead, inboxContentHandler},
+		{http.MethodGet, "/api/inbox/:id/thumb", tierRead, inboxThumbHandler},
+		// A POST that only reads: the hashes are too many for a query string.
+		{http.MethodPost, "/api/inbox/known", tierRead, inboxKnownHandler},
 		{http.MethodPost, "/api/inbox", tierWrite, uploadInboxHandler},
 		{http.MethodPost, "/api/inbox/bin", tierWrite, binInboxHandler},
 		{http.MethodPost, "/api/inbox/file-to-passage", tierWrite, fileInboxToPassageHandler},

@@ -62,8 +62,11 @@ func TestInboxRetryAfterAFailedClearDoesNotMakeASecondSign(t *testing.T) {
 	}
 	inboxRemoveItem = prev
 	r := fileOne(t, id, "Second")
-	if r["ok"] == true || !strings.Contains(r["error"].(string), "already") {
-		t.Fatalf("retry: %v", r)
+	if r["ok"] != true {
+		t.Fatalf("a sign already uses the photo and the item is cleared, so the retry succeeds: %v", r)
+	}
+	if left, _ := w.inbox.Count(); left != 0 {
+		t.Fatalf("item still in the Inbox: %d", left)
 	}
 	if signs, _ := w.passages.ListSigns(0, 0); len(signs) != 1 {
 		t.Fatalf("signs %d", len(signs))

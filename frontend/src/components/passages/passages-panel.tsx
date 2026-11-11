@@ -59,14 +59,12 @@ export interface PassagesPanelProps {
   onOpenPassage: (id: string) => void
   onOpenCruise: (id: string) => void
   onCombine: (ids: string[]) => void
-  /** How many photos and files wait in the Inbox; null before the server has said. */
-  inboxCount?: number | null
-  /** Opens the Inbox. The button is left out when this is. */
-  onOpenInbox?: () => void
+  /** The Inbox button: how many photos and files wait (null before the server has said) and how to open it. Left out, no button. */
+  inbox?: { count: number | null; onOpen: () => void }
 }
 
 export function PassagesPanel({
-  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine, inboxCount = null, onOpenInbox,
+  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine, inbox,
 }: PassagesPanelProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -282,13 +280,13 @@ export function PassagesPanel({
           </div>
         )}
       >
-        {onOpenInbox && (
+        {inbox && (
           <div>
-            <Button type="button" variant="outline" size="sm" onClick={onOpenInbox}>
+            <Button type="button" variant="outline" size="sm" onClick={inbox.onOpen}>
               <Inbox className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
               Inbox
-              {inboxCount !== null && inboxCount > 0 && (
-                <Badge variant="secondary" className="tabular-nums" aria-label={`${inboxCount} waiting`}>{inboxCount}</Badge>
+              {inbox.count !== null && inbox.count > 0 && (
+                <Badge variant="secondary" className="tabular-nums" aria-label={`${inbox.count} waiting`}>{inbox.count}</Badge>
               )}
             </Button>
           </div>

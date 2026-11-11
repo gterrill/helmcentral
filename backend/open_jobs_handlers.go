@@ -145,7 +145,7 @@ func uploadOpenJobPhotoHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to prepare document storage"})
 	}
 	up, err := receiveUploadedFile(c, dir, nil)
-	if err != nil {
+	if err != nil || c.Response().Committed { // the intake already answered
 		return err
 	}
 	mimeType := detectDocumentMIME(up.head, up.filename)

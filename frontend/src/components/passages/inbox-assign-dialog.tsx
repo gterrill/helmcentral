@@ -1,10 +1,11 @@
+import { FileText } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { inboxApi, type InboxItem } from '@/lib/inbox-api'
+import { inboxApi, inboxPreviewUrl, type InboxItem } from '@/lib/inbox-api'
 import { assignRequest, initialAssignRows, rowProblem, type AssignRow } from '@/lib/inbox-assign'
 import { placementOptions } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
@@ -36,7 +37,9 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
         if (cancelled) return
         // Only blank titles take a suggestion, so nothing the operator has typed is lost.
         const suggested = initialAssignRows(items, titles, passages)
-        setRows((prev) => prev.map((r, i) => (r.title === '' ? { ...r, title: suggested[i].title } : r)))
+        // By id: rows may have shrunk since the lookup began.
+        const byId = new Map(suggested.map((r) => [r.item.id, r.title]))
+        setRows((prev) => prev.map((r) => (r.title === '' && byId.has(r.item.id) ? { ...r, title: byId.get(r.item.id)! } : r)))
         setTitlesState('ready')
       },
       (err) => { if (!cancelled) setTitlesState(errorMessage(err)) },
@@ -91,7 +94,13 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
             const needsPlace = row.item.group.kind !== 'passage'
             return (
               <li key={row.item.id} className="flex min-w-0 gap-3">
-                <img src={row.item.content_url} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-md object-cover" />
+                {inboxPreviewUrl(row.item) ? (
+                  <img src={inboxPreviewUrl(row.item)} alt="" loading="lazy" className="h-16 w-16 shrink-0 rounded-md object-cover" />
+                ) : (
+                  <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <FileText className="h-6 w-6" aria-hidden="true" />
+                  </span>
+                )}
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   <Input
                     aria-label={`Title for ${row.item.filename}`}

@@ -1,15 +1,16 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InboxView } from '@/components/passages/inbox-view'
 import type { InboxItem } from '@/lib/inbox-api'
 import type { PassageSummary } from '@/lib/passages'
 
-const env = vi.hoisted(() => ({ items: [] as InboxItem[], folders: [{ id: 'folder-1' }] as { id: string }[] }))
+const env = vi.hoisted(() => ({ items: [] as InboxItem[], folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
 
 vi.mock('@/lib/api-query', async (orig) => ({
   ...(await orig<typeof import('@/lib/api-query')>()),
-  useApiQuery: () => ({ data: env.folders, isLoading: false, error: null, isFetching: false, refetch: vi.fn() }),
+  useApiQuery: (opts: { queryKey: unknown }) => (env.keys.push(opts.queryKey), { data: env.folders, isLoading: false, error: null, isFetching: false, refetch: vi.fn() }),
 }))
 
 vi.mock('@/hooks/use-inbox', () => ({
@@ -21,10 +22,12 @@ vi.mock('@/hooks/use-vessel-state', () => ({
 const api = vi.hoisted(() => ({ bin: vi.fn(), fileToPassage: vi.fn(), fileToDocuments: vi.fn(), suggestedTitles: vi.fn() }))
 vi.mock('@/lib/inbox-api', async (orig) => ({ ...(await orig<typeof import('@/lib/inbox-api')>()), inboxApi: api }))
 // The folder picker reads the library; this test is about the Inbox.
-vi.mock('@/components/documents/move-to-folder-dialog', () => ({
-  MoveToFolderDialog: ({ open, onPick, confirmLabel, initialFolderId }: { open: boolean; onPick: (id: string | null) => void; confirmLabel?: string; initialFolderId?: string | null }) =>
+vi.mock('@/components/documents/folder-picker-dialog', () => ({
+  FolderPickerDialog: ({ open, onPick, confirmLabel, initialFolderId }: { open: boolean; onPick: (id: string | null) => void; confirmLabel?: string; initialFolderId?: string | null }) =>
     open ? <button type="button" data-initial={initialFolderId ?? 'root'} onClick={() => onPick('folder-1')}>{confirmLabel}</button> : null,
 }))
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 
 const T0 = Date.UTC(2026, 9, 14)
 const min = 60_000
@@ -32,8 +35,8 @@ let n = 0
 function item(over: Partial<InboxItem>): InboxItem {
   n += 1
   return {
-    id: `i${n}`, filename: `IMG_${n}.jpg`, mime: 'image/jpeg', size_bytes: 1, capture_ms: T0 + n * min, capture_offset_min: 600,
-    bearing_deg: null, has_bearing: false, fingerprint: '', sharpness: 0, created_ms: n, content_url: `/api/inbox/i${n}/content`,
+    id: `i${n}`, filename: `IMG_${n}.jpg`, mime: 'image/jpeg', size_bytes: 1, capture_ms: T0 + n * min,
+    bearing_deg: null, fingerprint: '', sharpness: 0, created_ms: n, content_url: `/api/inbox/i${n}/content`, thumb_url: `/api/inbox/i${n}/thumb`,
     group: { kind: 'passage', passage_id: 'p1' }, gps_mismatch: false, ...over,
   }
 }
@@ -48,6 +51,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   n = 0
   env.items = []
+  env.keys = []
   env.folders = [{ id: 'folder-1' }]
   window.localStorage.clear()
 })
@@ -82,7 +86,7 @@ describe('InboxView', () => {
 
   it('asks before deleting, then deletes what is marked', async () => {
     env.items = [item({}), item({})]
-    api.bin.mockResolvedValue(1)
+    api.bin.mockResolvedValue({ deleted: 1, busy: [] })
     view()
     fireEvent.click(screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') !== null)[0])
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -91,6 +95,28 @@ describe('InboxView', () => {
     expect(api.bin).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.bin).toHaveBeenCalledWith(['i1']))
+  })
+
+  it('says how many items were left because they are being filed', async () => {
+    env.items = [item({}), item({}), item({})]
+    api.bin.mockResolvedValue({ deleted: 2, busy: [{ id: 'i3', ok: false, error: 'this item is already being filed' }] })
+    view()
+    for (const b of screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') !== null)) fireEvent.click(b)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('2 deleted, 1 is being filed'))
+  })
+
+  it('shows a photo with no thumbnail as the picture itself, and a PDF as an icon', () => {
+    env.items = [
+      item({ thumb_url: undefined, filename: 'plain.jpg' }),
+      item({ thumb_url: undefined, filename: 'chart.pdf', mime: 'application/pdf' }),
+    ]
+    view()
+    const photoButton = screen.getByRole('button', { name: /plain\.jpg/ })
+    expect(photoButton.querySelector('img')).toHaveAttribute('src', '/api/inbox/i1/content')
+    expect(screen.getByRole('button', { name: /chart\.pdf/ }).querySelector('img')).toBeNull()
   })
 
   it('flags duplicates and soft frames as suggestions and marks them only on request', () => {
@@ -110,7 +136,7 @@ describe('InboxView', () => {
   })
 
   it('shows the compass mark for a real bearing and the warning for a position mismatch', () => {
-    env.items = [item({ has_bearing: true, bearing_deg: 270.4 }), item({ gps_mismatch: true })]
+    env.items = [item({ bearing_deg: 270.4 }), item({ gps_mismatch: true })]
     view()
     expect(screen.getByLabelText('Facing 270 degrees')).toBeInTheDocument()
     expect(screen.getByLabelText('Phone position does not match the track')).toBeInTheDocument()
@@ -136,6 +162,13 @@ describe('InboxView', () => {
     expect((await screen.findByRole('button', { name: 'Send here' })).getAttribute('data-initial')).toBe('folder-1')
   })
 
+  it('reads the folder tree under the Documents key, so changes made there reach the Inbox', () => {
+    env.items = [item({})]
+    view()
+    expect(env.keys).toContainEqual(['/api/document-folders/tree'])
+    expect(env.keys).not.toContainEqual(['inbox-folders'])
+  })
+
   it('opens the folder picker at the root when the remembered folder has gone', async () => {
     env.items = [item({})]
     env.folders = [{ id: 'other' }]
@@ -144,6 +177,14 @@ describe('InboxView', () => {
     fireEvent.click(screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') !== null)[0])
     fireEvent.click(screen.getByRole('button', { name: /Send to Documents/ }))
     expect((await screen.findByRole('button', { name: 'Send here' })).getAttribute('data-initial')).toBe('root')
+  })
+
+  it('shows the small preview, and a file icon with the name where an item has none', () => {
+    env.items = [item({}), item({ mime: 'application/pdf', filename: 'receipt.pdf', thumb_url: undefined })]
+    const { container } = view()
+    const imgs = Array.from(container.querySelectorAll('img')).map((i) => i.getAttribute('src'))
+    expect(imgs).toEqual(['/api/inbox/i1/thumb'])
+    expect(screen.getByText('receipt.pdf')).toBeInTheDocument()
   })
 
   it('shows Clear only while something is marked', () => {

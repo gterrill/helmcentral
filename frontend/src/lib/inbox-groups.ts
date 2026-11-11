@@ -1,6 +1,6 @@
 import type { InboxGroupKind, InboxItem } from '@/lib/inbox-api'
 import { hammingHex } from '@/lib/image-fingerprint'
-import { formatLocalDate, type PassageSummary } from '@/lib/passages'
+import { formatLocalDate, passageRoute, type PassageSummary } from '@/lib/passages'
 
 // How the Inbox view arranges what is waiting, and the suggestions it makes
 // about culling. Nothing here removes or files anything: the flags are hints
@@ -24,9 +24,7 @@ export interface InboxGroup {
  */
 export function inboxPassageLabel(p: PassageSummary): string {
   const date = formatLocalDate(p.start, p.timezone)
-  const title = p.title.trim()
-  const ends = [p.from_name.trim(), p.to_name.trim()].filter((n) => n !== '')
-  const name = title !== '' ? title : ends.join(' → ')
+  const name = p.title.trim() || passageRoute(p, { dropMissing: true })
   return name === '' ? date : `${name} · ${date}`
 }
 
@@ -78,8 +76,7 @@ export function groupInbox(items: readonly InboxItem[], passages: readonly Passa
 // ── culling suggestions ─────────────────────────────────────────────────
 
 export interface DuplicateInfo {
-  /** The frame of the set with the best sharpness, the one to keep. */
-  keeperId: string
+  /** This frame is the sharpest of its set, the one to keep. */
   isKeeper: boolean
   /** How many frames the set holds. */
   size: number
@@ -119,7 +116,7 @@ export function findDuplicates(items: readonly InboxItem[]): Map<string, Duplica
     if (set.length < 2) continue
     // Capture order already holds, so the first of the sharpest is the earliest.
     const keeper = set.reduce((best, f) => (f.sharpness > best.sharpness ? f : best))
-    for (const f of set) out.set(f.id, { keeperId: keeper.id, isKeeper: f.id === keeper.id, size: set.length })
+    for (const f of set) out.set(f.id, { isKeeper: f.id === keeper.id, size: set.length })
   }
   return out
 }
@@ -141,25 +138,22 @@ export function findBlurry(items: readonly InboxItem[]): Set<string> {
 
 // ── placing a photo that is not on a passage ──────────────────────────────
 
-export interface PlacementEdge {
+/** The start or end of a passage nearest in time to a capture time, in Unix ms, or null with no passages. */
+export function nearestEdgeMs(captureMs: number, passages: readonly PassageSummary[]): number | null {
+  let best: { tMs: number; gap: number } | null = null
+  for (const p of passages) {
+    for (const tMs of [Date.parse(p.start), Date.parse(p.end)]) {
+      const gap = Math.abs(captureMs - tMs)
+      if (best === null || gap < best.gap) best = { tMs, gap }
+    }
+  }
+  return best && best.tMs
+}
+
+export interface PlacementOption {
   passageId: string
   edge: 'start' | 'end'
   tMs: number
-}
-
-/** The start or end of a passage nearest in time to a capture time, or null with no passages. */
-export function nearestEdge(captureMs: number, passages: readonly PassageSummary[]): PlacementEdge | null {
-  let best: (PlacementEdge & { gap: number }) | null = null
-  for (const p of passages) {
-    for (const [edge, tMs] of [['start', Date.parse(p.start)], ['end', Date.parse(p.end)]] as const) {
-      const gap = Math.abs(captureMs - tMs)
-      if (best === null || gap < best.gap) best = { passageId: p.id, edge, tMs, gap }
-    }
-  }
-  return best && { passageId: best.passageId, edge: best.edge, tMs: best.tMs }
-}
-
-export interface PlacementOption extends PlacementEdge {
   label: string
 }
 

@@ -179,6 +179,15 @@ func scanSign(row interface{ Scan(...any) error }) (replaySign, error) {
 	return s, err
 }
 
+// SignCountForDocument is how many signs show this library document.
+func (s *passageStore) SignCountForDocument(docID string) (int, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM replay_signs WHERE document_id = ?`, docID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count signs for document: %w", err)
+	}
+	return n, nil
+}
+
 // ListSigns returns the signs with from <= t_ms <= to, oldest first. A zero
 // from or to leaves that end open.
 func (s *passageStore) ListSigns(from, to int64) ([]replaySign, error) {

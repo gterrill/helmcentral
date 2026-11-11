@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import type { InboxItem } from '@/lib/inbox-api'
-import { assignRequest, initialAssignRows, readLastFolder, rowProblem, saveLastFolder } from '@/lib/inbox-assign'
+import { assignRequest, initialAssignRows, rowProblem } from '@/lib/inbox-assign'
 import type { PassageSummary } from '@/lib/passages'
 import { SIGN_TITLE_MAX } from '@/lib/replay-signs'
 
@@ -16,7 +16,7 @@ const passages = [
 ]
 
 const item = (id: string, kind: InboxItem['group']['kind'], captureMs: number | null, mime = 'image/jpeg'): InboxItem => ({
-  id, filename: `${id}.jpg`, mime, size_bytes: 1, capture_ms: captureMs, capture_offset_min: null, bearing_deg: null, has_bearing: false,
+  id, filename: `${id}.jpg`, mime, size_bytes: 1, capture_ms: captureMs, bearing_deg: null,
   fingerprint: '', sharpness: 0, created_ms: 0, content_url: '', group: { kind }, gps_mismatch: false,
 })
 
@@ -70,26 +70,5 @@ describe('assignRequest', () => {
   it('sends a time only where the operator or the nearest-end rule gave one', () => {
     const rows = initialAssignRows([item('a', 'passage', T0), item('b', 'off_passage', T0 + 130 * min)], { a: ' Whale ', b: 'Dock' }, passages)
     expect(assignRequest(rows)).toEqual([{ id: 'a', title: 'Whale' }, { id: 'b', title: 'Dock', t_ms: T0 + 120 * min }])
-  })
-})
-
-describe('last folder', () => {
-  beforeEach(() => localStorage.clear())
-
-  it('remembers the folder last sent to', () => {
-    expect(readLastFolder()).toBeNull()
-    saveLastFolder('f1')
-    expect(readLastFolder()).toBe('f1')
-  })
-
-  it('works without storage rather than failing the filing', () => {
-    const original = Object.getOwnPropertyDescriptor(window, 'localStorage')!
-    Object.defineProperty(window, 'localStorage', { get: () => { throw new Error('blocked') }, configurable: true })
-    try {
-      expect(readLastFolder()).toBeNull()
-      expect(() => saveLastFolder('f2')).not.toThrow()
-    } finally {
-      Object.defineProperty(window, 'localStorage', original)
-    }
   })
 })

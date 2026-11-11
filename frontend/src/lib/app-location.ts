@@ -103,13 +103,16 @@ export type PassagesFilter = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'cr
  * `/passages/upload` the page that shares them (the address to put on a phone's
  * Home Screen); neither belongs to a filter.
  */
-export type PassagesRoute =
+export type PassagesRoute = FilteredPassagesRoute | { view: 'cruise'; id: string } | InboxRoute
+
+/** The views that remember which filter of the listing they came from. */
+export type FilteredPassagesRoute =
   | { view: 'index'; filter: PassagesFilter }
   | { view: 'passage'; id: string; filter: PassagesFilter }
-  | { view: 'cruise'; id: string }
   | { view: 'combined'; ids: string[]; filter: PassagesFilter }
-  | { view: 'inbox' }
-  | { view: 'upload' }
+
+/** The Inbox and the page that shares to it: no filter, and no passage. */
+export type InboxRoute = { view: 'inbox' } | { view: 'upload' }
 
 /** The starting points the Watches page offers on an empty list. */
 export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
@@ -551,10 +554,9 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
 
     case 'passages': {
       const { route } = loc
-      if (route.view === 'inbox') return '/passages/inbox'
-      if (route.view === 'upload') return '/passages/upload'
+      if (route.view === 'inbox' || route.view === 'upload') return `/passages/${route.view}`
       const params = new URLSearchParams()
-      if (route.view !== 'cruise') {
+      if ('filter' in route) {
         if (route.filter.kind === 'unfiled') params.set('filter', 'unfiled')
         if (route.filter.kind === 'cruise') params.set('cruise', route.filter.id)
       }

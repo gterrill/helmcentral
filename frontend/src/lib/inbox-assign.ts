@@ -1,5 +1,5 @@
 import type { InboxItem } from '@/lib/inbox-api'
-import { nearestEdge } from '@/lib/inbox-groups'
+import { nearestEdgeMs } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { SIGN_TITLE_MAX } from '@/lib/replay-signs'
 
@@ -20,7 +20,7 @@ const clip = (s: string) => Array.from(s).slice(0, SIGN_TITLE_MAX).join('')
 export function initialAssignRows(items: readonly InboxItem[], titles: Readonly<Record<string, string>>, passages: readonly PassageSummary[]): AssignRow[] {
   return items.map((item) => {
     let tMs: number | null = null
-    if (item.group.kind === 'off_passage' && item.capture_ms !== null) tMs = nearestEdge(item.capture_ms, passages)?.tMs ?? null
+    if (item.group.kind === 'off_passage' && item.capture_ms !== null) tMs = nearestEdgeMs(item.capture_ms, passages)
     return { item, title: clip((titles[item.id] ?? '').trim()), tMs }
   })
 }
@@ -38,24 +38,4 @@ export function rowProblem(row: AssignRow): string | null {
 /** The body of the filing call. */
 export function assignRequest(rows: readonly AssignRow[]): { id: string; title: string; t_ms?: number }[] {
   return rows.map((r) => ({ id: r.item.id, title: r.title.trim(), ...(r.tMs !== null ? { t_ms: r.tMs } : {}) }))
-}
-
-// Per-device convenience: the Documents folder the Inbox last sent to. A
-// browser that blocks storage just opens the picker at the root each time.
-const LAST_FOLDER_KEY = 'inbox.lastFolder'
-
-export function readLastFolder(): string | null {
-  try {
-    return window.localStorage.getItem(LAST_FOLDER_KEY)
-  } catch {
-    return null
-  }
-}
-
-export function saveLastFolder(folderId: string): void {
-  try {
-    window.localStorage.setItem(LAST_FOLDER_KEY, folderId)
-  } catch {
-    // Storage blocked: the folder is simply not remembered.
-  }
 }

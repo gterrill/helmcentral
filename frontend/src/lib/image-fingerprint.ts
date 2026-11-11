@@ -91,25 +91,21 @@ export interface ImageFingerprint {
 }
 
 /**
- * Fingerprint and sharpness of a picture, from a grey copy drawn at
- * FINGERPRINT_LONG_EDGE. Throws when the browser cannot decode or draw it,
- * rather than uploading the photo with no score.
+ * Fingerprint and sharpness of a decoded picture, from a grey copy drawn at
+ * FINGERPRINT_LONG_EDGE. The caller owns the bitmap, so the photo is decoded
+ * once for this and for the copies it sends. Throws when the browser cannot
+ * draw it, rather than uploading the photo with no score.
  */
-export async function fingerprintImage(file: Blob): Promise<ImageFingerprint> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  try {
-    const scale = Math.min(1, FINGERPRINT_LONG_EDGE / Math.max(bitmap.width, bitmap.height))
-    const w = Math.max(3, Math.round(bitmap.width * scale))
-    const h = Math.max(3, Math.round(bitmap.height * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    if (!ctx) throw new Error('could not get a 2d canvas context to fingerprint the photo')
-    ctx.drawImage(bitmap, 0, 0, w, h)
-    const grey = greyFromRgba(ctx.getImageData(0, 0, w, h).data)
-    return { fingerprint: dHash(grey, w, h), sharpness: laplacianVariance(grey, w, h) }
-  } finally {
-    bitmap.close()
-  }
+export function fingerprintBitmap(bitmap: ImageBitmap): ImageFingerprint {
+  const scale = Math.min(1, FINGERPRINT_LONG_EDGE / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(3, Math.round(bitmap.width * scale))
+  const h = Math.max(3, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('could not get a 2d canvas context to fingerprint the photo')
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  const grey = greyFromRgba(ctx.getImageData(0, 0, w, h).data)
+  return { fingerprint: dHash(grey, w, h), sharpness: laplacianVariance(grey, w, h) }
 }

@@ -2,16 +2,16 @@ import { AlertTriangle, Compass, Copy, FileText, FolderInput, ImagePlus, Route, 
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { MoveToFolderDialog } from '@/components/documents/move-to-folder-dialog'
+import { FolderPickerDialog } from '@/components/documents/folder-picker-dialog'
 import { InboxAssignDialog } from '@/components/passages/inbox-assign-dialog'
 import { ConfirmDelete, EmptyState, Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
+import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 import { useInbox } from '@/hooks/use-inbox'
+import { useLocalStorageId } from '@/hooks/use-local-storage-id'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
-import { useApiQuery } from '@/lib/api-query'
 import { errorMessage } from '@/lib/errors'
-import { inboxApi, type InboxItem } from '@/lib/inbox-api'
-import { readLastFolder, saveLastFolder } from '@/lib/inbox-assign'
+import { inboxApi, inboxPreviewUrl, type InboxItem } from '@/lib/inbox-api'
 import { findBlurry, findDuplicates, groupInbox } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { cn } from '@/lib/utils'
@@ -39,16 +39,12 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
   const [dialog, setDialog] = useState<'passage' | 'documents' | 'bin' | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // The folder last sent to opens the picker, but only while it still exists:
-  // it may have been deleted since, on this or another device.
-  const folders = useApiQuery({
-    queryKey: ['inbox-folders'],
-    path: '/api/document-folders/tree',
-    enabled: dialog === 'documents',
-    select: (raw: { folders?: { id: string }[] }) => raw.folders ?? [],
-  })
-  const lastFolder = dialog === 'documents' ? readLastFolder() : null
-  const rememberedFolder = lastFolder !== null && (folders.data ?? []).some((f) => f.id === lastFolder) ? lastFolder : null
+  // The folder last sent to (a per-device convenience) opens the picker, but
+  // only while it still exists: it may have been deleted since, on this or
+  // another device.
+  const [lastFolder, setLastFolder] = useLocalStorageId('inbox.lastFolder')
+  const { folders, loading: foldersLoading } = useDocumentFolderTree()
+  const rememberedFolder = lastFolder !== null && folders.some((f) => f.id === lastFolder) ? lastFolder : null
 
   const groups = useMemo(() => groupInbox(inbox.items, passages), [inbox.items, passages])
   const duplicates = useMemo(() => findDuplicates(inbox.items), [inbox.items])
@@ -83,8 +79,10 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
   const bin = async () => {
     setBusy(true)
     try {
-      const n = await inboxApi.bin(selected.map((i) => i.id))
-      toast.success(n === 1 ? 'Deleted 1 item' : `Deleted ${n} items`)
+      const { deleted: n, busy } = await inboxApi.bin(selected.map((i) => i.id))
+      if (busy.length === 0) toast.success(n === 1 ? 'Deleted 1 item' : `Deleted ${n} items`)
+      else if (n === 0) toast.error(busy.length === 1 ? '1 item is being filed, so it stayed' : `${busy.length} items are being filed, so they stayed`)
+      else toast.success(`${n} deleted, ${busy.length} ${busy.length === 1 ? 'is' : 'are'} being filed`)
       setMarked(new Set())
       setDialog(null)
     } catch (err) {
@@ -100,7 +98,7 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
     setBusy(true)
     try {
       const results = await inboxApi.fileToDocuments(folderId, selected.map((i) => ({ id: i.id })))
-      saveLastFolder(folderId)
+      setLastFolder(folderId)
       const failed = results.filter((r) => !r.ok)
       const sent = results.length - failed.length
       if (sent > 0) toast.success(sent === 1 ? 'Sent 1 item to Documents' : `Sent ${sent} items to Documents`)
@@ -199,8 +197,8 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
                         isMarked ? 'border-primary ring-2 ring-primary' : 'border-border',
                       )}
                     >
-                      {item.mime.startsWith('image/') ? (
-                        <img src={item.content_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      {inboxPreviewUrl(item) ? (
+                        <img src={inboxPreviewUrl(item)} alt="" loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-muted-foreground">
                           <FileText className="h-8 w-8" aria-hidden="true" />
@@ -209,8 +207,8 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
                       )}
                       <span className="absolute inset-x-0 bottom-0 flex min-w-0 items-center gap-1 bg-background/85 px-1.5 py-0.5 text-xs tabular-nums text-foreground">
                         <span className="min-w-0 flex-1 truncate">{when ?? '--'}</span>
-                        {item.has_bearing && (
-                          <span title={`The phone was facing ${Math.round(item.bearing_deg ?? 0)}°`} aria-label={`Facing ${Math.round(item.bearing_deg ?? 0)} degrees`}>
+                        {item.bearing_deg !== null && (
+                          <span title={`The phone was facing ${Math.round(item.bearing_deg)}°`} aria-label={`Facing ${Math.round(item.bearing_deg)} degrees`}>
                             <Compass className="h-3.5 w-3.5" aria-hidden="true" />
                           </span>
                         )}
@@ -246,14 +244,14 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
       </div>
 
       {dialog === 'passage' && <InboxAssignDialog items={selected} passages={passages} onClose={() => setDialog(null)} />}
-      <MoveToFolderDialog
-        open={dialog === 'documents' && !folders.isLoading}
+      <FolderPickerDialog
+        open={dialog === 'documents' && !foldersLoading}
         onOpenChange={(open) => { if (!open) setDialog(null) }}
-        label={`${selected.length} item(s)`}
         title={`Send ${selected.length === 1 ? '1 item' : `${selected.length} items`} to Documents`}
         confirmLabel="Send here"
         initialFolderId={rememberedFolder}
-        requireFolder
+        canPick={(folderId) => folderId !== null}
+        showLoadError
         onPick={(folderId) => void sendToDocuments(folderId)}
       />
       <ConfirmDelete
