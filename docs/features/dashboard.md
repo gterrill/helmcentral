@@ -8,40 +8,40 @@ the screens yourself so that the readings in front of you are the ones that
 actually matter.
 
 Each layout is a **page**, and pages are how you switch jobs. Most boats end up
-with a handful: Anchored, Underway, an engine watch. Every page is a grid of
-instrument tiles reading live off the boat's own instrument network.
+with a handful: Anchored, Underway and an engine watch. Each page is a grid of
+instrument tiles that read live from the boat's instrument network.
 
 ## Connection loss
 
 If this screen loses its link to Helmcentral, a **Server connection
-unavailable** banner appears across the top of the page, on a phone as well as
-at the helm. You can't dismiss it. Everything below it is the last thing that
-arrived, whether that's telemetry, anchor-watch state or alarm status. Read it
-as history, not as the state of the boat right now.
+unavailable** banner appears across the top of the page, on a phone and at the
+helm. You can't dismiss it. Everything below it is the last thing that arrived,
+whether telemetry, anchor-watch state or alarm status. Read it as history, not
+the boat's current state.
 
-The dashboard reconnects on its own. Here is how it spots a lost link and how
+The dashboard reconnects on its own. Here is how it detects a lost link and how
 the warning clears:
 
 - **Instant warning:** If the link fails outright, or the device reports itself
   offline, the banner appears immediately.
 - **Silent drops:** If the link goes quiet without failing, it takes 45 seconds
   to catch.
-- **Waking up your device:** When you come back to the screen, the dashboard
-  checks the clock again. A phone that slept through an outage therefore
-  doesn't wake up showing a stale screen as though it were live.
+- **Waking up your device:** When you return to the screen, the dashboard checks
+  the clock again. A phone that slept through an outage therefore doesn't wake
+  up showing a stale screen as if it were live.
 - **Clearing the warning:** Only a fresh reading clears it.
 
-The banner tracks one thing, which is this screen's link to Helmcentral. A
-source dropping off the boat's own network is a different problem, covered
-under [When a source goes quiet](#when-a-source-goes-quiet). Alarms carry on
-running on the Helmcentral box while a phone can't reach it. The phone just
-can't tell you what they're doing.
+The banner tracks one thing: this screen's link to Helmcentral. A source
+dropping off the boat's network is a different problem, covered under [When a
+source goes quiet](#when-a-source-goes-quiet). Alarms carry on running on the
+Helmcentral box while a phone can't reach it. The phone just can't tell you what
+they're doing.
 
 ## Instrument tiles
 
 Twenty built-in tiles cover the boat's core systems, from Vessel and Wind
-through Current, Battery & Power, Autopilot and Forecast Conditions. You can also build
-six more types yourself, including these:
+through Current, Battery & Power, Autopilot and Forecast Conditions. You can
+also build six more types yourself, including these:
 
 - **Gauge:** Shows any single reading that has no dedicated tile of its own.
 - **Engine cluster and gauge group:** Each shows one piece of your equipment.
@@ -54,10 +54,10 @@ fields.
 
 ## The indicator ribbon
 
-The indicator ribbon is one strip of labelled status cells and a CHK cell,
-pinned above the grid on every dashboard page, inside whatever skin that page
-uses. The strip belongs to the vessel, not to the page. It has the same lamps in
-the same order wherever you look, so a glance always means the same thing.
+The indicator ribbon is a strip of labelled status cells and a CHK cell, pinned
+above the grid on every dashboard page, inside whatever skin that page uses. The
+strip belongs to the vessel, not the page. It has the same lamps in the same
+order wherever you look, so a glance always means the same thing.
 
 It stays off the Forecast, Windy, Anchor Watch and Settings panels, which rely
 on the alarm banner instead. It also stays off wall displays, where it would
@@ -81,62 +81,59 @@ Off, or `--` when nothing is reporting.
 - **Narrow screens:** The row wraps onto more lines on a narrow screen instead
   of scrolling.
 
-The CHK cell sits first. When it's quiet, it reads CHK. With alarms active it
-widens, takes the colour of the worst one, and reads the number active and that
+The CHK cell sits first. When it's quiet, it reads CHK. With alarms active, it
+widens, takes the colour of the worst one, and shows the number active and that
 alarm's title.
 
-The order never changes on its own. A lamp that trips doesn't jump to the
-front, and a lamp that clears doesn't vanish, because a ribbon only earns its
-place if you can memorise it. Sorting out which alarm matters most is the alarm
-banner's job, and it counts each severity currently active, worst first.
+The order never changes on its own. A lamp that trips doesn't jump to the front,
+and a lamp that clears doesn't vanish, because a ribbon earns its place only if
+you can memorise it. Sorting out which alarm matters most is the alarm banner's
+job, and it counts each severity currently active, worst first.
 
-If one page wants status lamps beyond the vessel-wide set, add an indicator
-tile to that page directly. It's configured the same way and leaves the pinned
-ribbon alone. See [Pin an indicator
-ribbon](../how-to/pin-an-indicator-ribbon.md).
+If one page wants status lamps beyond the vessel-wide set, add an indicator tile
+to that page directly. It's configured the same way and leaves the pinned ribbon
+alone. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md).
 
 ## Day, night and auto
 
 The button at the right of the header sets the theme for this browser. Each
 press steps Day, then Night, then Auto. Auto shows the night theme from sunset
-to sunrise and the day theme the rest of the time, using the sunrise and sunset
-on the Clock tile. A helm display therefore dims itself at dusk without anyone
-touching it. The button reads "Auto" with a sun or moon for the theme showing
-now, and its hover text gives the time the theme ends.
+to sunrise and the day theme the rest of the time, using sunrise and sunset on
+the Clock tile. A helm display therefore dims itself at dusk without anyone
+touching it. The button reads "Auto" with a sun or moon for the current theme,
+and its hover text gives the time the theme ends.
 
-Auto needs a forecast with sunrise and sunset. Without one it keeps the theme
-that was showing and doesn't guess. The hover text then says sunrise and sunset
-aren't available. Day or Night will hold the theme you want until the forecast
-returns.
+Auto needs a forecast with sunrise and sunset. Without one, it keeps the current
+theme and doesn't guess. The hover text then says sunrise and sunset aren't
+available. Day or Night will hold the theme you want until the forecast returns.
 
 ## Arranging it
 
 Toggle layout mode in the header to drag, resize, remove and add tiles, name or
 delete the page, switch its skin, or put it on a wall display. You can also
-promote one tile to **hero**, which is an enlarged, full-width row above the
-rest of the grid. It's useful for the one reading a page exists for, such as
-anchor distance on an anchorage page. Everything else keeps the position you
-gave it.
+promote one tile to **hero**, an enlarged, full-width row above the rest of the
+grid. It's useful for the one reading a page exists for, such as anchor distance
+on an anchorage page. Everything else keeps the position you gave it.
 
 The Wind and Engine Cluster tiles are drawn at a fixed proportion and fill
 whatever size you give them, centred in the tile, up to twice their usual size.
 Drag one larger and the dial and its readings grow with it. Make it smaller and
-they shrink. On a phone or a narrow window they fit the width of the screen as
+they shrink. On a phone or in a narrow window, they fit the screen width as
 before.
 
-The Nearby Vessels tile gives the same reasons when its list is empty: "AIS
+When its list is empty, the Nearby Vessels tile says why. It shows "AIS
 unavailable" when Helmcentral can't read AIS, and "AIS silent for 25m" when
-SignalK is working but no vessel has reported for over ten minutes. On a narrow tile a long
-vessel name takes a second line instead of being cut off.
+SignalK is working but no vessel has reported for over ten minutes. On a narrow
+tile, a long vessel name takes a second line instead of being cut off.
 
-Nearby Vessels is a list that grows and shrinks as contacts
-come and go. How tall it is drawn depends on what's under it:
+Nearby Vessels is a list that grows and shrinks as contacts come and go. How
+tall it is drawn depends on what's under it:
 
 - **Lowest in its column:** When nothing is below it, the tile is drawn only as
   tall as its list needs, down to a header and one line. It's never taller than
-  the height you set, and the space below it is left empty rather than padded.
+  the height you set, and the space below is left empty rather than padded.
 - **Another tile underneath:** The tile keeps the height you gave it, so nothing
-  on the page shifts as a contact appears or leaves.
+  on the page shifts when a contact appears or leaves.
 - **Layout mode:** Every tile shows the height you set, so dragging and resizing
   work on your own numbers.
 
@@ -155,28 +152,28 @@ pages](../how-to/reorder-dashboard-pages.md) for changing the sequence.
 
 ## Full screen
 
-Tap the full screen button (four outward corners) in the header and the
-sidebar, header and browser bars all go, leaving the tiles on the whole screen.
-A tablet mounted at the helm or a screen at the nav station then reads like a
-dedicated instrument. Here is how full screen behaves:
+Tap the full screen button (four outward corners) in the header, and the
+sidebar, header and browser bars disappear, leaving the tiles across the whole
+screen. A tablet mounted at the helm or a screen at the nav station then reads
+like a dedicated instrument. Here is how full screen behaves:
 
 - **Alarms:** A live alarm still shows over the grid, because full screen never
   quiets one.
 - **Coming back:** To bring the sidebar and header back, press Esc. On a screen
-  with no keyboard, tap the small exit button that appears in the corner.
-  Following an alarm banner into the alarms list also brings them back, since
-  you need the sidebar to get anywhere else from there.
+  with no keyboard, tap the small exit button in the corner. Following an alarm
+  banner into the alarms list also brings them back, since you need the sidebar
+  to get anywhere else from there.
 - **Swiping between pages:** On a touchscreen, swipe left or right anywhere on
   the grid to move to the next or previous page. They're in the same order as
-  they're listed normally. A page name and its position ("2 / 4") show briefly
-  in the middle of the screen, so you know where you landed. A map or a chart
-  keeps its own drag for panning or reading values off it. Swiping across one of
-  those moves the map or the chart instead of the page.
+  listed normally. A page name and its position ("2 / 4") show briefly in the
+  middle of the screen, so you know where you landed. A map or chart keeps its
+  own drag for panning or reading values. Swiping across one moves the map or
+  chart instead of the page.
 - **Keeping the screen awake:** While full screen is on, the screen stays awake
   instead of dimming and locking on its usual timeout. That only works if you
   reached Helmcentral by an `https://` address (the Tailscale name, for
-  example). Over a plain `http://` address the browser won't hold the screen on,
-  and it sleeps as it normally would. A phone in low-power mode may still dim it.
+  example). Over a plain `http://` address, the browser won't hold the screen
+  on, and it sleeps as normal. A phone in low-power mode may still dim it.
 - **iPhone and Home Screen:** Full screen isn't offered on an iPhone, which
   doesn't support it, or in Helmcentral opened from an iPad's Home Screen icon.
   A Home Screen copy on either already fills the screen with no browser bars,
@@ -190,13 +187,13 @@ A wall display is a screen somewhere on the boat that shows the dashboard and
 nothing else: no sidebar, no header, no way to click into anything. It cycles
 through the pages you give it, in page order, and runs unattended. You can have
 several, and they don't have to be alike. A 1920 by 360 strip at the flybridge
-helm and a 55 inch television in the saloon are both wall displays, each with
+helm and a 55-inch television in the saloon are both wall displays, each with
 its own pages.
 
 - **One display per page:** A page belongs to one display at a time. A board
-  laid out for a helm strip isn't a board you want filling a television. So a
-  page you like moves to another screen as a duplicate, and you then rearrange it
-  for its new shape.
+  laid out for a helm strip isn't one you want filling a television. So a page
+  you like moves to another screen as a duplicate, and you rearrange it for its
+  new shape.
 - **No hero tile:** A page loses its hero tile once it's on a display, since the
   hero's extra row spends the vertical room the wall is measuring.
 - **Deleting a display:** This never deletes its pages. They return to the
@@ -239,15 +236,15 @@ the Alarms panel, not the dashboard.
 
 ## When a source goes quiet
 
-The boat's instrument network keeps serving the last value a source sent it. If
-you stop the feed, the number sits there unchanged, and it's easily mistaken for
-a live reading. Solar output frozen at 0 W before sunrise can still read 0 W an
-hour after the array started producing.
+The boat's instrument network keeps serving the last value a source sent. If you
+stop the feed, the number stays unchanged and is easily mistaken for a live
+reading. Solar output frozen at 0 W before sunrise can still read 0 W an hour
+after the array started producing.
 
-Every tile watches how long it has been since its source last said anything.
-Past two minutes, its header gains a `STALE` marker with the age and the tile
-dims. Its readings go to `—`, because a stale reading shown as current is worse
-than no reading at all.
+Every tile watches how long it has been since its source last sent data. After
+two minutes, its header gains a `STALE` marker with the age and the tile dims.
+Its readings go to `—`, because a stale reading shown as current is worse than
+no reading at all.
 
 A tile reading `—` with no `STALE` marker means something else entirely. That
 reading isn't being published at all, so check the source before you go hunting
@@ -264,9 +261,9 @@ border alone is easy to miss along the edge of a screen.
 
 A tile with every reading in its normal band draws no attention at all, because
 colour is spent only where something needs it. A reading with no warn or alarm
-threshold set for it stays quiet too, until you set one in Settings. See [Tile
-state colours](../reference/tiles.md#tile-state-colours) for the full rule,
-including how a stale tile overrides its band colour.
+threshold stays quiet until you set one in Settings. See [Tile state
+colours](../reference/tiles.md#tile-state-colours) for the full rule, including
+how a stale tile overrides its band colour.
 
 ## Battery & Power
 
@@ -283,10 +280,10 @@ and how the Dawn figure is worked out.
 
 ## Current
 
-The Current tile tells you at a glance whether the water is helping the boat
-along or holding it back. It's two columns wide, like a Gauge tile, so it fits
-under one. You add it from the tile picker, and it reads only while you're under
-way, motoring or sailing. At anchor or on a mooring it shows `—` and says "Shows
+The Current tile tells you at a glance whether the water is helping the boat or
+holding it back. It's two columns wide, like a Gauge tile, so it fits under one.
+You add it from the tile picker, and it reads only while you're under way,
+motoring or sailing. At anchor or on a mooring it shows `—` and says "Shows
 under way", because the small set and drift you'd see there is noise.
 
 It has three rows, each a small label over a reading in the same type as a
@@ -297,20 +294,20 @@ Gauge tile's:
   water is coming from 35 degrees off the bow on the starboard side, and P35
   means the same on the port side. Dead ahead reads 0 and dead astern reads 180,
   because neither has a side.
-- **Helping or Hindering:** The third row is the speed the current adds to your
-  progress or takes off it, along your course. Its label is the word. "Helping"
+- **Helping or Hindering:** The third row is the speed the current adds to or
+  takes off your progress along your course. Its label is the word. "Helping"
   over +0.4 kt in teal means you're gaining four tenths of a knot from the
   water. "Hindering" over −1.8 kt in amber means the water is costing you nearly
   two knots. When the current adds or takes off less than a twentieth of a knot,
   the word is "No effect" in a plain colour.
 - **Still water:** When the current is under a twentieth of a knot, the Speed
-  reads 0.0 and the word is "No current". The From angle reads `—`, because
+  reads 0.0, and the word is "No current". The From angle reads `—`, because
   still water has no direction worth naming.
-- **When it can't tell you:** The reason takes the place of a label, so it
-  needs no line of its own. With no current reading, every row shows `—` and the
-  Helping or Hindering label says "No current reading". With no compass heading,
-  the tile still shows the speed and the helping or hindering figure, and the
-  From label says "No heading" over a `—`.
+- **When it can't tell you:** The reason replaces the label, so it needs no
+  separate line. With no current reading, every row shows `—` and the Helping or
+  Hindering label says "No current reading". With no compass heading, the tile
+  still shows speed and the helping or hindering figure, and the From label says
+  "No heading" over a `—`.
 - **No navigation state:** If Helmcentral isn't getting a navigation state at
   all, the tile can't tell whether you're under way. It shows `—` and the label
   says "No navigation state", rather than claiming the boat isn't moving.
@@ -320,18 +317,18 @@ Gauge tile's:
   quiet](#when-a-source-goes-quiet).
 
 Helmcentral doesn't work the current out itself. The `signalk-derived-data`
-plugin in SignalK does, by comparing your speed through the water, from the
-log, and your heading, from the compass, against your movement over the
-ground, from GPS. A log that reads high therefore shows up as a foul current
-that isn't there. If the tile always says Hindering, check the log calibration
-before you believe it.
+plugin in SignalK does, by comparing your speed through the water from the log
+and your heading from the compass against your movement over the ground from
+GPS. A log that reads high therefore shows up as a foul current that isn't
+there. If the tile always says Hindering, check the log calibration before you
+believe it.
 
 ## Tanks
 
 Each tank gets a bar showing its level in percent, plus a state word that stays
 readable in glare. Fuel and water turn amber and then red as they run low, and
 waste turns amber and then red as it fills. A tank turns amber below its warn
-level and red below its alarm level, or above them for waste. They're the same
+level and red below its alarm level, or above them for waste. These are the same
 levels the tank alarms use, so the colour on the tile and the alarm always
 agree. See [Tank level alarms](alarms.md#tank-level-alarms) for the defaults and
 how to change them.
@@ -343,19 +340,19 @@ The tile lists only the tanks you've given an equipment item.
 The Nearby map is a map of the area around the vessel. It shows the points of
 interest within a range you set: anchorages, marinas, fuel, dive sites and more.
 You add it from the tile picker like an embed or a gauge. You can add more than
-one to a page, or to different pages, each with its own range and categories.
+one to a page or to different pages, each with its own range and categories.
 
 - **Switches:** Two switches control nearby AIS traffic and your own vessel's
   trail.
 - **Footer:** It names the current data provider and how old its answer is. The
   age keeps counting visibly rather than going blank when a fetch fails.
 - **Framing:** The map is framed with the vessel at the centre and the five
-  nearest matches in view. The range sets how far Helmcentral searches, not
-  how far the map shows, so a close-up is possible, and places beyond the five
-  nearest can fall off the map. After that it stays still while the boat marker moves. It reframes with one instant jump
-  when the boat gets near the edge, or when you resize the tile or change its
-  layout or range. It also reframes when a different set of five matches comes
-  into range.
+  nearest matches in view. The range sets how far Helmcentral searches, not how
+  far the map shows, so a close-up is possible and places beyond the five
+  nearest can fall off the map. After that, it stays still while the boat marker
+  moves. It reframes with one instant jump when the boat nears the edge or when
+  you resize the tile or change its layout or range. It also reframes when a
+  different set of five matches comes into range.
 - **Highlighted match:** In the map-and-list layout, one row at a time is
   highlighted. It moves to the next match every few seconds and goes back to the
   first once it reaches the end, and that match's marker gets a ring. The row's
@@ -367,14 +364,14 @@ one to a page, or to different pages, each with its own range and categories.
   close to the boat for an arc, and while the GNSS badge shows.
 - **Vessels:** With **Show AIS traffic** on, the map-and-list layout adds a
   Vessels group to the list. It shows up to four AIS contacts within 5 km (or
-  the tile's range, if that is smaller), alarmed first and then nearest, with
-  distance, bearing and "Seen 7x before, last 2d ago" for vessels you have met.
-  The list then has a Places heading and a Vessels heading. On a short tile the
-  two groups sit side by side, and on a tall tile Vessels goes below Places. It
-  says why when it can't list vessels, for example "AIS unavailable". If no vessel
-  has reported for ten minutes, it says "AIS silent" and for how long, rather than
-  "No vessels". See
-  [Add a Nearby map](../how-to/add-a-nearby-map.md#vessels-in-the-list).
+  the tile's range, if that is smaller), alarmed first and then nearest. Each
+  shows distance and bearing, and a vessel you have met shows "Seen 7x before,
+  last 2d ago". The list then has a Places heading and a Vessels heading. On a
+  short tile, the two groups sit side by side, and on a tall tile, Vessels goes
+  below Places. It says why when it can't list vessels, for example, "AIS
+  unavailable". If no vessel has reported for ten minutes, it says "AIS silent"
+  and for how long, rather than "No vessels". See [Add a Nearby
+  map](../how-to/add-a-nearby-map.md#vessels-in-the-list).
 - **Summary cycle:** The Summary cycle is how long each match stays highlighted.
   A longer one, 15 to 20 seconds, gives you more time to read a description.
 - **Route:** The route SignalK is navigating shows as a line, with the leg
@@ -402,10 +399,9 @@ waypoint you're heading for, the tile shows that waypoint instead. See
 ### Autopilot
 
 The Autopilot tile covers engage and disengage, mode, heading nudges, tack and
-gybe either way, and dodge. Helmcentral drives pilots through the modern
-autopilot interface only. A pilot offering nothing but the older legacy
-steering controls won't respond, and Helmcentral won't quietly fall back to
-them.
+gybe either way, and dodge. Helmcentral drives pilots only through the modern
+autopilot interface. A pilot offering only the older legacy steering controls
+won't respond, and Helmcentral won't quietly fall back to them.
 
 - **What it reports:** The tile reports what the pilot last said about itself,
   never what your last press asked for.
@@ -418,18 +414,18 @@ them.
 ### Windy
 
 The **Windy** panel in the sidebar shows a Windy weather map centred on the
-boat. The map comes from Windy, so it needs an internet connection, and it waits
-for a GPS position before it opens.
+boat. The map comes from Windy, so it needs an internet connection and waits for
+a GPS position before opening.
 
 Here is what you can change on it:
 
-- Layer and units: Pick the **Layer** (radar, wind, temp or pressure), the
+- **Layer and units:** Pick the **Layer** (radar, wind, temp or pressure), the
   **Wind Unit** and the **Temp Unit**, and turn **Menu** and **Marker** on or
-  off. Then tap **Apply**.
-- Following the boat: The map doesn't move as the boat does, because reloading
-  it on every position update would keep interrupting you. Tap **Recenter** to
+  off. Tap **Apply**.
+- **Following the boat:** The map doesn't move as the boat does, because
+  reloading it on every position update would interrupt you. Tap **Recenter** to
   bring it back to the boat.
-- A bigger view: **Open in Windy** opens the same map on its own.
+- **A bigger view:** **Open in Windy** opens the same map on its own.
 
 ### Max wind gust
 
