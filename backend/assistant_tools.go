@@ -172,12 +172,12 @@ type assistantToolDeps struct {
 	// history (ADR 0226). Production returns globalAlarmLogStore; nil, or a nil
 	// store, is reported as absent, never as an empty history.
 	alarmLog func() *alarmLogStore
-	// unusualReadings is get_unusual_engine_readings' and the watch report's
-	// reader of the learned normal (ADR 0276): a past window scored against the
-	// saved model, for every engine or the one named. Production wires
-	// scoreUnusualReadings, given the operator's answers; nil is not wired, and the
-	// tool says so.
-	unusualReadings func(ctx context.Context, since, until time.Time, engine string, answers []normalAnswer) unusualResult
+	// unusualReadings is get_unusual_readings' and the watch report's reader of
+	// the learned normal (ADR 0276): a past window scored against the saved
+	// model, for every engine and the house bank or the one subject named.
+	// Production wires scoreUnusualAll, given the operator's answers; nil is not
+	// wired, and the tool says so.
+	unusualReadings func(ctx context.Context, since, until time.Time, subject unusualSubject, answers []normalAnswer) unusualResult
 	// unusualAnswers is the operator's answers about unusual stretches, so the tool can say which stretches were already answered. nil is not
 	// wired; an error is an unreadable store. Neither reads as no answers.
 	unusualAnswers func() ([]normalAnswer, error)
@@ -419,8 +419,8 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		anomalyReading:    globalAnomalySlot.get,
 		anchorWatch:       currentAnchorWatch,
 		overnight:         overnightForStatus,
-		unusualReadings: func(ctx context.Context, since, until time.Time, engine string, answers []normalAnswer) unusualResult {
-			return scoreUnusualReadings(ctx, normalEnginesSubsystem(), productionNormalScoreDeps(settingsPath), since, until, engine, answers)
+		unusualReadings: func(ctx context.Context, since, until time.Time, subject unusualSubject, answers []normalAnswer) unusualResult {
+			return scoreUnusualAll(ctx, productionNormalScoreDeps(settingsPath), since, until, subject, answers)
 		},
 		unusualAnswers: listNormalAnswers,
 	}
@@ -609,7 +609,7 @@ var mateTools = []mateTool{
 	mateToolGetNearbyVessels,
 	mateToolGetActiveAlarms,
 	mateToolGetAlarmContext,
-	mateToolGetUnusualEngineReadings,
+	mateToolGetUnusualReadings,
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,

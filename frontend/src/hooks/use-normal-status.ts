@@ -2,23 +2,27 @@ import { useApiQuery } from '@/lib/api-query'
 
 /**
  * What the learned normal holds (backend/anomaly_normal_status.go, ADR 0276):
- * when and from where it was learned, and each engine's readings with the
- * switch (the ignored-sensor list) and the automatic verdict beside it. Every
- * sentence arrives finished from the server, in the report's own words.
+ * when and from where it was learned, and each engine's and the house bank's
+ * readings, grouped by subsystem, with the switch (the ignored-sensor list) and
+ * the automatic verdict beside it. Every sentence arrives finished from the
+ * server, in the report's own words.
  */
 export interface NormalStatusReading {
   key: string
   /** The SignalK path: what the ignored-sensor list holds. */
   path: string
+  /** Every path the switch puts on or off the ignored sensors, for a reading that is the sum of several. */
+  paths?: string[]
   name: string
   /** The switch. False while the reading is on the ignored-sensor list. */
   on: boolean
-  /** The engine cannot be judged without the reading, so it cannot be switched off. */
+  /** The subject cannot be judged without the reading, so it cannot be switched off. */
   required: boolean
   status: string
 }
 
-export interface NormalStatusEngine {
+/** One engine, or the house bank. */
+export interface NormalStatusSubject {
   id: string
   name: string
   bands: number
@@ -26,12 +30,21 @@ export interface NormalStatusEngine {
   readings: NormalStatusReading[]
 }
 
+/** A group of subjects under its heading: the engines, or the house bank. */
+export interface NormalStatusSubsystem {
+  id: string
+  title: string
+  /** Why the group holds nothing, when the boat has nothing of the kind set up. */
+  note?: string
+  subjects: NormalStatusSubject[]
+}
+
 export interface NormalStatus {
   configured: boolean
   summary?: string
   /** What is wrong, as a finished sentence. Absent when nothing is. */
   note?: string
-  engines: NormalStatusEngine[]
+  subsystems: NormalStatusSubsystem[]
 }
 
 export const NORMAL_STATUS_PATH = '/api/anomaly/normal/status'

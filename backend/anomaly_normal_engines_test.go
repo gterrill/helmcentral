@@ -120,24 +120,33 @@ func TestEngineRegime(t *testing.T) {
 
 func TestEngineAlarmOwns(t *testing.T) {
 	sub := normalEnginesSubsystem()
+	subjects := map[string]normalSubject{}
+	for _, s := range sub.Subjects(vesselView{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}, {Instance: "0"}}}) {
+		subjects[s.ID] = s
+	}
 	cases := []struct {
 		path string
-		want string
-		ok   bool
+		want string // the engine it belongs to, "" for none
 	}{
-		{"propulsion.port.oilPressure", "port", true},
-		{"notifications.propulsion.starboard.temperature", "starboard", true},
-		{"helmcentral.anomaly.engines.port.oilPressureResidual", "port", true},
-		{"notifications.helmcentral.anomaly.engines.starboard.temperatureResidual", "starboard", true},
-		{"helmcentral.anomaly.propulsion.0.exhaustTemperature", "0", true},
-		{"electrical.batteries.512.voltage", "", false},
-		{"navigation.speedOverGround", "", false},
-		{"propulsion", "", false},
+		{"propulsion.port.oilPressure", "port"},
+		{"notifications.propulsion.starboard.temperature", "starboard"},
+		{"helmcentral.anomaly.engines.port.oilPressureResidual", "port"},
+		{"notifications.helmcentral.anomaly.engines.starboard.temperatureResidual", "starboard"},
+		{"helmcentral.anomaly.propulsion.0.exhaustTemperature", "0"},
+		{"electrical.batteries.512.voltage", ""},
+		{"navigation.speedOverGround", ""},
+		{"propulsion", ""},
+		{"propulsion.portside.oilPressure", ""},
 	}
 	for _, c := range cases {
-		got, ok := sub.AlarmOwns(c.path)
-		if got != c.want || ok != c.ok {
-			t.Errorf("AlarmOwns(%q) = %q, %v; want %q, %v", c.path, got, ok, c.want, c.ok)
+		got := ""
+		for id, s := range subjects {
+			if normalAlarmBelongs(s, c.path) {
+				got = id
+			}
+		}
+		if got != c.want {
+			t.Errorf("%q belongs to %q, want %q", c.path, got, c.want)
 		}
 	}
 }
@@ -215,9 +224,9 @@ func TestEngineNames_ReachTheSummaryAndTheLines(t *testing.T) {
 	}})
 	model := normalSubsystemModel{TrainedAt: trainNow, Source: normalSource{Kind: normalSourceMainBucket},
 		Subjects: map[string]normalSubjectModel{subs[0].ID: {Name: subs[0].Name}, subs[1].ID: {Name: subs[1].Name}}}
-	s := buildNormalStatus(normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: model}}, nil, nil, nil, time.UTC)
-	if len(s.Engines) != 2 || s.Engines[0].Name != "Port Cummins QSB 6.7 engine" || s.Engines[1].Name != "Starboard Cummins QSB 6.7 engine" {
-		t.Fatalf("engines = %+v", s.Engines)
+	s := buildNormalStatus(normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: model}}, nil, nil, nil, nil, time.UTC)
+	if len(statusEngines(s)) != 2 || statusEngines(s)[0].Name != "Port Cummins QSB 6.7 engine" || statusEngines(s)[1].Name != "Starboard Cummins QSB 6.7 engine" {
+		t.Fatalf("engines = %+v", statusEngines(s))
 	}
 	st := oilStretch(time.Date(2026, 11, 10, 2, 10, 0, 0, time.UTC), 30)
 	st.SubjectName = subs[1].Name

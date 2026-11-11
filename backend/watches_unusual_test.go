@@ -272,10 +272,10 @@ func TestGatherWatchReportInput_ReadsUnusualReadingsOnlyForAWatchThatChecksInstr
 	d := statusTestDeps(t)
 	d.alarmLog = func() *alarmLogStore { return nil }
 	var asked []time.Duration
-	var engine string
-	d.unusualReadings = func(_ context.Context, since, until time.Time, eng string, _ []normalAnswer) unusualResult {
+	var subject unusualSubject
+	d.unusualReadings = func(_ context.Context, since, until time.Time, sub unusualSubject, _ []normalAnswer) unusualResult {
 		asked = append(asked, until.Sub(since))
-		engine = eng
+		subject = sub
 		return unusualResultWith(stretchAt(2, 30))
 	}
 	now := vesselStatusTestNow
@@ -284,7 +284,7 @@ func TestGatherWatchReportInput_ReadsUnusualReadingsOnlyForAWatchThatChecksInstr
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.Unusual == nil || len(asked) != 1 || asked[0] != 24*time.Hour || engine != "" {
+	if in.Unusual == nil || len(asked) != 1 || asked[0] != 24*time.Hour || subject != (unusualSubject{}) {
 		t.Fatalf("unusual %+v asked %v", in.Unusual, asked)
 	}
 

@@ -108,9 +108,11 @@ that minute's average built from only part of its readings.
 
 ## Tell Helmcentral about it
 
-Helmcentral learns each engine's usual readings from one-minute averages, for
-the [unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings)
-suggestion. You don't have to name the bucket. Left blank, it works the minutes
+Helmcentral learns the usual readings of each engine and of the house bank from
+one-minute averages, for the
+[unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings)
+and [unusual house bank readings](../features/anomaly-detection.md#unusual-house-bank-readings)
+suggestions. You don't have to name the bucket. Left blank, it works the minutes
 out from the main bucket. To read the one-minute bucket instead, which is quicker
 and reaches back further:
 

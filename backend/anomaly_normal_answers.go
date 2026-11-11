@@ -230,25 +230,20 @@ func recordNormalAnswer(deps normalAnswerDeps, req normalAnswerRequest) (normalA
 		return normalAnswer{}, badNormalAnswer("That report has no such stretch to answer.")
 	}
 	st := stretches[req.Index]
-	var sub *normalSubsystem
-	for _, s := range normalSubsystems() {
-		if s.Name == st.Subsystem {
-			sub = &s
-		}
-	}
-	if sub == nil {
+	sub, known := normalSubsystemNamed(st.Subsystem)
+	if !known {
 		return normalAnswer{}, badNormalAnswer("That stretch is of a kind that is no longer learned.")
 	}
 	vessel, err := deps.Vessel()
 	if err != nil {
 		return normalAnswer{}, fmt.Errorf("vessel settings: %w", err)
 	}
-	known := false
+	present := false
 	for _, s := range sub.Subjects(vessel) {
-		known = known || s.ID == st.Subject
+		present = present || s.ID == st.Subject
 	}
-	if !known {
-		return normalAnswer{}, badNormalAnswer("This engine is no longer set up. It may have been renumbered or removed.")
+	if !present {
+		return normalAnswer{}, badNormalAnswer("%s", sub.Wording.Gone)
 	}
 	path := deps.Path()
 	saved := normalAnswer{

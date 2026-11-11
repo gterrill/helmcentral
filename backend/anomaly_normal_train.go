@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"math"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,8 +48,8 @@ type normalTrainDeps struct {
 
 func productionNormalTrainDeps(settingsPath string) normalTrainDeps {
 	return normalTrainDeps{
-		Now:     func() time.Time { return time.Now().UTC() },
-		Source:  func() (normalSource, error) { return resolveNormalSource(settingsPath, false) },
+		Now:    func() time.Time { return time.Now().UTC() },
+		Source: func() (normalSource, error) { return resolveNormalSource(settingsPath, false) },
 		Minutes: func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
 			return queryNormalMinutes(ctx, settingsPath, src, paths, start, stop)
 		},
@@ -81,13 +84,26 @@ func productionNormalTrainDeps(settingsPath string) normalTrainDeps {
 
 // normalSubsystems are the subsystems this build trains.
 func normalSubsystems() []normalSubsystem {
-	return []normalSubsystem{normalEnginesSubsystem()}
+	return []normalSubsystem{normalEnginesSubsystem(), normalElectricalSubsystem()}
 }
 
-// trainNormal runs every subsystem and saves the model. A run that fails, or
-// that learns no band where the saved model has some, leaves the saved model as
-// it was and records the attempt. A file that cannot be read is returned and
-// left untouched: overwriting it would hide the corruption.
+// normalSubsystemNamed is the subsystem a saved name stands for. A name this
+// build does not train, such as one from a newer build, is not one.
+func normalSubsystemNamed(name string) (normalSubsystem, bool) {
+	for _, sub := range normalSubsystems() {
+		if sub.Name == name {
+			return sub, true
+		}
+	}
+	return normalSubsystem{}, false
+}
+
+// trainNormal runs every subsystem and saves one record for each: trained with
+// its model, skipped with its reason, or failed with its problem. A subsystem that
+// fails, or that learns no band where its saved model has some, keeps that model,
+// so one subsystem's failure is never another's. The run is a failure when any of
+// them failed. A file that cannot be read is returned and left untouched:
+// overwriting it would hide the corruption.
 func trainNormal(ctx context.Context, path string, deps normalTrainDeps) error {
 	normalModelMu.Lock()
 	defer normalModelMu.Unlock()
@@ -97,26 +113,48 @@ func trainNormal(ctx context.Context, path string, deps normalTrainDeps) error {
 		return err
 	}
 	now := deps.Now().UTC()
+	// Every subsystem trains on the run's own clock, so they share one window.
+	deps.Now = func() time.Time { return now }
 	// The source is resolved once for the whole run, so the settings cannot change
-	// between the record and the read. An error here is returned by the run and
-	// recorded.
+	// between the record and the read. An error here fails every subsystem.
 	src, srcErr := deps.Source()
 	deps.Source = func() (normalSource, error) { return src, srcErr }
-	// The answers and the maintenance log are read once for the whole run too.
+	// The answers and the maintenance log are read once for the whole run too, and
+	// so are the vessel, the ignored list and the alarms over a window, which the
+	// subsystems share.
 	answers, answersErr := deps.Answers()
 	deps.Answers = func() ([]normalAnswer, error) { return answers, answersErr }
 	repairs, repairsErr := deps.Repairs()
 	deps.Repairs = func() ([]maintenanceRepair, error) { return repairs, repairsErr }
+	deps.Vessel = sync.OnceValues(deps.Vessel)
+	if deps.Ignored != nil {
+		deps.Ignored = sync.OnceValue(deps.Ignored)
+	}
+	alarmsFor := deps.Alarms
+	type window struct{ from, to time.Time }
+	type alarmRead struct {
+		entries []alarmLogEntry
+		err     error
+	}
+	alarmReads := map[window]alarmRead{}
+	deps.Alarms = func(from, to time.Time) ([]alarmLogEntry, error) {
+		if r, ok := alarmReads[window{from, to}]; ok {
+			return r.entries, r.err
+		}
+		entries, err := alarmsFor(from, to)
+		alarmReads[window{from, to}] = alarmRead{entries, err}
+		return entries, err
+	}
+	vessel, vesselErr := deps.Vessel()
+	if vesselErr == nil {
+		deps.Minutes = shareMinutes(deps.Minutes, sharedNormalPaths(vessel))
+	}
 	record := func(runErr error) error {
-		// A shutdown is not a failed attempt: the record stays as it was, so the
+		// A shutdown is not a failed attempt: the records stay as they were, so the
 		// operator is not shown "context canceled" and the next start does not
 		// retrain for it.
 		if runErr != nil && ctx.Err() != nil {
 			return runErr
-		}
-		file.LastAttempt = &normalAttempt{At: now, OK: runErr == nil, Source: src}
-		if runErr != nil {
-			file.LastAttempt.Problem = firstErrorLine(runErr)
 		}
 		if saveErr := saveNormalModel(path, file); saveErr != nil {
 			log.Printf("anomaly normal: could not save %s: %v", path, saveErr)
@@ -126,19 +164,158 @@ func trainNormal(ctx context.Context, path string, deps normalTrainDeps) error {
 		}
 		return runErr
 	}
+	// failedRecord is the earlier record with this attempt's failure on it.
+	failedRecord := func(previous normalSubsystemModel, problem string, inputs []normalSubjectInputs) normalSubsystemModel {
+		previous.State, previous.AttemptedAt, previous.Problem, previous.Inputs = normalStateFailed, now, problem, inputs
+		return previous
+	}
+	// A subsystem that fails keeps its own saved model and the others are still
+	// trained: a house bank that cannot be read must not cost the engines their
+	// run. The first failure is the run's.
+	var failed error
+	var skipped []string
 	for _, sub := range normalSubsystems() {
 		previous := file.Subsystems[sub.Name]
+		// A vessel that cannot be read leaves the inputs as they were, so the next
+		// equipment save does not see a change nobody made.
+		inputs := previous.Inputs
+		if vesselErr == nil {
+			inputs = normalInputsOf(sub.Subjects(vessel))
+		}
 		model, err := trainSubsystem(ctx, sub, deps, previous)
-		if err != nil {
-			return record(err)
+		switch {
+		case errors.Is(err, errNormalNoSubjects):
+			// Nothing of this kind is set up. The earlier model stays in the record, so a
+			// brief glitch in a role or an instance does not lose the history, but it is
+			// not used while it is not the model of what is set up (usableFor).
+			kept := previous
+			kept.State, kept.AttemptedAt, kept.Problem, kept.Inputs = normalStateSkipped, now, sub.NoSubjects, nil
+			file.Subsystems[sub.Name] = kept
+			skipped = append(skipped, sub.NoSubjects)
+		case err != nil:
+			file.Subsystems[sub.Name] = failedRecord(previous, firstErrorLine(err), inputs)
+			if failed == nil {
+				failed = err
+			}
+		case model.judgedRegimes() == 0 && previous.judgedRegimes() > 0:
+			noBand := fmt.Errorf("this run learned no band for the %s, so the model from %s is kept", sub.Name, previous.TrainedAt.Format(time.RFC3339))
+			file.Subsystems[sub.Name] = failedRecord(previous, noBand.Error(), inputs)
+			if failed == nil {
+				failed = noBand
+			}
+		default:
+			model.State, model.AttemptedAt, model.Inputs = normalStateTrained, now, inputs
+			file.Subsystems[sub.Name] = model
 		}
-		if model.judgedRegimes() == 0 && previous.judgedRegimes() > 0 {
-			return record(fmt.Errorf("this run learned no band for the %s, so the model from %s is kept", sub.Name, previous.TrainedAt.Format(time.RFC3339)))
-		}
-		file.Subsystems[sub.Name] = model
+	}
+	switch {
+	case failed != nil:
+		return record(failed)
+	case len(skipped) == len(normalSubsystems()):
+		// A boat with nothing set up has nothing to learn, and says so.
+		return record(errors.New(lowerFirst(skipped[0])))
 	}
 	return record(nil)
 }
+
+// sharedNormalPaths are the readings more than one subsystem is offered, such as an
+// engine's revolutions, which the engines are judged by and the house bank is
+// placed by.
+func sharedNormalPaths(vessel vesselView) map[string]bool {
+	count := map[string]int{}
+	for _, sub := range normalSubsystems() {
+		seen := map[string]bool{}
+		for _, s := range sub.Subjects(vessel) {
+			for _, f := range s.Features {
+				seen[f.Path] = true
+			}
+		}
+		for path := range seen {
+			count[path]++
+		}
+	}
+	shared := map[string]bool{}
+	for path, n := range count {
+		shared[path] = n > 1
+	}
+	return shared
+}
+
+// shareMinutes reads the shared paths once for a run and gives the rest of the
+// run what it read. Only shared paths are kept, so a run does not hold ninety days
+// of every reading. A read for one source and window is the same for all.
+func shareMinutes(read func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error), shared map[string]bool) func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
+	type key struct {
+		src         normalSource
+		start, stop time.Time
+	}
+	// A shared reading is read once, by whoever asks first. Whoever asks while it is
+	// being read waits for that read alone, and reads that are not shared go on.
+	type flight struct {
+		done chan struct{}
+		rows []normalMinuteRow
+		err  error
+	}
+	var mu sync.Mutex
+	kept := map[key]map[string]*flight{}
+	return func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
+		mu.Lock()
+		flights := kept[key{src, start, stop}]
+		if flights == nil {
+			flights = map[string]*flight{}
+			kept[key{src, start, stop}] = flights
+		}
+		var mine, rest []string
+		waiting := map[string]*flight{}
+		for _, p := range paths {
+			switch f, started := flights[p]; {
+			case !shared[p]:
+				rest = append(rest, p)
+			case started:
+				waiting[p] = f
+			default:
+				flights[p] = &flight{done: make(chan struct{})}
+				waiting[p] = flights[p]
+				mine = append(mine, p)
+			}
+		}
+		mu.Unlock()
+
+		out := map[string][]normalMinuteRow{}
+		// What is mine is read in a query of its own, so another subsystem waiting on it
+		// is not failed by a reading only this one asked for.
+		if len(mine) > 0 {
+			got, err := read(ctx, src, mine, start, stop)
+			for _, p := range mine {
+				f := flights[p]
+				f.rows, f.err = got[p], err
+				close(f.done)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(rest) > 0 {
+			got, err := read(ctx, src, rest, start, stop)
+			if err != nil {
+				return nil, err
+			}
+			maps.Copy(out, got)
+		}
+		for p, f := range waiting {
+			<-f.done
+			if f.err != nil {
+				return nil, f.err
+			}
+			out[p] = f.rows
+		}
+		return out, nil
+	}
+}
+
+// errNormalNoSubjects is a subsystem with nothing of its kind set up. It is a
+// reason to skip the subsystem, not a failed run.
+var errNormalNoSubjects = errors.New("nothing of this kind is set up")
 
 // normalTrainInterval is how often the trainer runs. It also runs when the
 // inputs change (normalInputsChanged).
@@ -160,37 +337,37 @@ func requestNormalTraining() {
 }
 
 // normalInputsChanged is the one hook for anything that changes what the
-// learned normal is trained on: the InfluxDB settings or token, the engines
-// that are set up, an engine reading switched on or off.
+// learned normal is trained on: the InfluxDB settings or token, the engines and
+// house bank that are set up, a reading switched on or off.
 func normalInputsChanged() { requestNormalTraining() }
 
-// wakeNormalIfEnginesChanged wakes the trainer when the engines now set up are
-// not the ones the saved model was learned from: one added, removed or given a
-// new instance. It is asked after an equipment item is saved or deleted. A model
-// file that cannot be read is left for the trainer to report.
-func wakeNormalIfEnginesChanged(vessel vesselView) {
+// wakeNormalIfInputsChanged wakes the trainer when the subjects of a subsystem are
+// not what its last attempt was made from: an engine added, removed or given a new
+// instance, or the house bank, a charging item or a solar controller replaced. Each
+// subsystem is compared with its own last attempt, trained, skipped or failed, so
+// one that keeps failing is not trained again for every unrelated equipment save.
+// It is asked after an equipment item is saved or deleted. A model file that cannot
+// be read is left for the trainer to report.
+func wakeNormalIfInputsChanged(vessel vesselView) {
 	file, err := loadNormalModel(anomalyNormalPath())
 	if err != nil {
-		log.Printf("anomaly normal: not checking the engines against the saved model: %v", err)
+		log.Printf("anomaly normal: not checking the vessel against the saved model: %v", err)
 		return
 	}
-	learned := file.Subsystems[normalSubsystemEngines].Subjects
-	now := map[string]string{} // instance to its equipment item
-	for _, e := range vessel.Engines {
-		if e.Instance != "" {
-			now[e.Instance] = e.EquipmentID
+	for _, sub := range normalSubsystems() {
+		if !sameNormalInputs(normalInputsOf(sub.Subjects(vessel)), file.Subsystems[sub.Name].Inputs) {
+			normalInputsChanged()
+			return
 		}
 	}
-	changed := len(now) != len(learned)
-	for id, equipment := range now {
-		// A different item moves where the engine's repairs are read from.
-		if sm, ok := learned[id]; !ok || sm.EquipmentID != equipment {
-			changed = true
-		}
-	}
-	if changed {
-		normalInputsChanged()
-	}
+}
+
+// sameNormalInputs says two attempts were made from the same subjects, items and
+// readings.
+func sameNormalInputs(a, b []normalSubjectInputs) bool {
+	return slices.EqualFunc(a, b, func(x, y normalSubjectInputs) bool {
+		return x.Subject == y.Subject && slices.Equal(x.EquipmentIDs, y.EquipmentIDs) && slices.Equal(x.Paths, y.Paths)
+	})
 }
 
 // drainWake empties the wake channel and says whether a wake was waiting.
@@ -205,13 +382,33 @@ func drainWake(ch <-chan struct{}) bool {
 
 // normalPathMatters says whether a change to the ignored state of a SignalK
 // path changes what is learned, asking each subsystem.
-func normalPathMatters(path string) bool {
-	for _, sub := range normalSubsystems() {
-		if sub.PathMatters != nil && sub.PathMatters(path) {
+func normalPathMatters(path string) bool { return normalPathsMatter(path) }
+
+// normalPathsMatter is normalPathMatters for several paths, checking the boat once.
+// A vessel that cannot be read is logged, and wakes the trainer for a path the
+// bank might use rather than hide the change.
+func normalPathsMatter(paths ...string) bool {
+	vessel, err := normalPathVessel()
+	if err != nil {
+		log.Printf("anomaly normal: could not read the vessel to check an ignored sensor: %v", err)
+	}
+	for _, path := range paths {
+		if err != nil && strings.HasPrefix(path, "electrical.") {
 			return true
+		}
+		for _, sub := range normalSubsystems() {
+			if sub.PathMatters != nil && sub.PathMatters(vessel, path) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// normalPathVessel is the vessel as it is now, a variable so a test can say what
+// the boat is.
+var normalPathVessel = func() (vesselView, error) {
+	return loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 }
 
 // waitQuiet returns true once no wake has arrived for quiet, and false if ctx
@@ -237,18 +434,30 @@ func waitQuiet(ctx context.Context, wake <-chan struct{}, quiet time.Duration) b
 	}
 }
 
-// normalStartDelay is how long a starting trainer waits before its first run:
-// the rest of the interval when the last run succeeded within it from the same
-// source, and no wait otherwise. A restart does not read ninety days again.
+// normalStartDelay is how long a starting trainer waits before its first run: the
+// rest of the interval when every subsystem was attempted within it, from the same
+// source, and did not fail, and no wait otherwise. One schedule trains them all, so
+// one that is due, or failed, trains every subsystem. A restart does not read
+// ninety days again for a boat that was trained within the interval.
 func normalStartDelay(file normalModelFile, now time.Time, src normalSource, interval time.Duration) time.Duration {
-	a := file.LastAttempt
-	if a == nil || !a.OK || a.Source != src {
-		return 0
+	wait := interval
+	for _, sub := range normalSubsystems() {
+		rec, recorded := file.Subsystems[sub.Name]
+		at := rec.AttemptedAt
+		if at.IsZero() {
+			at = rec.TrainedAt
+		}
+		age := now.Sub(at)
+		switch {
+		case !recorded, rec.State == normalStateFailed, age < 0, age >= interval:
+			return 0
+		case rec.State != normalStateSkipped && rec.Source != src:
+			// Read from somewhere else last time (a skipped subsystem read nothing).
+			return 0
+		}
+		wait = min(wait, interval-age)
 	}
-	if age := now.Sub(a.At); age >= 0 && age < interval {
-		return interval - age
-	}
-	return 0
+	return wait
 }
 
 func startNormalTrainer(ctx context.Context, settingsPath string, interval time.Duration) {
@@ -317,7 +526,7 @@ func trainSubsystem(ctx context.Context, sub normalSubsystem, deps normalTrainDe
 	}
 	subjects := sub.Subjects(vessel)
 	if len(subjects) == 0 {
-		return normalSubsystemModel{}, fmt.Errorf("no %s are set up", sub.Name)
+		return normalSubsystemModel{}, fmt.Errorf("%s: %w", lowerFirst(sub.NoSubjects), errNormalNoSubjects)
 	}
 	alarms, err := deps.Alarms(window.From.Add(-normalAlarmPadAfter), window.To.Add(normalAlarmPadBefore))
 	if err != nil {
@@ -335,8 +544,8 @@ func trainSubsystem(ctx context.Context, sub normalSubsystem, deps normalTrainDe
 	// for the boat's zone.
 	items := map[string]bool{}
 	for _, sj := range subjects {
-		if sj.EquipmentID != "" {
-			items[sj.EquipmentID] = true
+		for _, id := range sj.EquipmentIDs {
+			items[id] = true
 		}
 	}
 	// A repair that ended before the oldest window this run or an old normal was
@@ -365,6 +574,7 @@ func trainSubsystem(ctx context.Context, sub normalSubsystem, deps normalTrainDe
 	model := normalSubsystemModel{
 		TrainedAt: stamp, Window: window, Source: src,
 		Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}, Excluded: []normalExcluded{}, Labelled: []normalExcluded{},
+		ModelInputs: normalInputsOf(subjects),
 	}
 	for _, subject := range subjects {
 		if err := ctx.Err(); err != nil {
@@ -386,6 +596,16 @@ type trainContext struct {
 	repairs []normalRepairRange
 	ignored map[string]bool
 	prev    normalSubsystemModel
+}
+
+// normalAlarmBelongs says an alarm's path is about the subject: it is one of the
+// subject's alarm paths or under one, with or without the notifications. prefix a
+// bus alarm carries.
+func normalAlarmBelongs(subject normalSubject, alarmPath string) bool {
+	path := strings.TrimPrefix(alarmPath, "notifications.")
+	return slices.ContainsFunc(subject.AlarmPaths, func(root string) bool {
+		return path == root || strings.HasPrefix(path, root+".")
+	})
 }
 
 // normalRepairRange is the fault range of one repair: from the start of the day
@@ -432,6 +652,94 @@ func normalRepairRanges(repairs []maintenanceRepair, boatLoc func() (*time.Locat
 	return out, nil
 }
 
+// annotateMinutes lets the subsystem classify a subject's minutes once, and refuses
+// minutes it left unclassified: the gate, the runs and the regime read the class.
+func annotateMinutes(sub normalSubsystem, subject normalSubject, minutes []normalMinute) error {
+	if sub.Annotate == nil {
+		return nil
+	}
+	sub.Annotate(minutes)
+	for _, m := range minutes {
+		if !m.Classified {
+			return fmt.Errorf("%s: a minute was not annotated by the %s subsystem", subject.Name, sub.Name)
+		}
+	}
+	return nil
+}
+
+// withGroupsOff is the ignored list with every path of a group added when any one
+// of them is on it, so switching off a reading that is published under several
+// names switches off all of them and the next run does not pick another.
+func withGroupsOff(features []normalFeature, ignored map[string]bool) map[string]bool {
+	out := maps.Clone(ignored)
+	if out == nil {
+		out = map[string]bool{}
+	}
+	for _, f := range features {
+		if f.Group == "" || !ignored[f.Path] {
+			continue
+		}
+		for _, g := range features {
+			if g.Group == f.Group {
+				out[g.Path] = true
+			}
+		}
+	}
+	return out
+}
+
+// sumSeries is, for each minute, the sum of the series that report in it. A minute
+// where none does has no value, and a zero is never put in their place.
+func sumSeries(values map[string]map[time.Time]float64, keys []string) map[time.Time]float64 {
+	out := map[time.Time]float64{}
+	for _, k := range keys {
+		for at, v := range values[k] {
+			out[at] += v
+		}
+	}
+	return out
+}
+
+// firstOfEachGroup keeps, of the readings that share a Group, only the one with the
+// most rows, and on a tie the one that reported last: they are alternative paths
+// for one reading. The others read as having no data, so selectFeatures leaves
+// them out and scoring never asks for them. rows is not changed.
+func firstOfEachGroup(features []normalFeature, rows map[string][]normalMinuteRow) map[string][]normalMinuteRow {
+	latest := func(path string) time.Time {
+		var at time.Time
+		for _, r := range rows[path] {
+			if r.At.After(at) {
+				at = r.At
+			}
+		}
+		return at
+	}
+	best := map[string]normalFeature{}
+	for _, f := range features {
+		if f.Group == "" || len(rows[f.Path]) == 0 {
+			continue
+		}
+		b, has := best[f.Group]
+		if !has || len(rows[f.Path]) > len(rows[b.Path]) || (len(rows[f.Path]) == len(rows[b.Path]) && latest(f.Path).After(latest(b.Path))) {
+			best[f.Group] = f
+		}
+	}
+	var out map[string][]normalMinuteRow
+	for _, f := range features {
+		if f.Group == "" || len(rows[f.Path]) == 0 || best[f.Group].Path == f.Path {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(rows)
+		}
+		delete(out, f.Path)
+	}
+	if out == nil {
+		return rows
+	}
+	return out
+}
+
 type bandMinutes struct {
 	label string
 	idx   []int // indexes into the joined minutes, usable ones
@@ -441,11 +749,14 @@ type bandMinutes struct {
 }
 
 func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubject, deps normalTrainDeps, tc trainContext, model *normalSubsystemModel) error {
+	// A reading that places a minute is not on the ignored list: it cannot be
+	// switched off.
+	tc.ignored = withGroupsOff(subject.Features, withoutPlacing(subject.Features, tc.ignored))
 	// 1. Every reading's minutes, from the one source that carries it, in one
 	// query. A reading switched off is not read, unless the gate needs it.
 	var paths []string
 	for _, f := range subject.Features {
-		if f.Required || !tc.ignored[f.Path] {
+		if f.Path != "" && (f.Required || !tc.ignored[f.Path]) {
 			paths = append(paths, f.Path)
 		}
 	}
@@ -453,17 +764,27 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 	if err != nil {
 		return err
 	}
+	rows = firstOfEachGroup(subject.Features, rows)
 	evidence := make([]featureEvidence, len(subject.Features))
 	values := map[string]map[time.Time]float64{}
 	for i, f := range subject.Features {
 		pick := chooseSender(rows[f.Path])
-		evidence[i] = featureEvidence{Feature: f, Source: pick.Source, TwoSources: pick.Two, SenderChanged: pick.Changed, Values: pick.Values}
+		switch {
+		case len(f.SumOf) > 0:
+			pick = senderChoice{Values: sumSeries(values, f.SumOf)}
+		case f.Placing:
+			pick = senderChoice{Values: valuesFromAnySender(rows[f.Path])}
+		}
+		evidence[i] = featureEvidence{Feature: f, Source: pick.Source, TwoSources: pick.Two, SenderChanged: pick.Changed, Values: pick.Values, Wording: sub.Wording}
 		values[f.Key] = pick.Values
 	}
 
 	// 2. Join: a minute is a minute of the subject when it has every reading the
 	// gate needs. A minute that lacks one is not imputed and is not a minute.
 	minutes := joinNormalMinutes(subject.Features, values, func(string) bool { return true })
+	if err := annotateMinutes(sub, subject, minutes); err != nil {
+		return err
+	}
 
 	// 3. Gate, then take out the minutes of an alarm for this subject.
 	gate := sub.Gate(minutes)
@@ -499,12 +820,11 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 	var out []normalExcluded
 	inWindow := func(from, to time.Time) bool { return from.Before(tc.window.To) && to.After(tc.window.From) }
 	for _, a := range tc.alarms {
-		owner, ok := sub.AlarmOwns(a.Path)
-		if !ok || owner != subject.ID {
+		if !normalAlarmBelongs(subject, a.Path) {
 			continue
 		}
 		if sub.AlarmReading != nil {
-			if key, isReading := sub.AlarmReading(a.Path); isReading && !relevant[key] {
+			if key, isReading := sub.AlarmReading(subject, a); isReading && !relevant[key] {
 				continue
 			}
 		}
@@ -539,7 +859,7 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		}
 	}
 	for _, r := range tc.repairs {
-		if subject.EquipmentID != "" && r.EquipmentID == subject.EquipmentID {
+		if slices.Contains(subject.EquipmentIDs, r.EquipmentID) {
 			faults = append(faults, normalExcluded{Subject: subject.ID, From: r.From, To: r.To, Reason: normalReasonRepair, Ref: r.EntryID, Title: r.Title})
 		}
 	}
@@ -581,14 +901,28 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 		}
 	}
 
-	sm := normalSubjectModel{Name: subject.Name, EquipmentID: subject.EquipmentID, GatedMinutes: len(usable)}
+	sm := normalSubjectModel{Name: subject.Name, EquipmentIDs: subject.EquipmentIDs, GatedMinutes: len(usable)}
 	haveVerdicts := len(usable) > 0
 	var used []string // keys in subject order
+	// A reading the gate needs that has no rows at all is named, when the subject
+	// has data for the others: it is what stops the subject being judged.
+	var absent []string
+	required := 0
+	for i, f := range subject.Features {
+		if f.Required {
+			required++
+			if len(evidence[i].Values) == 0 {
+				absent = append(absent, f.displayName())
+			}
+		}
+	}
 	switch {
+	case len(absent) > 0 && len(absent) < required:
+		sm.Problem = fmt.Sprintf("%s: no readings in the last %d days", absent[0], int(normalTrainWindow/(24*time.Hour)))
 	case gateCount == 0:
-		sm.Problem = fmt.Sprintf("no steady running minutes in the last %d days", int(normalTrainWindow/(24*time.Hour)))
+		sm.Problem = fmt.Sprintf("no %s in the last %d days", sub.Wording.Steady, int(normalTrainWindow/(24*time.Hour)))
 	case len(usable) == 0:
-		sm.Problem = fmt.Sprintf("all %s steady running minutes were left out (alarms, answers marked real or repairs)", commaInt(gateCount))
+		sm.Problem = fmt.Sprintf("all %s %s were left out (alarms, answers marked real or repairs)", commaInt(gateCount), sub.Wording.Steady)
 	}
 	var runningTimes []time.Time
 	for i, m := range minutes {
@@ -612,7 +946,7 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 				// judged, and the problem names the reading so it can be switched
 				// back on.
 				if v.SwitchedOff {
-					sm.Problem = normalSwitchedOffProblem(v.Key, v.Path)
+					sm.Problem = normalSwitchedOffProblem(sub, normalFeatureName(v))
 				} else {
 					sm.Problem = fmt.Sprintf("%s: %s", normalFeatureName(v), v.Reason)
 				}
@@ -665,8 +999,12 @@ func trainSubject(ctx context.Context, sub normalSubsystem, subject normalSubjec
 			}
 			minSD[key] = normalMinSD(minChange[key], smallestStep(vals))
 		}
+		perRegime := map[string]bool{}
+		for _, f := range subject.Features {
+			perRegime[f.Key] = f.PerRegime
+		}
 		for key, b := range bands {
-			model.Regimes[key] = fitBand(subject.ID, key, b, minutes, runIDs, used, byKey, minSD, faults, tc)
+			model.Regimes[key] = fitBand(subject.ID, key, b, minutes, runIDs, used, byKey, minSD, perRegime, faults, tc)
 		}
 	}
 
@@ -721,7 +1059,7 @@ func usableCarry(r normalRegime, now time.Time, used []string, usedKnown bool, f
 }
 
 // fitBand fits one regime of one subject, or says why not.
-func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runIDs []int, used []string, verdicts map[string]normalFeatureVerdict, minSD map[string]float64, faults []normalExcluded, tc trainContext) normalRegime {
+func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runIDs []int, used []string, verdicts map[string]normalFeatureVerdict, minSD map[string]float64, perRegime map[string]bool, faults []normalExcluded, tc trainContext) normalRegime {
 	collect := func(keys []string) (rows [][]float64, keep []bool, runs int) {
 		seenRun := map[int]bool{}
 		for n, i := range b.idx {
@@ -747,8 +1085,24 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 
 	base := normalRegime{Subject: subjectID, Label: b.label, LearnedAt: tc.stamp, Window: tc.window, ExcludedMinutes: b.excluded}
 	prevR, hadPrev := tc.prev.Regimes[key]
-	carry := hadPrev && usableCarry(prevR, tc.stamp, used, true, faults)
 
+	// A reading that is fitted only where it reports is left out of a band whose
+	// minutes mostly lack it, and the band is judged on the readings it has.
+	used = slices.DeleteFunc(slices.Clone(used), func(k string) bool {
+		if !perRegime[k] {
+			return false
+		}
+		have := 0
+		for _, i := range b.idx {
+			if _, ok := minutes[i].Values[k]; ok {
+				have++
+			}
+		}
+		return float64(have) < normalMinPresence*float64(len(b.idx))
+	})
+	// A band is carried forward only if the readings it describes are the readings
+	// this run would fit it with.
+	carry := hadPrev && usableCarry(prevR, tc.stamp, used, true, faults)
 	var late []string
 	for _, k := range used {
 		if verdicts[k].LateJoiner {
@@ -778,6 +1132,15 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 		return base
 	}
 
+	// A reading that holds one value through the whole band says nothing about it
+	// and leaves the fit; it is judged where it moves.
+	keys, rows = dropStillColumns(keys, rows, perRegime)
+	if len(keys) == 0 {
+		base.Minutes, base.Runs = len(rows), runs
+		base.Reason = "could not be fitted: no reading changed in this band"
+		return base
+	}
+
 	opts := normalFitOptions{Ridge: normalRidge, Reweight: normalReweight, MinSD: make([]float64, len(keys)), Keep: keep}
 	for j, k := range keys {
 		opts.MinSD[j] = minSD[k]
@@ -799,23 +1162,66 @@ func fitBand(subjectID, key string, b *bandMinutes, minutes []normalMinute, runI
 	return base
 }
 
+// dropStillColumns removes the readings that hold one value in every row, from
+// the keys and from each row. Values are compared to nine significant digits so
+// float noise from an average is not a change. keys is not changed.
+func dropStillColumns(keys []string, rows [][]float64, perRegime map[string]bool) ([]string, [][]float64) {
+	var moving []int
+	for j := range keys {
+		if !perRegime[keys[j]] {
+			moving = append(moving, j)
+			continue
+		}
+		first := significant(rows[0][j])
+		for _, r := range rows[1:] {
+			if significant(r[j]) != first {
+				moving = append(moving, j)
+				break
+			}
+		}
+	}
+	if len(moving) == len(keys) {
+		return keys, rows
+	}
+	kept := make([]string, len(moving))
+	for n, j := range moving {
+		kept[n] = keys[j]
+	}
+	slim := make([][]float64, len(rows))
+	for i, r := range rows {
+		slim[i] = make([]float64, len(moving))
+		for n, j := range moving {
+			slim[i][n] = r[j]
+		}
+	}
+	return kept, slim
+}
+
 func thinBandReason(minutes, runs int) string {
 	if minutes < normalMinMinutes {
 		return fmt.Sprintf("%s minutes learned, needs %d", commaInt(minutes), normalMinMinutes)
 	}
-	return fmt.Sprintf("%s minutes from %s, needs %d runs", commaInt(minutes), plural(runs, "run", "runs"), normalMinRuns)
+	return fmt.Sprintf("%s minutes from %s, needs %d %s", commaInt(minutes), plural(runs, normalRunOne, normalRunMany), normalMinRuns, normalRunMany)
 }
 
-// normalSwitchedOffProblem is why an engine cannot be judged when a reading its
+// normalSwitchedOffProblem is why a subject cannot be judged when a reading its
 // gate needs is on the ignored list. Training and scoring say it the same way.
-func normalSwitchedOffProblem(key, path string) string {
-	return fmt.Sprintf("%s is switched off, so this engine cannot be judged", normalFeatureName(normalFeatureVerdict{Key: key, Path: path}))
+func normalSwitchedOffProblem(sub normalSubsystem, reading string) string {
+	return fmt.Sprintf("%s is switched off, so %s cannot be judged", reading, sub.Wording.This)
 }
 
 // normalFeatureName is a reading's plain name for the operator, "oil pressure".
 func normalFeatureName(v normalFeatureVerdict) string {
+	if v.Name != "" {
+		return v.Name
+	}
 	if name := sensorQuantity(v.Path); name != "" {
 		return name
 	}
 	return v.Key
+}
+
+// displayName is the feature's plain name for the operator.
+func (f normalFeature) displayName() string {
+	return normalFeatureName(normalFeatureVerdict{Key: f.Key, Path: f.Path, Name: f.Name})
 }

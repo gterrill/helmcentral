@@ -537,6 +537,7 @@ func alarmRoutes() []apiRoute {
 		{http.MethodPut, "/api/alarm-rules/:id", tierWrite, updateAlarmRuleHandler},
 		{http.MethodDelete, "/api/alarm-rules/:id", tierWrite, deleteAlarmRuleHandler},
 		{http.MethodPost, "/api/alarms/ignored-sensors", tierWrite, ignoreSensorHandler},
+		{http.MethodPut, "/api/alarms/ignored-sensors", tierWrite, setIgnoredSensorsHandler},
 		{http.MethodDelete, "/api/alarms/ignored-sensors/:identifier", tierWrite, unignoreSensorHandler},
 
 		// The network alarm card's "Stop showing" action and its Restore in

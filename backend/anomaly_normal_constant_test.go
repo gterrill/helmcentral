@@ -32,7 +32,7 @@ func coolantRuns(warm, judged int, hold func(i int) float64) (running, gated []t
 func coolantEvidence(values map[time.Time]float64) featureEvidence {
 	return featureEvidence{
 		Feature: normalFeature{Key: "temperature", Path: "propulsion.port.temperature", SIUnit: "K", Explain: true, Required: true},
-		Source:  "can0.1", Values: values,
+		Source:  "can0.1", Values: values, Wording: normalEngineWording,
 	}
 }
 

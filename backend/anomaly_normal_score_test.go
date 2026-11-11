@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -48,11 +49,15 @@ type scoreCase struct {
 	engines []string
 	asked   int
 	paths   []string        // the readings asked for in the last read
+	reads   [][]string      // the readings asked for in every read
+	mu      sync.Mutex      // subsystems are scored together
 	since   time.Time       // the start of the last read
 	ctx     context.Context // the context of the last read
 	ignored map[string]bool // the ignored-sensor list at score time
 	wakes   int             // how often scoring asked for a training run
 	answers []normalAnswer  // the operator's answers about stretches
+	// vessel, when set, is the whole vessel, in place of the engines above.
+	vessel *vesselView
 }
 
 func newScoreCase(model normalModelFile, feed map[string][]normalMinuteRow, engines ...string) *scoreCase {
@@ -67,8 +72,11 @@ func (c *scoreCase) deps() normalScoreDeps {
 		Now:    func() time.Time { return trainNow },
 		Source: func() (normalSource, error) { return c.src, c.srcErr },
 		Minutes: func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
+			c.mu.Lock()
+			defer c.mu.Unlock()
 			c.asked++
 			c.paths = paths
+			c.reads = append(c.reads, paths)
 			c.since = start
 			c.ctx = ctx
 			if c.minErr != nil {
@@ -77,6 +85,9 @@ func (c *scoreCase) deps() normalScoreDeps {
 			return minutesFrom(c.feed, paths, start, stop), nil
 		},
 		Vessel: func() (vesselView, error) {
+			if c.vessel != nil {
+				return *c.vessel, nil
+			}
 			v := vesselView{}
 			for _, e := range c.engines {
 				v.Engines = append(v.Engines, vesselEngineSetting{Instance: e, Name: strings.ToUpper(e[:1]) + e[1:]})
@@ -90,7 +101,7 @@ func (c *scoreCase) deps() normalScoreDeps {
 }
 
 func (c *scoreCase) score(since time.Duration) unusualResult {
-	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-since), trainNow, "", c.answers)
+	return scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-since), trainNow, "", c.answers)
 }
 
 // bend changes one reading over minutes [from, to) of the run.
@@ -228,7 +239,7 @@ func TestScore_MinutesBeforeTheGateAreCountedAsNotRunningSteadily(t *testing.T) 
 // the minutes before it. Scoring reads a lead-in and judges only the window.
 func TestScore_AWindowThatStartsMidRunIsJudgedFromItsFirstMinute(t *testing.T) {
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(37))
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(60*time.Minute), trainNow, "", nil)
+	res := scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(60*time.Minute), trainNow, "", nil)
 	if res.JudgedMinutes != 60 {
 		t.Fatalf("judged %d, want the whole 60 minute window", res.JudgedMinutes)
 	}
@@ -308,7 +319,7 @@ func TestScore_OnlyTheNamedEngineIsRead(t *testing.T) {
 	feed := mergeFeeds(synthFeed("port", 41, []synthRun{{Start: scoreRunStart, Minutes: 120, RPM: 1900}}),
 		synthFeed("starboard", 42, []synthRun{{Start: scoreRunStart, Minutes: 120, RPM: 1900}}))
 	c := newScoreCase(trainedPort(t), feed, "port", "starboard")
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "starboard", nil)
+	res := scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "starboard", nil)
 	// Starboard has no model, so none of its minutes are judged; port is not read.
 	if res.JudgedMinutes != 0 {
 		t.Fatalf("judged = %d", res.JudgedMinutes)
@@ -352,7 +363,7 @@ func TestScore_ProblemsAreStatedAndNeverBecomeAnEmptyResult(t *testing.T) {
 // With no model but a failed training run on record, the stored problem is the
 // reason.
 func TestScore_NoModelAfterAFailedRunSaysWhy(t *testing.T) {
-	m := normalModelFile{LastAttempt: &normalAttempt{At: trainNow, OK: false, Problem: `the one-minute bucket "b" could not be read: nope`}, Subsystems: map[string]normalSubsystemModel{}}
+	m := normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: {State: normalStateFailed, AttemptedAt: trainNow, Problem: `the one-minute bucket "b" could not be read: nope`}}}
 	res := newScoreCase(m, nil).score(time.Hour)
 	if res.ProblemKind != unusualNoModel || res.Problem != `the one-minute bucket "b" could not be read: nope` {
 		t.Fatalf("result = %q %q", res.ProblemKind, res.Problem)
@@ -361,7 +372,9 @@ func TestScore_NoModelAfterAFailedRunSaysWhy(t *testing.T) {
 
 func TestScore_AGoodModelWithAFailedLatestRunCarriesTheFailure(t *testing.T) {
 	m := trainedPort(t)
-	m.LastAttempt = &normalAttempt{At: trainNow, OK: false, Problem: "InfluxDB could not be read: timeout"}
+	rec := m.Subsystems[normalSubsystemEngines]
+	rec.State, rec.AttemptedAt, rec.Problem = normalStateFailed, trainNow, "InfluxDB could not be read: timeout"
+	m.Subsystems[normalSubsystemEngines] = rec
 	res := newScoreCase(m, steadyScoreFeed(43)).score(24 * time.Hour)
 	if res.TrainingProblem != "InfluxDB could not be read: timeout" || res.JudgedMinutes == 0 {
 		t.Fatalf("result = %+v", res)
@@ -381,14 +394,14 @@ func TestScore_ModelInfoCarriesTheLearnedDateAndBands(t *testing.T) {
 // The window is cut to seven days inside the score, and the result says so.
 func TestScore_AWindowOverSevenDaysIsCutAndSaidSo(t *testing.T) {
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(45))
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-30*24*time.Hour), trainNow, "", nil)
+	res := scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-30*24*time.Hour), trainNow, "", nil)
 	if !res.Clipped || !res.Since.Equal(trainNow.Add(-7*24*time.Hour)) {
 		t.Fatalf("clipped %v since %v", res.Clipped, res.Since)
 	}
 	if want := trainNow.Add(-7*24*time.Hour - normalScoreLeadIn); !c.since.Equal(want) {
 		t.Fatalf("the read starts at %v, want %v", c.since, want)
 	}
-	if res = scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil); res.Clipped {
+	if res = scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil); res.Clipped {
 		t.Fatal("a day is not clipped")
 	}
 }
@@ -398,7 +411,7 @@ func TestScore_OneReadWithTheCallersContext(t *testing.T) {
 	type key struct{}
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(46))
 	ctx := context.WithValue(context.Background(), key{}, "mark")
-	scoreUnusualReadings(ctx, normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil)
+	scoreOnly(ctx, normalEnginesSubsystem(), c.deps(), trainNow.Add(-24*time.Hour), trainNow, "", nil)
 	if c.asked != 1 || len(c.paths) < 5 {
 		t.Fatalf("%d reads of %v, want 1 read of the engine's readings", c.asked, c.paths)
 	}

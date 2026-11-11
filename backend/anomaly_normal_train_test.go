@@ -89,6 +89,16 @@ type trainHarness struct {
 	asked      []normalSource
 	// requested is the paths of each read, one entry per read.
 	requested [][]string
+	// vessel, when set, is the whole vessel, in place of the engines above.
+	vessel *vesselView
+	// failPathPrefix makes a read that asks for a path with it fail.
+	failPathPrefix string
+	// vesselErr makes the vessel unreadable.
+	vesselErr error
+	// nowStep advances the clock by that much each time it is read.
+	nowStep time.Duration
+	// alarmReads counts reads of the alarm log.
+	alarmReads int
 }
 
 func newTrainHarness(feed map[string][]normalMinuteRow, engines ...string) *trainHarness {
@@ -101,7 +111,11 @@ func newTrainHarness(feed map[string][]normalMinuteRow, engines ...string) *trai
 
 func (h *trainHarness) deps() normalTrainDeps {
 	return normalTrainDeps{
-		Now:    func() time.Time { return h.now },
+		Now: func() time.Time {
+			at := h.now
+			h.now = h.now.Add(h.nowStep)
+			return at
+		},
 		Source: func() (normalSource, error) { return h.source, h.srcErr },
 		Minutes: func(ctx context.Context, src normalSource, paths []string, start, stop time.Time) (map[string][]normalMinuteRow, error) {
 			h.asked = append(h.asked, src)
@@ -109,14 +123,30 @@ func (h *trainHarness) deps() normalTrainDeps {
 			if h.minErr != nil {
 				return nil, h.minErr
 			}
+			for _, p := range paths {
+				if h.failPathPrefix != "" && strings.HasPrefix(p, h.failPathPrefix) {
+					return nil, errors.New(strings.TrimSuffix(h.failPathPrefix, ".") + " read failed")
+				}
+			}
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return minutesFrom(h.feed, paths, start, stop), nil
 		},
-		Vessel:   func() (vesselView, error) { return vesselView{Engines: h.engines}, nil },
-		Ignored:  func() map[string]bool { return h.ignored },
-		Alarms:   func(from, to time.Time) ([]alarmLogEntry, error) { return h.alarms, h.alarmEr },
+		Vessel: func() (vesselView, error) {
+			if h.vesselErr != nil {
+				return vesselView{}, h.vesselErr
+			}
+			if h.vessel != nil {
+				return *h.vessel, nil
+			}
+			return vesselView{Engines: h.engines}, nil
+		},
+		Ignored: func() map[string]bool { return h.ignored },
+		Alarms: func(from, to time.Time) ([]alarmLogEntry, error) {
+			h.alarmReads++
+			return h.alarms, h.alarmEr
+		},
 		Answers:  func() ([]normalAnswer, error) { return h.answers, h.answersErr },
 		Repairs:  func() ([]maintenanceRepair, error) { return h.repairs, h.repairsErr },
 		BoatLoc:  func() (*time.Location, error) { return h.boatLoc, h.boatLocErr },
@@ -438,8 +468,8 @@ func TestTrainNormal_SavesTheModelAndRecordsTheAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.LastAttempt == nil || !got.LastAttempt.OK || !got.LastAttempt.At.Equal(trainNow) {
-		t.Fatalf("last attempt = %+v", got.LastAttempt)
+	if rec := got.Subsystems[normalSubsystemEngines]; rec.State != normalStateTrained || !rec.AttemptedAt.Equal(trainNow) {
+		t.Fatalf("record = %+v", rec)
 	}
 	if got.Subsystems[normalSubsystemEngines].judgedRegimes() != 1 {
 		t.Fatalf("engines = %+v", got.Subsystems[normalSubsystemEngines])
@@ -470,11 +500,12 @@ func TestTrainNormal_ANamedBucketThatFailsKeepsTheOldModelAndRecordsWhy(t *testi
 		}
 	}
 	after, _ := loadNormalModel(path)
-	if after.LastAttempt == nil || after.LastAttempt.OK || !strings.Contains(after.LastAttempt.Problem, `the one-minute bucket "SignalK_1m" could not be read`) {
-		t.Fatalf("last attempt = %+v", after.LastAttempt)
+	rec := after.Subsystems[normalSubsystemEngines]
+	if rec.State != normalStateFailed || !strings.Contains(rec.Problem, `the one-minute bucket "SignalK_1m" could not be read`) {
+		t.Fatalf("record = %+v", rec)
 	}
-	if !after.LastAttempt.At.Equal(h.now) {
-		t.Fatalf("attempt time = %v", after.LastAttempt.At)
+	if !rec.AttemptedAt.Equal(h.now) {
+		t.Fatalf("attempt time = %v", rec.AttemptedAt)
 	}
 	if after.Subsystems[normalSubsystemEngines].TrainedAt != good.Subsystems[normalSubsystemEngines].TrainedAt || after.Subsystems[normalSubsystemEngines].judgedRegimes() != 1 {
 		t.Fatalf("the good model must be left as it was: %+v", after.Subsystems[normalSubsystemEngines])
@@ -509,11 +540,13 @@ func TestTrainNormal_NoInfluxIsSaidPlainly(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	got, _ := loadNormalModel(path)
-	if got.LastAttempt == nil || got.LastAttempt.OK || got.LastAttempt.Problem != "InfluxDB is not set up" {
-		t.Fatalf("last attempt = %+v", got.LastAttempt)
+	for name, rec := range got.Subsystems {
+		if rec.State != normalStateFailed || rec.Problem != "InfluxDB is not set up" || rec.hasModel() {
+			t.Fatalf("%s: nothing was learned, and each says why: %+v", name, rec)
+		}
 	}
-	if len(got.Subsystems) != 0 {
-		t.Fatalf("nothing was learned, so nothing is saved: %+v", got.Subsystems)
+	if len(got.Subsystems) == 0 {
+		t.Fatalf("every subsystem has a record: %+v", got.Subsystems)
 	}
 }
 
@@ -536,8 +569,8 @@ func TestTrainNormal_AnEmptyRunDoesNotOverwriteAGoodModel(t *testing.T) {
 	if got.Subsystems[normalSubsystemEngines].judgedRegimes() != 1 {
 		t.Fatalf("the model with a band was overwritten: %+v", got.Subsystems[normalSubsystemEngines])
 	}
-	if got.LastAttempt == nil || got.LastAttempt.OK {
-		t.Fatalf("last attempt = %+v", got.LastAttempt)
+	if rec := got.Subsystems[normalSubsystemEngines]; rec.State != normalStateFailed {
+		t.Fatalf("record = %+v", rec)
 	}
 }
 
@@ -615,15 +648,22 @@ func TestTrainNormal_TheAttemptRecordsWhereItRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := loadNormalModel(path)
-	if got.LastAttempt == nil || got.LastAttempt.Source != h.source {
-		t.Fatalf("attempt = %+v", got.LastAttempt)
+	if got.Subsystems[normalSubsystemEngines].Source != h.source {
+		t.Fatalf("record = %+v", got.Subsystems[normalSubsystemEngines])
 	}
 }
 
 func TestNormalStartDelay(t *testing.T) {
 	src := normalSource{Kind: normalSourceMainBucket}
 	at := trainNow.Add(-6 * time.Hour)
-	ok := normalModelFile{LastAttempt: &normalAttempt{At: at, OK: true, Source: src}}
+	record := func(state string, source normalSource) normalModelFile {
+		file := normalModelFile{Subsystems: map[string]normalSubsystemModel{}}
+		for _, sub := range normalSubsystems() {
+			file.Subsystems[sub.Name] = normalSubsystemModel{State: state, AttemptedAt: at, Source: source}
+		}
+		return file
+	}
+	ok := record(normalStateTrained, src)
 	if got := normalStartDelay(ok, trainNow, src, 24*time.Hour); got != 18*time.Hour {
 		t.Errorf("a run 6 hours ago waits out the other 18, got %v", got)
 	}
@@ -633,9 +673,14 @@ func TestNormalStartDelay(t *testing.T) {
 	if got := normalStartDelay(ok, trainNow, normalSource{Kind: normalSourceMinuteBucket, Bucket: "b"}, 24*time.Hour); got != 0 {
 		t.Errorf("a changed source runs now, got %v", got)
 	}
-	failed := normalModelFile{LastAttempt: &normalAttempt{At: at, OK: false, Source: src}}
-	if got := normalStartDelay(failed, trainNow, src, 24*time.Hour); got != 0 {
-		t.Errorf("a failed run is tried again at start, got %v", got)
+	// One schedule: a subsystem that is due, or failed, trains them all.
+	mixed := record(normalStateTrained, src)
+	mixed.Subsystems[normalSubsystemElectrical] = normalSubsystemModel{State: normalStateFailed, AttemptedAt: at}
+	if got := normalStartDelay(mixed, trainNow, src, 24*time.Hour); got != 0 {
+		t.Errorf("a failed subsystem is tried again at start, got %v", got)
+	}
+	if got := normalStartDelay(record(normalStateSkipped, normalSource{}), trainNow, src, 24*time.Hour); got != 18*time.Hour {
+		t.Errorf("a skipped subsystem read nothing, so no source changed, got %v", got)
 	}
 	if got := normalStartDelay(normalModelFile{}, trainNow, src, 24*time.Hour); got != 0 {
 		t.Errorf("no run yet runs now, got %v", got)
@@ -672,10 +717,14 @@ func TestWaitQuiet_AStoppedContextEndsTheWait(t *testing.T) {
 }
 
 func TestNormalPathMatters_AskedOfTheSubsystems(t *testing.T) {
+	withVessel(t, houseVessel())
 	for path, want := range map[string]bool{
 		"propulsion.port.oilPressure":        true,
 		"propulsion.0.exhaustTemperature":    true,
+		"electrical.batteries.1.voltage":     true,
 		"electrical.batteries.512.voltage":   false,
+		"electrical.alternator.p.current":    true,
+		"electrical.chargers.sc.current":     true,
 		"navigation.speedOverGround":         false,
 		"helmcentral.anomaly.engines.port.x": false,
 		"propulsion":                         false,

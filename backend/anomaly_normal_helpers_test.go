@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"testing"
 	"time"
 )
 
@@ -38,4 +39,24 @@ func writeNormalTestFile(path, content string) error {
 func readNormalTestFile(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	return string(b), err
+}
+
+// scoreOnly scores one subsystem alone, as the report and the tool do for the
+// subsystems a boat has: the inputs are read, then the subsystem is judged.
+func scoreOnly(ctx context.Context, sub normalSubsystem, deps normalScoreDeps, since, until time.Time, subjectFilter string, answers []normalAnswer) unusualResult {
+	res := newUnusualResult(since, until)
+	in, kind, err := loadUnusualInputs(deps)
+	if err != nil {
+		res.ProblemKind, res.Problem = kind, firstErrorLine(err)
+		return res
+	}
+	return scoreSubsystem(ctx, sub, deps, in, res, subjectFilter, answers)
+}
+
+// withVessel makes the vessel the boat has, for the checks of ignored sensors.
+func withVessel(t *testing.T, v vesselView) {
+	t.Helper()
+	old := normalPathVessel
+	normalPathVessel = func() (vesselView, error) { return v, nil }
+	t.Cleanup(func() { normalPathVessel = old })
 }

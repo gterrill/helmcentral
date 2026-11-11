@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -105,14 +106,15 @@ func TestSavingTheInfluxdbTokenWakesTheTrainerAndOtherSecretsDoNot(t *testing.T)
 	}
 }
 
-func TestIgnoringAnEngineReadingWakesTheTrainerAndOtherSensorsDoNot(t *testing.T) {
+func TestIgnoringAnEngineOrBankReadingWakesTheTrainerAndOtherSensorsDoNot(t *testing.T) {
 	withTempIgnoreStore(t)
+	withVessel(t, houseVessel())
 	drainNormalWake()
-	if err := ignoreSensor("electrical.batteries.512.voltage"); err != nil {
+	if err := ignoreSensor("environment.wind.speedApparent"); err != nil {
 		t.Fatal(err)
 	}
 	if woke() {
-		t.Fatal("a battery sensor is not part of the engines' normal")
+		t.Fatal("a wind sensor is not part of any learned normal")
 	}
 	if err := ignoreSensor("propulsion.port.exhaustTemperature"); err != nil {
 		t.Fatal(err)
@@ -126,6 +128,24 @@ func TestIgnoringAnEngineReadingWakesTheTrainerAndOtherSensorsDoNot(t *testing.T
 	if !woke() {
 		t.Fatal("switching it on again must too")
 	}
+	for _, path := range []string{"electrical.batteries.1.voltage", "electrical.chargers.sc.current", "electrical.inverters.inv.ac.output.power", "electrical.alternator.p.current"} {
+		if err := ignoreSensor(path); err != nil {
+			t.Fatal(err)
+		}
+		if !woke() {
+			t.Fatalf("switching %s off must update the house bank's normal", path)
+		}
+	}
+	// A starter battery, an alternator, solar and the readings that only place a
+	// minute are not switches.
+	for _, path := range []string{"electrical.batteries.2.voltage", "electrical.chargers.sc.acin.1.current", "electrical.inverters.inv.acin.power", "electrical.solar.s1.panelPower", "electrical.venus.totalPanelPower"} {
+		if err := ignoreSensor(path); err != nil {
+			t.Fatal(err)
+		}
+		if woke() {
+			t.Fatalf("%s is not part of the house bank's normal", path)
+		}
+	}
 }
 
 // Linking an engine to another equipment item moves where its repairs are read
@@ -133,24 +153,22 @@ func TestIgnoringAnEngineReadingWakesTheTrainerAndOtherSensorsDoNot(t *testing.T
 func TestWakeNormalIfEnginesChanged_NoticesAChangeOfEquipmentItem(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "anomaly-normal.json")
 	t.Setenv("ANOMALY_NORMAL_FILE", path)
-	if err := saveNormalModel(path, normalModelFile{Subsystems: map[string]normalSubsystemModel{
-		normalSubsystemEngines: {Subjects: map[string]normalSubjectModel{"0": {Name: "Port engine", EquipmentID: "eq-a"}}},
-	}}); err != nil {
+	if err := saveNormalModel(path, learnedModel(vesselView{Engines: []vesselEngineSetting{{Instance: "0", EquipmentID: "eq-a"}}})); err != nil {
 		t.Fatal(err)
 	}
 	engines := func(instance, equipment string) vesselView {
 		return vesselView{Engines: []vesselEngineSetting{{Instance: instance, EquipmentID: equipment}}}
 	}
 	drainNormalWake()
-	wakeNormalIfEnginesChanged(engines("0", "eq-a"))
+	wakeNormalIfInputsChanged(engines("0", "eq-a"))
 	if woke() {
 		t.Fatal("the same engine on the same item wakes nothing")
 	}
-	wakeNormalIfEnginesChanged(engines("0", "eq-b"))
+	wakeNormalIfInputsChanged(engines("0", "eq-b"))
 	if !woke() {
 		t.Fatal("another equipment item must wake the trainer")
 	}
-	wakeNormalIfEnginesChanged(engines("1", "eq-a"))
+	wakeNormalIfInputsChanged(engines("1", "eq-a"))
 	if !woke() {
 		t.Fatal("another instance must wake the trainer")
 	}
@@ -188,5 +206,91 @@ func TestDeletingAnEnginesEquipmentItemWakesTheTrainer(t *testing.T) {
 	}
 	if !woke() {
 		t.Fatal("deleting an engine's item must wake the trainer")
+	}
+}
+
+// The house bank is made of the bank and the items that charge it. Replacing
+// one, or choosing no bank at all, is a change the trainer must hear.
+func TestWakeNormalIfInputsChanged_NoticesAChangeToTheHouseBankOrItsChargingItems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "anomaly-normal.json")
+	t.Setenv("ANOMALY_NORMAL_FILE", path)
+	if err := saveNormalModel(path, learnedModel(houseVessel())); err != nil {
+		t.Fatal(err)
+	}
+	drainNormalWake()
+	wakeNormalIfInputsChanged(houseVessel())
+	if woke() {
+		t.Fatal("the same bank on the same items wakes nothing")
+	}
+	other := houseVessel()
+	other.RoleItems = map[string]string{"house_bank": "eq-bank", "port_alternator": "eq-alt2", "shore_charger": "eq-sc", "inverter": "eq-inv", "generator": "eq-gen"}
+	wakeNormalIfInputsChanged(other)
+	if !woke() {
+		t.Fatal("another alternator must wake the trainer")
+	}
+	wakeNormalIfInputsChanged(vesselView{})
+	if !woke() {
+		t.Fatal("no house bank any more, with one learned, must wake the trainer")
+	}
+	drainNormalWake()
+	wakeNormalIfInputsChanged(vesselView{Engines: []vesselEngineSetting{{Instance: "0", EquipmentID: "eq-a"}}})
+	if !woke() {
+		t.Fatal("an engine added must wake the trainer")
+	}
+}
+
+// Saving roles is a change to what the house bank is made of.
+func TestSavingRolesWakesTheTrainer(t *testing.T) {
+	base := settingsPayload{}
+	withRoles := base
+	withRoles.Roles = &vesselRoles{HouseBank: "a"}
+	otherRoles := base
+	otherRoles.Roles = &vesselRoles{HouseBank: "b"}
+	if !normalInputsChangedBySave(base, withRoles) || !normalInputsChangedBySave(withRoles, otherRoles) {
+		t.Error("a house bank or alternator change must wake the trainer")
+	}
+	if normalInputsChangedBySave(withRoles, withRoles) {
+		t.Error("the same roles wake nothing")
+	}
+	same := withRoles
+	same.Roles = &vesselRoles{HouseBank: "a"}
+	if normalInputsChangedBySave(withRoles, same) {
+		t.Error("equal roles in another block wake nothing")
+	}
+	if normalInputsChangedBySave(withRoles, base) {
+		t.Error("a save that carries no roles leaves them alone and wakes nothing")
+	}
+}
+
+// Deleting an alternator's item clears the role that named it, which changes the
+// house bank. The vessel read before the role was cleared still has it.
+func TestDeletingAChargingItemWakesTheTrainerAfterItsRoleIsCleared(t *testing.T) {
+	store := vesselFixtureStore(t)
+	withTempAlarmRules(t)
+	bank, err := store.CreateEquipment(equipmentItem{Name: "House bank", System: "electrical", SignalKSource: "electrical.batteries.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alt, err := store.CreateEquipment(equipmentItem{Name: "Port alternator", System: "electrical", SignalKSource: "electrical.alternator.p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := writeVesselTestSettings(t, fmt.Sprintf("roles:\n  house_bank: %s\n  port_alternator: %s\n", bank.ID, alt.ID))
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	modelPath := filepath.Join(t.TempDir(), "anomaly-normal.json")
+	t.Setenv("ANOMALY_NORMAL_FILE", modelPath)
+	if err := saveNormalModel(modelPath, normalModelFile{Subsystems: map[string]normalSubsystemModel{
+		normalSubsystemElectrical: {Subjects: map[string]normalSubjectModel{"house": {Name: "House bank", EquipmentIDs: []string{bank.ID, alt.ID}}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	drainNormalWake()
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+alt.ID, "", alt.ID)
+	if err := deleteEquipmentHandler(c); err != nil || rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %v %d %s", err, rec.Code, rec.Body)
+	}
+	if !woke() {
+		t.Fatal("deleting an item the house bank is made of must wake the trainer")
 	}
 }

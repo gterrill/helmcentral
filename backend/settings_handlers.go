@@ -313,7 +313,7 @@ func updateSettingsHandler(c echo.Context) error {
 		}
 	}
 
-	// The learned normal reads InfluxDB and the engines the roles name (ADR 0276).
+	// The learned normal reads InfluxDB and the house bank the roles name (ADR 0276).
 	// A change to either wakes the trainer once the settings are saved, below.
 	inputsChanged := normalInputsChangedBySave(current, normalized)
 
@@ -467,11 +467,33 @@ func updateSettingsHandler(c echo.Context) error {
 }
 
 // normalInputsChangedBySave says a settings save changes what the learned normal
-// trains on: the InfluxDB block. The engines it trains on are equipment items
-// and wake the trainer from the item save (wakeNormalIfEnginesChanged), not
-// from the roles, which only name a house bank or an alternator.
+// trains on: the InfluxDB block, or the roles, which name the house bank and the
+// alternators, charger and inverter that charge it. The engines it trains on are
+// equipment items and wake the trainer from the item save
+// (wakeNormalIfInputsChanged).
 func normalInputsChangedBySave(current, next settingsPayload) bool {
-	return current.Influxdb != next.Influxdb
+	if current.Influxdb != next.Influxdb {
+		return true
+	}
+	// A request that carries no roles leaves the saved ones alone.
+	if next.Roles == nil {
+		return false
+	}
+	var before vesselRoles
+	if current.Roles != nil {
+		before = *current.Roles
+	}
+	return normalRolesRead(before) != normalRolesRead(*next.Roles)
+}
+
+// normalRolesRead is the roles the learned normal is made from: the house bank and
+// what charges it. The voltage readout battery and the generator's AC meter are
+// shown elsewhere and change nothing it learns.
+func normalRolesRead(r vesselRoles) vesselRoles {
+	return vesselRoles{
+		HouseBank: r.HouseBank, PortAlternator: r.PortAlternator, StarboardAlternator: r.StarboardAlternator,
+		ShoreCharger: r.ShoreCharger, Inverter: r.Inverter, Generator: r.Generator,
+	}
 }
 
 // settingsValidationError identifies which field of a bulk settings save was

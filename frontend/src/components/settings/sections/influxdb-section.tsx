@@ -17,7 +17,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
       <FormSection title="InfluxDB (optional)">
           <Field orientation="horizontal">
             <Switch checked={draft.influxdbEnabled} onCheckedChange={(checked) => onChange({ influxdbEnabled: checked })} />
-            <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer, and to learn each engine&apos;s usual readings</FieldLabel>
+            <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer, and to learn the usual readings of each engine and the house bank</FieldLabel>
           </Field>
 
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
@@ -60,7 +60,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               onChange={(e) => onChange({ influxdbMinuteBucket: e.target.value })}
             />
             <FieldDescription>
-              Leave blank to roll up the main bucket. Helmcentral learns each engine&apos;s usual readings from it.
+              Leave blank to roll up the main bucket. Helmcentral learns the usual readings of each engine and the house bank from it.
             </FieldDescription>
           </Field>
       </FormSection>

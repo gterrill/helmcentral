@@ -26,7 +26,7 @@ func featureEvidenceFor(key, path string, gated []time.Time, value func(i int) (
 			values[at] = v
 		}
 	}
-	return featureEvidence{Feature: normalFeature{Key: key, Path: path, SIUnit: "Pa", Explain: true}, Source: "can0.1", Values: values}
+	return featureEvidence{Feature: normalFeature{Key: key, Path: path, SIUnit: "Pa", Explain: true}, Source: "can0.1", Values: values, Wording: normalEngineWording}
 }
 
 func noLimits(string, float64) rangeVerdict { return rangeNotApplicable }

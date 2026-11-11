@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -40,26 +39,30 @@ var normalEngineCandidates = []normalFeature{
 	{Key: "exhaustTemperature", Explain: true, MinChange: 10},          // K: exhaust swings with every touch of load
 }
 
-var (
-	normalEngineOwnerRes = []*regexp.Regexp{
-		regexp.MustCompile(`^propulsion\.([^.]+)\.`),
-		regexp.MustCompile(`^helmcentral\.anomaly\.engines\.([^.]+)\.`),
-		regexp.MustCompile(`^helmcentral\.anomaly\.propulsion\.([^.]+)\.`),
-	}
-	normalEnginePathRe = regexp.MustCompile(`^propulsion\.[^.]+\.`)
-)
+// normalEngineWording is how the engines are worded in the core's sentences.
+var normalEngineWording = normalWording{
+	BandPrefix: "at ",
+	Steady:     "steady running minutes",
+	While:      "while running",
+	Unsteady:   "not running steadily",
+	This:       "this engine",
+	Gone:       "This engine is no longer set up. It may have been renumbered or removed.",
+}
 
 func normalEnginesSubsystem() normalSubsystem {
 	return normalSubsystem{
-		Name:        normalSubsystemEngines,
-		Subjects:    normalEngineSubjects,
-		Regime:      normalEngineRegime,
-		Gate:        normalEngineGate,
-		Run:         normalEngineRuns,
-		AlarmOwns:   normalEngineAlarmOwns,
+		Name:         normalSubsystemEngines,
+		Title:        "Engines",
+		NoSubjects:   "No engines are set up",
+		Wording:      normalEngineWording,
+		Subjects:     normalEngineSubjects,
+		Regime:       normalEngineRegime,
+		Gate:         normalEngineGate,
+		Run:          normalEngineRuns,
+		Aliases:      normalEngineAliases,
 		AlarmReading: normalEngineAlarmReading,
-		PathMatters: normalEnginePathMatters,
-		Active:      func(m normalMinute) bool { return m.Values["revolutions"] > twinIdleRPMHz },
+		PathMatters:  func(_ vesselView, path string) bool { return normalEnginePathMatters(path) },
+		Active:       func(m normalMinute) bool { return m.Values["revolutions"] > twinIdleRPMHz },
 	}
 }
 
@@ -85,7 +88,10 @@ func normalEngineSubjects(vessel vesselView) []normalSubject {
 		if taken[name] > 1 {
 			name = enginePositionPrefix(e.Instance) + " " + name
 		}
-		s := normalSubject{ID: e.Instance, Name: name, EquipmentID: e.EquipmentID}
+		s := normalSubject{ID: e.Instance, Name: name, EquipmentIDs: equipmentIDs(e.EquipmentID)}
+		for _, re := range normalEngineAlarmRoots {
+			s.AlarmPaths = append(s.AlarmPaths, re+e.Instance)
+		}
 		for _, c := range normalEngineCandidates {
 			c.Path, c.SIUnit = "propulsion."+e.Instance+"."+c.Key, sensorLimitUnit[c.Key]
 			s.Features = append(s.Features, c)
@@ -114,7 +120,8 @@ func normalEnginePathMatters(path string) bool {
 // propulsion.<id>.<reading> path, with or without the notifications. prefix. A
 // propulsion path that is not one of the candidate readings is a reading the
 // model does not use (key ""). The anomaly detectors' paths are not one reading.
-func normalEngineAlarmReading(alarmPath string) (string, bool) {
+func normalEngineAlarmReading(_ normalSubject, alarm alarmLogEntry) (string, bool) {
+	alarmPath := alarm.Path
 	rest, ok := strings.CutPrefix(strings.TrimPrefix(alarmPath, "notifications."), "propulsion.")
 	if !ok {
 		return "", false
@@ -229,15 +236,22 @@ func normalEngineSteady(minutes []normalMinute, i int) (rpmSteady, coolantSteady
 	return hi-lo <= twinGateMaxRPMSpreadHz+1e-9, coolantSteady
 }
 
-// normalEngineAlarmOwns names the engine an alarm path belongs to: its own
-// readings, and the anomaly detectors' paths for it, with or without the
-// notifications. prefix a bus alarm carries.
-func normalEngineAlarmOwns(alarmPath string) (string, bool) {
-	path := strings.TrimPrefix(alarmPath, "notifications.")
-	for _, re := range normalEngineOwnerRes {
-		if m := re.FindStringSubmatch(path); m != nil {
-			return m[1], true
-		}
+// normalEngineAlarmRoots go before an instance to make the subtrees whose alarms
+// belong to the engine: its own readings and the anomaly detectors' paths for it.
+var normalEngineAlarmRoots = []string{"propulsion.", "helmcentral.anomaly.engines.", "helmcentral.anomaly.propulsion."}
+
+// normalEngineAliases lets the operator say "port" for "Port engine".
+func normalEngineAliases(s normalSubject) []string {
+	if short, ok := strings.CutSuffix(s.Name, " engine"); ok {
+		return []string{short}
 	}
-	return "", false
+	return nil
+}
+
+// equipmentIDs is the one item an id names, or none for a blank.
+func equipmentIDs(id string) []string {
+	if id == "" {
+		return nil
+	}
+	return []string{id}
 }

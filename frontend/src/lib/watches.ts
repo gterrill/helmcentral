@@ -206,15 +206,15 @@ export interface WatchUnusualStretch {
   stretch_id: string
   subsystem: string
   subject: string
-  /** The subject as the operator names it, for the buttons' labels. */
-  engine: string
+  /** The subject (an engine or the house bank) as the operator names it, for the buttons' labels. */
+  subject_name: string
   from: string
   to: string
 }
 
 /**
- * A learned normal's suggestions (ADR 0276): engine readings that were unusual
- * for that engine. A field of the report, not a section and not a finding, so it
+ * A learned normal's suggestions (ADR 0276): engine or house bank readings that
+ * were unusual for that engine or the bank. A field of the report, not a section and not a finding, so it
  * is never counted as something to look at. Absent from reports made before it.
  */
 export interface WatchUnusual {

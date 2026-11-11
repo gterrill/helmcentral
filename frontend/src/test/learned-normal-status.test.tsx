@@ -7,23 +7,41 @@ import { resetQueryStore } from '@/lib/api-query'
 // ADR 0276: what the learned normal holds, and a switch for each engine reading
 // that is the existing ignored-sensor list.
 
+const portReadings = [
+  { key: 'revolutions', path: 'propulsion.port.revolutions', name: 'rpm', on: true, required: true, status: 'used' },
+  { key: 'oilPressure', path: 'propulsion.port.oilPressure', name: 'oil pressure', on: true, required: false, status: 'used' },
+  { key: 'transmission.oilTemperature', path: 'propulsion.port.transmission.oilTemperature', name: 'gear oil temperature', on: true, required: false, status: 'never changed while running' },
+  { key: 'exhaustTemperature', path: 'propulsion.port.exhaustTemperature', name: 'exhaust temperature', on: false, required: false, status: 'switched off' },
+  { key: 'fuel.rate', path: 'propulsion.port.fuel.rate', name: 'fuel rate', on: true, required: false, status: 'joins after 60 minutes, 14 so far' },
+]
+
 const status = {
   configured: true,
   summary: 'Learned Tue 10 Nov 3.00 AM from main bucket.',
-  engines: [
+  subsystems: [
     {
-      id: 'port',
-      name: 'Port engine',
-      bands: 2,
-      readings: [
-        { key: 'revolutions', path: 'propulsion.port.revolutions', name: 'rpm', on: true, required: true, status: 'used' },
-        { key: 'oilPressure', path: 'propulsion.port.oilPressure', name: 'oil pressure', on: true, required: false, status: 'used' },
-        { key: 'transmission.oilTemperature', path: 'propulsion.port.transmission.oilTemperature', name: 'gear oil temperature', on: true, required: false, status: 'never changed while running' },
-        { key: 'exhaustTemperature', path: 'propulsion.port.exhaustTemperature', name: 'exhaust temperature', on: false, required: false, status: 'switched off' },
-        { key: 'fuel.rate', path: 'propulsion.port.fuel.rate', name: 'fuel rate', on: true, required: false, status: 'joins after 60 minutes, 14 so far' },
+      id: 'engines',
+      title: 'Engines',
+      subjects: [
+        { id: 'port', name: 'Port engine', bands: 2, readings: portReadings },
+        { id: 'starboard', name: 'Starboard engine', bands: 0, problem: 'no steady running minutes in the last 90 days', readings: [] },
       ],
     },
-    { id: 'starboard', name: 'Starboard engine', bands: 0, problem: 'no steady running minutes in the last 90 days', readings: [] },
+    {
+      id: 'electrical',
+      title: 'House bank',
+      subjects: [
+        {
+          id: 'house',
+          name: 'House bank',
+          bands: 3,
+          readings: [
+            { key: 'voltage', path: 'electrical.batteries.1.voltage', name: 'House bank voltage', on: true, required: true, status: 'used' },
+            { key: 'alternator.p', path: 'electrical.alternator.p.current', name: 'Port alternator current', on: true, required: false, status: 'no readings' },
+          ],
+        },
+      ],
+    },
   ],
 }
 
@@ -86,6 +104,73 @@ describe('LearnedNormalStatus', () => {
     expect(name.compareDocumentPosition(verdict) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it('groups the engines and the house bank under their own headings', async () => {
+    stubApi()
+    render(<LearnedNormalStatus />)
+    await screen.findByText(status.summary)
+    const groups = screen.getAllByTestId('learned-normal-group')
+    expect(groups).toHaveLength(2)
+    expect(within(groups[0]).getByRole('heading', { name: 'Engines' })).toBeInTheDocument()
+    expect(within(groups[0]).getByText('Port engine')).toBeInTheDocument()
+    expect(within(groups[1]).getByRole('switch', { name: 'House bank voltage' })).toBeChecked()
+    expect(within(groups[1]).getByText('no readings')).toBeInTheDocument()
+    expect(within(groups[1]).getByText('3 bands')).toBeInTheDocument()
+  })
+
+  it('shows the house bank once when the group and its one subject have the same name', async () => {
+    stubApi()
+    render(<LearnedNormalStatus />)
+    await screen.findByText(status.summary)
+    const bank = screen.getAllByTestId('learned-normal-group')[1]
+    expect(within(bank).getAllByText('House bank')).toHaveLength(1)
+    expect(within(bank).queryByRole('heading', { name: 'House bank' })).toBeNull()
+    expect(within(bank).getByText('3 bands')).toBeInTheDocument()
+    // Engines keep their group heading above each engine.
+    const engines = screen.getAllByTestId('learned-normal-group')[0]
+    expect(within(engines).getByRole('heading', { name: 'Engines' })).toBeInTheDocument()
+  })
+
+  it('puts all the parts of a reading on or off the ignored sensors in one request', async () => {
+    const parts = ['electrical.alternator.p.current', 'electrical.alternator.q.current']
+    const calls = stubApi({
+      ...status,
+      subsystems: [
+        {
+          id: 'electrical',
+          title: 'House bank',
+          subjects: [
+            {
+              id: 'house',
+              name: 'House bank',
+              bands: 1,
+              readings: [{ key: 'alternator', path: parts[0], paths: parts, name: 'Alternator current', on: true, required: false, status: 'used' }],
+            },
+          ],
+        },
+      ],
+    })
+    render(<LearnedNormalStatus />)
+    await screen.findByText(status.summary)
+    fireEvent.click(screen.getByRole('switch', { name: 'House bank Alternator current' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/api/alarms/ignored-sensors')).length).toBe(1))
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(0)
+  })
+
+  it('says under its heading why a group holds nothing', async () => {
+    stubApi({
+      ...status,
+      subsystems: [
+        { id: 'engines', title: 'Engines', subjects: [{ id: 'port', name: 'Port engine', bands: 1, readings: [] }] },
+        { id: 'electrical', title: 'House bank', note: 'No house bank is chosen.', subjects: [] },
+      ],
+    })
+    render(<LearnedNormalStatus />)
+    await screen.findByText(status.summary)
+    const groups = screen.getAllByTestId('learned-normal-group')
+    expect(within(groups[1]).getByText('No house bank is chosen.')).toBeInTheDocument()
+    expect(within(groups[1]).queryByRole('switch')).toBeNull()
+  })
+
   it('does not repeat the engines\' band counts in the summary line', async () => {
     stubApi()
     render(<LearnedNormalStatus />)
@@ -101,17 +186,18 @@ describe('LearnedNormalStatus', () => {
     const rpm = screen.getByRole('switch', { name: 'Port engine rpm' })
     expect(rpm).toHaveAttribute('aria-disabled', 'true')
     expect(rpm).toHaveAttribute('aria-checked', 'true')
-    expect(within(rpm.closest('li') as HTMLElement).getByText(/needed to judge the engine/i)).toBeInTheDocument()
+    expect(within(rpm.closest('li') as HTMLElement).getByText(/needed to judge it/i)).toBeInTheDocument()
   })
 
   it('lets a needed reading that is switched off be switched back on', async () => {
     const off = {
       ...status,
-      engines: status.engines.map((e) => ({
-        ...e,
-        readings: e.readings.map((r) =>
-          r.key === 'revolutions' ? { ...r, on: false, status: 'switched off' } : r,
-        ),
+      subsystems: status.subsystems.map((group) => ({
+        ...group,
+        subjects: group.subjects.map((e) => ({
+          ...e,
+          readings: e.readings.map((r) => (r.key === 'revolutions' ? { ...r, on: false, status: 'switched off' } : r)),
+        })),
       })),
     }
     const calls = stubApi(off)
@@ -151,7 +237,7 @@ describe('LearnedNormalStatus', () => {
   })
 
   it('says why there is no learned normal instead of showing nothing', async () => {
-    stubApi({ configured: false, note: 'No learned normal: InfluxDB is not set up.', engines: [] })
+    stubApi({ configured: false, note: 'No learned normal: InfluxDB is not set up.', subsystems: [] })
     render(<LearnedNormalStatus />)
     expect(await screen.findByText('No learned normal: InfluxDB is not set up.')).toBeInTheDocument()
     expect(screen.queryByRole('switch')).toBeNull()

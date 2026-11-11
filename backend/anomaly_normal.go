@@ -91,12 +91,40 @@ type normalFeature struct {
 	// value and now and then steps by its own resolution cannot make a one-step
 	// dip look many deviations out. 0 leaves the observed step alone.
 	MinChange float64
+	// PerRegime says the reading is fitted only in the regimes whose minutes
+	// normally carry it (an alternator's current in the bands where an engine runs).
+	// Elsewhere it is left out of the fit, and nothing is ever filled in for it.
+	PerRegime bool
+	// AllowConstant says the reading may sit on one value for nearly every minute
+	// without being left out: it places the minute in a regime (the bank's charge)
+	// and is not judged by how much it moves.
+	AllowConstant bool
+	// Component says the reading is only read to be summed into another (an
+	// alternator's current into the alternators'). It is never fitted or judged, and
+	// it follows the ignored list.
+	Component bool
+	// SumOf makes the reading the sum of other readings (by Key) that report in a
+	// minute, with no path of its own. It is missing in a minute where none of them
+	// reports, and a zero is never put in their place.
+	SumOf []string
+	// Name is the reading as the operator reads it, "House bank voltage". Empty
+	// takes the name from the path (sensorQuantity), which suits an engine's.
+	Name string
+	// Placing says the reading is only read to place the minute in a regime (which
+	// sources are on), or to be summed into another reading. It is never fitted or
+	// judged. A minute without it is a minute where the source is off, and is never
+	// dropped for it. It is read from any sender, is not on the ignored list's reach,
+	// has no switch, and is always asked for, whether or not any band uses it.
+	Placing bool
+	// Group, when set, makes the readings that share it alternative paths for one
+	// reading: the first with data in the window is used and the rest are not.
+	Group string
 }
 
 // joinNormalMinutes builds a subject's minutes from each reading's minute
 // means (values, by Key). A minute exists when it has every Required reading,
 // and carries each reading that need accepts. A minute missing a Required
-// reading is not a minute and nothing is filled in. The result is sorted.
+// reading is not a minute, and nothing is ever filled in. The result is sorted.
 func joinNormalMinutes(features []normalFeature, values map[string]map[time.Time]float64, need func(key string) bool) []normalMinute {
 	seen := map[time.Time]bool{}
 	for _, f := range features {
@@ -131,22 +159,41 @@ func joinNormalMinutes(features []normalFeature, values map[string]map[time.Time
 
 type normalSubject struct {
 	ID, Name string
-	// EquipmentID is the inventory item the subject is, "" when it has none. A
-	// repair logged against that item leaves out the subject's fault range.
-	EquipmentID string
-	Features    []normalFeature
+	// EquipmentIDs are the inventory items the subject is made of, none when it
+	// has none. A repair logged against any of them leaves out the subject's
+	// fault range: an engine is one item, the house bank is the bank and every
+	// charging source on it.
+	EquipmentIDs []string
+	Features     []normalFeature
+	// AlarmPaths are the SignalK paths whose alarms belong to the subject, each a
+	// path or the root of a subtree, with or without the notifications. prefix.
+	AlarmPaths []string
+	// ACInputIsGenerator says the house bank's inverter AC input is the generator,
+	// because one is set up. Otherwise it is only "AC input".
+	ACInputIsGenerator bool
 }
 
 // normalMinute is one minute of one subject: each feature's mean, by Key.
 type normalMinute struct {
 	At     time.Time
 	Values map[string]float64
+	// Class is the minute's classification by its subsystem (Annotate), worked out
+	// once so the gate, the runs and the regime do not each work it out again.
+	// Classified says it has been.
+	Class      int
+	Classified bool
 }
 
 // normalSubsystem is what the core needs to know about a kind of subject.
 type normalSubsystem struct {
-	Name     string
-	Subjects func(vesselView) []normalSubject
+	Name string
+	// Title is the subsystem as Settings and the report's notes name it.
+	Title string
+	// NoSubjects is the sentence for a boat with nothing of this kind set up. A
+	// subsystem in that state is skipped, never an error for the others.
+	NoSubjects string
+	Wording    normalWording
+	Subjects   func(vesselView) []normalSubject
 	// Regime names the operating regime of a minute. ok is false when the minute
 	// cannot be placed (no rpm).
 	Regime func(s normalSubject, m normalMinute) (key, label string, ok bool)
@@ -156,20 +203,56 @@ type normalSubsystem struct {
 	// Run numbers the subject's separate runs (an engine's starts), one number per
 	// minute, so a regime can ask for minutes from more than one run.
 	Run func(minutes []normalMinute) []int
-	// AlarmOwns says which subject an alarm's path belongs to.
-	AlarmOwns func(alarmPath string) (subjectID string, ok bool)
-	// AlarmReading says an alarm is about one of the subsystem's readings, and
-	// which (key, "" for a reading the subsystem does not use). An alarm that is
-	// not about a single reading, such as a detector's, is not one. Only an alarm
-	// about a reading the model uses takes minutes out of training.
-	AlarmReading func(alarmPath string) (key string, isReading bool)
+	// LeadIn, when longer than the usual, is how far before a scored window its
+	// minutes must be read for the first of them to be gated and classified as
+	// they were in training.
+	LeadIn time.Duration
+	// Annotate, when set, classifies the minutes of one subject once, after they
+	// are joined, for the subsystem's gate, runs and regime to read.
+	Annotate func(minutes []normalMinute)
+	// Aliases are the other names a subject answers to when the operator names it,
+	// besides its id and its name.
+	Aliases func(s normalSubject) []string
+	// AlarmReading says an alarm is about one of the subject's readings, and which
+	// (key, "" for a reading the subsystem does not judge). An alarm that is not
+	// about a single reading, such as a detector's, is not one. Only an alarm about a
+	// reading the model uses takes minutes out of training.
+	AlarmReading func(s normalSubject, alarm alarmLogEntry) (key string, isReading bool)
 	// Active says a minute is one the subject was running in, before the gate asks
 	// it to be steady and warm. A reading is judged constant over these.
 	Active func(m normalMinute) bool
-	// PathMatters says a SignalK path is one of the subsystem's readings, so a
-	// change to whether it is ignored changes what is learned.
-	PathMatters func(path string) bool
+	// PathMatters says a SignalK path is one of the subsystem's switchable readings
+	// on this boat, so a change to whether it is ignored changes what is learned.
+	PathMatters func(vessel vesselView, path string) bool
 }
+
+// normalWording is what a subsystem says in sentences the core writes, so no
+// shared path names an engine.
+type normalWording struct {
+	// BandPrefix goes before a regime's label when it follows a figure:
+	// "at " makes "at 1,800 to 2,000 rpm".
+	BandPrefix string
+	// BandNamePrefix goes before it when it is the subject of a sentence.
+	BandNamePrefix string
+	// Steady names the minutes that are judged: "steady running minutes".
+	Steady string
+	// While finishes "never changed" for the minutes the subject was in use:
+	// "while running".
+	While string
+	// Unsteady is why a minute outside the gate was not judged.
+	Unsteady string
+	// This is the subject in "so this engine cannot be judged".
+	This string
+	// Gone is said to an operator who answers a stretch of a subject that is no
+	// longer set up.
+	Gone string
+}
+
+// A separate run of a subject, in the sentences about how much history a band has.
+const (
+	normalRunOne  = "run"
+	normalRunMany = "runs"
+)
 
 // normalFitOptions are the knobs of one fit.
 type normalFitOptions struct {

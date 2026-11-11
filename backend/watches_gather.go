@@ -76,18 +76,11 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 		// it runs out the block says so and the rest of the report goes on.
 		// The budget is taken from the run's own context, so a shutdown ends it too.
 		budget, cancel := context.WithTimeout(ctx, watchUnusualBudget)
+		budget = withUnusualBudget(budget, watchUnusualBudget)
 		res := scoreWithAnswers(d, budget, in.Since, now)
 		// A result that came back whole is kept, even if the deadline passed as it
 		// did. Only one that failed for want of time is replaced.
-		if res.ProblemKind != "" {
-			switch {
-			case ctx.Err() != nil:
-				res.Problem = "Helmcentral was stopping"
-			case budget.Err() != nil:
-				res = unusualResult{Since: in.Since, Until: now, ProblemKind: unusualError,
-					Problem: fmt.Sprintf("it took longer than %d seconds", int(watchUnusualBudget/time.Second))}
-			}
-		}
+		// Each subsystem words its own cut-short failure (scoreUnusualAll).
 		cancel()
 		// A boat with no InfluxDB has nothing to say here: the block stays out of
 		// the report, and Settings says why. A configured InfluxDB that fails
@@ -110,7 +103,7 @@ func scoreWithAnswers(d assistantToolDeps, ctx context.Context, since, until tim
 	if err != nil {
 		return unusualResult{Since: since, Until: until, ProblemKind: unusualError, Problem: "the answers about unusual stretches could not be read: " + firstErrorLine(err)}
 	}
-	return d.unusualReadings(ctx, since, until, "", answers)
+	return d.unusualReadings(ctx, since, until, unusualSubject{}, answers)
 }
 
 // watchRaisedAlarms counts the alarms raised in [since, now] by title from the
