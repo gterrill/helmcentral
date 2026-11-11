@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-11-11
+
 ### Breaking
 
 - **Replace your Open-Meteo Marine plugin if you placed it by hand, so Mate can
@@ -125,9 +127,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   can't be rebuilt, so include it in your backups. See
   [Anomaly detection](docs/features/anomaly-detection.md#telling-it-what-you-think).
 - **A repair can say when the fault started showing.** When you log a repair, a new
-  **Started showing** date says when the fault first showed. For an engine, its
-  readings from that day until the repair are left out of what Helmcentral learns
-  as normal. When you log a repair by hand, leave it blank and nothing changes.
+  **Started showing** date says when the fault first showed. For an engine, the house bank or
+  anything that charges it, the readings from that day until the repair are left
+  out of what Helmcentral learns as normal. When you log a repair by hand, leave it blank and nothing changes.
   Completing an open job as a repair fills it with the day you opened the job, so
   clear it if the fault didn't show then. See
   [Log a service](docs/how-to/log-a-service.md).
@@ -3480,7 +3482,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/gterrill/helmcentral/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/gterrill/helmcentral/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/gterrill/helmcentral/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/gterrill/helmcentral/compare/v0.60.0...v0.61.0

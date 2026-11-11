@@ -943,7 +943,7 @@ var mateToolPlanTidalDeparture = mateTool{
 						"passage_hours": {"type": "number", "description": "Passage duration in hours, greater than 0 and at most 24 (from estimate_passage)."},
 						"route": {
 							"type": "array",
-							"description": "The route points in order, as estimate_passage returns them (each with lat and lon, at least two, starting within 2 nm of lat and lon). The boat is taken along it at a steady speed and the current is read at each point with the course of the leg it is on. Pass it whenever estimate_passage returned one.",
+							"description": "The route points in order, as estimate_passage returns them (each with lat and lon, at least two, starting near lat and lon: one starting more than 20 nm away is refused). The boat is taken along it at a steady speed and the current is read at each point with the course of the leg it is on. Pass it whenever estimate_passage returned one.",
 							"items": {
 								"type": "object",
 								"properties": {"lat": {"type": "number"}, "lon": {"type": "number"}},

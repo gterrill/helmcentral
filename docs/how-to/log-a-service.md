@@ -39,8 +39,9 @@ belongs in the item's history.
    the gauge, the description, who did it, the cost and the parts, as they
    apply.
 4. For a repair, you can set **Started showing** to the date the fault first
-   showed. If the item is an engine, its readings from that day until the date
-   of the repair are left out of what Helmcentral learns as that engine's normal.
+   showed. This works on an engine, the house bank or anything that charges
+   it. Its readings from that day until the repair are left out of what
+   Helmcentral learns as normal.
    The date can't be later than the repair's own.
 5. Save, then add photos if you like.
 

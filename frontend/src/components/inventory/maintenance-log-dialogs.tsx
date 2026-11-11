@@ -595,7 +595,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
               />
               {startedTooLate && <FieldError errors={[{ message: STARTED_AFTER_REPAIR }]} />}
               <FieldDescription>
-                When the fault first showed. On an engine, the house battery or what charges it, readings from then until this repair are left out of what counts as normal.
+                When the fault first showed. On an engine, the house bank or what charges it, readings from then until this repair are left out of what counts as normal.
               </FieldDescription>
             </Field>
           )}
