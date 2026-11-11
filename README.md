@@ -84,9 +84,9 @@ connection. If you're stuck, ask in
 ## Requirements
 
 - **Linux, macOS or Windows.** Builds cover Linux on x86-64, arm64 and armv7
-  (which covers the Raspberry Pi 2, 3, 4 and 5 and the Zero 2 W, but not the
-  older ARMv6 boards: the Pi 1, Pi Zero, Zero W and Compute Module 1), plus
-  macOS and Windows. Linux gets a
+  (which covers the Raspberry Pi 2 and every later model, including the
+  Zero 2 W, but not the older ARMv6 boards: the Pi 1, Pi Zero, Zero W and
+  Compute Module 1), plus macOS and Windows. Linux gets a
   systemd service. There's nothing else to install alongside it.
 - **A SignalK server** on your network, with
   [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) for
@@ -260,14 +260,12 @@ falling back to something more permissive.
 
 Turn on SignalK's security first, then turn on login in Settings → Security.
 Helmcentral won't save the setting until SignalK security is on. With login
-on, Helmcentral won't start if it can't reach SignalK, which matters after a
-power cut, or if SignalK's security has been turned off since. How to get it
-going again is in the [FAQ](docs/reference/faq.md#what-about-security).
-Turning login off doesn't need SignalK to be reachable, so that way out always
-works.
-
-Every environment variable, state path and startup behaviour:
-[docs/reference/configuration.md](docs/reference/configuration.md).
+on, Helmcentral won't start in two cases: when it can't reach SignalK, as
+after a power cut, and when SignalK's security has since been turned off. How
+to get it going again is in
+[Login and SignalK at startup](docs/reference/configuration.md#login-and-signalk-at-startup),
+on the page that also lists every environment variable, state path and
+startup behaviour.
 
 ## Provider plugins
 

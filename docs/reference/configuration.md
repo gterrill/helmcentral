@@ -322,21 +322,43 @@ still in the state directory, startup refuses and names the exact command to
 run. The **Breaking** entry for the release you're upgrading to in
 `CHANGELOG.md` has that command too.
 
-`auth.mode: signalk` adds one more fail-fast check. Helmcentral probes the
-SignalK server's security status once at startup. It refuses to boot if
-SignalK's own security is disabled, because delegated login needs
-authentication on the upstream server. It also refuses to boot if SignalK
-can't be reached, which includes a SignalK still starting up after a power
-cut. Under Docker the container keeps restarting and comes up once SignalK
-answers. The systemd service retries too, but if `systemctl status helmcentral`
-shows it failed, run `sudo systemctl restart helmcentral` once SignalK is up.
+### Login and SignalK at startup
 
-Settings → Security refuses to save `signalk` unless SignalK reports security
-is already active. If startup fails on this check, `settings.yaml` was edited
-by hand or SignalK security was disabled after Helmcentral was configured. The
-fix is the same either way: turn SignalK security back on, or set
-`auth.mode: none` in `settings.yaml` and restart. Turning authentication *off*
-is never gated on SignalK being reachable, so that way out always works.
+`auth.mode: signalk` adds one more fail-fast check. Helmcentral asks SignalK
+for its security status once, when it starts. Because delegated login needs
+SignalK to do the authenticating, Helmcentral refuses to start in either of
+these cases:
+
+- SignalK can't be reached: This includes a SignalK that's still starting up
+  after a power cut, which is the case you're most likely to meet.
+- SignalK's security is off: Settings → Security won't save `signalk` unless
+  SignalK's security is on. So either SignalK's security was turned off
+  afterwards, or `settings.yaml` was edited by hand. A wrong SignalK address
+  in `settings.yaml` can look like this too, if something else answers at
+  that address, so check the address before you change SignalK.
+
+Helmcentral doesn't keep retrying the check itself. Whatever started it has to
+start it again, so once SignalK is up and its security is on, here's how to get
+going again:
+
+- Docker with the shipped `docker-compose.yml`: The container has
+  `restart: unless-stopped`, so it keeps restarting and comes up by itself. A
+  container started with plain `docker run` and no `--restart` stays down, so
+  start it again.
+- The systemd service: It restarts Helmcentral after a failure, but it can
+  stop trying if SignalK takes a long time to come up. If
+  `systemctl status helmcentral` shows it as failed, run
+  `sudo systemctl reset-failed helmcentral` and then
+  `sudo systemctl start helmcentral`. A plain restart can be refused until
+  the failure is cleared.
+- macOS, Windows, or a binary you started by hand: Nothing restarts it, so
+  start it again.
+
+If SignalK's security has been turned off, turn it back on in SignalK first.
+As a last resort, set `auth.mode: none` in `settings.yaml` and start
+Helmcentral again. That turns login off for everyone, so turn it back on once
+SignalK is sorted out. Turning login off this way never needs SignalK, so it
+always works.
 
 ## Web push over Tailscale
 

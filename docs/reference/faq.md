@@ -5,24 +5,40 @@ Each one links to the page that covers it in full.
 
 ## What hardware and software does it need?
 
-Helmcentral runs on a computer that stays on aboard the boat. Here's what you
-need:
+Helmcentral runs on a computer that stays on aboard the boat, and you look at
+it in a web browser on your phones, tablets and screens. Here's what you need:
 
+- **A connection to the boat's instruments:** Your instruments talk to each
+  other over NMEA 2000, NMEA 0183 or both. Helmcentral can't plug into those
+  directly. It needs a gateway that passes their data to a computer, such as a
+  USB adaptor for NMEA 0183 or an NMEA 2000 gateway. SignalK's
+  [installation page](https://signalk.org/installation/) covers which adaptors
+  and gateways work and how to connect them.
+- **A SignalK server:** SignalK reads the gateway and turns the NMEA data into
+  readings Helmcentral can use. If you don't have it yet, install it first,
+  following the same [installation page](https://signalk.org/installation/).
+  It can run on the same computer as Helmcentral. Add the
+  `signalk-derived-data` plugin for true wind and other worked-out navigation
+  figures. If you have a Victron GX, add `signalk-venus-plugin` too, so that
+  you get generator and detailed electrical readings.
 - **A computer on the boat:** Linux, macOS or Windows. Linux builds cover
   x86-64, arm64 and armv7, which covers the Raspberry Pi 2 and every later
   model, including the Zero 2 W. The older ARMv6 boards aren't covered: the
   Pi 1, Pi Zero, Zero W and Compute Module 1. On Linux it runs as a
   systemd service. It also runs in Docker, and the image works on the same
   three kinds of processor.
-- **A SignalK server:** Helmcentral reads the boat's instruments through
-  SignalK, which turns the NMEA network into readings it can use. Add the
-  `signalk-derived-data` plugin for true wind and other worked-out navigation
-  figures. If you have a Victron GX, add `signalk-venus-plugin` too, so that
-  you get generator and detailed electrical readings.
-- **A screen with a recent browser:** Chrome or Edge 111 or later, Firefox 111
-  or later, or Safari 16.4 or later. On an iPad or iPhone that means iOS 16.4
-  or later. Older tablets aren't supported, so check a wall screen with
-  `/display-probe.html` before you mount it.
+- **Phones, tablets and screens to look at it on:** There's no app to install.
+  Any phone, tablet, laptop or wall screen with a recent browser works: Chrome
+  or Edge 111 or later, Firefox 111 or later, or Safari 16.4 or later. On an
+  iPad or iPhone that means iOS 16.4 or later. Older tablets aren't supported,
+  so check a wall screen with `/display-probe.html` before you mount it.
+- **A network on the boat:** Each phone, tablet and screen has to be on the
+  same network as the computer running Helmcentral. On most boats that's the
+  boat's WiFi. If your boat doesn't have WiFi yet, you'll need a WiFi router
+  or access point aboard first, with the Helmcentral computer plugged into it
+  or joined to it. A phone's hotspot isn't a good substitute, because the
+  network goes away whenever the phone leaves the boat. To look at it from
+  ashore, see [Can I use it while off the boat?](#can-i-use-it-while-off-the-boat).
 
 There's no database server to install. Helmcentral is a single program with
 the web app built in, and it keeps its own data on the computer it runs on.
@@ -149,17 +165,10 @@ Here's how Helmcentral keeps the boat safe:
 - **Login depends on SignalK at startup:** With login on, Helmcentral checks
   SignalK's security when it starts. If SignalK isn't running yet, or its
   security has been turned off, Helmcentral won't start, and nothing else
-  works until it does, alarms and anchor watch included. Here's how to get it
-  going again:
-  - SignalK slow to start: Under Docker, Helmcentral keeps trying and comes up
-    once SignalK answers. The systemd service retries too, but it can give up.
-    If `systemctl status helmcentral` shows it failed, run
-    `sudo systemctl restart helmcentral` once SignalK is up.
-  - SignalK's security turned off: Turn it back on in SignalK, and Helmcentral
-    starts with login as before.
-  - As a last resort: Set `auth.mode: none` in `settings.yaml` and restart.
-    That turns login off for everyone, so turn it back on once SignalK is
-    sorted out. See [Configuration](configuration.md#startup-behaviour).
+  works until it does, alarms and anchor watch included. Depending on how you
+  run it, a power cut can leave it stopped until you start it again. How to
+  get it going again on Docker, systemd, macOS and Windows is in
+  [Login and SignalK at startup](configuration.md#login-and-signalk-at-startup).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
   never forward a port to it.
