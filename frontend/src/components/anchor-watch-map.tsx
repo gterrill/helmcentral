@@ -1105,6 +1105,9 @@ export function AnchorWatchMap({
   // the drawer) must not pan or step the radius.
   const handleAdjustKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!adjustActive) return
+    // A popover opened from the HUD portals out of this container, but React
+    // still bubbles its keys here. Those keys belong to the popover.
+    if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return
     // The control buttons stay up during Adjust and sit inside this
     // container, so their own keys bubble here. Only Escape applies from a
     // button: Enter on "Increase radius" or the Adjust icon means that
