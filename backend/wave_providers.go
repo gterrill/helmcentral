@@ -32,9 +32,13 @@
 //
 // Currents are a separate, optional export so a wave fetch costs nothing extra:
 //
-//	fetch_currents({"lat": float64, "lon": float64, "days": int}) -> {
-//	  "hourly": [{time, current_velocity_ms, current_set_deg}]
+//	fetch_currents({"points": [{"lat": float64, "lon": float64}], "days": int}) -> {
+//	  "points": [{"hourly": [{time, current_velocity_ms, current_set_deg}]}]
 //	}
+//
+// The answer has one entry per requested point, in the same order, and the
+// plugin makes one upstream request for all of them. A route is at most
+// maxCurrentsPoints points; the host errors above that and never splits it.
 //
 // current_velocity_ms (metres per second) and current_set_deg (degrees true, the
 // direction the current flows TOWARD) are OPTIONAL and come as a pair: a plugin
@@ -74,6 +78,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -132,23 +137,35 @@ type currentHourPoint struct {
 	SetDeg     *float64
 }
 
-// currentsBundle is one fetch_currents round-trip, mapped to typed values.
+// currentsPoint is a position a fetch_currents call asks about.
+type currentsPoint struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+// maxCurrentsPoints is the most points one fetch_currents call carries. The
+// host errors above it and never splits a route into several requests.
+const maxCurrentsPoints = 100
+
+// currentPointSeries is the hours the model gave for one requested point.
+type currentPointSeries struct {
+	Hourly []currentHourPoint
+}
+
+// currentsBundle is one fetch_currents round-trip, mapped to typed values: one
+// series per requested point, in request order.
 type currentsBundle struct {
-	Hourly   []currentHourPoint
-	Cached   bool
-	CachedAt time.Time
+	Points []currentPointSeries
 }
 
 // currentsProvider is the optional capability of a wave provider that can give
 // the modelled ocean current. A provider that implements the method but whose
-// plugin lacks the export answers false from SupportsCurrents. FetchCurrents
-// returns ctx.Err() once ctx is done and never serves a stale answer for a
-// failed fetch. A caller that fetches many points calls PersistCurrents once at
-// the end, because FetchCurrents keeps its cache in memory only.
+// plugin lacks the export answers with an error wrapping errNoCurrentsExport.
+// FetchCurrents takes every point of a route (at most maxCurrentsPoints) and
+// makes one request for them all. It returns ctx.Err() once ctx is done and
+// never serves a stale answer for a failed fetch.
 type currentsProvider interface {
-	SupportsCurrents() bool
-	FetchCurrents(ctx context.Context, lat, lon float64, days int) (currentsBundle, error)
-	PersistCurrents()
+	FetchCurrents(ctx context.Context, points []currentsPoint, days int) (currentsBundle, error)
 }
 
 // waveProvider is the interface implemented by each pluggable wave data
@@ -197,12 +214,17 @@ func waveProvidersHandler(c echo.Context) error {
 // settings.yaml.
 const defaultWaveProviderID = "open-meteo-marine"
 
+// errNoWaveProviderInstalled marks the resolve error for a blank
+// ui.wave_provider when the default plugin is not installed.
+var errNoWaveProviderInstalled = errors.New("no wave provider is installed")
+
 // resolveWaveProvider reads ui.wave_provider from settingsPath (defaulting
 // to defaultWaveProviderID) and resolves it against the registry, mirroring
 // resolveWeatherProvider's idiom. Returns a clear, actionable error - never
 // a fallback provider - when the configured id isn't registered, since an
 // unregistered provider most likely means the plugin hasn't been installed
 // yet.
+
 func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
@@ -211,13 +233,20 @@ func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 
 	uiMap, _ := settings["ui"].(map[string]any)
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["wave_provider"]))
-	if configuredProvider == "" {
+	blank := configuredProvider == ""
+	if blank {
 		configuredProvider = defaultWaveProviderID
 	}
 
 	provider, ok := getWaveProvider(configuredProvider)
 	if !ok {
-		return nil, configuredProvider, fmt.Errorf("unknown wave provider configured: %q (is the plugin installed in plugins/waves?)", configuredProvider)
+		err := fmt.Errorf("unknown wave provider configured: %q (is the plugin installed in plugins/waves?)", configuredProvider)
+		if blank {
+			// Nothing was chosen and the default is not installed: there is no
+			// wave provider, which is not the same as a wrong one being named.
+			err = fmt.Errorf("%w: %w", err, errNoWaveProviderInstalled)
+		}
+		return nil, configuredProvider, err
 	}
 
 	return provider, configuredProvider, nil

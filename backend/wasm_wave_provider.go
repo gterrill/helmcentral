@@ -16,13 +16,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	extism "github.com/extism/go-sdk"
+	"golang.org/x/sync/singleflight"
 )
 
 // wasmWaveProvider is a waveProvider backed by a sandboxed WASM guest
@@ -31,9 +34,11 @@ type wasmWaveProvider struct {
 	*wasmPluginBase
 	cache *wasmPluginCache[waveForecastBundle]
 
-	// currentsCache holds fetch_currents answers in a file of its own, apart
-	// from the waves, since currents are fetched only when a tool needs them.
-	currentsCache *wasmPluginCache[currentsBundle]
+	// currents remembers recent fetch_currents answers in memory only. The two
+	// fields below are seams for tests: the clock, and the call to the plugin.
+	currents     currentsCache
+	currentsNow  func() time.Time
+	currentsCall func(points []currentsPoint, days int) (currentsBundle, error)
 }
 
 // pluginsWavesDir follows the codebase's cacheFilePath(envKey, fallback)
@@ -79,17 +84,7 @@ func newWasmWaveProviderFromBase(base *wasmPluginBase) *wasmWaveProvider {
 	cache := newWasmPluginCache[waveForecastBundle](cacheFile)
 	cache.loadFromDisk()
 
-	currentsFile := cacheFilePath(
-		"CURRENTS_WASM_CACHE_FILE_"+strings.ToUpper(strings.ReplaceAll(base.ID(), "-", "_")),
-		fmt.Sprintf("cache/currents_wasm_v1_%s_cache.json", base.ID()),
-	)
-	currentsCache := newWasmPluginCache[currentsBundle](currentsFile)
-	// One route call holds up to assistantTidalMaxPoints points, so the usual cap
-	// would let two routes evict each other.
-	currentsCache.maxEntries = assistantTidalMaxPoints * 4
-	currentsCache.loadFromDisk()
-
-	return &wasmWaveProvider{wasmPluginBase: base, cache: cache, currentsCache: currentsCache}
+	return &wasmWaveProvider{wasmPluginBase: base, cache: cache}
 }
 
 // wasmFetchWavesInput mirrors the guest's fetch_waves input contract.
@@ -296,9 +291,14 @@ func (p *wasmWaveProvider) fetchFromPlugin(lat, lon float64, days int) (waveFore
 	return bundle, nil
 }
 
-// wasmCurrentHourOutput and wasmFetchCurrentsOutput mirror the guest's
-// fetch_currents output (see wave_providers.go). The figures are pointers so a
-// missing key arrives as nil.
+// wasmFetchCurrentsInput, wasmCurrentHourOutput and wasmFetchCurrentsOutput
+// mirror the guest's fetch_currents contract (see wave_providers.go). The
+// figures are pointers so a missing key arrives as nil.
+type wasmFetchCurrentsInput struct {
+	Points []currentsPoint `json:"points"`
+	Days   int             `json:"days"`
+}
+
 type wasmCurrentHourOutput struct {
 	Time              string   `json:"time"`
 	CurrentVelocityMS *float64 `json:"current_velocity_ms"`
@@ -306,102 +306,172 @@ type wasmCurrentHourOutput struct {
 }
 
 type wasmFetchCurrentsOutput struct {
-	Hourly []wasmCurrentHourOutput `json:"hourly"`
+	Points []struct {
+		Hourly []wasmCurrentHourOutput `json:"hourly"`
+	} `json:"points"`
 }
 
 // maxPlausibleCurrentMS bounds a reported ocean current (about 19 kn, beyond
 // any tidal stream or boundary current); a larger figure is a broken plugin.
 const maxPlausibleCurrentMS = 10
 
-// mapWasmFetchCurrentsOutput types the guest's hours and rejects an impossible
-// figure rather than clamping or dropping it.
-func mapWasmFetchCurrentsOutput(out wasmFetchCurrentsOutput) (currentsBundle, error) {
-	bundle := currentsBundle{Hourly: make([]currentHourPoint, 0, len(out.Hourly))}
-	for i, h := range out.Hourly {
-		hourTime, err := parseRequiredTime(fmt.Sprintf("hourly[%d].time", i), h.Time)
-		if err != nil {
-			return currentsBundle{}, err
+// mapWasmFetchCurrentsOutput types the guest's series, which must be one per
+// requested point, and rejects an impossible figure rather than clamping or
+// dropping it.
+func mapWasmFetchCurrentsOutput(out wasmFetchCurrentsOutput, want int) (currentsBundle, error) {
+	if len(out.Points) != want {
+		return currentsBundle{}, fmt.Errorf("fetch_currents answered for %d points, asked for %d", len(out.Points), want)
+	}
+	bundle := currentsBundle{Points: make([]currentPointSeries, 0, len(out.Points))}
+	for pi, point := range out.Points {
+		series := currentPointSeries{Hourly: make([]currentHourPoint, 0, len(point.Hourly))}
+		for i, h := range point.Hourly {
+			where := fmt.Sprintf("points[%d].hourly[%d]", pi, i)
+			hourTime, err := parseRequiredTime(where+".time", h.Time)
+			if err != nil {
+				return currentsBundle{}, err
+			}
+			if (h.CurrentVelocityMS == nil) != (h.CurrentSetDeg == nil) {
+				return currentsBundle{}, fmt.Errorf("%s gives only one of current_velocity_ms and current_set_deg; a current needs both", where)
+			}
+			if h.CurrentVelocityMS != nil && (*h.CurrentVelocityMS < 0 || *h.CurrentVelocityMS > maxPlausibleCurrentMS) {
+				return currentsBundle{}, fmt.Errorf("%s.current_velocity_ms is %g, a current must be 0 to %g m/s", where, *h.CurrentVelocityMS, float64(maxPlausibleCurrentMS))
+			}
+			if h.CurrentSetDeg != nil && (*h.CurrentSetDeg < 0 || *h.CurrentSetDeg > 360) {
+				return currentsBundle{}, fmt.Errorf("%s.current_set_deg is %g, a direction must be 0 to 360", where, *h.CurrentSetDeg)
+			}
+			series.Hourly = append(series.Hourly, currentHourPoint{Time: hourTime, VelocityMS: h.CurrentVelocityMS, SetDeg: h.CurrentSetDeg})
 		}
-		if (h.CurrentVelocityMS == nil) != (h.CurrentSetDeg == nil) {
-			return currentsBundle{}, fmt.Errorf("hourly[%d] gives only one of current_velocity_ms and current_set_deg; a current needs both", i)
-		}
-		if h.CurrentVelocityMS != nil && (*h.CurrentVelocityMS < 0 || *h.CurrentVelocityMS > maxPlausibleCurrentMS) {
-			return currentsBundle{}, fmt.Errorf("hourly[%d].current_velocity_ms is %g, a current must be 0 to %g m/s", i, *h.CurrentVelocityMS, float64(maxPlausibleCurrentMS))
-		}
-		if h.CurrentSetDeg != nil && (*h.CurrentSetDeg < 0 || *h.CurrentSetDeg > 360) {
-			return currentsBundle{}, fmt.Errorf("hourly[%d].current_set_deg is %g, a direction must be 0 to 360", i, *h.CurrentSetDeg)
-		}
-		bundle.Hourly = append(bundle.Hourly, currentHourPoint{Time: hourTime, VelocityMS: h.CurrentVelocityMS, SetDeg: h.CurrentSetDeg})
+		bundle.Points = append(bundle.Points, series)
 	}
 	return bundle, nil
 }
 
-// errNoCurrentsExport says what to do about a wave plugin with no fetch_currents.
-const errNoCurrentsExport = "the installed wave plugin has no currents; install the updated open-meteo-marine plugin"
+// errNoCurrentsExport is what a wave plugin without fetch_currents answers
+// with, wrapped with the plugin id. It is the one place that says what to do.
+var errNoCurrentsExport = errors.New("has no fetch_currents export, so no currents; install the updated open-meteo-marine plugin")
 
-// currentsCacheKey keys on the position rounded to the tool's grid, which is
-// the model's own, and the number of days.
-func currentsCacheKey(lat, lon float64, days int) string {
-	p := roundToTidalGrid(lat, lon)
-	return fmt.Sprintf("%.4f,%.4f,%d", p.lat, p.lon, days)
-}
-
-// FetchCurrents calls the guest's fetch_currents with the same TTL cache and
-// singleflight merge as FetchWaves, but with no stale fallback: a failed fetch
-// is the error, so the caller reports the failure instead of an old forecast.
-// A plugin without the export is an error saying so, never an empty answer. The
-// cache is set in memory only; PersistCurrents writes the file.
-func (p *wasmWaveProvider) FetchCurrents(ctx context.Context, lat, lon float64, days int) (bundle currentsBundle, err error) {
+// FetchCurrents answers from the plugin's fetch_currents, which makes one
+// request for every point. A repeat of the same question within
+// currentsCacheTTL is answered from memory; the memory is never written to disk
+// and an expired answer is never served, not even when the new request fails. A
+// failed call is the error. A plugin without the export answers with
+// errNoCurrentsExport. ctx is checked before and after the call; the call
+// itself cannot be cancelled, so at most one request is left running when ctx
+// is done, and its answer is dropped.
+//
+// Every plugin call gets its own instance (wasmPluginBase.callWithin), so a slow
+// currents request does not hold up the wave fetches the dashboard makes.
+func (p *wasmWaveProvider) FetchCurrents(ctx context.Context, points []currentsPoint, days int) (currentsBundle, error) {
 	if err := ctx.Err(); err != nil {
 		return currentsBundle{}, err
 	}
-	if !p.supportsCurrents {
-		return currentsBundle{}, fmt.Errorf("%s", errNoCurrentsExport)
+	if len(points) == 0 {
+		return currentsBundle{}, fmt.Errorf("plugin %q: fetch_currents needs at least one point", p.id)
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("plugin %q panicked in fetch_currents: %v", p.id, r)
-			bundle = currentsBundle{}
-		}
-	}()
-
-	key := p.saltedCacheKey(currentsCacheKey(lat, lon, days))
-	if cached, ok := p.currentsCache.get(key, p.ttlDuration()); ok {
-		cached.Cached = true
+	if len(points) > maxCurrentsPoints {
+		return currentsBundle{}, fmt.Errorf("plugin %q: fetch_currents carries at most %d points, got %d", p.id, maxCurrentsPoints, len(points))
+	}
+	now := time.Now
+	if p.currentsNow != nil {
+		now = p.currentsNow
+	}
+	key := p.saltedCacheKey(currentsCacheKey(points, days, now()))
+	if cached, ok := p.currents.get(key, now()); ok {
 		return cached, nil
 	}
-	fetched, ferr := p.currentsCache.singleflightFetch(key, func() (currentsBundle, error) {
-		return p.fetchCurrentsFromPlugin(lat, lon, days)
+	call := p.fetchCurrentsFromPlugin
+	if p.currentsCall != nil {
+		call = p.currentsCall
+	}
+	// Identical questions asked while one is in flight share its answer.
+	v, err, _ := p.currents.group.Do(key, func() (any, error) {
+		bundle, err := call(points, days)
+		if err != nil {
+			return currentsBundle{}, err
+		}
+		p.currents.set(key, bundle, now())
+		return bundle, nil
 	})
-	if ferr != nil {
-		return currentsBundle{}, ferr
+	if err != nil {
+		return currentsBundle{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return currentsBundle{}, err
 	}
-	fetched.CachedAt = time.Now().UTC()
-	fetched.Cached = false
-	p.currentsCache.setInMemory(key, fetched)
-	return fetched, nil
+	return v.(currentsBundle), nil
 }
 
-// PersistCurrents writes the currents cache file once, after a burst of fetches.
-func (p *wasmWaveProvider) PersistCurrents() { p.currentsCache.persistToDisk() }
+func (p *wasmWaveProvider) fetchCurrentsFromPlugin(points []currentsPoint, days int) (currentsBundle, error) {
+	return callOptionalExport(p.wasmPluginBase, "fetch_currents", p.supportsCurrents, errNoCurrentsExport,
+		wasmFetchCurrentsInput{Points: points, Days: days},
+		func(pluginID string, raw []byte) (currentsBundle, error) {
+			var parsed wasmFetchCurrentsOutput
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				return currentsBundle{}, fmt.Errorf("plugin %q: unparseable fetch_currents JSON: %w", pluginID, err)
+			}
+			return mapWasmFetchCurrentsOutput(parsed, len(points))
+		})
+}
 
-func (p *wasmWaveProvider) fetchCurrentsFromPlugin(lat, lon float64, days int) (currentsBundle, error) {
-	input, err := json.Marshal(wasmFetchWavesInput{Lat: lat, Lon: lon, Days: days})
-	if err != nil {
-		return currentsBundle{}, fmt.Errorf("plugin %q: failed to marshal fetch_currents input: %w", p.id, err)
+const (
+	currentsCacheTTL     = 30 * time.Minute
+	currentsCacheEntries = 16
+)
+
+// currentsCacheKey names a question: the points in order, the forecast days,
+// and the UTC date, because the series starts at 00:00 UTC yesterday and a
+// bundle from before midnight does not reach as far as one fetched after it.
+func currentsCacheKey(points []currentsPoint, days int, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d|%s", days, now.UTC().Format("2006-01-02"))
+	// The bundle answers the requested list point for point, so the key keeps its
+	// order and its duplicates.
+	for _, pt := range points {
+		fmt.Fprintf(&b, "|%.5f,%.5f", pt.Lat, pt.Lon)
 	}
-	out, err := p.call("fetch_currents", input)
-	if err != nil {
-		return currentsBundle{}, err
+	return b.String()
+}
+
+type currentsCacheEntry struct {
+	key     string
+	bundle  currentsBundle
+	savedAt time.Time
+}
+
+// currentsCache keeps the last few answers, oldest dropped first. The zero
+// value is ready to use.
+type currentsCache struct {
+	group   singleflight.Group
+	mu      sync.Mutex
+	entries []currentsCacheEntry
+}
+
+func (c *currentsCache) get(key string, now time.Time) (currentsBundle, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.entries {
+		if e.key == key && now.Sub(e.savedAt) < currentsCacheTTL {
+			return e.bundle, true
+		}
 	}
-	var parsed wasmFetchCurrentsOutput
-	if err := json.Unmarshal(out, &parsed); err != nil {
-		return currentsBundle{}, fmt.Errorf("plugin %q: unparseable fetch_currents JSON: %w", p.id, err)
+	return currentsBundle{}, false
+}
+
+func (c *currentsCache) set(key string, bundle currentsBundle, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	kept := c.entries[:0]
+	for _, e := range c.entries {
+		if e.key != key && now.Sub(e.savedAt) < currentsCacheTTL {
+			kept = append(kept, e)
+		}
 	}
-	return mapWasmFetchCurrentsOutput(parsed)
+	kept = append(kept, currentsCacheEntry{key: key, bundle: bundle, savedAt: now})
+	if len(kept) > currentsCacheEntries {
+		kept = kept[len(kept)-currentsCacheEntries:]
+	}
+	c.entries = kept
 }
 
 // loadWasmWaveProviders scans dir once at startup for .wasm plugins, via the

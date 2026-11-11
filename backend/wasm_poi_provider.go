@@ -604,30 +604,3 @@ const optionalExportCallBudget = 30 * time.Second
 func optionalExportBudget() time.Duration {
 	return max(optionalExportCallBudget, time.Duration(wasmPluginTimeoutMS())*time.Millisecond)
 }
-
-// callOptionalExport calls an export a plugin may lack (marina_details,
-// anchorage_features): it answers noExport, wrapped with the plugin id, when
-// the plugin does not have it, recovers a panic into an error, and decodes the
-// guest's answer strictly with decode.
-func callOptionalExport[T any](p *wasmPOIProvider, export string, supported bool, noExport error, input any,
-	decode func(pluginID string, raw []byte) (T, error)) (result T, err error) {
-	var zero T
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("plugin %q panicked in %s: %v", p.id, export, r)
-			result = zero
-		}
-	}()
-	if !supported {
-		return zero, fmt.Errorf("plugin %q: %w", p.id, noExport)
-	}
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return zero, fmt.Errorf("plugin %q: failed to marshal %s input: %w", p.id, export, err)
-	}
-	out, err := p.callWithin(export, payload, optionalExportBudget())
-	if err != nil {
-		return zero, err
-	}
-	return decode(p.id, out)
-}

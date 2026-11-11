@@ -385,15 +385,28 @@ func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
 
 // at is the position and segment a fraction of the way along the route.
 func (p passageLegPlan) at(frac float64) (lat, lon float64, seg passageSegment) {
-	d := math.Max(0, math.Min(1, frac)) * p.totalM
-	idx := len(p.segs) - 1
-	for i, s := range p.segs {
+	return routeWalk{segs: p.segs, totalM: p.totalM}.at(frac)
+}
+
+// routeWalk dead-reckons along a polyline of segments. It is the one place that
+// turns a fraction of the way into a position, shared by the passage window and
+// the fair-tide departure.
+type routeWalk struct {
+	segs   []passageSegment
+	totalM float64
+}
+
+// at is the position and segment a fraction of the way along the route.
+func (w routeWalk) at(frac float64) (lat, lon float64, seg passageSegment) {
+	d := math.Max(0, math.Min(1, frac)) * w.totalM
+	idx := len(w.segs) - 1
+	for i, s := range w.segs {
 		if d < s.startM+s.lengthM {
 			idx = i
 			break
 		}
 	}
-	s := p.segs[idx]
+	s := w.segs[idx]
 	u := 0.0
 	if s.lengthM > 0 {
 		u = math.Min(1, (d-s.startM)/s.lengthM)

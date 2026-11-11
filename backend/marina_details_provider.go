@@ -326,6 +326,6 @@ type wasmLatLonInput struct {
 // text (no marina charted within 500 m, a rate limit, a runtime error from the
 // map server) comes back as the error.
 func (p *wasmPOIProvider) MarinaDetails(lat, lon float64) (marinaDetails, error) {
-	return callOptionalExport(p, "marina_details", p.SupportsMarinaDetails(), errNoMarinaDetailsExport,
+	return callOptionalExport(p.wasmPluginBase, "marina_details", p.SupportsMarinaDetails(), errNoMarinaDetailsExport,
 		wasmLatLonInput{Lat: lat, Lon: lon}, decodeMarinaDetails)
 }

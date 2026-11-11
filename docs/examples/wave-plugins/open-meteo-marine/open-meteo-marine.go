@@ -26,9 +26,19 @@ const (
 	// Ocean current endpoint, for fetch_currents. Deliberately does not pin a
 	// models= param: the GFS-Wave model the wave fetch is pinned to carries no
 	// ocean currents (every value comes back null), so only the default blend
-	// answers. It asks for the two current variables alone. Velocity comes back
-	// in km/h, and the direction is where the water flows toward.
-	marineCurrentsURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=ocean_current_velocity,ocean_current_direction&timezone=auto&forecast_days=%d"
+	// answers. It asks for the two current variables alone, for every point in
+	// one request (comma-separated latitude and longitude lists), in GMT so the
+	// times are UTC and one offset cannot be wrong across a daylight-saving
+	// change, with yesterday's hours (past_days=1) so a window that starts earlier
+	// today is bracketed. Velocity comes back in km/h, and the direction is where the water
+	// flows toward.
+	marineCurrentsURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%s&longitude=%s&hourly=ocean_current_velocity,ocean_current_direction&timezone=GMT&past_days=1&forecast_days=%d"
+
+	// maxCurrentsPoints is the most points one fetch_currents call carries. The
+	// two lists cost about 20 characters a point, so 100 keeps the URL near 2 KB,
+	// well inside what servers accept. The host errors above it and never splits
+	// the route into several requests.
+	maxCurrentsPoints = 100
 
 	// modelGFSWave is the model the wave fetch is pinned to. Its 0.25 degree
 	// grid has land-masked cells, and over one Open-Meteo returns every wave
@@ -63,9 +73,38 @@ func waveURL(lat, lon float64, days int, fallback bool) string {
 	return u
 }
 
-// currentsURL builds the ocean-current request.
-func currentsURL(lat, lon float64, days int) string {
-	return fmt.Sprintf(marineCurrentsURLFmt, lat, lon, days)
+// currentsPoint is one position a fetch_currents call asks about.
+type currentsPoint struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+// validateCurrentsInput checks the points a fetch_currents call carries: at
+// least one, at most maxCurrentsPoints, each a real position.
+func validateCurrentsInput(points []currentsPoint) error {
+	if len(points) == 0 {
+		return fmt.Errorf("fetch_currents needs at least one point")
+	}
+	if len(points) > maxCurrentsPoints {
+		return fmt.Errorf("fetch_currents carries at most %d points, got %d", maxCurrentsPoints, len(points))
+	}
+	for i, p := range points {
+		if p.Lat < -90 || p.Lat > 90 || p.Lon < -180 || p.Lon > 180 {
+			return fmt.Errorf("fetch_currents point %d (%g, %g) is not a valid position", i, p.Lat, p.Lon)
+		}
+	}
+	return nil
+}
+
+// currentsURL builds the one ocean-current request for every point.
+func currentsURL(points []currentsPoint, days int) string {
+	lats := make([]string, len(points))
+	lons := make([]string, len(points))
+	for i, p := range points {
+		lats[i] = fmt.Sprintf("%.4f", p.Lat)
+		lons[i] = fmt.Sprintf("%.4f", p.Lon)
+	}
+	return fmt.Sprintf(marineCurrentsURLFmt, strings.Join(lats, ","), strings.Join(lons, ","), days)
 }
 
 // currentHourOutput is one hour of fetch_currents output: the modelled
@@ -77,25 +116,65 @@ type currentHourOutput struct {
 	CurrentSetDeg     *float64 `json:"current_set_deg,omitempty"`
 }
 
-// fetchCurrentsOutput mirrors the host's wasmFetchCurrentsOutput contract
-// (backend/wasm_wave_provider.go).
-type fetchCurrentsOutput struct {
+// currentPointOutput is one requested point's hours, in request order.
+type currentPointOutput struct {
 	Hourly []currentHourOutput `json:"hourly"`
 }
 
-// parseOpenMeteoCurrentsResponse reads the hourly ocean current series. Every
-// hour is listed. Only a JSON null in both arrays means "no current that hour"
-// (Open-Meteo returns null over land and near shore), and such an hour is never
-// read as slack. A reported 0 is a real figure and is kept. Anything else that
-// is not a clean answer is an error for the host to report: a missing or
-// mistyped array, arrays of unequal length, an unparseable time, a velocity unit
-// other than km/h (it would be converted wrongly) or missing, a null in only
+// fetchCurrentsOutput mirrors the host's wasmFetchCurrentsOutput contract
+// (backend/wasm_wave_provider.go).
+type fetchCurrentsOutput struct {
+	Points []currentPointOutput `json:"points"`
+}
+
+// parseOpenMeteoCurrentsResponse reads Open-Meteo's answer for `want` points:
+// a JSON array with one object per location in request order, or a single
+// object when one location was asked for. It returns one hourly series per
+// point. The request is in GMT, so a response with any other offset is an error,
+// not a time to guess at. Every hour is listed. Only a JSON null in both arrays
+// means "no current that hour" (Open-Meteo returns null over land and near
+// shore), and such an hour is never read as slack. A reported 0 is a real figure
+// and is kept. Anything else that is not a clean answer is an error for the host
+// to report: a wrong location count, a missing or mistyped array, arrays of
+// unequal length, an unparseable time, a missing offset or velocity unit, a
+// velocity unit other than km/h (it would be converted wrongly), a null in only
 // one of the pair, or a figure out of range (negative velocity, direction
 // outside 0 to 360).
-func parseOpenMeteoCurrentsResponse(raw []byte) ([]currentHourOutput, error) {
+func parseOpenMeteoCurrentsResponse(raw []byte, want int) ([][]currentHourOutput, error) {
+	var locations []json.RawMessage
+	if err := json.Unmarshal(raw, &locations); err != nil {
+		var single map[string]any
+		if json.Unmarshal(raw, &single) != nil {
+			return nil, fmt.Errorf("failed to parse ocean current response: %w", err)
+		}
+		locations = []json.RawMessage{raw}
+	}
+	if len(locations) != want {
+		return nil, fmt.Errorf("ocean current response has %d locations, asked for %d", len(locations), want)
+	}
+	out := make([][]currentHourOutput, len(locations))
+	for i, loc := range locations {
+		hours, err := parseCurrentsLocation(loc)
+		if err != nil {
+			return nil, fmt.Errorf("location %d: %w", i, err)
+		}
+		out[i] = hours
+	}
+	return out, nil
+}
+
+// parseCurrentsLocation reads one location's object.
+func parseCurrentsLocation(raw json.RawMessage) ([]currentHourOutput, error) {
 	var result map[string]any
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse ocean current response: %w", err)
+		return nil, fmt.Errorf("failed to parse ocean current location: %w", err)
+	}
+	offset, ok := result["utc_offset_seconds"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("utc_offset_seconds missing from ocean current response")
+	}
+	if offset != 0 {
+		return nil, fmt.Errorf("utc_offset_seconds is %g, but the request is in GMT", offset)
 	}
 	units, ok := result["hourly_units"].(map[string]any)
 	if !ok {
@@ -103,10 +182,6 @@ func parseOpenMeteoCurrentsResponse(raw []byte) ([]currentHourOutput, error) {
 	}
 	if u, ok := units["ocean_current_velocity"].(string); !ok || u != "km/h" {
 		return nil, fmt.Errorf("ocean_current_velocity unit is %v, expected km/h", units["ocean_current_velocity"])
-	}
-	offset := 0
-	if o, ok := result["utc_offset_seconds"].(float64); ok {
-		offset = int(o)
 	}
 	hourly, ok := result["hourly"].(map[string]any)
 	if !ok {
@@ -134,7 +209,7 @@ func parseOpenMeteoCurrentsResponse(raw []byte) ([]currentHourOutput, error) {
 		if !ok {
 			return nil, fmt.Errorf("hourly.time[%d] is not a string", i)
 		}
-		t, err := parseOpenMeteoLocalTime(timeStr, offset)
+		t, err := parseOpenMeteoLocalTime(timeStr, 0)
 		if err != nil {
 			return nil, err
 		}

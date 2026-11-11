@@ -1173,16 +1173,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		// now-or-forecast-range case as estimate_passage: the planning
 		// question above is already told to use general knowledge.
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
-		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg " +
-		"and the estimated hours as passage_hours, and pass estimate_passage's route as route when it returned one. " +
-		"Give flood_set_deg and flood_set_source only from the standing notes or the operator (or general knowledge you " +
-		"are sure of, labelled general_knowledge), and leave them out when you do not know which way the flood " +
-		"stream sets; they are used only where the model cannot cover the run. The Open-Meteo model's total current (tide plus ocean currents such as the East Australian Current, " +
-		"a forecast on a grid of about 8 km, which cannot resolve river entrances, narrow straits such as the Great Sandy " +
-		"Strait or shoals) ranks the departures where it covers the run, and you call those figures modelled and " +
-		"point to the tidal stream atlas for narrow water. If ranking_basis is tide_phase the stream was timed from high and " +
-		"low water and the direction you gave, so say that and where the direction came from. If the call says it " +
-		"has nothing to rank with, say the stream cannot be timed. " +
+		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg, " +
+		"the estimated hours as passage_hours and its route as route. The tool says where flood_set_source may come from " +
+		"and how to word its answer. " +
 		"Recommend a " +
 		"departure time from the best candidate and say how much of the run is with the stream (fair_fraction), " +
 		"name the departure time to avoid, and weigh the departure against the forecast wind. Do not use it for the planning " +

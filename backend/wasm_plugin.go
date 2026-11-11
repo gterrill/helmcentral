@@ -162,9 +162,8 @@ func (b *wasmPluginBase) SupportsAnchorageFeatures() bool {
 }
 
 // PositionBased and HeightDatum make a tide plugin a positionTideProvider.
-func (b *wasmPluginBase) SupportsCurrents() bool { return b.supportsCurrents }
-func (b *wasmPluginBase) PositionBased() bool    { return b.positionBased }
-func (b *wasmPluginBase) HeightDatum() string    { return b.heightDatum }
+func (b *wasmPluginBase) PositionBased() bool { return b.positionBased }
+func (b *wasmPluginBase) HeightDatum() string { return b.heightDatum }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -801,6 +800,33 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	}, nil
 }
 
+// callOptionalExport calls an export a plugin may lack (marina_details,
+// anchorage_features): it answers noExport, wrapped with the plugin id, when
+// the plugin does not have it, recovers a panic into an error, and decodes the
+// guest's answer strictly with decode.
+func callOptionalExport[T any](p *wasmPluginBase, export string, supported bool, noExport error, input any,
+	decode func(pluginID string, raw []byte) (T, error)) (result T, err error) {
+	var zero T
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in %s: %v", p.id, export, r)
+			result = zero
+		}
+	}()
+	if !supported {
+		return zero, fmt.Errorf("plugin %q: %w", p.id, noExport)
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return zero, fmt.Errorf("plugin %q: failed to marshal %s input: %w", p.id, export, err)
+	}
+	out, err := p.callWithin(export, payload, optionalExportBudget())
+	if err != nil {
+		return zero, err
+	}
+	return decode(p.id, out)
+}
+
 // optionalEnumExport reads an optional export that must return one of allowed.
 // Absent gives allowed[0]. A value outside the set fails the load: guessing
 // what a plugin meant could hand the operator a wrong depth.
@@ -867,16 +893,6 @@ type wasmPluginCache[T any] struct {
 	path    string
 	writeMu sync.Mutex
 	group   singleflight.Group
-	// maxEntries overrides wasmPluginCacheMaxEntries when above 0, for a cache
-	// whose keys are many small points rather than a few big ones.
-	maxEntries int
-}
-
-func (c *wasmPluginCache[T]) entryCap() int {
-	if c.maxEntries > 0 {
-		return c.maxEntries
-	}
-	return wasmPluginCacheMaxEntries
 }
 
 func newWasmPluginCache[T any](path string) *wasmPluginCache[T] {
@@ -902,17 +918,11 @@ func (c *wasmPluginCache[T]) getStale(key string) (T, bool) {
 }
 
 func (c *wasmPluginCache[T]) set(key string, value T) {
-	c.setInMemory(key, value)
-	c.persistToDisk()
-}
-
-// setInMemory stores and prunes without writing the file, for a caller that
-// sets many keys in a burst and calls persistToDisk once at the end.
-func (c *wasmPluginCache[T]) setInMemory(key string, value T) {
 	c.mu.Lock()
 	c.data[key] = wasmCacheEntry[T]{Value: value, CachedAt: time.Now().UTC()}
 	c.pruneLocked()
 	c.mu.Unlock()
+	c.persistToDisk()
 }
 
 // pruneLocked drops entries older than wasmPluginCacheMaxAge, then - if
@@ -928,7 +938,7 @@ func (c *wasmPluginCache[T]) pruneLocked() {
 		}
 	}
 
-	for len(c.data) > c.entryCap() {
+	for len(c.data) > wasmPluginCacheMaxEntries {
 		oldestKey := ""
 		var oldestAt time.Time
 		for key, entry := range c.data {
