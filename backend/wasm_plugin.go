@@ -132,6 +132,11 @@ type wasmPluginBase struct {
 	// anchorage_features, the optional export behind the features section of
 	// Mate's anchorage_details tool. Like marina_details it stands alone.
 	supportsAnchorageFeatures bool
+	// supportsCurrents is true when a wave plugin exports fetch_currents, the
+	// optional export behind the modelled current Mate's fair-tide tool reads
+	// (ADR 0278). An older plugin lacks it, which is not a load failure: the
+	// tool reports that the installed plugin has no currents.
+	supportsCurrents bool
 	// positionBased is true when a tide plugin exports position_based returning
 	// "true" (ADR 0273): it has no station catalog and takes the position as
 	// "<lat>,<lon>" in place of a station id. Absent means station-based, so
@@ -789,9 +794,37 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		supportsMarinaDetails: instance.FunctionExists("marina_details"),
 
 		supportsAnchorageFeatures: instance.FunctionExists("anchorage_features"),
+		supportsCurrents:          instance.FunctionExists("fetch_currents"),
 		positionBased:             positionBasedOut == "true",
 		heightDatum:               heightDatum,
 	}, nil
+}
+
+// callOptionalExport calls an export a plugin may lack (marina_details,
+// anchorage_features): it answers noExport, wrapped with the plugin id, when
+// the plugin does not have it, recovers a panic into an error, and decodes the
+// guest's answer strictly with decode.
+func callOptionalExport[T any](p *wasmPluginBase, export string, supported bool, noExport error, input any,
+	decode func(pluginID string, raw []byte) (T, error)) (result T, err error) {
+	var zero T
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in %s: %v", p.id, export, r)
+			result = zero
+		}
+	}()
+	if !supported {
+		return zero, fmt.Errorf("plugin %q: %w", p.id, noExport)
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return zero, fmt.Errorf("plugin %q: failed to marshal %s input: %w", p.id, export, err)
+	}
+	out, err := p.callWithin(export, payload, optionalExportBudget())
+	if err != nil {
+		return zero, err
+	}
+	return decode(p.id, out)
 }
 
 // optionalEnumExport reads an optional export that must return one of allowed.

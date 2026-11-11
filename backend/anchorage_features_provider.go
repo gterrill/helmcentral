@@ -263,7 +263,7 @@ func capFeatureList[T any](list []T, limit int, truncated *bool, distance func(T
 // for anchorageFeaturesTTL; an error is never cached.
 func (p *wasmPOIProvider) AnchorageFeatures(lat, lon float64) (anchorageFeatures, error) {
 	fetch := func() (anchorageFeatures, error) {
-		return callOptionalExport(p, "anchorage_features", p.SupportsAnchorageFeatures(), errNoAnchorageFeaturesExport,
+		return callOptionalExport(p.wasmPluginBase, "anchorage_features", p.SupportsAnchorageFeatures(), errNoAnchorageFeaturesExport,
 			wasmLatLonInput{Lat: lat, Lon: lon}, decodeAnchorageFeatures)
 	}
 	// The config salt makes a saved setting a miss, as for every other cache.

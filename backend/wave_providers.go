@@ -30,6 +30,28 @@
 // reads the missing key as absent (a nil *float64), never as 0 m, 0 s or a
 // sea from due north. A reported 0 is a real figure and is kept.
 //
+// Currents are a separate, optional export so a wave fetch costs nothing extra:
+//
+//	fetch_currents({"points": [{"lat": float64, "lon": float64}], "days": int}) -> {
+//	  "points": [{"hourly": [{time, current_velocity_ms, current_set_deg}]}]
+//	}
+//
+// The answer has one entry per requested point, in the same order, and the
+// plugin makes one upstream request for all of them. A route is at most
+// maxCurrentsPoints points; the host errors above that and never splits it.
+//
+// current_velocity_ms (metres per second) and current_set_deg (degrees true, the
+// direction the current flows TOWARD) are OPTIONAL and come as a pair: a plugin
+// omits both for an hour in which its model has no current (null over land and
+// near shore), and the host reads them as absent (nil *float64), never as
+// slack. A reported 0 m/s is a real figure and is kept. A velocity below 0 or
+// above 10 m/s, a set outside 0 to 360, or only one of the two is rejected as a
+// broken plugin. A plugin that does not export fetch_currents is still a valid
+// wave plugin; the host reports that it has no currents. The reference plugin
+// asks Open-Meteo for the two variables alone, without the GFS-Wave pin, which
+// carries no currents. Currents are the TOTAL current the model gives (tide plus
+// ocean currents), not a tide alone.
+//
 // The per-component direction and period fields are OPTIONAL in the sense
 // that a model without them may omit them; they then read as 0, and a
 // component with a zero period is treated as absent rather than as a wave
@@ -55,6 +77,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -105,6 +129,45 @@ type waveForecastBundle struct {
 	FallbackModel string
 }
 
+// currentHourPoint is one hour of modelled current. Nil figures are absent,
+// not slack and not due north.
+type currentHourPoint struct {
+	Time       time.Time
+	VelocityMS *float64
+	SetDeg     *float64
+}
+
+// currentsPoint is a position a fetch_currents call asks about.
+type currentsPoint struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+// maxCurrentsPoints is the most points one fetch_currents call carries. The
+// host errors above it and never splits a route into several requests.
+const maxCurrentsPoints = 100
+
+// currentPointSeries is the hours the model gave for one requested point.
+type currentPointSeries struct {
+	Hourly []currentHourPoint
+}
+
+// currentsBundle is one fetch_currents round-trip, mapped to typed values: one
+// series per requested point, in request order.
+type currentsBundle struct {
+	Points []currentPointSeries
+}
+
+// currentsProvider is the optional capability of a wave provider that can give
+// the modelled ocean current. A provider that implements the method but whose
+// plugin lacks the export answers with an error wrapping errNoCurrentsExport.
+// FetchCurrents takes every point of a route (at most maxCurrentsPoints) and
+// makes one request for them all. It returns ctx.Err() once ctx is done and
+// never serves a stale answer for a failed fetch.
+type currentsProvider interface {
+	FetchCurrents(ctx context.Context, points []currentsPoint, days int) (currentsBundle, error)
+}
+
 // waveProvider is the interface implemented by each pluggable wave data
 // source. The reference provider (open-meteo-marine) is a WASM plugin -
 // there is no native built-in, mirroring weatherProvider's shape.
@@ -151,12 +214,17 @@ func waveProvidersHandler(c echo.Context) error {
 // settings.yaml.
 const defaultWaveProviderID = "open-meteo-marine"
 
+// errNoWaveProviderInstalled marks the resolve error for a blank
+// ui.wave_provider when the default plugin is not installed.
+var errNoWaveProviderInstalled = errors.New("no wave provider is installed")
+
 // resolveWaveProvider reads ui.wave_provider from settingsPath (defaulting
 // to defaultWaveProviderID) and resolves it against the registry, mirroring
 // resolveWeatherProvider's idiom. Returns a clear, actionable error - never
 // a fallback provider - when the configured id isn't registered, since an
 // unregistered provider most likely means the plugin hasn't been installed
 // yet.
+
 func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
@@ -165,13 +233,20 @@ func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 
 	uiMap, _ := settings["ui"].(map[string]any)
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["wave_provider"]))
-	if configuredProvider == "" {
+	blank := configuredProvider == ""
+	if blank {
 		configuredProvider = defaultWaveProviderID
 	}
 
 	provider, ok := getWaveProvider(configuredProvider)
 	if !ok {
-		return nil, configuredProvider, fmt.Errorf("unknown wave provider configured: %q (is the plugin installed in plugins/waves?)", configuredProvider)
+		err := fmt.Errorf("unknown wave provider configured: %q (is the plugin installed in plugins/waves?)", configuredProvider)
+		if blank {
+			// Nothing was chosen and the default is not installed: there is no
+			// wave provider, which is not the same as a wrong one being named.
+			err = fmt.Errorf("%w: %w", err, errNoWaveProviderInstalled)
+		}
+		return nil, configuredProvider, err
 	}
 
 	return provider, configuredProvider, nil

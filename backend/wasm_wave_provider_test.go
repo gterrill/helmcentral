@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -403,5 +405,240 @@ func TestPostPluginConfigHandler_ConfigChangeYieldsAFreshFetch(t *testing.T) {
 	}
 	if fresh.Cached {
 		t.Fatal("a config change must yield a fresh fetch, not the cached answer")
+	}
+}
+
+// fetch_currents answers one series per requested point, in order. An hour
+// carries both figures or neither. A missing key is absent (nil), a reported 0
+// is a real slack figure and is kept.
+func TestMapWasmFetchCurrentsOutput_FiguresAreOptional(t *testing.T) {
+	raw := `{"points":[{"hourly":[
+		{"time":"2026-07-19T05:00:00Z","current_velocity_ms":0.3,"current_set_deg":153},
+		{"time":"2026-07-19T06:00:00Z","current_velocity_ms":0,"current_set_deg":0},
+		{"time":"2026-07-19T07:00:00Z"}]},
+		{"hourly":[{"time":"2026-07-19T05:00:00Z"}]}]}`
+	var parsed wasmFetchCurrentsOutput
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mapWasmFetchCurrentsOutput(parsed, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.Points) != 2 {
+		t.Fatalf("one series per point, got %d", len(bundle.Points))
+	}
+	a, b, c := bundle.Points[0].Hourly[0], bundle.Points[0].Hourly[1], bundle.Points[0].Hourly[2]
+	if a.VelocityMS == nil || *a.VelocityMS != 0.3 || a.SetDeg == nil || *a.SetDeg != 153 {
+		t.Errorf("current figures lost: %+v", a)
+	}
+	if b.VelocityMS == nil || *b.VelocityMS != 0 || b.SetDeg == nil || *b.SetDeg != 0 {
+		t.Errorf("a reported 0 must be kept: %+v", b)
+	}
+	if c.VelocityMS != nil || c.SetDeg != nil {
+		t.Errorf("no keys must be absent: %+v", c)
+	}
+}
+
+func TestMapWasmFetchCurrentsOutput_ImpossibleFiguresAreErrors(t *testing.T) {
+	cases := map[string]string{
+		"negative velocity":    `"current_velocity_ms":-0.1,"current_set_deg":90`,
+		"velocity above 10":    `"current_velocity_ms":11,"current_set_deg":90`,
+		"set below 0":          `"current_velocity_ms":0.2,"current_set_deg":-5`,
+		"set above 360":        `"current_velocity_ms":0.2,"current_set_deg":361`,
+		"velocity without set": `"current_velocity_ms":0.2`,
+		"set without velocity": `"current_set_deg":90`,
+	}
+	for name, fields := range cases {
+		t.Run(name, func(t *testing.T) {
+			var parsed wasmFetchCurrentsOutput
+			body := `{"points":[{"hourly":[{"time":"2026-07-19T05:00:00Z"},{"time":"2026-07-19T06:00:00Z",` + fields + `}]}]}`
+			if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+				t.Fatal(err)
+			}
+			_, err := mapWasmFetchCurrentsOutput(parsed, 1)
+			if err == nil || !strings.Contains(err.Error(), "points[0].hourly[1]") {
+				t.Fatalf("want an error naming points[0].hourly[1], got %v", err)
+			}
+		})
+	}
+}
+
+func TestMapWasmFetchCurrentsOutput_WrongPointCountIsAnError(t *testing.T) {
+	var parsed wasmFetchCurrentsOutput
+	if err := json.Unmarshal([]byte(`{"points":[{"hourly":[]}]}`), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapWasmFetchCurrentsOutput(parsed, 2); err == nil {
+		t.Fatal("a plugin that answers for fewer points than asked is broken")
+	}
+}
+
+// A wave plugin built before currents existed has no fetch_currents. It still
+// loads and serves waves; asking it for currents says what to install.
+func TestWasmWaveProvider_PluginWithoutFetchCurrentsSaysSo(t *testing.T) {
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	if p.supportsCurrents {
+		t.Fatal("the fixture exports no fetch_currents")
+	}
+	var cp currentsProvider = p
+	_, err := cp.FetchCurrents(context.Background(), []currentsPoint{{Lat: -27.4, Lon: 153.0}}, 2)
+	if !errors.Is(err, errNoCurrentsExport) || !strings.Contains(err.Error(), "install the updated open-meteo-marine plugin") || !strings.Contains(err.Error(), "wave-valid-fixture") {
+		t.Fatalf("want the install hint naming the plugin, got %v", err)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsRefusesMoreThanTheCapAndEmpty(t *testing.T) {
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	p.supportsCurrents = true
+	over := make([]currentsPoint, maxCurrentsPoints+1)
+	if _, err := p.FetchCurrents(context.Background(), over, 2); err == nil || !strings.Contains(err.Error(), "100") {
+		t.Errorf("over the cap must be an error naming it, got %v", err)
+	}
+	if _, err := p.FetchCurrents(context.Background(), nil, 2); err == nil {
+		t.Errorf("no points must be an error")
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsReturnsTheContextError(t *testing.T) {
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	p.supportsCurrents = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.FetchCurrents(ctx, []currentsPoint{{Lat: -27.4, Lon: 153.0}}, 2); err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+// ---- fetch_currents memory cache ----
+
+type currentsCacheRig struct {
+	p     *wasmWaveProvider
+	calls int
+	fail  error
+	now   time.Time
+}
+
+func newCurrentsCacheRig(t *testing.T) *currentsCacheRig {
+	t.Helper()
+	r := &currentsCacheRig{now: time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC)}
+	r.p = mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	r.p.supportsCurrents = true
+	r.p.currentsNow = func() time.Time { return r.now }
+	r.p.currentsCall = func(points []currentsPoint, days int) (currentsBundle, error) {
+		r.calls++
+		if r.fail != nil {
+			return currentsBundle{}, r.fail
+		}
+		return currentsBundle{Points: make([]currentPointSeries, len(points))}, nil
+	}
+	return r
+}
+
+func TestWasmWaveProvider_FetchCurrentsRepeatWithinThirtyMinutesIsNotRequestedAgain(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	pts := []currentsPoint{{Lat: -27.4, Lon: 153.0}, {Lat: -27.5, Lon: 153.1}}
+	for i := 0; i < 2; i++ {
+		if _, err := r.p.FetchCurrents(context.Background(), pts, 7); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r.calls != 1 {
+		t.Errorf("a repeat question must not call the plugin again, got %d calls", r.calls)
+	}
+	r.now = r.now.Add(29 * time.Minute)
+	r.p.FetchCurrents(context.Background(), pts, 7)
+	if r.calls != 1 {
+		t.Errorf("29 minutes on is still fresh, got %d calls", r.calls)
+	}
+	// A different question is a different entry.
+	r.p.FetchCurrents(context.Background(), pts, 16)
+	r.p.FetchCurrents(context.Background(), pts[:1], 7)
+	if r.calls != 3 {
+		t.Errorf("different days or points are separate entries, got %d calls", r.calls)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsNeverServesAnExpiredEntryNotEvenOnFailure(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	pts := []currentsPoint{{Lat: -27.4, Lon: 153.0}}
+	r.p.FetchCurrents(context.Background(), pts, 7)
+	r.now = r.now.Add(31 * time.Minute)
+	r.fail = errors.New("open-meteo down")
+	if _, err := r.p.FetchCurrents(context.Background(), pts, 7); err == nil {
+		t.Fatal("an expired entry must not stand in for a failed request")
+	}
+	// A failure is not remembered either.
+	r.fail = nil
+	if _, err := r.p.FetchCurrents(context.Background(), pts, 7); err != nil {
+		t.Fatal(err)
+	}
+	if r.calls != 3 {
+		t.Errorf("want 3 plugin calls, got %d", r.calls)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsKeepsOnlyTheLastSixteenQuestions(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	for i := 0; i < 17; i++ {
+		r.p.FetchCurrents(context.Background(), []currentsPoint{{Lat: -27.0 - float64(i)/10, Lon: 153.0}}, 7)
+	}
+	r.p.FetchCurrents(context.Background(), []currentsPoint{{Lat: -27.0, Lon: 153.0}}, 7)
+	if r.calls != 18 {
+		t.Errorf("the oldest of 17 questions must have been dropped, got %d calls", r.calls)
+	}
+	r.p.FetchCurrents(context.Background(), []currentsPoint{{Lat: -28.6, Lon: 153.0}}, 7)
+	if r.calls != 18 {
+		t.Errorf("a recent question stays, got %d calls", r.calls)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsCacheStartsANewDayAtUTCMidnight(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	r.now = time.Date(2026, 9, 12, 23, 50, 0, 0, time.UTC)
+	pts := []currentsPoint{{Lat: -27.4, Lon: 153.0}}
+	r.p.FetchCurrents(context.Background(), pts, 7)
+	r.now = r.now.Add(15 * time.Minute)
+	r.p.FetchCurrents(context.Background(), pts, 7)
+	if r.calls != 2 {
+		t.Errorf("the series starts at UTC midnight, so a bundle from the day before is not reused, got %d calls", r.calls)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsKeyKeepsTheRequestedListWithItsDuplicates(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	a, b := currentsPoint{Lat: -27.4, Lon: 153.0}, currentsPoint{Lat: -27.5, Lon: 153.1}
+	first, _ := r.p.FetchCurrents(context.Background(), []currentsPoint{a, b}, 7)
+	second, err := r.p.FetchCurrents(context.Background(), []currentsPoint{a, b, a}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Points) != 2 || len(second.Points) != 3 || r.calls != 2 {
+		t.Errorf("a bundle answers the requested list point for point: got %d and %d points from %d calls", len(first.Points), len(second.Points), r.calls)
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsMergesIdenticalRequestsInFlight(t *testing.T) {
+	r := newCurrentsCacheRig(t)
+	var mu sync.Mutex
+	calls := 0
+	r.p.currentsCall = func(points []currentsPoint, days int) (currentsBundle, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		time.Sleep(200 * time.Millisecond)
+		return currentsBundle{Points: make([]currentPointSeries, len(points))}, nil
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.p.FetchCurrents(context.Background(), []currentsPoint{{Lat: -27.4, Lon: 153.0}}, 7)
+		}()
+	}
+	wg.Wait()
+	if calls != 1 {
+		t.Errorf("identical requests in flight must share one plugin call, got %d", calls)
 	}
 }

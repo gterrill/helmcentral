@@ -46,7 +46,7 @@ function for its category:
 | --- | --- | --- |
 | Tides | `search_stations`, `fetch_tide_chart`; optional `position_based`, `height_datum` | Raw station and tide-extreme data |
 | Weather | `fetch_forecast` | Current + multi-day + hourly, all SI units |
-| Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature |
+| Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature; an optional separate `fetch_currents` export takes a route's points (at most 100) and gives, for each, the hourly modelled current (`current_velocity_ms` in m/s, `current_set_deg` toward, both left out when the model has none), from one upstream request |
 | Points of interest | `fetch_poi(lat, lon, radius_m, categories, limit)` | Raw features per category (id, name, position, optional detail/source URL), plus which categories were truncated or unsupported |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 | Upper air | `fetch_upper_air` | Hourly 500mb and 1000mb geopotential height, 500mb wind and temperature |

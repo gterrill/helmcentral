@@ -5,17 +5,18 @@ API. It is the default wave provider for fresh Helmcentral installs because
 it needs no API key or config.json.
 
 The plugin fetches hourly wave forecasts (wave height, period, direction, wind
-swell, and swell components) and optionally sea surface temperature, converted
-to SI units and RFC3339 timestamps per the plugin contract.
+swell, and swell components), and optionally sea surface temperature, converted
+to SI units and RFC3339 timestamps per the plugin contract. A separate,
+optional `fetch_currents` export gives the hourly modelled ocean current.
 
 Written in TinyGo. The Extism plugin contract isn't TinyGo-specific: Rust, Zig, C,
 AssemblyScript, C++, and Haskell PDKs all implement the same contract
 identically; see [Extism's PDK list](https://extism.org/docs/concepts/pdk) if
 you'd rather use one of those.
 
-## Two-endpoint design
+## Request design
 
-The plugin makes two separate HTTP calls to the Marine API:
+The plugin makes two separate HTTP calls to the Marine API for `fetch_waves`, and a third only when the host calls `fetch_currents`:
 
 1. **Wave data (REQUIRED)**: Fetches hourly wave heights, periods, directions,
    wind-wave heights, and swell-wave heights. This call is pinned to NOAA's
@@ -35,6 +36,51 @@ The plugin makes two separate HTTP calls to the Marine API:
    sea_surface_temperature:null), the fetch_waves call still succeeds.
    sea_surface_temperature_c is omitted from the output JSON rather than
    replaced with zero.
+
+3. **Ocean currents (OPTIONAL, `fetch_currents` only)**: Fetches
+   `ocean_current_velocity` and `ocean_current_direction` hourly for every
+   point of a route in one request, and nothing else, also without a `models=`
+   param. GFS-Wave carries no ocean currents
+   (every value comes back null), so these cannot ride on the wave request; only
+   Open-Meteo's default blend answers. This request is made only when the host
+   calls the separate `fetch_currents` export, so a wave fetch costs no extra
+   request. See "Ocean currents" below.
+
+## Ocean currents
+
+`fetch_currents({points: [{lat, lon}, ...], days})` returns
+`{"points":[{"hourly":[{time, current_velocity_ms?, current_set_deg?}]}, ...]}`,
+one entry per point in the same order. A call carries at most 100 points
+(`maxCurrentsPoints`, which keeps the URL near 2 KB); the host errors above that
+and never splits a route. The plugin makes ONE request with comma-separated
+latitude and longitude lists, in `timezone=GMT` so the times are UTC and a
+daylight-saving change cannot make one offset wrong, with `past_days=1` so the
+series starts at 00:00 UTC yesterday and a window that starts earlier today is
+bracketed. Open-Meteo answers several
+locations with a JSON array of per-location objects and one location with a
+single object; the plugin reads both. A response whose `utc_offset_seconds` is
+missing or not zero is an error.
+
+Open-Meteo gives velocity in km/h and the direction the current flows
+**toward**, in degrees; the plugin converts the velocity to metres per second and
+refuses a response whose velocity unit is not `km/h`, because it would convert it
+wrongly. This is the total current the model gives (tide plus ocean currents),
+not a tide alone. The test fixture, `testdata/currents_four_points.json`, is a
+real response, including a location whose hours are all null.
+
+Every hour is listed. Open-Meteo returns JSON `null` in both arrays over land and
+near shore. Only that means "no current this hour": the hour carries neither key,
+which the host reads as "no current", never as slack. A reported `0` is a real
+figure and is kept.
+
+Anything else that is not a clean answer is an error returned to the host, which
+reports it: a missing or mistyped array, arrays of unequal length, an unparseable
+time, a missing or non-`km/h` velocity unit, a null in only one of the pair, a
+negative velocity or a direction outside 0 to 360. So are a failed request and a
+non-2xx status. Nothing is dropped or swallowed. A host or plugin
+built before currents existed lacks the export, and the host says to install the
+updated plugin. The model's grid is about 9 km, so it does not resolve river
+entrances, narrow straits or shoals, and rates there are likely understated.
 
 ## Land cells and the blend fallback
 
@@ -162,6 +208,11 @@ cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... &
 
    Response includes current sea surface temperature (can be null for inland
    coordinates).
+
+3. Ocean currents (`fetch_currents` only): `GET https://marine-api.open-meteo.com/v1/marine?latitude=<lat1>,<lat2>,...&longitude=<lon1>,<lon2>,...&hourly=ocean_current_velocity,ocean_current_direction&timezone=GMT&past_days=1&forecast_days=<days>`
+
+   One request for every point. No `models=` param. Velocity is in km/h, direction in degrees toward which the
+   current flows, and both can be null.
 
 See Open-Meteo's [Marine Weather API
 docs](https://open-meteo.com/en/docs/marine-weather-api) for full endpoint

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -395,5 +396,195 @@ func TestParseOpenMeteoWaveResponse_ZeroPeriodHourIsLeftOut(t *testing.T) {
 	}
 	if hours[1].WavePeriodS == nil || *hours[1].WavePeriodS != 7.4 {
 		t.Errorf("a real hour is kept: %+v", hours[1])
+	}
+}
+
+// currents_four_points.json is a real Open-Meteo response (timezone=GMT,
+// past_days=1, forecast_days=1) for four locations: Hervey Bay, off Fraser Island, near
+// Bundaberg and an inland point whose hours are all null. It has no
+// location_id on the first location, as the live API sends it.
+func readCurrentsFixture(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/currents_four_points.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestCurrentsURL_OneRequestForEveryPoint(t *testing.T) {
+	u := currentsURL([]currentsPoint{{-25.0, 152.6}, {-25.0, 153.6}, {-24.7, 152.5}}, 3)
+	if strings.Contains(u, "models=") {
+		t.Errorf("GFS-Wave carries no currents, so the request must not pin it: %s", u)
+	}
+	for _, want := range []string{
+		"latitude=-25.0000,-25.0000,-24.7000",
+		"longitude=152.6000,153.6000,152.5000",
+		"hourly=ocean_current_velocity,ocean_current_direction&",
+		"timezone=GMT", "forecast_days=3", "past_days=1",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("currents request must contain %q: %s", want, u)
+		}
+	}
+	if strings.Contains(u, "wave_") || strings.Contains(u, "timezone=auto") {
+		t.Errorf("the request asks for the two current variables only, in GMT: %s", u)
+	}
+}
+
+func TestValidateCurrentsInput(t *testing.T) {
+	ok := []currentsPoint{{-25, 152}}
+	if err := validateCurrentsInput(ok); err != nil {
+		t.Errorf("one point is fine: %v", err)
+	}
+	many := make([]currentsPoint, maxCurrentsPoints)
+	for i := range many {
+		many[i] = currentsPoint{-25, 152}
+	}
+	if err := validateCurrentsInput(many); err != nil {
+		t.Errorf("exactly the cap is fine: %v", err)
+	}
+	cases := map[string][]currentsPoint{
+		"no points":     {},
+		"over the cap":  append(many, currentsPoint{-25, 152}),
+		"bad latitude":  {{95, 152}},
+		"bad longitude": {{-25, 181}},
+	}
+	for name, pts := range cases {
+		if err := validateCurrentsInput(pts); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestParseOpenMeteoCurrentsResponse_RealMultiLocationFixture(t *testing.T) {
+	got, err := parseOpenMeteoCurrentsResponse(readCurrentsFixture(t), 4)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("one series per point, in order; got %d", len(got))
+	}
+	for i, hours := range got {
+		if len(hours) != 48 {
+			t.Errorf("point %d: expected yesterday and today, 48 hours, got %d", i, len(hours))
+		}
+	}
+	if got[0][0].Time != "2026-11-10T00:00:00Z" {
+		t.Errorf("timezone=GMT means the times are UTC as given: %s", got[0][0].Time)
+	}
+	// Off Fraser is the East Australian Current: 4.2 km/h is 1.17 m/s toward 155.
+	h := got[1][24] // 2026-11-11T00:00Z, after yesterday's 24 hours
+	if h.CurrentVelocityMS == nil || *h.CurrentVelocityMS < 1.15 || *h.CurrentVelocityMS > 1.18 || h.CurrentSetDeg == nil || *h.CurrentSetDeg != 155 {
+		t.Errorf("4.2 km/h toward 155 expected, got %+v", h)
+	}
+	// Inland: every hour null, no keys.
+	for _, hr := range got[3] {
+		if hr.CurrentVelocityMS != nil || hr.CurrentSetDeg != nil {
+			t.Fatalf("a null hour carries neither key: %+v", hr)
+		}
+	}
+	out, err := json.Marshal(fetchCurrentsOutput{Points: toPointSeries(got)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Points []struct {
+			Hourly []map[string]any `json:"hourly"`
+		} `json:"points"`
+	}
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := back.Points[3].Hourly[0]["current_velocity_ms"]; ok {
+		t.Errorf("a null hour must not emit the key: %v", back.Points[3].Hourly[0])
+	}
+}
+
+func toPointSeries(in [][]currentHourOutput) []currentPointOutput {
+	out := make([]currentPointOutput, len(in))
+	for i, h := range in {
+		out[i] = currentPointOutput{Hourly: h}
+	}
+	return out
+}
+
+// With one location Open-Meteo answers with a single object, not an array.
+func TestParseOpenMeteoCurrentsResponse_SingleLocationIsAnObject(t *testing.T) {
+	var arr []json.RawMessage
+	if err := json.Unmarshal(readCurrentsFixture(t), &arr); err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseOpenMeteoCurrentsResponse(arr[0], 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("a single object is one location: %v %d", err, len(got))
+	}
+}
+
+func TestParseOpenMeteoCurrentsResponse_AZeroIsKept(t *testing.T) {
+	raw := `[{"utc_offset_seconds":0,"hourly_units":{"ocean_current_velocity":"km/h"},"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[0],"ocean_current_direction":[0]}}]`
+	got, err := parseOpenMeteoCurrentsResponse([]byte(raw), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0][0].CurrentVelocityMS == nil || *got[0][0].CurrentVelocityMS != 0 || got[0][0].CurrentSetDeg == nil || *got[0][0].CurrentSetDeg != 0 {
+		t.Errorf("a reported 0 is a real slack figure: %+v", got[0][0])
+	}
+}
+
+// Anything that is not a clean answer is an error for the host to report. Only
+// a JSON null in both arrays for an hour means "no current that hour".
+func TestParseOpenMeteoCurrentsResponse_MalformedResponsesAreErrors(t *testing.T) {
+	loc := func(offset, units, hourly string) string {
+		return `{` + offset + units + `"hourly":{` + hourly + `}}`
+	}
+	off := `"utc_offset_seconds":0,`
+	units := `"hourly_units":{"ocean_current_velocity":"km/h"},`
+	one := func(hourly string) string { return `[` + loc(off, units, hourly) + `]` }
+	t1 := `"time":["2026-11-11T00:00"],`
+	cases := map[string]string{
+		"not json":                   `nope`,
+		"velocity array missing":     one(t1 + `"ocean_current_direction":[90]`),
+		"direction array missing":    one(t1 + `"ocean_current_velocity":[1]`),
+		"velocity not an array":      one(t1 + `"ocean_current_velocity":"x","ocean_current_direction":[90]`),
+		"units missing":              `[` + loc(off, ``, t1+`"ocean_current_velocity":[1],"ocean_current_direction":[90]`) + `]`,
+		"units not km/h":             `[` + loc(off, `"hourly_units":{"ocean_current_velocity":"kn"},`, t1+`"ocean_current_velocity":[1],"ocean_current_direction":[90]`) + `]`,
+		"offset missing":             `[` + loc(``, units, t1+`"ocean_current_velocity":[1],"ocean_current_direction":[90]`) + `]`,
+		"offset not zero":            `[` + loc(`"utc_offset_seconds":36000,`, units, t1+`"ocean_current_velocity":[1],"ocean_current_direction":[90]`) + `]`,
+		"arrays of unequal length":   one(`"time":["2026-11-11T00:00","2026-11-11T01:00"],"ocean_current_velocity":[1],"ocean_current_direction":[90,90]`),
+		"unparseable time":           one(`"time":["yesterday"],"ocean_current_velocity":[1],"ocean_current_direction":[90]`),
+		"time not a string":          one(`"time":[5],"ocean_current_velocity":[1],"ocean_current_direction":[90]`),
+		"negative velocity":          one(t1 + `"ocean_current_velocity":[-1],"ocean_current_direction":[90]`),
+		"direction above 360":        one(t1 + `"ocean_current_velocity":[1],"ocean_current_direction":[400]`),
+		"direction below 0":          one(t1 + `"ocean_current_velocity":[1],"ocean_current_direction":[-5]`),
+		"non-numeric velocity":       one(t1 + `"ocean_current_velocity":["fast"],"ocean_current_direction":[90]`),
+		"velocity without direction": one(t1 + `"ocean_current_velocity":[1],"ocean_current_direction":[null]`),
+		"direction without velocity": one(t1 + `"ocean_current_velocity":[null],"ocean_current_direction":[90]`),
+		"fewer locations than asked": one(t1 + `"ocean_current_velocity":[1],"ocean_current_direction":[90]`),
+		"hourly missing":             `[{"utc_offset_seconds":0,` + units + `"x":1}]`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			n := 1
+			if name == "fewer locations than asked" {
+				n = 2
+			}
+			if _, err := parseOpenMeteoCurrentsResponse([]byte(raw), n); err == nil {
+				t.Errorf("expected an error")
+			}
+		})
+	}
+}
+
+func TestWaveHoursCarryNoCurrentFields(t *testing.T) {
+	out, err := json.Marshal(waveHourOutput{Time: "2026-11-10T14:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "current") {
+		t.Errorf("fetch_waves leaves currents to fetch_currents: %s", out)
+	}
+	if strings.Contains(marineWaveURLFmt, "ocean_current") {
+		t.Errorf("the wave request must not ask for currents: %s", marineWaveURLFmt)
 	}
 }

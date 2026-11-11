@@ -41,6 +41,12 @@
 // plugin is actually compiled via `tinygo build` - see README.md. Verified
 // empirically both ways before this file was written.
 //
+// A separate export, fetch_currents, returns the hourly modelled ocean current
+// (current_velocity_ms and current_set_deg) for a list of route points, from one
+// request for all of them, also without the models= pin since GFS-Wave has no
+// currents. fetch_waves does not
+// call it, so waves cost no extra request.
+//
 // Like every WASM wave plugin, this returns only raw SI-unit, RFC3339-timestamped
 // wave and sea-temperature data; it does NOT bucket by day or interpolate
 // current conditions - the host (backend/wasm_wave_provider.go) already does
@@ -60,6 +66,12 @@ type wasmFetchWavesInput struct {
 	Lat  float64 `json:"lat"`
 	Lon  float64 `json:"lon"`
 	Days int     `json:"days"`
+}
+
+// wasmFetchCurrentsInput mirrors the host's fetch_currents input contract.
+type wasmFetchCurrentsInput struct {
+	Points []currentsPoint `json:"points"`
+	Days   int             `json:"days"`
 }
 
 //go:wasmexport id
@@ -148,6 +160,46 @@ func fetchWaves() int32 {
 		return -1
 	}
 
+	return 0
+}
+
+// fetch_currents is a separate, optional export so a wave fetch never pays for
+// currents: the host calls it only when something (Mate's fair-tide tool) needs
+// the modelled current along a route. It takes every point of the route and
+// makes ONE request for all of them, asking for the two current variables alone,
+// without the GFS-Wave pin, which carries no currents. Any failure is an error
+// returned to the host, which reports it; nothing is swallowed.
+//
+//go:wasmexport fetch_currents
+func fetchCurrents() int32 {
+	var input wasmFetchCurrentsInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	if err := validateCurrentsInput(input.Points); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	days := clampForecastDays(input.Days)
+	res := pdk.NewHTTPRequest(pdk.MethodGet, currentsURL(input.Points, days)).Send()
+	if res.Status() < 200 || res.Status() >= 300 {
+		pdk.SetErrorString(fmt.Sprintf("open-meteo marine currents API returned %d", res.Status()))
+		return -1
+	}
+	hours, err := parseOpenMeteoCurrentsResponse(res.Body(), len(input.Points))
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	points := make([]currentPointOutput, len(hours))
+	for i, h := range hours {
+		points[i] = currentPointOutput{Hourly: h}
+	}
+	if err := pdk.OutputJSON(fetchCurrentsOutput{Points: points}); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
 	return 0
 }
 
