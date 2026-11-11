@@ -17,9 +17,10 @@ you're doing, you put the rest on a passage or into Documents.
 
 ## Sharing from your phone
 
-Open **Passages**, tap **Inbox**, then **Share photos**. The same page is at
-`/passages/upload`, so you can add that address to your phone's Home Screen and
-open it like an app. Tap **Choose photos and files** and pick as many as you
+Open **Inbox** in the sidebar, then tap **Share photos**. The same page is at
+`/inbox/upload`, so you can add that address to your phone's Home Screen and open
+it like an app. On an Android phone you can also share straight from Photos or
+Files, as described next. Tap **Choose photos and files** and pick as many as you
 want. Photos and PDFs are accepted, and nothing else.
 
 Helmcentral first checks your photos against what the boat already has, which
@@ -63,10 +64,40 @@ If a photo has no time zone of its own, Helmcentral reads its time in the boat's
 zone. If it doesn't know the boat's zone either, the photo goes up with no time
 and the upload page tells you, rather than guessing.
 
+## Sharing from the share sheet
+
+On an Android phone with Helmcentral installed as an app, **Helmcentral** appears
+in the share sheet. Select photos or PDFs, tap **Share**, then **Helmcentral**.
+Setting it up is in [Share photos from an Android
+phone](../how-to/share-photos-from-an-android-phone.md). An iPhone has no share
+sheet entry for web apps, so it uses the upload page.
+
+Shared files and files you pick on the upload page both go on a waiting list on
+the phone before anything is sent. That is what lets an interrupted upload carry
+on:
+
+- Leaving the list: A file comes off only when the boat has stored it or already
+  had it. If you remove it yourself, it comes off too.
+- A file that fails: It stays on the list with the reason, and **Upload now**
+  tries it again.
+- Next time you open Helmcentral: A banner says how many are waiting, such as "7
+  photos waiting to upload", with **Upload now** and **Discard**. Nothing is sent
+  until you say so, apart from straight after a share.
+- One upload at a time: Two open windows on the same phone don't both upload. The
+  second one tells you the first is already working.
+
+Helmcentral doesn't upload in the background. The upload runs while the app is
+open, so keep it open until the count reaches the end.
+
+A shared photo goes through the same checks as a picked one: the time, the
+direction the phone faced and where the phone says it was are read before the
+photo is shrunk. A share may keep a location that picking in the browser hides,
+so the compass mark on an item tells you whether the direction arrived.
+
 ## The Inbox
 
-**Passages** shows an **Inbox** button with a number on it while anything is
-waiting. The Inbox lays the photos out as a contact sheet, in the order they were
+The **Inbox** row in the sidebar shows a number on it while anything is waiting.
+The Inbox lays the photos out as a contact sheet, in the order they were
 taken, in groups:
 
 - Each passage: Photos taken during a passage, headed by that passage's name and
@@ -146,8 +177,10 @@ is being filed".
   other way has none.
 - Anyone who can make changes can share, and an item doesn't say who sent it.
 - Photos can't yet be sent to a piece of equipment or an open job from the Inbox.
-- Sharing straight from the phone's share menu isn't there yet. Use the upload
-  page.
+- Sharing from the share sheet is for Android with the installed app only. An
+  iPhone uses the upload page.
+- The upload doesn't carry on in the background. Close the app mid-way and the
+  rest waits for the next time you open it.
 - The Inbox is stored in `data/inbox` beside the document library. The
   [configuration reference](../reference/configuration.md) lists the setting that
   moves it. Include that folder in your backups.

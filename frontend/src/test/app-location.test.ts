@@ -677,14 +677,26 @@ describe('Passages panel (ADR 0171 panel route)', () => {
     })
   })
 
-  it('parses and round-trips the Inbox and the page that shares to it', () => {
-    expect(parseAppLocation('/passages/inbox')).toEqual({ panel: 'passages', route: { view: 'inbox' } })
-    expect(parseAppLocation('/passages/upload')).toEqual({ panel: 'passages', route: { view: 'upload' } })
-    for (const view of ['inbox', 'upload'] as const) {
-      const loc: AppLocation = { panel: 'passages', route: { view } }
-      expect(formatAppLocation(loc, ctx)).toBe(`/passages/${view}`)
-      expect(parseAppLocation(formatAppLocation(loc, ctx))).toEqual(loc)
+  it('parses and round-trips the Inbox panel and the page that shares to it', () => {
+    expect(parseAppLocation('/inbox')).toEqual({ panel: 'inbox', route: { view: 'index' } })
+    expect(parseAppLocation('/inbox/upload')).toEqual({ panel: 'inbox', route: { view: 'upload' } })
+    expect(parseAppLocation('/inbox/upload?shared=1')).toEqual({ panel: 'inbox', route: { view: 'upload' } })
+    expect(parseAppLocation('/inbox/nonsense')).toEqual({ panel: 'inbox', route: { view: 'index' } })
+    const cases: [AppLocation, string][] = [
+      [{ panel: 'inbox', route: { view: 'index' } }, '/inbox'],
+      [{ panel: 'inbox', route: { view: 'upload' } }, '/inbox/upload'],
+    ]
+    for (const [loc, path] of cases) {
+      expect(formatAppLocation(loc, ctx)).toBe(path)
+      expect(parseAppLocation(path)).toEqual(loc)
+      expect(isCanonicalAppPath(path, { firstPageId: 'p1', knownPageIds: null, canAdmin: true })).toBe(true)
     }
+  })
+
+  it('no longer knows the Inbox as a view of Passages', () => {
+    // PR 1 was never released, so these addresses are read as passage ids, not redirected.
+    expect(parseAppLocation('/passages/inbox')).toEqual({ panel: 'passages', route: { view: 'passage', id: 'inbox', filter: { kind: 'all' } } })
+    expect(parseAppLocation('/passages/upload')).toEqual({ panel: 'passages', route: { view: 'passage', id: 'upload', filter: { kind: 'all' } } })
   })
 
   it('falls back to the index for a combined link with no ids or a cruise link with no id', () => {

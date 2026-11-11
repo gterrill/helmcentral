@@ -1,11 +1,12 @@
 /*
  * Helmcentral service worker — alarm push only.
  *
- * SCOPE FENCE, deliberately narrow (see docs/adr/0045): there is no `fetch`
- * handler and no caching here. Caching the app shell would serve stale JS after
- * an upgrade, and this project has no cache-busting story for a service worker.
- * This file exists so an alarm reaches the lock screen with the dashboard
- * closed, and for nothing else.
+ * SCOPE FENCE, deliberately narrow (see docs/adr/0045): there is no caching
+ * here, and the only `fetch` handling is the share target's POST (ADR 0280),
+ * which every other request passes by. Caching the app shell would serve stale
+ * JS after an upgrade, and this project has no cache-busting story for a
+ * service worker. This file exists so an alarm reaches the lock screen with the
+ * dashboard closed, and so a photo shared from the phone is kept; nothing else.
  *
  * It also touches only `self` — no imports, no other globals — which is what
  * lets src/test/service-worker-push.test.ts load and exercise the real file
@@ -95,6 +96,78 @@ async function openDashboard(url) {
   }
 
   return self.clients.openWindow(target)
+}
+
+/*
+ * Share to Helmcentral (ADR 0280). The manifest's share_target posts the shared
+ * files to SHARE_ACTION. This is the one request the worker answers; every
+ * other request returns from the handler without respondWith, so the browser
+ * deals with it exactly as if there were no fetch handler (the scope fence at
+ * the top still holds: no caching, no rewriting).
+ *
+ * The files go to the waiting list in IndexedDB, in one transaction, and the
+ * phone is sent to the upload page, which uploads them. If they cannot be kept
+ * the phone is sent there with share_error=1 and the page says so. A share is
+ * never dropped quietly.
+ *
+ * The database below is the same one src/lib/inbox-queue.ts opens. That file
+ * defines the schema; src/test/service-worker-share.test.ts reads what this
+ * writes through it, so the two cannot drift apart unnoticed.
+ */
+const SHARE_ACTION = '/share-target'
+const SHARE_FIELD = 'files'
+const QUEUE_DB = 'helmcentral-inbox-queue'
+const QUEUE_DB_VERSION = 1
+const QUEUE_STORE = 'pending'
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request
+  if (request.method !== 'POST') return
+  if (new URL(request.url).pathname !== SHARE_ACTION) return
+  event.respondWith(receiveShare(request))
+})
+
+async function receiveShare(request) {
+  const origin = new URL(request.url).origin
+  try {
+    const form = await request.formData()
+    const files = form.getAll(SHARE_FIELD).filter((v) => typeof v !== 'string')
+    if (files.length === 0) throw new Error('the share held no files')
+    await queueShared(files)
+    return Response.redirect(origin + '/inbox/upload?shared=1', 303)
+  } catch (err) {
+    return Response.redirect(origin + '/inbox/upload?share_error=1', 303)
+  }
+}
+
+function queueShared(files) {
+  return new Promise((resolve, reject) => {
+    const open = self.indexedDB.open(QUEUE_DB, QUEUE_DB_VERSION)
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(QUEUE_STORE)) {
+        open.result.createObjectStore(QUEUE_STORE, { keyPath: 'id' })
+      }
+    }
+    open.onerror = () => reject(open.error || new Error('could not open the waiting list'))
+    open.onsuccess = () => {
+      const db = open.result
+      const tx = db.transaction(QUEUE_STORE, 'readwrite')
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onerror = () => { db.close(); reject(tx.error || new Error('could not write the waiting list')) }
+      tx.onabort = () => { db.close(); reject(tx.error || new Error('the waiting list write was aborted')) }
+      const now = Date.now()
+      files.forEach((file, i) => {
+        tx.objectStore(QUEUE_STORE).add({
+          id: now.toString(36).padStart(9, '0') + '-' + String(i).padStart(5, '0') + '-' + Math.random().toString(36).slice(2, 8),
+          blob: file,
+          name: file.name,
+          type: file.type,
+          lastModified: file.lastModified,
+          addedAt: now,
+        })
+      })
+    }
+  })
 }
 
 /*

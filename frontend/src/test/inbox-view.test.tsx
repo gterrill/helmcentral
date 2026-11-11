@@ -45,7 +45,7 @@ const passage = {
   notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', timezone: 'Australia/Brisbane', stats: {},
 } as unknown as PassageSummary
 
-const view = (canWrite = true) => render(<InboxView canWrite={canWrite} passages={[passage]} onBack={vi.fn()} onOpenUpload={vi.fn()} />)
+const view = (canWrite = true) => render(<InboxView canWrite={canWrite} passages={[passage]} onOpenUpload={vi.fn()} />)
 
 beforeEach(() => {
   vi.clearAllMocks()

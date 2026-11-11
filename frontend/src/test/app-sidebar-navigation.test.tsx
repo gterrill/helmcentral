@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
@@ -54,6 +54,9 @@ beforeEach(() => {
     }
     if (url.endsWith('/api/assistant/conversations')) {
       return { ok: true, json: async () => ({ conversations: [] }) }
+    }
+    if (url.endsWith('/api/inbox/count')) {
+      return { ok: true, json: async () => ({ count: 4 }) }
     }
     return { ok: false, json: async () => ({}) }
   }))
@@ -350,6 +353,12 @@ describe('App sidebar navigation', () => {
     expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
   })
 
+  it('shows how many files wait in the Inbox on its sidebar row', async () => {
+    render(<App />)
+    const row = screen.getByRole('button', { name: /^Inbox/ }).closest('[data-sidebar="menu-item"]') as HTMLElement
+    expect(await within(row).findByLabelText('4 waiting')).toHaveTextContent('4')
+  })
+
   // The order of the top-level sidebar items is a deliberate product
   // decision, not an accident of the order panels were built in: the
   // things you reach for underway sit at the top, the reference and
@@ -368,6 +377,7 @@ describe('App sidebar navigation', () => {
       'Anchor Watch',
       'Forecast',
       'Windy',
+      'Inbox',
       'Passages',
       'Watches',
       'Documents',

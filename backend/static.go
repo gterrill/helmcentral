@@ -103,11 +103,23 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 	// http.FileServer already answers HEAD with GET's status and headers
 	// and no body.
 	methods := []string{http.MethodGet, http.MethodHead}
+
+	// The manifest's share target posts files here. The installed app's
+	// service worker answers the POST itself and the server never sees it. If
+	// the post does arrive, no worker was running, so the files are lost; say
+	// so on the upload page rather than answer with a bare error.
+	e.POST(shareTargetRoute, func(c echo.Context) error {
+		return c.Redirect(http.StatusSeeOther, shareWithoutWorkerLocation)
+	})
+
 	e.Match(methods, staticRootRoute, serve)
 	e.Match(methods, staticCatchAllRoute, serve)
 }
 
 const (
+	shareTargetRoute           = "/share-target"
+	shareWithoutWorkerLocation = "/inbox/upload?share_error=2"
+
 	staticRootRoute     = "/"
 	staticCatchAllRoute = "/*"
 )

@@ -278,3 +278,24 @@ func TestStaticHandler_HeadOverTheWire(t *testing.T) {
 		}
 	}
 }
+
+// TestStaticHandler_ShareWithoutWorkerIsRefusedVisibly guards the share target
+// (ADR 0280). The installed app's service worker answers a POST to
+// /share-target itself. When no worker is running, the browser posts the files
+// to the server, which has nowhere to keep them. It must send the phone back to
+// the upload page with the error flag, never a bare 404/405 and never a 200
+// that looks as if the share worked.
+func TestStaticHandler_ShareWithoutWorkerIsRefusedVisibly(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/share-target", strings.NewReader("ignored")))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /share-target = %d, want 303", rec.Code)
+	}
+	if got, want := rec.Header().Get("Location"), "/inbox/upload?share_error=2"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}

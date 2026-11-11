@@ -14,8 +14,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Added
 
 - **Share photos and PDFs from your phone to a new Inbox, then sort them on
-  the laptop.** Open **Passages**, tap **Inbox**, then **Share photos**, or put
-  `/passages/upload` on your phone's Home Screen. Pick a whole camera roll:
+  the laptop.** Open **Inbox** in the sidebar, then tap **Share photos**, or put
+  `/inbox/upload` on your phone's Home Screen. The sidebar shows how many are
+  waiting. Pick a whole camera roll:
   photos already in the Inbox, or already filed from it, are skipped before any
   work is done, so picking the same ones twice is harmless and quick. The rest
   are shrunk on the phone and sent one at a time with a small preview.
@@ -29,6 +30,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   The Inbox lives in `data/inbox` (set `INBOX_DIR` to move it), so include it in
   your backups. Notes with no folder are called **Unfiled notes**, so the word
   Inbox means only this.
+
+- **Share to Helmcentral from an Android phone.** Install Helmcentral as an app
+  from Chrome, over the secure Tailscale address, then pick **Helmcentral** in
+  the phone's share sheet from Photos or Files. The photos go onto a waiting list
+  on the phone and the upload starts at once. Whatever is not yet in Helmcentral
+  stays on that list, so a lost connection or a closed app doesn't lose a share.
+  Next time you open Helmcentral on that phone, a banner says how many photos are
+  waiting, with **Upload now** and **Discard**. Files you pick on the upload page
+  use the same list. An iPhone has no share sheet entry for web apps, so it keeps
+  using the upload page.
+
+  If Helmcentral is already installed as an app on your phone, **Helmcentral**
+  can take up to a day to appear in the share sheet, because Chrome only
+  refreshes an installed app's details now and then. To get it straight away,
+  remove the app from the Home Screen and install it again from Chrome's menu.
 
 ### Changed
 

@@ -35,6 +35,8 @@ describe('helpTargetFor', () => {
       { panel: 'display', slug: null, options: { pageId: null, preview: false } },
       { panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: null } },
       { panel: 'wall-displays', route: { view: 'index' } },
+      { panel: 'inbox', route: { view: 'index' } },
+      { panel: 'inbox', route: { view: 'upload' } },
     ]
     for (const location of plain) {
       expect(helpTargetFor(location)).toEqual(PANEL_HELP_TARGETS[location.panel as PanelId])

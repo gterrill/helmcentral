@@ -5,6 +5,7 @@ import {
   CircleHelp,
   CloudSun,
   FileText,
+  Inbox,
   LayoutDashboard,
   Maximize,
   Mic,
@@ -21,6 +22,8 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
+import { InboxWaitingBanner } from '@/components/inbox-waiting-banner'
+import { useInboxCount } from '@/hooks/use-inbox'
 import { LiveAlarmBanner } from '@/components/live-alarm-banner'
 import { LiveDisplayShell } from '@/components/display-shell'
 import { LiveAlarmsDrawer, LiveAnchorWatchDrawer, LiveForecastPage, LiveRadarDrawer } from '@/components/live-drawers'
@@ -39,6 +42,7 @@ import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
+const InboxRoutePanel = lazy(() => import('@/components/passages/inbox-route-panel').then((mod) => ({ default: mod.InboxRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
 const WatchesRoutePanel = lazy(() => import('@/components/watches/watches-route-panel').then((mod) => ({ default: mod.WatchesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
@@ -132,6 +136,7 @@ import {
   SidebarInset,
   SidebarMenu,
   SidebarMenuItem,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuSub,
   SidebarMenuSubButton,
@@ -156,6 +161,14 @@ import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Table into the entry chunk for the sake of one empty div.
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { cn } from '@/lib/utils'
+
+// The waiting count on the Inbox row. Its own component, so the poll that feeds
+// it re-renders the badge and not the whole shell.
+function InboxNavBadge() {
+  const count = useInboxCount()
+  if (count === null || count === 0) return null
+  return <SidebarMenuBadge aria-label={`${count} waiting`}>{count}</SidebarMenuBadge>
+}
 
 /**
  * Ordered the way the boat is actually run, not the order the panels were
@@ -184,6 +197,7 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   // The id stays 'radar', and so does the /radar address, so saved links work.
   { id: 'radar', label: 'Windy', icon: Wind },
+  { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'watches', label: 'Watches', icon: Eye },
   { id: 'documents', label: 'Documents', icon: FileText },
@@ -1590,6 +1604,8 @@ function AppShell() {
           />
         )
       }
+      case 'inbox':
+        return <InboxRoutePanel canWrite={canWrite} />
       case 'passages':
         return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'watches':
@@ -1855,6 +1871,7 @@ function AppShell() {
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
                 </SidebarMenuButton>
+                {id === 'inbox' && <InboxNavBadge />}
               </SidebarMenuItem>
             ))}
             {/* ADR 0095: opens the contents page of the in-app help. Never
@@ -2174,6 +2191,11 @@ function AppShell() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className={cn('mx-auto flex w-full flex-1 min-h-0 flex-col gap-4', !isFullscreenDashboard && 'max-w-[1800px]')}>
             <ConnectionBanner />
+            {/* Files shared from this phone and not yet uploaded (ADR 0280).
+                The upload page lists them itself. */}
+            {!(appLocation.panel === 'inbox' && appLocation.route.view === 'upload') && (
+              <InboxWaitingBanner canWrite={canWrite} onUploadNow={() => { navigate({ panel: 'inbox', route: { view: 'upload' } }) }} />
+            )}
             {/* z-55 keeps a live alarm above the Mate sheet's backdrop (z-50)
                 while staying under the dashboard header, which sits at
                 z-60 same as the page selector and every other top-level
