@@ -224,7 +224,6 @@ var errNoWaveProviderInstalled = errors.New("no wave provider is installed")
 // a fallback provider - when the configured id isn't registered, since an
 // unregistered provider most likely means the plugin hasn't been installed
 // yet.
-
 func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
