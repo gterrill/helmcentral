@@ -54,7 +54,9 @@ for your boat, so the engine, battery and tank tiles stay empty until you do.
 Docker, manual binaries and upgrading:
 [docs/how-to/install.md](docs/how-to/install.md).
 
-Stuck, or not sure it suits your boat? Ask in
+Not sure it suits your boat? The [FAQ](docs/reference/faq.md) covers what it
+needs, what it costs, where it works and what works without an internet
+connection. If you're stuck, ask in
 [Discussions](https://github.com/gterrill/helmcentral/discussions).
 
 > [!WARNING]
@@ -82,7 +84,9 @@ Stuck, or not sure it suits your boat? Ask in
 ## Requirements
 
 - **Linux, macOS or Windows.** Builds cover Linux on x86-64, arm64 and armv7
-  (which covers every Raspberry Pi), plus macOS and Windows. Linux gets a
+  (which covers the Raspberry Pi 2 and every later model, including the
+  Zero 2 W, but not the older ARMv6 boards: the Pi 1, Pi Zero, Zero W and
+  Compute Module 1), plus macOS and Windows. Linux gets a
   systemd service. There's nothing else to install alongside it.
 - **A SignalK server** on your network, with
   [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) for
@@ -255,12 +259,13 @@ matching permissions. A role it doesn't recognise gets no access, rather than
 falling back to something more permissive.
 
 Turn on SignalK's security first, then turn on login in Settings → Security.
-Helmcentral won't save the setting until SignalK security is on, so that a
-reboot can't lock you out. Turning login off doesn't need SignalK to be
-reachable.
-
-Every environment variable, state path and startup behaviour:
-[docs/reference/configuration.md](docs/reference/configuration.md).
+Helmcentral won't save the setting until SignalK security is on. With login
+on, Helmcentral won't start in two cases: when it can't reach SignalK, as
+after a power cut, and when SignalK's security has since been turned off. How
+to get it going again is in
+[Login and SignalK at startup](docs/reference/configuration.md#login-and-signalk-at-startup),
+on the page that also lists every environment variable, state path and
+startup behaviour.
 
 ## Provider plugins
 
@@ -297,6 +302,7 @@ program, so the help is on the boat whether or not the boat has a connection.
 | --- | --- |
 | [docs/features/](docs/features/) | What each part does and where it stops |
 | [docs/how-to/](docs/how-to/) | Install, upgrade, wall displays, Mate, outside assistants, and more |
+| [docs/reference/faq.md](docs/reference/faq.md) | Frequently asked questions: hardware, internet, cost, regions, forecasts, using it ashore, security |
 | [docs/reference/](docs/reference/) | Configuration, plugins, place categories, engine profiles |
 | [docs/adr/](docs/adr/) | Why it was built the way it was |
 

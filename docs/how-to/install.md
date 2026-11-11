@@ -67,7 +67,9 @@ systemd unit, and `settings.example.yaml` as a starting config.
 
 ## Docker
 
-The image is multi-arch (amd64, arm64, armv7), so it runs on a Raspberry Pi.
+The image is multi-arch (amd64, arm64, armv7), so it runs on a Raspberry Pi 2
+or later, including the Zero 2 W. It doesn't run on the older ARMv6 boards:
+the Pi 1, Pi Zero, Zero W and Compute Module 1.
 Take `docker-compose.yml` from the repository, then run these from the
 directory containing it:
 
