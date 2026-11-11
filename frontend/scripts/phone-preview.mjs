@@ -2,6 +2,10 @@
 //
 //   node frontend/scripts/phone-preview.mjs <url> <out.png>
 //        [--width N] [--height N] [--wait-for <selector>] [--full-page]
+//        [--scale N] [--clip <selector>]
+//
+// --scale is the device scale factor: 2 below 768 px wide, 1 from 768 up.
+// --clip screenshots only the first element matching the CSS selector.
 //
 // Playwright is a pinned devDependency, so this needs no npx cache lookup.
 // The viewport is set by the browser context, which is why it works where
@@ -10,7 +14,7 @@ import { chromium } from 'playwright';
 
 const args = process.argv.slice(2);
 const positional = [];
-const opts = { width: 390, height: 844, waitFor: '', fullPage: false };
+const opts = { width: 390, height: 844, waitFor: '', fullPage: false, scale: null, clip: '' };
 
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -18,13 +22,19 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--width') opts.width = Number(args[++i]);
   else if (a === '--height') opts.height = Number(args[++i]);
   else if (a === '--wait-for') opts.waitFor = args[++i] ?? '';
+  else if (a === '--scale') opts.scale = Number(args[++i]);
+  else if (a === '--clip') opts.clip = args[++i] ?? '';
   else if (a.startsWith('--')) fail(`unknown option ${a}`);
   else positional.push(a);
 }
 
 const [url, out] = positional;
-if (!url || !out) fail('usage: phone-preview.mjs <url> <out.png> [--width N] [--height N] [--wait-for <selector>] [--full-page]');
+if (!url || !out) fail('usage: phone-preview.mjs <url> <out.png> [--width N] [--height N] [--wait-for <selector>] [--full-page] [--scale N] [--clip <selector>]');
 if (!Number.isFinite(opts.width) || !Number.isFinite(opts.height)) fail('--width and --height must be numbers');
+// Unset means 2 on a phone-width viewport and 1 from tablet width up.
+if (opts.scale === null) opts.scale = opts.width >= 768 ? 1 : 2;
+if (!(opts.scale > 0)) fail('--scale must be a positive number');
+if (opts.clip && opts.fullPage) fail('--clip and --full-page cannot be combined');
 
 function fail(msg) {
   console.error(msg);
@@ -35,7 +45,7 @@ const browser = await chromium.launch();
 try {
   const context = await browser.newContext({
     viewport: { width: opts.width, height: opts.height },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: opts.scale,
     isMobile: true,
     hasTouch: true,
   });
@@ -45,7 +55,8 @@ try {
   await page.goto(url, { waitUntil: 'load' });
   if (opts.waitFor) await page.waitForSelector(opts.waitFor, { timeout: 15000 });
   else await page.waitForTimeout(3000);
-  await page.screenshot({ path: out, fullPage: opts.fullPage });
+  if (opts.clip) await page.locator(opts.clip).first().screenshot({ path: out, timeout: 15000 });
+  else await page.screenshot({ path: out, fullPage: opts.fullPage });
   const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   console.log(`wrote ${out} (viewport ${opts.width}x${opts.height}, page scrollWidth ${scrollWidth})`);
   if (scrollWidth > opts.width) console.log('warning: page is wider than the viewport (horizontal overflow)');

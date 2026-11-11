@@ -27,6 +27,7 @@
   `/security-review` before it merges, with or without the `ship` skill, which
   holds the full steps. Check each finding against the code. From a worktree,
   run the security review with `sh scripts/security-review.sh <worktree>`.
+  A docs-only change, as the `ship` skill defines it, skips `/security-review`.
 - Tags are SemVer only, such as `v0.3.5`. Every release goes through the
   `release` skill.
 
