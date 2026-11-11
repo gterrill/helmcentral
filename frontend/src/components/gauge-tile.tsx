@@ -1,13 +1,14 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
 import { memo, useId } from 'react'
 
+import { Readout } from '@/components/readout'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { DialRing } from '@/components/ui/dial-ring'
 import { useGaugeAge, useGaugeValue } from '@/hooks/use-gauge-values'
 import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
-import { severityFill, severityTextClass } from '@/lib/severity'
+import { severityFill } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
 /** The zone a converted reading falls in, or null when it is in no zone. */
@@ -29,14 +30,7 @@ export type GaugeDensity = 'full' | 'compact' | 'hero'
  * the reading and carries its severity colour, so a second frame inside it is a
  * card in a card.
  */
-/**
- * The readout of a standalone numeric gauge grows with its tile. The tile body
- * is a size container (see GaugeTile), so cqh and cqi are its height and width.
- * Height drives it until the tile is wide, then width caps it so the value and
- * unit still fit two columns across; 2.25rem is the floor the two-row minimum
- * height is built on.
- */
-const FLUID_READOUT_FONT = 'clamp(2.25rem, min(60cqh, 22cqi), 9rem)'
+/** The lamp's equivalent of FLUID_READOUT_FONT (lib/fluid-readout.ts). */
 const FLUID_LAMP_FONT = 'clamp(2.25rem, min(40cqh, 13cqi), 7rem)'
 
 interface GaugeBodyProps {
@@ -157,43 +151,6 @@ export const GaugeTileView = memo(function GaugeTileView({ config, value, age = 
     </Tile>
   )
 })
-
-/**
- * The structural dash, never a zero. A gauge reading 0 when it means "no data"
- * is the dangerous failure — AGENTS.md's zero-state rule exists for this.
- */
-function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass, readoutGapClass, fluid }: {
-  text: string | null
-  unitLabel: string
-  zone: GaugeZone['state'] | null
-  size: string
-  fallbackTextClass: string
-  unitSizeClass?: string
-  readoutGapClass?: string
-  /** Scale with the tile body (FLUID_READOUT_FONT); `size` and `unitSizeClass` are ignored. */
-  fluid?: boolean
-}) {
-  return (
-    <div
-      className={`flex items-baseline ${readoutGapClass ?? 'gap-1'} min-w-0`}
-      style={fluid ? { fontSize: FLUID_READOUT_FONT } : undefined}
-    >
-      <span
-        style={fluid ? { fontSize: '1em' } : undefined}
-        className={`font-display ${fluid ? '' : size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, fallbackTextClass)}`}>
-        {text ?? '--'}
-      </span>
-      {unitLabel && (
-        <span
-          style={fluid ? { fontSize: 'max(0.75rem, 0.3em)' } : undefined}
-          className={`${fluid ? '' : unitSizeClass ?? 'text-xs'} leading-none text-muted-foreground`}
-        >
-          {unitLabel}
-        </span>
-      )}
-    </div>
-  )
-}
 
 function NumericGauge({ text, unitLabel, zone, density, fallbackTextClass, readoutSizeClass, unitSizeClass, readoutGapClass }: {
   text: string | null

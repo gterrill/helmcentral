@@ -1,5 +1,6 @@
 import { memo } from 'react'
 
+import { Readout } from '@/components/readout'
 import { Tile } from '@/components/ui/tile'
 import { useVesselFields } from '@/hooks/use-vessel-state'
 import { normalizeDisplayState } from '@/lib/displays'
@@ -46,15 +47,13 @@ function readCurrent(
 
 /**
  * Where the current comes from relative to the bow, in the wind's convention:
- * S35 is 35 degrees off the bow on the starboard side.
+ * S35 is 35 degrees off the bow on the starboard side. Dead ahead and dead
+ * astern name no side, so they read as plain 0 and 180.
  */
 function formatComesFrom(setDeg: number, headingTrue: number): string {
   const fromRel = Math.round(norm360(setDeg + 180 - headingTrue)) % 360
-  if (fromRel === 0) {
-    return 'Ahead'
-  }
-  if (fromRel === 180) {
-    return 'Astern'
+  if (fromRel === 0 || fromRel === 180) {
+    return String(fromRel)
   }
   return fromRel < 180 ? `S${fromRel}` : `P${360 - fromRel}`
 }
@@ -62,6 +61,7 @@ function formatComesFrom(setDeg: number, headingTrue: number): string {
 interface Effect {
   label: string
   figure: string
+  unit?: string
   className: string
 }
 
@@ -74,7 +74,7 @@ function describeEffect(driftKts: number | null, impactKts: number | null): Effe
   }
   // Drift that rounds to 0.0 kt is still water, whatever the impact says.
   if (roundTenth(driftKts) === 0) {
-    return { label: 'No current', figure: '0.0 kt', className: MUTED }
+    return { label: 'No current', figure: '0.0', unit: 'kt', className: MUTED }
   }
   if (impactKts === null) {
     return { label: 'Effect', figure: NO_VALUE, className: MUTED }
@@ -83,22 +83,50 @@ function describeEffect(driftKts: number | null, impactKts: number | null): Effe
   const className = currentEffectColorClass(classifyCurrentEffect(impactKts)) || MUTED
   switch (classifyCurrentEffect(impactKts)) {
     case 'helping':
-      return { label: 'Helping', figure: `+${rounded.toFixed(1)} kt`, className }
+      return { label: 'Helping', figure: `+${rounded.toFixed(1)}`, unit: 'kt', className }
     case 'hindering':
-      return { label: 'Hindering', figure: `${MINUS}${Math.abs(rounded).toFixed(1)} kt`, className }
+      return { label: 'Hindering', figure: `${MINUS}${Math.abs(rounded).toFixed(1)}`, unit: 'kt', className }
     default:
-      return { label: 'No effect', figure: '0.0 kt', className }
+      return { label: 'No effect', figure: '0.0', unit: 'kt', className }
   }
 }
 
-function Stat({ label, value, unit, testId }: { label: string; value: string; unit?: string; testId: string }) {
+/**
+ * One row of the tile: a small label over a reading the size of a Gauge tile's.
+ * The value box is its own size container, so the reading scales with the room
+ * the row has, as it does on a gauge.
+ */
+function Row({ label, labelWraps, labelClassName, value, unit, className, rowTestId, labelTestId, valueTestId }: {
+  label: string
+  /** A reason in the label wraps rather than truncating; a plain label stays on one line. */
+  labelWraps?: boolean
+  labelClassName?: string
+  value: string
+  unit?: string
+  className: string
+  rowTestId?: string
+  labelTestId: string
+  valueTestId: string
+}) {
   return (
-    <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
-      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-      <p className="whitespace-nowrap font-display text-2xl leading-none text-gauge-primary tabular-nums">
-        <span data-testid={testId}>{value}</span>
-        {unit && <span className="ml-1 text-xs text-muted-foreground">{unit}</span>}
+    <div data-testid={rowTestId} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
+      <p
+        data-testid={labelTestId}
+        className={cn('text-[10px] uppercase leading-none tracking-[0.16em]', !labelWraps && 'truncate', labelClassName)}
+      >
+        {label}
       </p>
+      <div className="flex min-h-0 min-w-0 flex-1 items-center [container-type:size]">
+        <Readout
+          text={value}
+          unitLabel={unit ?? ''}
+          zone={null}
+          size=""
+          fallbackTextClass={className}
+          fluid
+          valueTestId={valueTestId}
+        />
+      </div>
     </div>
   )
 }
@@ -124,24 +152,45 @@ export const WaterCurrentTile = memo(function WaterCurrentTile({
   const speed = readings ? readings.driftKts.toFixed(1) : NO_VALUE
   const angle = showAngle ? formatComesFrom(readings.setDeg, headingTrue) : NO_VALUE
   const effect = describeEffect(readings?.driftKts ?? null, readings ? currentDriftImpactKts : null)
-  const reason = gate.reason ?? (!still && headingTrue === null ? 'No heading' : null)
+  // Why a row is blank is said in that row's label, so no extra line is needed.
+  // A blocked tile blanks every row and says why on the effect row; a missing
+  // heading blanks only From.
+  const effectLabel = gate.reason ?? effect.label
+  const noHeading = readings !== null && !still && headingTrue === null
+  const fromLabel = noHeading ? 'No heading' : 'From'
 
   return (
-    <Tile title="Current" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
-      <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2">
-        <Stat label="Speed" value={speed} unit={readings ? 'kt' : undefined} testId="current-speed" />
-        <Stat label="From" value={angle} testId="current-angle" />
+    <Tile title="Current" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)} fill>
+      <div className="flex min-h-0 flex-1 flex-col gap-1">
+        <Row
+          label="Speed"
+          labelClassName={MUTED}
+          value={speed}
+          unit={readings ? 'kt' : undefined}
+          className="text-gauge-primary"
+          labelTestId="current-speed-label"
+          valueTestId="current-speed"
+        />
+        <Row
+          label={fromLabel}
+          labelWraps={noHeading}
+          labelClassName={MUTED}
+          value={angle}
+          className="text-gauge-primary"
+          labelTestId="current-angle-label"
+          valueTestId="current-angle"
+        />
+        <Row
+          label={effectLabel}
+          labelWraps={gate.reason !== null}
+          value={effect.figure}
+          unit={effect.unit}
+          className={effect.className}
+          rowTestId="current-effect"
+          labelTestId="current-effect-label"
+          valueTestId="current-effect-figure"
+        />
       </div>
-      <div data-testid="current-effect" className={cn('mt-2 min-w-0', effect.className)}>
-        <p data-testid="current-effect-label" className="text-xs uppercase tracking-[0.16em]">{effect.label}</p>
-        <p
-          data-testid="current-effect-figure"
-          className="whitespace-nowrap font-display text-3xl leading-none tabular-nums"
-        >
-          {effect.figure}
-        </p>
-      </div>
-      {reason !== null && <p className="mt-1 text-xs text-muted-foreground">{reason}</p>}
     </Tile>
   )
 })

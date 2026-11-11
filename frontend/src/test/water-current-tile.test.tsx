@@ -32,25 +32,25 @@ describe('WaterCurrentTile', () => {
     expect(screen.getByTestId('current-angle')).toHaveTextContent('P90')
   })
 
-  test('names dead ahead and dead astern', () => {
+  test('dead ahead is 0 and dead astern is 180, plain numbers that fit two columns', () => {
     const { unmount } = renderTile({ currentSetDeg: 180, headingTrue: 0 })
-    expect(screen.getByTestId('current-angle')).toHaveTextContent('Ahead')
+    expect(screen.getByTestId('current-angle').textContent).toBe('0')
     unmount()
     renderTile({ currentSetDeg: 0, headingTrue: 0 })
-    expect(screen.getByTestId('current-angle')).toHaveTextContent('Astern')
+    expect(screen.getByTestId('current-angle').textContent).toBe('180')
   })
 
   test('a current helping the boat reads teal with a plus sign, the figure in its own element', () => {
     renderTile({ currentDriftImpactKts: 0.4 })
     expect(screen.getByTestId('current-effect-label')).toHaveTextContent('Helping')
-    expect(screen.getByTestId('current-effect-figure')).toHaveTextContent('+0.4 kt')
+    expect(screen.getByTestId('current-effect-figure').textContent).toBe('+0.4')
     expect(screen.getByTestId('current-effect').className).toContain('text-gauge-secondary')
   })
 
   test('a current against the boat reads amber with a real minus sign', () => {
     renderTile({ currentDriftImpactKts: -1.8 })
     expect(screen.getByTestId('current-effect-label')).toHaveTextContent('Hindering')
-    expect(screen.getByTestId('current-effect-figure')).toHaveTextContent('−1.8 kt')
+    expect(screen.getByTestId('current-effect-figure').textContent).toBe('−1.8')
     expect(screen.getByTestId('current-effect').className).toContain('text-amber-600')
   })
 
@@ -100,7 +100,7 @@ describe('WaterCurrentTile', () => {
     expect(screen.getByTestId('current-angle')).toHaveTextContent('—')
     expect(screen.getByText('No heading')).toBeInTheDocument()
     expect(screen.getByTestId('current-effect-label')).toHaveTextContent('Helping')
-    expect(screen.getByTestId('current-effect-figure')).toHaveTextContent('+0.4 kt')
+    expect(screen.getByTestId('current-effect-figure').textContent).toBe('+0.4')
     expect(screen.getByTestId('current-speed')).toHaveTextContent('2.1')
   })
 
@@ -116,6 +116,43 @@ describe('WaterCurrentTile', () => {
     renderTile({ currentSetDeg: null })
     expect(screen.getByTestId('current-angle')).toHaveTextContent('—')
     expect(screen.getByText('No current reading')).toBeInTheDocument()
+  })
+
+  // jsdom discards the cq-unit clamp itself (as gauge-tile.test.tsx notes), so
+  // the tell is that each reading is the shared Readout in its fluid form,
+  // which the Gauge tile also renders.
+  test.each(['current-speed', 'current-angle', 'current-effect-figure'])(
+    '%s is drawn by the shared fluid Readout',
+    (testId) => {
+      renderTile()
+      const readout = screen.getByTestId(testId).closest('[data-slot="readout"]')
+      expect(readout).not.toBeNull()
+      expect(readout).toHaveAttribute('data-fluid', 'true')
+    },
+  )
+
+  test('the units sit beside the numbers', () => {
+    renderTile()
+    expect(screen.getByTestId('current-speed').closest('[data-slot="readout"]')).toHaveTextContent(/2\.1\s*kt/)
+  })
+
+  test('a blocked tile puts its reason where the effect word goes, and lets it wrap', () => {
+    renderTile({ navigationState: 'anchored' })
+    const label = screen.getByTestId('current-effect-label')
+    expect(label).toHaveTextContent('Shows under way')
+    expect(label.className).not.toContain('truncate')
+  })
+
+  test('ordinary labels stay on one line', () => {
+    renderTile()
+    expect(screen.getByTestId('current-speed-label').className).toContain('truncate')
+    expect(screen.getByTestId('current-effect-label').className).toContain('truncate')
+  })
+
+  test('no heading is said on the From row and leaves the effect word alone', () => {
+    renderTile({ headingTrue: null })
+    expect(screen.getByTestId('current-angle-label')).toHaveTextContent('No heading')
+    expect(screen.getByTestId('current-effect-label')).toHaveTextContent('Helping')
   })
 
   test('a fresh feed draws no stale badge', () => {

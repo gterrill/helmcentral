@@ -38,11 +38,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **A new Current tile shows whether the water is helping or hindering you.** Add
   it from **Add Tile**, under Navigation. It gives the speed of the current and
   the angle it comes from, read off the bow the way the Wind tile reads wind, so
-  "2.1 kt, S35" is 2.1 knots from 35 degrees off the starboard bow. The large
-  figure below says "Helping +0.4 kt" in teal or "Hindering −1.8 kt" in amber,
-  the speed the current adds or takes off along your course. It reads only while
-  you're motoring or sailing, says why when it can't, and gets the amber stale
-  outline if the current stops updating. It works the current
+  "2.1 kt, S35" is 2.1 knots from 35 degrees off the starboard bow. A third row
+  says "Helping" over +0.4 kt in teal or "Hindering" over −1.8 kt in amber, the
+  speed the current adds or takes off along your course. The tile is two columns
+  wide like a Gauge tile, with its readings in the same type. It reads only while
+  you're motoring or sailing, says why in the row label when it can't, and gets
+  the amber stale outline if the current stops updating. It works the current
   out from your log and compass against GPS, so if it always says Hindering,
   check the log calibration.
 - **Watch reports can point out engine readings that look unusual for that
