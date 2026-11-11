@@ -149,12 +149,17 @@ Here's how Helmcentral keeps the boat safe:
 - **Login depends on SignalK at startup:** With login on, Helmcentral checks
   SignalK's security when it starts. If SignalK isn't running yet, or its
   security has been turned off, Helmcentral won't start, and nothing else
-  works until it does, alarms and anchor watch included. Under Docker it keeps
-  trying and comes up once SignalK answers. The systemd service gives up after
-  five failed starts in two minutes, so once SignalK is up, run
-  `sudo systemctl restart helmcentral`. Set `auth.mode: none` in
-  `settings.yaml` only if SignalK's security really is off. See
-  [Configuration](configuration.md).
+  works until it does, alarms and anchor watch included. Here's how to get it
+  going again:
+  - SignalK slow to start: Under Docker, Helmcentral keeps trying and comes up
+    once SignalK answers. The systemd service retries too, but it can give up.
+    If `systemctl status helmcentral` shows it failed, run
+    `sudo systemctl restart helmcentral` once SignalK is up.
+  - SignalK's security turned off: Turn it back on in SignalK, and Helmcentral
+    starts with login as before.
+  - As a last resort: Set `auth.mode: none` in `settings.yaml` and restart.
+    That turns login off for everyone, so turn it back on once SignalK is
+    sorted out. See [Configuration](configuration.md#startup-behaviour).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
   never forward a port to it.

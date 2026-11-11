@@ -54,7 +54,9 @@ for your boat, so the engine, battery and tank tiles stay empty until you do.
 Docker, manual binaries and upgrading:
 [docs/how-to/install.md](docs/how-to/install.md).
 
-Stuck, or not sure it suits your boat? Ask in
+Not sure it suits your boat? The [FAQ](docs/reference/faq.md) covers what it
+needs, what it costs, where it works and what works without an internet
+connection. If you're stuck, ask in
 [Discussions](https://github.com/gterrill/helmcentral/discussions).
 
 > [!WARNING]
@@ -258,14 +260,11 @@ falling back to something more permissive.
 
 Turn on SignalK's security first, then turn on login in Settings → Security.
 Helmcentral won't save the setting until SignalK security is on. With login
-on, Helmcentral checks SignalK's security every time it starts, and it won't
-start if SignalK can't be reached or its security has been turned off. That
-includes a SignalK that's still starting up after a power cut. Under Docker the
-container keeps retrying and comes up once SignalK answers. The systemd service
-gives up after five failed starts in two minutes, so once SignalK is up, run
-`sudo systemctl restart helmcentral`. Set `auth.mode: none` in `settings.yaml`
-only if SignalK's security really is off. Turning login off doesn't need
-SignalK to be reachable.
+on, Helmcentral won't start if it can't reach SignalK, which matters after a
+power cut, or if SignalK's security has been turned off since. How to get it
+going again is in the [FAQ](docs/reference/faq.md#what-about-security).
+Turning login off doesn't need SignalK to be reachable, so that way out always
+works.
 
 Every environment variable, state path and startup behaviour:
 [docs/reference/configuration.md](docs/reference/configuration.md).
@@ -305,6 +304,7 @@ program, so the help is on the boat whether or not the boat has a connection.
 | --- | --- |
 | [docs/features/](docs/features/) | What each part does and where it stops |
 | [docs/how-to/](docs/how-to/) | Install, upgrade, wall displays, Mate, outside assistants, and more |
+| [docs/reference/faq.md](docs/reference/faq.md) | Frequently asked questions: hardware, internet, cost, regions, forecasts, using it ashore, security |
 | [docs/reference/](docs/reference/) | Configuration, plugins, place categories, engine profiles |
 | [docs/adr/](docs/adr/) | Why it was built the way it was |
 

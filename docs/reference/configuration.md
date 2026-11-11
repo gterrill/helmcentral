@@ -325,8 +325,11 @@ run. The **Breaking** entry for the release you're upgrading to in
 `auth.mode: signalk` adds one more fail-fast check. Helmcentral probes the
 SignalK server's security status once at startup. It refuses to boot if
 SignalK's own security is disabled, because delegated login needs
-authentication on the upstream server. Enable security on the SignalK server
-first, or set `auth.mode: none` in `settings.yaml` to boot without it.
+authentication on the upstream server. It also refuses to boot if SignalK
+can't be reached, which includes a SignalK still starting up after a power
+cut. Under Docker the container keeps restarting and comes up once SignalK
+answers. The systemd service retries too, but if `systemctl status helmcentral`
+shows it failed, run `sudo systemctl restart helmcentral` once SignalK is up.
 
 Settings → Security refuses to save `signalk` unless SignalK reports security
 is already active. If startup fails on this check, `settings.yaml` was edited
