@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 )
@@ -70,6 +71,34 @@ func (s *passageStore) onePoint(tail string, start, end time.Time) (*recordedTra
 		return nil, err
 	}
 	return &p, nil
+}
+
+// trackFix is the part of a track point a lookup by time needs.
+type trackFix struct {
+	TMs      int64
+	Lat, Lon float64
+	SOGKts   *float64
+}
+
+// trackFixesIn returns every track point with startMs <= t_ms <= endMs,
+// oldest first (ties by insertion order).
+func (s *passageStore) trackFixesIn(startMs, endMs int64) ([]trackFix, error) {
+	rows, err := s.db.Query(`SELECT t_ms, lat, lon, sog_kts FROM track_points WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms, id`, startMs, endMs)
+	if err != nil {
+		return nil, fmt.Errorf("read track: %w", err)
+	}
+	defer rows.Close()
+	var out []trackFix
+	for rows.Next() {
+		var p trackFix
+		var sog sql.NullFloat64
+		if err := rows.Scan(&p.TMs, &p.Lat, &p.Lon, &sog); err != nil {
+			return nil, fmt.Errorf("read track: %w", err)
+		}
+		p.SOGKts = nullToPtr(sog)
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // FillPassageNames asks lookup for the places at a passage's start and end and

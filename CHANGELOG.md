@@ -11,6 +11,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Share photos and PDFs from your phone to a new Inbox, then sort them on
+  the laptop.** Open **Passages**, tap **Inbox**, then **Share photos**, or put
+  `/passages/upload` on your phone's Home Screen. Pick a whole camera roll:
+  photos already in the Inbox, or already filed from it, are skipped before any
+  work is done, so picking the same ones twice is harmless and quick. The rest
+  are shrunk on the phone and sent one at a time with a small preview.
+
+  In the Inbox, photos sit in groups by passage in the order they were taken.
+  Add them to a passage as signs, send them to a Documents folder, or delete
+  them. Near-identical and blurred shots are flagged, and nothing is deleted
+  until you confirm. A photo whose phone position is well off the boat's track
+  gets a warning: the phone's clock or time zone is probably wrong.
+
+  The Inbox lives in `data/inbox` (set `INBOX_DIR` to move it), so include it in
+  your backups. Notes with no folder are called **Unfiled notes**, so the word
+  Inbox means only this.
+
 ### Changed
 
 - **The Anchor Watch tide panel is easier to read.** The high and the low each
@@ -19,6 +38,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the calibration note and the shallowest sounded spot no longer take up room of
   their own. Tap the small **i** beside the tide direction to read them. The
   **i** turns amber when the boat has sounded ground shallower than where it lies.
+
+### Fixed
+
+- **A file too big to upload now says so.** Uploading an oversized file to
+  Documents, an equipment item, a deck plan, a maintenance entry, an import or
+  an open job showed a bare error code. It now says the file is over the limit.
 
 ## [0.64.0] - 2026-11-11
 

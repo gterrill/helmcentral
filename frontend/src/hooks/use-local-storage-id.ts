@@ -1,5 +1,25 @@
 import { useEffect, useState } from 'react'
 
+// Storage can be missing or throw (a private window, blocked site data), and
+// what is kept here is only a convenience, so a failed read or write leaves the
+// value unremembered rather than breaking the page.
+function readStored(key: string): string | null {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeStored(key: string, value: string | null): void {
+  try {
+    if (value === null) globalThis.localStorage?.removeItem(key)
+    else globalThis.localStorage?.setItem(key, value)
+  } catch {
+    // Storage blocked: the value is simply not remembered.
+  }
+}
+
 // `initialId` (ADR 0074) lets a caller seed the value from somewhere other
 // than localStorage — App.tsx passes the page id parsed off a deep link like
 // `/dashboard/<pageId>` — and have it win on mount over whatever was already
@@ -12,20 +32,10 @@ import { useEffect, useState } from 'react'
 // of the SAME browser, so persisting those writes would leave the
 // operator's own dashboard remembering a wall page.
 export function useLocalStorageId(key: string, initialId?: string | null, persist = true): [string | null, (id: string | null) => void] {
-  const [id, setIdState] = useState<string | null>(
-    () => initialId ?? globalThis.localStorage?.getItem(key) ?? null,
-  )
+  const [id, setIdState] = useState<string | null>(() => initialId ?? readStored(key))
 
   function setId(next: string | null) {
-    if (!persist) {
-      setIdState(next)
-      return
-    }
-    if (next === null) {
-      globalThis.localStorage?.removeItem(key)
-    } else {
-      globalThis.localStorage?.setItem(key, next)
-    }
+    if (persist) writeStored(key, next)
     setIdState(next)
   }
 
@@ -35,7 +45,7 @@ export function useLocalStorageId(key: string, initialId?: string | null, persis
   // alone, or this would wipe the remembered page on every ordinary mount.
   useEffect(() => {
     if (persist && initialId != null) {
-      globalThis.localStorage?.setItem(key, initialId)
+      writeStored(key, initialId)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

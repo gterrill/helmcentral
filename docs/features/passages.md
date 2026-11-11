@@ -268,7 +268,9 @@ from the marks for camera shots. Picking one jumps to it and opens it for
 editing.
 
 A photo is either uploaded, into a Documents folder called **Passage photos**
-that is made the first time, or chosen from a photo already in Documents.
+that is made the first time, or chosen from a photo already in Documents. To
+make signs from a whole roll of photos shared from your phone, use the Inbox
+instead. See [Inbox](inbox.md).
 
 - **Placing the sign:** When you make a sign from a photo, it is placed at the
   moment the photo was taken, if that is inside the replay. The camera's clock is

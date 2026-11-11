@@ -252,6 +252,13 @@ func nullFloat(v *float64) any {
 	return *v
 }
 
+func nullInt64(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
 func nullToPtr(n sql.NullFloat64) *float64 {
 	if !n.Valid {
 		return nil
@@ -475,6 +482,16 @@ func scanPassage(r rowScanner) (passageRecord, error) {
 	}
 	p.CreatedAt = time.UnixMilli(createdMs).UTC()
 	return p, nil
+}
+
+// LastPassageEndMs is the end of the latest passage, hidden or not, or 0 with
+// none.
+func (s *passageStore) LastPassageEndMs() (int64, error) {
+	var end sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MAX(end_ms) FROM passages`).Scan(&end); err != nil {
+		return 0, fmt.Errorf("last passage end: %w", err)
+	}
+	return end.Int64, nil
 }
 
 // ListPassages returns the visible (not hidden) passages, newest first.

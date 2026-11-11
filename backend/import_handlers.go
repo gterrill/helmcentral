@@ -185,7 +185,7 @@ func uploadImportFileHandler(c echo.Context) error {
 		return importError(c, http.StatusInternalServerError, "failed to prepare document storage")
 	}
 	up, err := receiveUploadedFile(c, dir, nil)
-	if err != nil {
+	if err != nil || c.Response().Committed { // the intake already answered
 		return err
 	}
 

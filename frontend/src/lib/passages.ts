@@ -155,8 +155,13 @@ export function fmtDuration(seconds: number | null | undefined): string {
   return `${h} h ${String(m).padStart(2, '0')} m`
 }
 
-/** `from → to`, with whichever end is unnamed left as `--`. */
-export function passageRoute(p: Pick<PassageRecord, 'from_name' | 'to_name'>): string {
+/**
+ * `from → to`, with whichever end is unnamed left as `--`. With `dropMissing`
+ * an unnamed end is left out instead (a lone name has no arrow; no names at
+ * all is empty).
+ */
+export function passageRoute(p: Pick<PassageRecord, 'from_name' | 'to_name'>, options: { dropMissing?: boolean } = {}): string {
+  if (options.dropMissing) return [p.from_name.trim(), p.to_name.trim()].filter((n) => n !== '').join(' → ')
   return `${p.from_name || ABSENT} → ${p.to_name || ABSENT}`
 }
 

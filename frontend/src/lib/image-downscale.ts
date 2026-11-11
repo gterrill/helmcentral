@@ -80,7 +80,8 @@ function exifOrientation(b: Uint8Array, tiff: number, end: number): number | nul
   return null
 }
 
-async function decode(file: Blob, maxDimension: number, reduce: boolean): Promise<ImageBitmap> {
+/** Decodes a picture; with `reduce`, at about `maxDimension`, orientation applied (see DownscaleOptions.reduceDecode). */
+export async function decodeImage(file: Blob, maxDimension: number, reduce: boolean): Promise<ImageBitmap> {
   if (!reduce) return createImageBitmap(file)
   const size = await probeJpeg(file)
   const longSide = size ? Math.max(size.width, size.height) : 0
@@ -91,34 +92,43 @@ async function decode(file: Blob, maxDimension: number, reduce: boolean): Promis
   return createImageBitmap(file, { imageOrientation: 'from-image', resizeQuality: 'high', ...resize })
 }
 
+/**
+ * Draws an already decoded picture at most `maxDimension` px on its long edge
+ * (never larger than it is) and encodes it as JPEG. The caller owns the bitmap,
+ * so one decode can serve several sizes.
+ */
+export async function encodeBitmap(bitmap: ImageBitmap, maxDimension: number, options: DownscaleOptions = {}): Promise<Blob> {
+  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
+  const width = Math.max(1, Math.round(bitmap.width * scale))
+  const height = Math.max(1, Math.round(bitmap.height * scale))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('could not get a 2d canvas context to downscale the photo')
+  }
+  if (options.opaque) {
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+  }
+  if (options.reduceDecode) ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(bitmap, 0, 0, width, height)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, 'image/jpeg', options.quality ?? JPEG_QUALITY)
+  })
+  if (!blob) {
+    throw new Error('could not encode the downscaled photo')
+  }
+  return blob
+}
+
 export async function downscaleImage(file: Blob, maxDimension: number = MAX_DIMENSION, options: DownscaleOptions = {}): Promise<Blob> {
-  const bitmap = await decode(file, maxDimension, options.reduceDecode === true)
+  const bitmap = await decodeImage(file, maxDimension, options.reduceDecode === true)
   try {
-    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
-    const width = Math.max(1, Math.round(bitmap.width * scale))
-    const height = Math.max(1, Math.round(bitmap.height * scale))
-
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      throw new Error('could not get a 2d canvas context to downscale the photo')
-    }
-    if (options.opaque) {
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, width, height)
-    }
-    if (options.reduceDecode) ctx.imageSmoothingQuality = 'high'
-    ctx.drawImage(bitmap, 0, 0, width, height)
-
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, 'image/jpeg', options.quality ?? JPEG_QUALITY)
-    })
-    if (!blob) {
-      throw new Error('could not encode the downscaled photo')
-    }
-    return blob
+    return await encodeBitmap(bitmap, maxDimension, options)
   } finally {
     bitmap.close()
   }

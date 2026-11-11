@@ -740,7 +740,7 @@ func uploadEquipmentPhotoHandler(c echo.Context) error {
 	}
 
 	up, err := receiveUploadedFile(c, dir, nil)
-	if err != nil {
+	if err != nil || c.Response().Committed { // the intake already answered
 		return err
 	}
 

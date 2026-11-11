@@ -140,14 +140,22 @@ export function zoneOffsetLabel(timeZone: string, at: Date | number): string {
   return `UTC${minutes < 0 ? '-' : '+'}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`
 }
 
+/**
+ * The instant a wall-clock time stands for in `timeZone`. The clock is given
+ * as `wallMs`, the Unix milliseconds it would be if it read UTC (`Date.UTC` of
+ * its fields).
+ */
+export function zonedWallInstant(wallMs: number, timeZone: string): Date {
+  // Offset at the first guess, then at the corrected instant: the second pass
+  // settles a time that sits across a daylight-saving change.
+  const first = wallMs - zoneOffsetMinutes(timeZone, wallMs) * 60_000
+  return new Date(wallMs - zoneOffsetMinutes(timeZone, first) * 60_000)
+}
+
 /** The instant the calendar day `dayKey` (YYYY-MM-DD) begins in `timeZone`. */
 export function zonedDayStart(dayKey: string, timeZone: string): Date {
   const [year, month, day] = dayKey.split('-').map(Number)
-  const wall = Date.UTC(year, month - 1, day)
-  // Offset at the first guess, then at the corrected instant: the second pass
-  // settles a day whose midnight sits across a daylight-saving change.
-  const first = wall - zoneOffsetMinutes(timeZone, wall) * 60_000
-  return new Date(wall - zoneOffsetMinutes(timeZone, first) * 60_000)
+  return zonedWallInstant(Date.UTC(year, month - 1, day), timeZone)
 }
 
 /** Whether two zones show a different clock at the instant `at`. */

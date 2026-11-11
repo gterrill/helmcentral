@@ -677,6 +677,16 @@ describe('Passages panel (ADR 0171 panel route)', () => {
     })
   })
 
+  it('parses and round-trips the Inbox and the page that shares to it', () => {
+    expect(parseAppLocation('/passages/inbox')).toEqual({ panel: 'passages', route: { view: 'inbox' } })
+    expect(parseAppLocation('/passages/upload')).toEqual({ panel: 'passages', route: { view: 'upload' } })
+    for (const view of ['inbox', 'upload'] as const) {
+      const loc: AppLocation = { panel: 'passages', route: { view } }
+      expect(formatAppLocation(loc, ctx)).toBe(`/passages/${view}`)
+      expect(parseAppLocation(formatAppLocation(loc, ctx))).toEqual(loc)
+    }
+  })
+
   it('falls back to the index for a combined link with no ids or a cruise link with no id', () => {
     expect(parseAppLocation('/passages/combined')).toEqual(index())
     expect(parseAppLocation('/passages/cruises')).toEqual(index())

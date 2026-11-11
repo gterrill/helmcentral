@@ -182,6 +182,7 @@ they're resolved against it.
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
 | `HELMCENTRAL_DB_PATH` | `data/helmcentral.sqlite` |
 | `DOCUMENTS_DIR` | `data/documents` |
+| `INBOX_DIR` | `data/inbox` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
 | `PLUGINS_TIDES_DIR` | `plugins/tides` |
 | `PLUGINS_WEATHER_DIR` | `plugins/weather` |

@@ -1110,6 +1110,11 @@ func validateFolderName(name string) (string, error) {
 	return trimmed, nil
 }
 
+// folderSiblingMatch is the one place the sibling rule lives: a folder under
+// the parent (root is the empty key) with this name, case-insensitively. Its
+// two placeholders take the parent key, then the name.
+const folderSiblingMatch = `COALESCE(parent_id,'') = ? AND lower(name) = lower(?)`
+
 // folderNameTaken reports whether another folder (any id other than
 // excludeID) already has name (case-insensitively) under parentID.
 // excludeID is "" for a brand new folder (CreateFolder), where nothing
@@ -1120,7 +1125,7 @@ func folderNameTaken(q sqlQueryer, parentID *string, name, excludeID string) (bo
 		parentKey = *parentID
 	}
 	return rowExists(q,
-		`SELECT 1 FROM document_folders WHERE COALESCE(parent_id,'') = ? AND lower(name) = lower(?) AND id != ? LIMIT 1`,
+		`SELECT 1 FROM document_folders WHERE `+folderSiblingMatch+` AND id != ? LIMIT 1`,
 		parentKey, name, excludeID)
 }
 
@@ -2859,6 +2864,45 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 			return fmt.Errorf("create folder: insert: %w", err)
 		}
 
+		return nil
+	})
+	if err != nil {
+		return documentFolder{}, err
+	}
+	return folder, nil
+}
+
+// FindOrCreateRootFolder returns the root folder called name, matched the way
+// CreateFolder matches siblings (case-insensitively), or makes it. The find and
+// the insert share one lock and transaction, so two callers cannot both make it.
+func (s *documentStore) FindOrCreateRootFolder(name string) (documentFolder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trimmed, err := validateFolderName(name)
+	if err != nil {
+		return documentFolder{}, err
+	}
+	var folder documentFolder
+	err = s.runTxLocked("find or create root folder", func(tx *sql.Tx, now time.Time) error {
+		var created, updated int64
+		row := tx.QueryRow(
+			`SELECT id, name, created_at, updated_at FROM document_folders WHERE `+folderSiblingMatch+` LIMIT 1`,
+			"", trimmed)
+		switch err := row.Scan(&folder.ID, &folder.Name, &created, &updated); {
+		case err == nil:
+			folder.CreatedAt, folder.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+			return nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("find root folder: %w", err)
+		}
+		folder = documentFolder{ID: uuid.NewString(), Name: trimmed, CreatedAt: now, UpdatedAt: now}
+		if _, err := tx.Exec(
+			`INSERT INTO document_folders (id, parent_id, name, created_at, updated_at) VALUES (?, NULL, ?, ?, ?)`,
+			folder.ID, folder.Name, now.Unix(), now.Unix(),
+		); err != nil {
+			return fmt.Errorf("create root folder: insert: %w", err)
+		}
 		return nil
 	})
 	if err != nil {
