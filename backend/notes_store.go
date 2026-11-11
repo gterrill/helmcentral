@@ -183,7 +183,7 @@ func (s *documentStore) SetNoteTypeIfNotOperator(id, noteType, source string) er
 
 // ListNotes returns kind='note' documents, newest first (the same
 // created_at-then-id tiebreak queryDocuments itself uses), optionally
-// narrowed to the inbox (unfiledOnly: folder_id IS NULL - the Notes panel's
+// narrowed to Unfiled notes (unfiledOnly: folder_id IS NULL - the Notes panel's
 // default view, plan §4's GET /api/notes?filed=0) and/or a note_type/tag
 // filter. limit<=0 means every matching row, no LIMIT/OFFSET - matching
 // List's own contract (documents_store.go), though

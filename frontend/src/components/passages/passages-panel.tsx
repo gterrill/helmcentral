@@ -1,5 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
-import { ChevronDown, FolderPlus, Layers, Route, Upload } from 'lucide-react'
+import { ChevronDown, FolderPlus, Inbox, Layers, Route, Upload } from 'lucide-react'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { toast } from 'sonner'
 
@@ -15,6 +15,7 @@ import {
   type RowAction,
   type TreeNode,
 } from '@/components/patterns'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { PassagesFilter } from '@/lib/app-location'
@@ -58,10 +59,14 @@ export interface PassagesPanelProps {
   onOpenPassage: (id: string) => void
   onOpenCruise: (id: string) => void
   onCombine: (ids: string[]) => void
+  /** How many photos and files wait in the Inbox; null before the server has said. */
+  inboxCount?: number | null
+  /** Opens the Inbox. The button is left out when this is. */
+  onOpenInbox?: () => void
 }
 
 export function PassagesPanel({
-  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine,
+  filter, passages, cruises, loading, error, canWrite, onRetry, onFilter, onOpenPassage, onOpenCruise, onCombine, inboxCount = null, onOpenInbox,
 }: PassagesPanelProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -277,6 +282,17 @@ export function PassagesPanel({
           </div>
         )}
       >
+        {onOpenInbox && (
+          <div>
+            <Button type="button" variant="outline" size="sm" onClick={onOpenInbox}>
+              <Inbox className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              Inbox
+              {inboxCount !== null && inboxCount > 0 && (
+                <Badge variant="secondary" className="tabular-nums" aria-label={`${inboxCount} waiting`}>{inboxCount}</Badge>
+              )}
+            </Button>
+          </div>
+        )}
         {summary && <ImportSummaryCard summary={summary} onDismiss={() => setSummary(null)} />}
         {activeCruise && (
           <div>

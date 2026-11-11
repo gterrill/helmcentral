@@ -12,6 +12,8 @@ export interface PassagesRouteApi {
   openPassage: (id: string, options?: NavigateOptions) => boolean
   openCruise: (id: string, options?: NavigateOptions) => boolean
   openCombined: (ids: string[], options?: NavigateOptions) => boolean
+  openInbox: (options?: NavigateOptions) => boolean
+  openUpload: (options?: NavigateOptions) => boolean
   /** Back from a details page to the listing it was opened from. */
   close: (options?: NavigateOptions) => boolean
 }
@@ -25,6 +27,7 @@ function liveRoute(router: AppRouter): PassagesRoute {
 
 function filterOf(route: PassagesRoute): PassagesFilter {
   if (route.view === 'cruise') return { kind: 'cruise', id: route.id }
+  if (route.view === 'inbox' || route.view === 'upload') return { kind: 'all' }
   return route.filter
 }
 
@@ -52,6 +55,8 @@ export function usePassagesRoute(): PassagesRouteApi {
     (ids: string[], options?: NavigateOptions) => go({ view: 'combined', ids, filter: filterOf(liveRoute(router)) }, options),
     [go, router],
   )
+  const openInbox = useCallback((options?: NavigateOptions) => go({ view: 'inbox' }, options), [go])
+  const openUpload = useCallback((options?: NavigateOptions) => go({ view: 'upload' }, options), [go])
   const close = useCallback(
     (options?: NavigateOptions) => {
       const current = liveRoute(router)
@@ -61,5 +66,5 @@ export function usePassagesRoute(): PassagesRouteApi {
     [go, router],
   )
 
-  return { route, go, showFilter, openPassage, openCruise, openCombined, close }
+  return { route, go, showFilter, openPassage, openCruise, openCombined, openInbox, openUpload, close }
 }

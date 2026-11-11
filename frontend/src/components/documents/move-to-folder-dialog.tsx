@@ -19,8 +19,16 @@ import { errorMessage } from '@/lib/errors'
 function FolderPicker({
   onPick,
   onFolderCreated,
+  initialFolderId = null,
+  confirmLabel = 'Move here',
+  requireFolder = false,
 }: {
   onPick: (folderId: string | null) => void
+  /** The folder the picker opens in; the library root when absent. */
+  initialFolderId?: string | null
+  confirmLabel?: string
+  /** A destination must be a folder: the confirm button waits while the picker is at the root. */
+  requireFolder?: boolean
   /** Review finding: the picker owns its own useDocuments(pickerFolderId)
    * instance, entirely separate from the panel's own - so a folder created
    * here used to refresh only the picker's view. Cancel the dialog and the
@@ -32,7 +40,7 @@ function FolderPicker({
    * unchanged. */
   onFolderCreated?: () => void
 }) {
-  const [pickerFolderId, setPickerFolderId] = useState<string | null>(null)
+  const [pickerFolderId, setPickerFolderId] = useState<string | null>(initialFolderId)
   const picker = useDocuments(pickerFolderId)
 
   // ADR 0115 §6: create-here, so a move no longer has to be
@@ -119,7 +127,8 @@ function FolderPicker({
         </Button>
       </div>
       {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
-      <Button type="button" onClick={() => onPick(pickerFolderId)}>Move here</Button>
+      {picker.error && <p role="alert" className="text-sm text-destructive">{picker.error}</p>}
+      <Button type="button" disabled={requireFolder && pickerFolderId === null} onClick={() => onPick(pickerFolderId)}>{confirmLabel}</Button>
     </div>
   )
 }
@@ -130,6 +139,10 @@ export function MoveToFolderDialog({
   label,
   onPick,
   onFolderCreated,
+  title,
+  confirmLabel,
+  initialFolderId,
+  requireFolder,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -137,15 +150,28 @@ export function MoveToFolderDialog({
   label: string
   onPick: (folderId: string | null) => void
   onFolderCreated?: () => void
+  /** Replaces "Move <label>" for a caller that is filing rather than moving. */
+  title?: string
+  confirmLabel?: string
+  initialFolderId?: string | null
+  requireFolder?: boolean
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Move {label}</DialogTitle>
+          <DialogTitle>{title ?? `Move ${label}`}</DialogTitle>
           <DialogDescription>Pick the destination folder.</DialogDescription>
         </DialogHeader>
-        {open && <FolderPicker onPick={onPick} onFolderCreated={onFolderCreated} />}
+        {open && (
+          <FolderPicker
+            onPick={onPick}
+            onFolderCreated={onFolderCreated}
+            initialFolderId={initialFolderId}
+            confirmLabel={confirmLabel}
+            requireFolder={requireFolder}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

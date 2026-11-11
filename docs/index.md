@@ -23,6 +23,9 @@ Helmcentral suits your boat.
 - [Passages](features/passages.md): the logbook of every leg the boat has run.
   Replay any of them on the chart and see cruise totals for nights, fuel, wind,
   generator, battery and water.
+- [Inbox](features/inbox.md): share photos and PDFs from your phone, throw out
+  the duplicates and blurred shots, then put the rest on a passage or into
+  Documents.
 - [Watches](features/watches.md): regular checks of the boat on a schedule, each
   with a report, findings from rules you can read, and Mate's review.
 - [Anomaly detection](features/anomaly-detection.md): catches frozen or

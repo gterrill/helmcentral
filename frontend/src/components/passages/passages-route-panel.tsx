@@ -1,8 +1,11 @@
 import { memo } from 'react'
 
 import type { DistanceUnits } from '@/config/app-config'
+import { InboxUploadPage } from '@/components/passages/inbox-upload-page'
+import { InboxView } from '@/components/passages/inbox-view'
 import { PassageDetailsPage } from '@/components/passages/passage-details-page'
 import { PassagesPanel } from '@/components/passages/passages-panel'
+import { useInboxCount } from '@/hooks/use-inbox'
 import { usePassageList } from '@/hooks/use-passages'
 import { usePassagesRoute } from '@/hooks/use-passages-route'
 
@@ -14,11 +17,13 @@ export interface PassagesRoutePanelProps {
 
 // ADR 0171: Passages wired to the app location. The listing and the details
 // pages (one passage, one Cruise, a combined selection) are one panel; which
-// renders is the route's view.
+// renders is the route's view. The Inbox of shared photos (ADR 0279) and the
+// page that shares them are two more views of it.
 // AppShell re-renders on every live delta; memo keeps this page out of it.
 export const PassagesRoutePanel = memo(function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRoutePanelProps) {
-  const { route, showFilter, openPassage, openCruise, openCombined, close } = usePassagesRoute()
+  const { route, showFilter, openPassage, openCruise, openCombined, openInbox, openUpload, close } = usePassagesRoute()
   const list = usePassageList()
+  const inboxCount = useInboxCount()
 
   if (route.view === 'index') {
     return (
@@ -34,8 +39,18 @@ export const PassagesRoutePanel = memo(function PassagesRoutePanel({ units, canW
         onOpenPassage={(id) => { openPassage(id) }}
         onOpenCruise={(id) => { openCruise(id) }}
         onCombine={(ids) => { openCombined(ids) }}
+        inboxCount={inboxCount}
+        onOpenInbox={() => { openInbox() }}
       />
     )
+  }
+
+  if (route.view === 'inbox') {
+    return <InboxView canWrite={canWrite} passages={list.passages} onBack={() => { close() }} onOpenUpload={() => { openUpload() }} />
+  }
+
+  if (route.view === 'upload') {
+    return <InboxUploadPage canWrite={canWrite} onBack={() => { close() }} onOpenInbox={() => { openInbox() }} />
   }
 
   const mode =

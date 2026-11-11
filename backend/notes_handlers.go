@@ -146,8 +146,8 @@ func getNoteOrError(id string) (document, error) {
 // ── GET /api/notes ───────────────────────────────────────────────────────
 
 // listNotesHandler is GET /api/notes: kind='note' documents, newest first,
-// with the Notes inbox's own filters (plan §4) - ?filed=0 narrows to
-// unfiled notes (the inbox view itself), ?type= and ?tag= narrow further,
+// with the Unfiled notes view's own filters (plan §4) - ?filed=0 narrows to
+// unfiled notes (that view itself), ?type= and ?tag= narrow further,
 // and limit/offset reuse parseDocumentLimit/parseDocumentOffset exactly as
 // GET /api/documents does. The response key is "notes" (plural), which is
 // the one place in this codebase's JSON that word is allowed to mean the

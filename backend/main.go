@@ -317,6 +317,18 @@ func main() {
 			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
 	}
 
+	// Inbox (ADR 0279): items shared from a phone wait here, in the same
+	// database file with their bytes in their own directory, until the
+	// operator files or bins them. Fail fast on open error.
+	inbox, err := newInboxStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open inbox store: %v", err)
+	}
+	globalInboxStore = inbox
+	if err := os.MkdirAll(inboxDirPath(), 0o755); err != nil {
+		log.Fatalf("failed to create inbox directory: %v", err)
+	}
+
 	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid
 	// OCR/summarise-and-tag enrichment only when a document's own consent
 	// flag says so. Its own *http.Client, not openRouterHTTPClient (the
@@ -714,6 +726,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, logRoutes()...)
 	routes = append(routes, documentRoutes()...)
 	routes = append(routes, noteRoutes()...)
+	routes = append(routes, inboxRoutes()...)
 	routes = append(routes, checklistRunRoutes()...)
 	routes = append(routes, manualRoutes()...)
 	routes = append(routes, inventoryRoutes()...)

@@ -11,6 +11,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Share photos and PDFs from your phone to a new Inbox, then sort them on
+  the laptop.** Open **Passages**, tap **Inbox**, then **Share photos**, or put
+  `/passages/upload` on your phone's Home Screen. Pick a whole camera roll. Each
+  photo is shrunk on the phone, sent one at a time, and checked against what's
+  already in the Inbox and Documents, so picking the same ones twice is
+  harmless. In the Inbox, photos sit in groups by passage, in the order they were
+  taken, and you can add them to a passage as signs, send them to a Documents
+  folder, or delete them. Near-identical shots and blurred ones are flagged as
+  suggestions, and nothing is deleted until you confirm. A photo whose phone
+  position is over a nautical mile from the boat's track gets a warning, because
+  the phone's clock or time zone is probably wrong. The Inbox lives in
+  `data/inbox` (set `INBOX_DIR` to move it), so include it in your backups. Notes
+  with no folder are called **Unfiled notes**, so the word Inbox means only this.
+
 ### Changed
 
 - **The Anchor Watch tide panel is easier to read.** The high and the low each

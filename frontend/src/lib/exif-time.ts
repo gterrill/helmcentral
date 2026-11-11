@@ -1,6 +1,8 @@
 // The moment a photo was taken, from its EXIF block. Only the two fields the
 // replay needs are read, and only from JPEG, which is what cameras and phones
-// write. GPS is deliberately not read: the track says where the boat was.
+// write. The track says where the boat was, so a sign never takes a position
+// from the photo; the Inbox reads the phone's position separately (exif-gps.ts)
+// only to warn when its clock or zone looks wrong.
 
 export interface ExifCapture {
   year: number
@@ -27,8 +29,16 @@ const HEAD_BYTES = 256 * 1024
  * but cannot be read throws rather than guessing.
  */
 export function readExifCapture(buffer: ArrayBuffer): ExifCapture | null {
+  return guardExif(() => {
+    const tiff = findExifTiff(buffer)
+    return tiff ? readTiff(tiff.view, tiff.base, tiff.end) : null
+  })
+}
+
+/** Runs an Exif read, turning a read past the end of the buffer into the damaged error. */
+export function guardExif<T>(read: () => T): T {
   try {
-    return parse(buffer)
+    return read()
   } catch (err) {
     // A read past the end of the buffer means the file stops short.
     if (err instanceof RangeError) throw damaged()
@@ -36,7 +46,18 @@ export function readExifCapture(buffer: ArrayBuffer): ExifCapture | null {
   }
 }
 
-function parse(buffer: ArrayBuffer): ExifCapture | null {
+/** The error for an Exif block that is there but cannot be read. */
+export const exifDamaged = damaged
+
+/** Where the TIFF structure of a JPEG's Exif APP1 sits: `base` is its first byte, `end` the end of the block. */
+export interface ExifTiff {
+  view: DataView
+  base: number
+  end: number
+}
+
+/** The Exif TIFF block of a JPEG, or null for a file that is not a JPEG or has none. Call inside guardExif. */
+export function findExifTiff(buffer: ArrayBuffer): ExifTiff | null {
   const view = new DataView(buffer, 0, Math.min(buffer.byteLength, HEAD_BYTES))
   if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return null
   let pos = 2
@@ -52,7 +73,7 @@ function parse(buffer: ArrayBuffer): ExifCapture | null {
       if (pos + 10 > view.byteLength) throw damaged()
       if (length >= 8 && view.getUint32(pos + 4) === 0x45786966 && view.getUint16(pos + 8) === 0) {
         if (pos + 2 + length > view.byteLength) throw damaged()
-        return readTiff(view, pos + 10, pos + 2 + length)
+        return { view, base: pos + 10, end: pos + 2 + length }
       }
     }
     pos += 2 + length

@@ -99,12 +99,17 @@ export type PassagesFilter = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'cr
 /**
  * `/passages` is the index. `/passages/<id>` is one passage, `/passages/cruises/<id>`
  * one Cruise, and `/passages/combined?ids=a,b` an ad-hoc selection viewed together.
+ * `/passages/inbox` is the Inbox of photos and files shared from a phone, and
+ * `/passages/upload` the page that shares them (the address to put on a phone's
+ * Home Screen); neither belongs to a filter.
  */
 export type PassagesRoute =
   | { view: 'index'; filter: PassagesFilter }
   | { view: 'passage'; id: string; filter: PassagesFilter }
   | { view: 'cruise'; id: string }
   | { view: 'combined'; ids: string[]; filter: PassagesFilter }
+  | { view: 'inbox' }
+  | { view: 'upload' }
 
 /** The starting points the Watches page offers on an empty list. */
 export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
@@ -298,6 +303,8 @@ export function parseAppLocation(pathname: string): AppLocation {
       : params.get('filter') === 'unfiled' ? { kind: 'unfiled' } : { kind: 'all' }
     const indexRoute: AppLocation = { panel: 'passages', route: { view: 'index', filter } }
     if (second === undefined) return indexRoute
+    if (second === 'inbox') return { panel: 'passages', route: { view: 'inbox' } }
+    if (second === 'upload') return { panel: 'passages', route: { view: 'upload' } }
     if (second === 'cruises') {
       const idSegment = segments[2]
       const id = idSegment !== undefined ? decodeSegment(idSegment) : null
@@ -544,6 +551,8 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
 
     case 'passages': {
       const { route } = loc
+      if (route.view === 'inbox') return '/passages/inbox'
+      if (route.view === 'upload') return '/passages/upload'
       const params = new URLSearchParams()
       if (route.view !== 'cruise') {
         if (route.filter.kind === 'unfiled') params.set('filter', 'unfiled')
