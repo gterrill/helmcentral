@@ -319,8 +319,9 @@ Gauge tile's:
   readings. A tile left blank has nothing to go stale. See [When a source goes
   quiet](#when-a-source-goes-quiet).
 
-Helmcentral works the current out by comparing your speed through the water, from
-the log, and your heading, from the compass, against your movement over the
+Helmcentral doesn't work the current out itself. The `signalk-derived-data`
+plugin in SignalK does, by comparing your speed through the water, from the
+log, and your heading, from the compass, against your movement over the
 ground, from GPS. A log that reads high therefore shows up as a foul current
 that isn't there. If the tile always says Hindering, check the log calibration
 before you believe it.
