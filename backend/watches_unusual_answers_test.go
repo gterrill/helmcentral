@@ -21,7 +21,7 @@ func TestBuildWatchUnusual_StretchesSitBesideTheirLines(t *testing.T) {
 		t.Fatalf("block = %+v", u)
 	}
 	s := u.Stretches[0]
-	if s.StretchID != "engines:port@2026-11-10T02:10:00Z" || s.Subsystem != "engines" || s.Subject != "port" || s.Engine != "Port engine" ||
+	if s.StretchID != "engines:port@2026-11-10T02:10:00Z" || s.Subsystem != "engines" || s.Subject != "port" || s.SubjectName != "Port engine" ||
 		!s.From.Equal(st.Start) || !s.To.Equal(st.End) {
 		t.Fatalf("stretch = %+v", s)
 	}

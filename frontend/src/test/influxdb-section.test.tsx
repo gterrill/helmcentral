@@ -15,7 +15,7 @@ describe('InfluxdbSection one-minute bucket', () => {
     resetQueryStore()
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ configured: false, note: 'No learned normal: InfluxDB is not set up.', engines: [] }) })),
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ configured: false, note: 'No learned normal: InfluxDB is not set up.', subsystems: [] }) })),
     )
   })
 
@@ -24,7 +24,7 @@ describe('InfluxdbSection one-minute bucket', () => {
     const field = screen.getByLabelText('One-minute bucket (optional)')
     expect(field).toHaveValue('')
     expect(
-      screen.getByText("Leave blank to roll up the main bucket. Helmcentral learns each engine's usual readings from it."),
+      screen.getByText("Leave blank to roll up the main bucket. Helmcentral learns the usual readings of each engine and the house bank from it."),
     ).toBeInTheDocument()
   })
 
@@ -37,7 +37,7 @@ describe('InfluxdbSection one-minute bucket', () => {
 
   it('names the learned normal in the switch label and shows its status', async () => {
     render(<InfluxdbSection draft={initialRegularSettingsDraft} onChange={() => {}} />)
-    expect(screen.getByText(/to learn each engine's usual readings/)).toBeInTheDocument()
+    expect(screen.getByText(/to learn the usual readings of each engine and the house bank/)).toBeInTheDocument()
     expect(await screen.findByText('No learned normal: InfluxDB is not set up.')).toBeInTheDocument()
   })
 })

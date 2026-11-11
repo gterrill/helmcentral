@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,8 +61,8 @@ func TestTrainNormal_AStoppedRunLeavesTheLastAttemptAsItWas(t *testing.T) {
 		t.Fatal("a stopped run still returns the stop")
 	}
 	after, _ := loadNormalModel(path)
-	if after.LastAttempt == nil || !after.LastAttempt.OK || !after.LastAttempt.At.Equal(before.LastAttempt.At) {
-		t.Fatalf("last attempt = %+v, want the earlier successful one", after.LastAttempt)
+	if rec := after.Subsystems[normalSubsystemEngines]; rec.State != normalStateTrained || !rec.AttemptedAt.Equal(before.Subsystems[normalSubsystemEngines].AttemptedAt) {
+		t.Fatalf("record = %+v, want the earlier successful one", rec)
 	}
 }
 
@@ -75,9 +76,16 @@ func TestGatherWatchReportInput_AUnusualReadingThatTakesTooLongIsCutOffAndSaid(t
 	env := newProposalEnv(t)
 	d := statusTestDeps(t)
 	d.alarmLog = func() *alarmLogStore { return nil }
-	d.unusualReadings = func(ctx context.Context, _, _ time.Time, _ string, _ []normalAnswer) unusualResult {
-		<-ctx.Done()
-		return unusualResult{ProblemKind: unusualError, Problem: ctx.Err().Error()}
+	// The real scoring, whose read is ended by the budget with an error that does not
+	// wrap the context's, as the InfluxDB client's can be.
+	d.unusualReadings = func(ctx context.Context, since, until time.Time, subject unusualSubject, answers []normalAnswer) unusualResult {
+		c := newScoreCase(trainedPort(t), nil)
+		deps := c.deps()
+		deps.Minutes = func(ctx context.Context, _ normalSource, _ []string, _, _ time.Time) (map[string][]normalMinuteRow, error) {
+			<-ctx.Done()
+			return nil, errors.New("net/http: request canceled")
+		}
+		return scoreUnusualAll(ctx, deps, since, until, subject, answers)
 	}
 	w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Sections: []string{"instruments"}, Thresholds: defaultWatchThresholds()}
 	start := time.Now()
@@ -96,6 +104,7 @@ func TestGatherWatchReportInput_AUnusualReadingThatTakesTooLongIsCutOffAndSaid(t
 
 // 5. Only a subject's own candidate readings matter.
 func TestNormalPathMatters_OnlyTheCandidateReadings(t *testing.T) {
+	withVessel(t, houseVessel())
 	for path, want := range map[string]bool{
 		"propulsion.port.revolutions":                 true,
 		"propulsion.0.fuel.rate":                      true,
@@ -105,7 +114,12 @@ func TestNormalPathMatters_OnlyTheCandidateReadings(t *testing.T) {
 		"propulsion.port.fuel.used":                   false,
 		"propulsion.port.temperature.extra":           false,
 		"propulsion.revolutions":                      false,
+		"electrical.batteries.1.voltage":              true,
 		"electrical.batteries.512.voltage":            false,
+		"electrical.batteries.1.name":                 false,
+		"electrical.solar.s1.panelPower":              false,
+		"electrical.venus.totalPanelPower":            false,
+		"environment.wind.speedApparent":              false,
 	} {
 		if got := normalPathMatters(path); got != want {
 			t.Errorf("normalPathMatters(%q) = %v, want %v", path, got, want)
@@ -135,7 +149,7 @@ func TestScore_TheMinuteInProgressIsNotJudged(t *testing.T) {
 	// Run minutes are at :00. Ending at 40 s past the 60th judged minute must not
 	// pull in that minute's partial mean.
 	until := scoreRunStart.Add(60*time.Minute + 40*time.Second)
-	res := scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(-time.Hour), until, "", nil)
+	res := scoreOnly(context.Background(), normalEnginesSubsystem(), c.deps(), scoreRunStart.Add(-time.Hour), until, "", nil)
 	if !res.Until.Equal(scoreRunStart.Add(60 * time.Minute)) {
 		t.Fatalf("until = %v", res.Until)
 	}

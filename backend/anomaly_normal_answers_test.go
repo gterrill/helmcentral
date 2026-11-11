@@ -24,7 +24,7 @@ var answerFrom = time.Date(2026, 11, 9, 14, 0, 0, 0, time.UTC)
 // answerStretch is the stretch the stored run's first line is about.
 func answerStretch() watchUnusualStretch {
 	return watchUnusualStretch{
-		StretchID: stretchIDFor(normalSubsystemEngines, "0", answerFrom), Subsystem: normalSubsystemEngines, Subject: "0", Engine: "Port engine",
+		StretchID: stretchIDFor(normalSubsystemEngines, "0", answerFrom), Subsystem: normalSubsystemEngines, Subject: "0", SubjectName: "Port engine",
 		From: answerFrom, To: answerFrom.Add(20 * time.Minute),
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,17 +22,6 @@ var normalModelMu sync.Mutex
 type normalWindow struct {
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
-}
-
-// normalAttempt is the last training run, kept whether or not it succeeded, so
-// a failing run is visible beside the good model it left alone.
-type normalAttempt struct {
-	At      time.Time `json:"at"`
-	OK      bool      `json:"ok"`
-	Problem string    `json:"problem,omitempty"`
-	// Source is what the run read from, so a restart can tell the settings are
-	// unchanged since.
-	Source normalSource `json:"source,omitempty"`
 }
 
 type normalShift struct {
@@ -63,9 +54,9 @@ type normalRegime struct {
 
 type normalSubjectModel struct {
 	Name string `json:"name"`
-	// EquipmentID is the inventory item the subject was linked to when it was
-	// learned, so a change of link is noticed (wakeNormalIfEnginesChanged).
-	EquipmentID string `json:"equipment_id,omitempty"`
+	// EquipmentIDs are the inventory items the subject was linked to when it was
+	// learned, so a change of link is noticed (wakeNormalIfInputsChanged).
+	EquipmentIDs []string `json:"equipment_ids,omitempty"`
 	// GatedMinutes are the minutes this subject was learned from, after the
 	// gate and the alarm exclusions.
 	GatedMinutes int                    `json:"gated_minutes"`
@@ -95,7 +86,57 @@ type normalExcluded struct {
 	Title   string    `json:"title,omitempty"`
 }
 
+// What the latest training run did for a subsystem.
+const (
+	normalStateTrained = "trained"
+	// normalStateSkipped is a boat with nothing of the kind set up. It is not a
+	// failure, and the subsystem holds no model.
+	normalStateSkipped = "skipped"
+	// normalStateFailed keeps the model from before, if there was one.
+	normalStateFailed = "failed"
+)
+
+// normalSubjectInputs is what one subject was trained from: the items it is made
+// of and the readings it was offered.
+type normalSubjectInputs struct {
+	Subject      string   `json:"subject"`
+	EquipmentIDs []string `json:"equipment_ids,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+}
+
+// normalInputsOf is what a subsystem's subjects are made of now, in a form that
+// can be compared with the inputs of its last attempt.
+func normalInputsOf(subjects []normalSubject) []normalSubjectInputs {
+	var out []normalSubjectInputs
+	for _, s := range subjects {
+		in := normalSubjectInputs{Subject: s.ID, EquipmentIDs: slices.Clone(s.EquipmentIDs)}
+		slices.Sort(in.EquipmentIDs)
+		for _, f := range s.Features {
+			in.Paths = append(in.Paths, f.Path)
+		}
+		slices.Sort(in.Paths)
+		out = append(out, in)
+	}
+	slices.SortFunc(out, func(a, b normalSubjectInputs) int { return strings.Compare(a.Subject, b.Subject) })
+	return out
+}
+
+// normalSubsystemModel is one subsystem's saved record: its latest attempt, and
+// the model from the last run that learned something.
 type normalSubsystemModel struct {
+	// State, AttemptedAt, Problem and Inputs are the latest attempt. Problem is why
+	// it failed, or why it was skipped. Inputs are compared with the boat to see
+	// whether training has anything new to learn from. A record saved before these
+	// existed has no State and reads as trained.
+	State       string                `json:"state,omitempty"`
+	AttemptedAt time.Time             `json:"attempted_at,omitempty"`
+	Problem     string                `json:"problem,omitempty"`
+	Inputs      []normalSubjectInputs `json:"inputs,omitempty"`
+	// ModelInputs are what the model below was learned from. A failed or skipped
+	// attempt keeps the model and these, and the model is used only while they are
+	// what the boat has.
+	ModelInputs []normalSubjectInputs `json:"model_inputs,omitempty"`
+
 	TrainedAt time.Time                     `json:"trained_at"`
 	Window    normalWindow                  `json:"window"`
 	Source    normalSource                  `json:"source"`
@@ -107,14 +148,31 @@ type normalSubsystemModel struct {
 	Labelled []normalExcluded `json:"labelled"`
 }
 
+// usableFor says the model was learned from the subjects the boat has now. A model
+// saved without its inputs is taken as it stands.
+func (m normalSubsystemModel) usableFor(subjects []normalSubject) bool {
+	return len(m.ModelInputs) == 0 || sameNormalInputs(normalInputsOf(subjects), m.ModelInputs)
+}
+
+// hasModel says the record holds something learned.
+func (m normalSubsystemModel) hasModel() bool { return !m.TrainedAt.IsZero() }
+
 type normalModelFile struct {
-	LastAttempt *normalAttempt                  `json:"last_attempt,omitempty"`
-	Subsystems  map[string]normalSubsystemModel `json:"subsystems"`
+	Subsystems map[string]normalSubsystemModel `json:"subsystems"`
 }
 
 // normalNoModelYet is what the report, the tool and Settings say before the
 // first run has learned anything.
 const normalNoModelYet = "No learned normal yet."
+
+// trainingProblem is why the latest attempt failed for a subsystem, or "" when it
+// did not.
+func (m normalModelFile) trainingProblem(subsystem string) string {
+	if rec := m.Subsystems[subsystem]; rec.State == normalStateFailed {
+		return rec.Problem
+	}
+	return ""
+}
 
 // bandsBySubject counts the judged regimes of each subject, by subject id.
 func (m normalSubsystemModel) bandsBySubject() map[string]int {

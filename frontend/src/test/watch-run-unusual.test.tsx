@@ -49,7 +49,7 @@ const STRETCH: WatchUnusualStretch = {
   stretch_id: 'engines:0@2026-11-10T02:10:00Z',
   subsystem: 'engines',
   subject: '0',
-  engine: 'Port engine',
+  subject_name: 'Port engine',
   from: '2026-11-10T02:10:00Z',
   to: '2026-11-10T02:40:00Z',
 }
@@ -112,6 +112,12 @@ describe('Unusual block in a watch run', () => {
       expect(within(group).getByRole('button', { name: 'Normal: Port engine stretch' })).toHaveTextContent('Normal')
       expect(within(group).getByRole('button', { name: "Don't know: Port engine stretch" })).toHaveTextContent("Don't know")
       expect(screen.queryByTestId('unusual-answer')).toBeNull()
+    })
+
+    it('names the house bank for its stretch', () => {
+      const bank = { ...STRETCH, stretch_id: 'electrical:house@2026-11-10T02:10:00Z', subsystem: 'electrical', subject: 'house', subject_name: 'House bank' }
+      render(<WatchRunCard run={run(report({ unusual: { lines: [LINE], stretches: [bank], judged_minutes: 300 } }))} onAnswerUnusual={vi.fn()} />)
+      expect(screen.getByRole('group', { name: 'Your answer for the House bank stretch' })).toBeInTheDocument()
     })
 
     it('sends the answer with the stretch, and shows what the server then says', async () => {

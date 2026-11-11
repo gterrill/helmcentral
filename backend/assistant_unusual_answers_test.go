@@ -100,9 +100,9 @@ func TestUnusualTool_ReadsTheAnswersOnceAndHandsThemToTheScore(t *testing.T) {
 	d.unusualAnswers = func() ([]normalAnswer, error) { reads++; return answers, nil }
 	var given []normalAnswer
 	inner := d.unusualReadings
-	d.unusualReadings = func(ctx context.Context, since, until time.Time, engine string, a []normalAnswer) unusualResult {
+	d.unusualReadings = func(ctx context.Context, since, until time.Time, subject unusualSubject, a []normalAnswer) unusualResult {
 		given = a
-		return inner(ctx, since, until, engine, a)
+		return inner(ctx, since, until, subject, a)
 	}
 	runUnusualTool(t, d, `{}`)
 	if reads != 1 || len(given) != 1 || given[0].StretchID != "x" {
@@ -120,7 +120,7 @@ func TestGatherWatchReportInput_AnswersThatCannotBeReadAreTheReasonNothingWasSco
 			d := statusTestDeps(t)
 			d.alarmLog = func() *alarmLogStore { return nil }
 			scored := false
-			d.unusualReadings = func(context.Context, time.Time, time.Time, string, []normalAnswer) unusualResult {
+			d.unusualReadings = func(context.Context, time.Time, time.Time, unusualSubject, []normalAnswer) unusualResult {
 				scored = true
 				return unusualResult{}
 			}

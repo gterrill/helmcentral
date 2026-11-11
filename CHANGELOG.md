@@ -78,6 +78,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   least two separate runs, so bands fill in as the boat motors at different
   speeds, and the report says so when it can't judge. See
   [Anomaly detection](docs/features/anomaly-detection.md#unusual-engine-readings).
+- **Watch reports can point out house bank readings that look unusual for the
+  bank, too.** Helmcentral learns the bank's usual voltage and current from your
+  InfluxDB history, for each combination of what is charging it (shore power,
+  solar, the generator, the engines) and how full it is. When a stretch of three
+  minutes or more falls outside that, it shows in the same **Unusual** block, for
+  example "House bank voltage ran low from 2.10 AM to 2.40 AM: 25.6 V against a
+  usual 26.1 V with nothing charging, 60 to 80 % charge". The engines and the
+  bank share the block's two lines, worst first. It needs a house bank chosen in
+  Settings, and a boat without one is judged on its engines alone. Choosing or
+  changing the bank, an alternator, the shore charger, the inverter or the
+  generator starts new learning within a minute. **Real**, **Normal** and **Don't
+  know** work as they do for an engine, and a repair logged on the bank or any of
+  those items leaves its fault days out. See
+  [Anomaly detection](docs/features/anomaly-detection.md#unusual-house-bank-readings).
 - **You can tell Helmcentral what you think of an unusual stretch.** Under each
   stretch in a watch report there are now three buttons: **Real**, **Normal** and
   **Don't know**. Your answer shows under the stretch, and you can change it. A
@@ -95,15 +109,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Completing an open job as a repair fills it with the day you opened the job, so
   clear it if the fault didn't show then. See
   [Log a service](docs/how-to/log-a-service.md).
-- **Mate and outside assistants can ask for the unusual engine readings.** The
-  new lookup gives the same stretches for the last day or up to 7 days, and counts
-  the minutes it couldn't judge, with the reason. Outside assistants don't get it
-  until you switch it on for a token in **Settings, Outside assistants**.
+- **Mate and outside assistants can ask for the unusual readings.** The new
+  lookup gives the same stretches, for the engines and the house bank or for one
+  of them, for the last day or up to 7 days, and counts the minutes it couldn't
+  judge, with the reason. Outside assistants don't get it until you switch it on
+  for a token in **Settings, Outside assistants**.
 - **A new optional setting, One-minute bucket, under Settings → InfluxDB.** If
   you keep a bucket of one-minute averages, name it and Helmcentral learns from
   it. Left blank, it works the minutes out from your main bucket. Under it,
   **Learned normal** shows when and from where Helmcentral learned, and lists each
-  engine's readings with a switch and the reason beside any it left out. A switch
+  engine's and the house bank's readings with a switch and the reason beside any it left out. A switch
   uses the **Ignored sensors** list, so a reading you turn off there is also left
   out of the frozen and impossible-reading checks.
 - **A new help page shows how to keep a longer history in InfluxDB.** You set

@@ -35,10 +35,10 @@ type watchUnusualStretch struct {
 	StretchID string `json:"stretch_id"`
 	Subsystem string `json:"subsystem"`
 	Subject   string `json:"subject"`
-	// Engine is the subject as the operator names it, for the buttons' labels.
-	Engine string    `json:"engine"`
-	From   time.Time `json:"from"`
-	To     time.Time `json:"to"`
+	// SubjectName is the subject as the operator names it, for the buttons' labels.
+	SubjectName string    `json:"subject_name,omitempty"`
+	From        time.Time `json:"from"`
+	To          time.Time `json:"to"`
 }
 
 // unusualStretchesOf is the stretches a stored run's Unusual block names, in the
@@ -76,6 +76,9 @@ func unusualProblemNote(kind, problem string) string {
 		return "The learned normal could not be read: " + endedSentence(problem)
 	case unusualError:
 		return "Unusual readings could not be checked: " + endedSentence(problem)
+	case unusualMixed:
+		// Each subsystem's own sentence, already finished.
+		return problem
 	}
 	return ""
 }
@@ -121,7 +124,7 @@ func buildWatchUnusual(res unusualResult, system string, loc *time.Location, now
 		}
 		u.Lines = append(u.Lines, v.Summary)
 		u.Stretches = append(u.Stretches, watchUnusualStretch{
-			StretchID: st.ID, Subsystem: st.Subsystem, Subject: st.Subject, Engine: st.SubjectName, From: st.Start.UTC(), To: st.End.UTC(),
+			StretchID: st.ID, Subsystem: st.Subsystem, Subject: st.Subject, SubjectName: st.SubjectName, From: st.Start.UTC(), To: st.End.UTC(),
 		})
 	}
 	if len(res.Stretches) == 0 && res.JudgedMinutes == 0 {
@@ -129,10 +132,10 @@ func buildWatchUnusual(res unusualResult, system string, loc *time.Location, now
 			notes = append(notes, why)
 		}
 	}
-	// An engine that could not be judged is said even when the other was.
+	// A subject that could not be judged is said even when the others were.
 	for _, n := range res.NotJudged {
 		switch n.Kind {
-		case "engine_problem":
+		case "subject_problem":
 			notes = append(notes, endedSentence(n.SubjectName+": "+n.Reason))
 		case "sender_silent":
 			// The reason begins with the reading: "Port engine oil pressure: the sender ...".

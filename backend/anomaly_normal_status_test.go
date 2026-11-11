@@ -38,9 +38,19 @@ func statusModel() normalModelFile {
 	}}}
 }
 
+// statusEngines are the engines' subjects of a status.
+func statusEngines(s normalStatus) []normalStatusSubject {
+	for _, sub := range s.Subsystems {
+		if sub.ID == normalSubsystemEngines {
+			return sub.Subjects
+		}
+	}
+	return nil
+}
+
 func TestBuildNormalStatus_SaysWhenAndFromWhereWithTheBandsPerEngine(t *testing.T) {
 	loc, _ := time.LoadLocation("Australia/Brisbane")
-	s := buildNormalStatus(statusModel(), nil, nil, nil, loc)
+	s := buildNormalStatus(statusModel(), nil, nil, nil, nil, loc)
 	// The band counts are on the engine headings, not repeated here.
 	want := `Learned Tue 10 Nov 3.00 AM from one-minute bucket "SignalK_1m".`
 	if s.Summary != want {
@@ -49,21 +59,21 @@ func TestBuildNormalStatus_SaysWhenAndFromWhereWithTheBandsPerEngine(t *testing.
 	if !s.Configured || s.Note != "" {
 		t.Fatalf("status = %+v", s)
 	}
-	if len(s.Engines) != 2 || s.Engines[0].ID != "port" || s.Engines[1].ID != "starboard" {
-		t.Fatalf("engines = %+v", s.Engines)
+	if len(statusEngines(s)) != 2 || statusEngines(s)[0].ID != "port" || statusEngines(s)[1].ID != "starboard" {
+		t.Fatalf("engines = %+v", statusEngines(s))
 	}
-	if s.Engines[0].Bands != 2 || s.Engines[1].Bands != 0 {
-		t.Fatalf("bands = %d, %d", s.Engines[0].Bands, s.Engines[1].Bands)
+	if statusEngines(s)[0].Bands != 2 || statusEngines(s)[1].Bands != 0 {
+		t.Fatalf("bands = %d, %d", statusEngines(s)[0].Bands, statusEngines(s)[1].Bands)
 	}
-	if s.Engines[1].Problem != "no steady running minutes in the last 90 days" {
-		t.Fatalf("starboard = %+v", s.Engines[1])
+	if statusEngines(s)[1].Problem != "no steady running minutes in the last 90 days" {
+		t.Fatalf("starboard = %+v", statusEngines(s)[1])
 	}
 }
 
 func TestBuildNormalStatus_EachReadingHasASwitchAndTheAutomaticVerdictBesideIt(t *testing.T) {
-	s := buildNormalStatus(statusModel(), nil, nil, map[string]bool{"propulsion.port.oilPressure": true}, time.UTC)
+	s := buildNormalStatus(statusModel(), nil, nil, map[string]bool{"propulsion.port.oilPressure": true}, nil, time.UTC)
 	byKey := map[string]normalStatusReading{}
-	for _, r := range s.Engines[0].Readings {
+	for _, r := range statusEngines(s)[0].Readings {
 		byKey[r.Key] = r
 	}
 	cases := map[string]struct {
@@ -105,9 +115,9 @@ func TestBuildNormalStatus_ASwitchChangedSinceTheLastRunSaysWhenItTakesEffect(t 
 		normalFeatureVerdict{Key: "engineLoad", Path: "propulsion.port.engineLoad", Reason: "switched off"})
 	eng.Subjects["port"] = port
 	m.Subsystems[normalSubsystemEngines] = eng
-	s := buildNormalStatus(m, nil, nil, nil, time.UTC)
+	s := buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
 	got := map[string]normalStatusReading{}
-	for _, r := range s.Engines[0].Readings {
+	for _, r := range statusEngines(s)[0].Readings {
 		got[r.Key] = r
 	}
 	if r := got["boostPressure"]; !r.On || r.Status != "switched on, used from the next update" {
@@ -131,13 +141,11 @@ func TestBuildNormalStatus_NotesAreTheReportsOwnSentences(t *testing.T) {
 		{"no influx", empty, nil, errNormalNoInflux, "No learned normal: InfluxDB is not set up."},
 		{"unreadable", normalModelFile{}, errors.New("parsing x: bad"), nil, "The learned normal could not be read: parsing x: bad."},
 		{"nothing learned yet", empty, nil, nil, normalNoModelYet},
-		{"last run failed, no model", normalModelFile{LastAttempt: &normalAttempt{Problem: `the one-minute bucket "b" could not be read: nope`}, Subsystems: map[string]normalSubsystemModel{}}, nil, nil,
-			`No learned normal: the one-minute bucket "b" could not be read: nope.`},
 		{"the secrets could not be read", empty, nil, errors.New("reading INFLUXDB_TOKEN: boom"), "Unusual readings could not be checked: reading INFLUXDB_TOKEN: boom."},
 	}
 	for _, c := range cases {
-		s := buildNormalStatus(c.file, c.fileErr, c.srcErr, nil, time.UTC)
-		if s.Note != c.want || s.Summary != "" || len(s.Engines) != 0 {
+		s := buildNormalStatus(c.file, c.fileErr, c.srcErr, nil, nil, time.UTC)
+		if s.Note != c.want || s.Summary != "" || len(statusEngines(s)) != 0 {
 			t.Errorf("%s: %+v, want note %q", c.name, s, c.want)
 		}
 		if c.srcErr != nil && s.Configured {
@@ -148,9 +156,11 @@ func TestBuildNormalStatus_NotesAreTheReportsOwnSentences(t *testing.T) {
 
 func TestBuildNormalStatus_AFailedLatestRunIsGivenBesideTheGoodModel(t *testing.T) {
 	m := statusModel()
-	m.LastAttempt = &normalAttempt{At: time.Now(), OK: false, Problem: "InfluxDB could not be read: timeout"}
-	s := buildNormalStatus(m, nil, nil, nil, time.UTC)
-	if s.Summary == "" || s.Note != "The learned normal was not updated: InfluxDB could not be read: timeout." {
+	eng := m.Subsystems[normalSubsystemEngines]
+	eng.State, eng.Problem = normalStateFailed, "InfluxDB could not be read: timeout"
+	m.Subsystems[normalSubsystemEngines] = eng
+	s := buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
+	if s.Summary == "" || s.Note != "" || s.Subsystems[0].Note != "The learned normal was not updated: InfluxDB could not be read: timeout." {
 		t.Fatalf("status = %+v", s)
 	}
 }
@@ -180,13 +190,14 @@ func TestNormalStatusHandler(t *testing.T) {
 	if got["configured"] != false || got["note"] != "No learned normal: InfluxDB is not set up." {
 		t.Fatalf("body = %s", rec.Body)
 	}
-	if _, has := got["engines"]; !has {
-		t.Fatalf("engines is always a list: %s", rec.Body)
+	if _, has := got["subsystems"]; !has {
+		t.Fatalf("subsystems is always a list: %s", rec.Body)
 	}
 
 	if err := saveNormalModel(filepath.Join(dir, "anomaly-normal.json"), statusModel()); err != nil {
 		t.Fatal(err)
 	}
+	withVessel(t, vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"}}})
 	rec = httptest.NewRecorder()
 	_ = normalStatusHandler(e.NewContext(httptest.NewRequest(http.MethodGet, "/api/anomaly/normal/status", nil), rec))
 	if !strings.Contains(rec.Body.String(), `"oilPressure"`) || !strings.Contains(rec.Body.String(), `"bands":2`) {
@@ -201,4 +212,88 @@ func TestNormalStatusRouteIsReadTier(t *testing.T) {
 		}
 	}
 	t.Fatal("GET /api/anomaly/normal/status must be a read-tier route")
+}
+
+// The status is grouped by subsystem: each has its heading, its subjects and the
+// reason it holds none.
+func TestBuildNormalStatus_GroupsTheSubjectsBySubsystemAndSaysWhySomeHoldNone(t *testing.T) {
+	m := statusModel()
+	m.Subsystems[normalSubsystemElectrical] = normalSubsystemModel{
+		TrainedAt: m.Subsystems[normalSubsystemEngines].TrainedAt, Source: m.Subsystems[normalSubsystemEngines].Source,
+		Subjects: map[string]normalSubjectModel{"house": {Name: "House bank", Features: []normalFeatureVerdict{
+			{Key: "voltage", Path: "electrical.batteries.1.voltage", Name: "House bank voltage", Used: true, Required: true},
+			{Key: "alternator.p", Path: "electrical.alternator.p.current", Name: "Port alternator current", Reason: "no readings"},
+		}}},
+		Regimes: map[string]normalRegime{"house/none/soc60": {Subject: "house", Judged: true}},
+	}
+	s := buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
+	if len(s.Subsystems) != 2 || s.Subsystems[0].ID != "engines" || s.Subsystems[0].Title != "Engines" || s.Subsystems[1].ID != "electrical" || s.Subsystems[1].Title != "House bank" {
+		t.Fatalf("subsystems = %+v", s.Subsystems)
+	}
+	house := s.Subsystems[1].Subjects
+	if len(house) != 1 || house[0].Bands != 1 || len(house[0].Readings) != 2 {
+		t.Fatalf("house = %+v", house)
+	}
+	if r := house[0].Readings[0]; r.Name != "House bank voltage" || !r.Required || r.Status != "used" {
+		t.Fatalf("reading = %+v", r)
+	}
+	if r := house[0].Readings[1]; r.Name != "Port alternator current" || r.Status != "no readings" {
+		t.Fatalf("reading = %+v", r)
+	}
+
+	// A boat with no house bank says so under the house bank's heading.
+	m = statusModel()
+	m.Subsystems[normalSubsystemElectrical] = normalSubsystemModel{State: normalStateSkipped, Problem: "No house bank is chosen"}
+	s = buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
+	if len(s.Subsystems) != 2 || s.Subsystems[1].ID != "electrical" || s.Subsystems[1].Note != "No house bank is chosen." || len(s.Subsystems[1].Subjects) != 0 {
+		t.Fatalf("subsystems = %+v", s.Subsystems)
+	}
+	if s.Note != "" {
+		t.Fatalf("a subsystem with nothing set up is not a problem for the whole: %q", s.Note)
+	}
+}
+
+// A boat with only a bank is told nothing about an engine it does not have, and
+// is not told "no learned normal" while the bank has one.
+func TestBuildNormalStatus_ABoatWithOnlyABankHasNoNoteAboutEngines(t *testing.T) {
+	m := normalModelFile{
+		Subsystems: map[string]normalSubsystemModel{normalSubsystemElectrical: {
+			TrainedAt: time.Date(2026, 11, 9, 17, 0, 0, 0, time.UTC), Source: normalSource{Kind: normalSourceMainBucket},
+			Subjects: map[string]normalSubjectModel{"house": {Name: "House bank"}},
+		}},
+	}
+	m.Subsystems[normalSubsystemEngines] = normalSubsystemModel{State: normalStateSkipped, Problem: "No engines are set up"}
+	s := buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
+	if s.Note != "" || s.Summary == "" || len(s.Subsystems) != 2 || s.Subsystems[0].Note != "No engines are set up." {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
+// A reading published under several names is one row in Settings: the name the
+// model pinned, and before any training the first.
+func TestBuildNormalStatus_AlternativePathsForOneReadingAreOneRow(t *testing.T) {
+	alt := func(key, path string, used bool, reason string) normalFeatureVerdict {
+		return normalFeatureVerdict{Key: key, Path: path, Name: "Inverter AC load", Group: "acLoad", Used: used, Reason: reason}
+	}
+	build := func(a, b, c normalFeatureVerdict) []normalStatusReading {
+		m := normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemElectrical: {
+			TrainedAt: time.Date(2026, 11, 9, 17, 0, 0, 0, time.UTC),
+			Subjects: map[string]normalSubjectModel{"house": {Name: "House bank", Features: []normalFeatureVerdict{
+				{Key: "voltage", Path: "electrical.batteries.1.voltage", Name: "House bank voltage", Used: true}, a, b, c,
+			}}},
+		}}}
+		s := buildNormalStatus(m, nil, nil, nil, nil, time.UTC)
+		return s.Subsystems[0].Subjects[0].Readings
+	}
+	one := alt("acLoad.output", "electrical.inverters.inv.ac.output.power", false, "no readings")
+	two := alt("acLoad.acout", "electrical.inverters.inv.acout.power", true, "")
+	three := alt("acLoad.acOutPw", "electrical.inverters.inv.acOutputPower", false, "no readings")
+	got := build(one, two, three)
+	if len(got) != 2 || got[1].Key != "acLoad.acout" || got[1].Status != "used" {
+		t.Fatalf("the pinned alternative is the row: %+v", got)
+	}
+	got = build(one, alt("acLoad.acout", two.Path, false, "no readings"), three)
+	if len(got) != 2 || got[1].Key != "acLoad.output" {
+		t.Fatalf("before training the first is the row: %+v", got)
+	}
 }

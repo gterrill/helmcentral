@@ -160,3 +160,38 @@ func unignoreSensorHandler(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusNoContent)
 }
+
+// maxIgnoredSensorBatch is the most identifiers one PUT changes: the parts of a
+// reading are a handful.
+const maxIgnoredSensorBatch = 64
+
+// PUT /api/alarms/ignored-sensors puts every identifier of a reading that has
+// several parts on or off the list in one request, so it never ends half done.
+func setIgnoredSensorsHandler(c echo.Context) error {
+	var req struct {
+		Identifiers []string `json:"identifiers"`
+		Ignored     bool     `json:"ignored"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+	keys := make([]string, len(req.Identifiers))
+	for i, id := range req.Identifiers {
+		if keys[i] = strings.TrimSpace(id); keys[i] == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "identifier required"})
+		}
+	}
+	if len(keys) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "identifiers required"})
+	}
+	if len(keys) > maxIgnoredSensorBatch {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("at most %d identifiers at once", maxIgnoredSensorBatch)})
+	}
+	if err := globalIgnoreStore.setMany(ignoredSensorsList, keys, req.Ignored, time.Now().UTC()); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	if normalPathsMatter(keys...) {
+		normalInputsChanged()
+	}
+	return c.JSON(http.StatusOK, ignoredSensorsResponse())
+}

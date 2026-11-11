@@ -13,7 +13,7 @@ func TestLoadNormalModel_MissingFileIsEmptyNotAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a missing file is a boat that has not trained yet: %v", err)
 	}
-	if len(m.Subsystems) != 0 || m.LastAttempt != nil {
+	if len(m.Subsystems) != 0 {
 		t.Fatalf("want empty, got %+v", m)
 	}
 }
@@ -32,9 +32,10 @@ func TestNormalModel_RoundTripKeepsAnUnknownSubsystem(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "anomaly-normal.json")
 	at := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	want := normalModelFile{
-		LastAttempt: &normalAttempt{At: at, OK: false, Problem: "the one-minute bucket \"x\" could not be read: nope"},
 		Subsystems: map[string]normalSubsystemModel{
 			"engines": {
+				State: normalStateFailed, AttemptedAt: at, Problem: "the one-minute bucket \"x\" could not be read: nope",
+				Inputs:    []normalSubjectInputs{{Subject: "port", EquipmentIDs: []string{"eq"}, Paths: []string{"propulsion.port.oilPressure"}}},
 				TrainedAt: at,
 				Window:    normalWindow{From: at.Add(-90 * 24 * time.Hour), To: at},
 				Source:    normalSource{Kind: normalSourceMinuteBucket, Bucket: "b"},

@@ -985,13 +985,19 @@ func queryInfluxSolarYesterdayKWh(now time.Time, loc *time.Location) float64 {
 	return queryInfluxSolarEnergyKWhRange(start, stop)
 }
 
+// solarMeasurement is the measurement the whole-boat solar power is logged under,
+// configurable because boats name it differently.
+func solarMeasurement() string {
+	return trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+}
+
 func queryInfluxSolarPeakTodayW(now time.Time, loc *time.Location) float64 {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return -1
 	}
 
-	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	measurement := solarMeasurement()
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 	start := localDayStart(now, loc)
 
@@ -1048,7 +1054,7 @@ func queryInfluxSolarEnergyKWhRange(start time.Time, stop time.Time) float64 {
 		return -1
 	}
 
-	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	measurement := solarMeasurement()
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 
 	bucketLiteral, err := fluxStringLiteral(bucket)
@@ -1098,7 +1104,7 @@ func queryInfluxSolarTrend24h(now time.Time) []solarTrendPoint {
 		return nil
 	}
 
-	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	measurement := solarMeasurement()
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 	start := now.UTC().Add(-24 * time.Hour)
 

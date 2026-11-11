@@ -11,7 +11,7 @@ import (
 
 type unusualToolCall struct {
 	since, until time.Time
-	engine       string
+	subject      unusualSubject
 	ctx          context.Context
 }
 
@@ -28,13 +28,15 @@ func unusualToolDeps(res unusualResult, fixed bool) (assistantToolDeps, *unusual
 			return vesselStateData{Latitude: -19.25, Longitude: 146.8, PositionLastUpdateAge: 1}, nil
 		},
 		vesselView: func() (vesselView, error) {
-			return vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"}}}, nil
+			v := houseVessel()
+			v.Engines = []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"}}
+			return v, nil
 		},
 		displayUnits:   func() (string, error) { return "metric", nil },
 		unusualAnswers: func() ([]normalAnswer, error) { return nil, nil },
-		// Like scoreUnusualReadings, the stand-in cuts a window past seven days.
-		unusualReadings: func(ctx context.Context, since, until time.Time, engine string, _ []normalAnswer) unusualResult {
-			*call = unusualToolCall{since: since, until: until, engine: engine, ctx: ctx}
+		// Like scoreSubsystem, the stand-in cuts a window past seven days.
+		unusualReadings: func(ctx context.Context, since, until time.Time, subject unusualSubject, _ []normalAnswer) unusualResult {
+			*call = unusualToolCall{since: since, until: until, subject: subject, ctx: ctx}
 			r := res
 			r.Since, r.Until = since, until
 			if floor := until.Add(-normalScoreMaxSince); since.Before(floor) {
@@ -51,7 +53,7 @@ func runUnusualTool(t *testing.T, d assistantToolDeps, args string) (map[string]
 	// The boat's zone is remembered between calls in a file; keep this test's
 	// fix, or its absence, out of every other test's.
 	useFreshBoatZone(t)
-	mt := lookupMateTool("get_unusual_engine_readings")
+	mt := lookupMateTool("get_unusual_readings")
 	if mt == nil {
 		t.Fatal("the tool is not registered")
 	}
@@ -73,8 +75,8 @@ func TestUnusualTool_GivesBoatTimeLabelsWithIsoBesideThemAndTheFiguresInTheOpera
 	d, call := unusualToolDeps(res, true)
 	got, raw := runUnusualTool(t, d, `{}`)
 
-	if call.until != unusualNow || call.since != unusualNow.Add(-24*time.Hour) || call.engine != "" {
-		t.Fatalf("asked %+v, want the last 24 hours for every engine", call)
+	if call.until != unusualNow || call.since != unusualNow.Add(-24*time.Hour) || call.subject != (unusualSubject{}) {
+		t.Fatalf("asked %+v, want the last 24 hours for every subject", call)
 	}
 	stretches := got["stretches"].([]any)
 	if len(stretches) != 1 {
@@ -154,10 +156,10 @@ func TestUnusualTool_LimitDefaultsToFiveAndSaysWhatItLeftOut(t *testing.T) {
 	}
 }
 
-func TestUnusualTool_RefusesAnOutOfRangeLimitAndAnUnknownEngine(t *testing.T) {
+func TestUnusualTool_RefusesAnOutOfRangeLimitAndAnUnknownSubject(t *testing.T) {
 	d, _ := unusualToolDeps(unusualResultWith(), true)
-	mt := lookupMateTool("get_unusual_engine_readings")
-	for _, args := range []string{`{"limit":0}`, `{"limit":11}`, `{"since_iso":"yesterday"}`, `{"since_iso":"2027-01-01T00:00:00Z"}`, `{"engine":"centre"}`} {
+	mt := lookupMateTool("get_unusual_readings")
+	for _, args := range []string{`{"limit":0}`, `{"limit":11}`, `{"since_iso":"yesterday"}`, `{"since_iso":"2027-01-01T00:00:00Z"}`, `{"subject":"centre"}`} {
 		if _, _, err := mt.execute(d, context.Background(), json.RawMessage(args)); err == nil {
 			t.Errorf("%s must be refused", args)
 		}
@@ -167,11 +169,52 @@ func TestUnusualTool_RefusesAnOutOfRangeLimitAndAnUnknownEngine(t *testing.T) {
 func TestUnusualTool_AnEngineIsNamedByItsInstanceOrItsName(t *testing.T) {
 	d, call := unusualToolDeps(unusualResultWith(), true)
 	for _, name := range []string{"port", "Port", "Port engine", "starboard"} {
-		runUnusualTool(t, d, `{"engine":"`+name+`"}`)
-		want := strings.ToLower(strings.Fields(name)[0])
-		if call.engine != want {
-			t.Errorf("engine %q asked for %q, want %q", name, call.engine, want)
+		runUnusualTool(t, d, `{"subject":"`+name+`"}`)
+		want := unusualSubject{Subsystem: "engines", ID: strings.ToLower(strings.Fields(name)[0])}
+		if call.subject != want {
+			t.Errorf("subject %q asked for %+v, want %+v", name, call.subject, want)
 		}
+	}
+}
+
+func TestUnusualTool_TheHouseBankIsNamedByItsIdOrItsName(t *testing.T) {
+	d, call := unusualToolDeps(unusualResultWith(), true)
+	for _, name := range []string{"house", "House bank", "house bank"} {
+		got, _ := runUnusualTool(t, d, `{"subject":"`+name+`"}`)
+		if want := (unusualSubject{Subsystem: "electrical", ID: "house"}); call.subject != want {
+			t.Errorf("subject %q asked for %+v, want %+v", name, call.subject, want)
+		}
+		if got["subject"] != "House bank" {
+			t.Errorf("the result names the subject: %v", got["subject"])
+		}
+	}
+}
+
+// An unknown subject is refused with the names it could have been.
+func TestUnusualTool_AnUnknownSubjectNamesTheOnesThereAre(t *testing.T) {
+	d, _ := unusualToolDeps(unusualResultWith(), true)
+	useFreshBoatZone(t)
+	_, _, err := lookupMateTool("get_unusual_readings").execute(d, context.Background(), json.RawMessage(`{"subject":"centre"}`))
+	if err == nil || !strings.Contains(err.Error(), "Port engine") || !strings.Contains(err.Error(), "House bank") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUnusualTool_TheOldEngineArgumentIsNotAccepted(t *testing.T) {
+	d, _ := unusualToolDeps(unusualResultWith(), true)
+	useFreshBoatZone(t)
+	_, _, err := lookupMateTool("get_unusual_readings").execute(d, context.Background(), json.RawMessage(`{"engine":"port"}`))
+	if err == nil {
+		t.Fatal("an argument the tool no longer has must be refused, not ignored")
+	}
+}
+
+func TestUnusualTool_TheOldNameIsGone(t *testing.T) {
+	if lookupMateTool("get_unusual_engine_readings") != nil {
+		t.Fatal("the tool was renamed")
+	}
+	if _, ok := mcpPolicyFor("get_unusual_engine_readings"); ok {
+		t.Fatal("the outside assistant policy was renamed too")
 	}
 }
 
@@ -212,7 +255,7 @@ func TestUnusualTool_NotJudgedAndATrainingProblemAreGiven(t *testing.T) {
 // call, and a reading that cannot be converted does too. Neither falls back.
 func TestUnusualTool_UnitsThatCannotBeReadOrAppliedAreAnErrorNotAFallback(t *testing.T) {
 	useFreshBoatZone(t)
-	mt := lookupMateTool("get_unusual_engine_readings")
+	mt := lookupMateTool("get_unusual_readings")
 	res := unusualResultWith(oilStretch(time.Date(2026, 11, 9, 16, 10, 0, 0, time.UTC), 30))
 
 	d, call := unusualToolDeps(res, true)
@@ -244,7 +287,7 @@ func TestUnusualTool_PassesItsContextToTheQuery(t *testing.T) {
 	d, call := unusualToolDeps(unusualResultWith(), true)
 	useFreshBoatZone(t)
 	ctx := context.WithValue(context.Background(), key{}, "mark")
-	if _, _, err := lookupMateTool("get_unusual_engine_readings").execute(d, ctx, json.RawMessage(`{}`)); err != nil {
+	if _, _, err := lookupMateTool("get_unusual_readings").execute(d, ctx, json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if call.ctx == nil || call.ctx.Value(key{}) != "mark" {
@@ -253,14 +296,14 @@ func TestUnusualTool_PassesItsContextToTheQuery(t *testing.T) {
 }
 
 func TestUnusualTool_NotWiredIsAnError(t *testing.T) {
-	mt := lookupMateTool("get_unusual_engine_readings")
+	mt := lookupMateTool("get_unusual_readings")
 	if _, _, err := mt.execute(assistantToolDeps{now: func() time.Time { return unusualNow }}, context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not wired") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestUnusualTool_IsAReadOnlyToolForReviewsAndOutsideAssistants(t *testing.T) {
-	mt := lookupMateTool("get_unusual_engine_readings")
+	mt := lookupMateTool("get_unusual_readings")
 	if mt == nil || mt.effect != effectReads || mt.drawsCard || mt.collect != nil {
 		t.Fatalf("tool = %+v", mt)
 	}
@@ -272,16 +315,28 @@ func TestUnusualTool_IsAReadOnlyToolForReviewsAndOutsideAssistants(t *testing.T)
 	if !strings.Contains(strings.ToLower(mt.function.Description), "suggestion") || !strings.Contains(strings.ToLower(mt.function.Description), "never a diagnosis") {
 		t.Fatalf("description = %q", mt.function.Description)
 	}
-	p, ok := mcpPolicyFor("get_unusual_engine_readings")
-	if !ok || p.Status != mcpOfferedOff || p.Plain != "Unusual engine readings" {
+	p, ok := mcpPolicyFor("get_unusual_readings")
+	if !ok || p.Status != mcpOfferedOff || p.Plain != "Unusual readings" {
 		t.Fatalf("policy = %+v %v", p, ok)
 	}
-	if mcpToolDefByName("get_unusual_engine_readings") == nil {
+	if mcpToolDefByName("get_unusual_readings") == nil {
 		t.Fatal("not built into the outside assistant server")
 	}
 	for _, n := range mcpDefaultTools() {
-		if n == "get_unusual_engine_readings" {
+		if n == "get_unusual_readings" {
 			t.Fatal("it starts off")
 		}
+	}
+}
+
+// A stray key is not the tool's business. Only the old engine argument is refused,
+// and it says what to use.
+func TestUnusualTool_AStrayKeyIsIgnoredButTheOldEngineArgumentSaysToUseSubject(t *testing.T) {
+	d, _ := unusualToolDeps(unusualResultWith(), true)
+	runUnusualTool(t, d, `{"note":"hello"}`)
+	useFreshBoatZone(t)
+	_, _, err := lookupMateTool("get_unusual_readings").execute(d, context.Background(), json.RawMessage(`{"engine":"port"}`))
+	if err == nil || !strings.Contains(err.Error(), "subject") {
+		t.Fatalf("err = %v", err)
 	}
 }

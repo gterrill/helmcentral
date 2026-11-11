@@ -222,14 +222,14 @@ function UnusualLine({
         <ToggleGroup
           variant="outline"
           size="sm"
-          aria-label={`Your answer for the ${stretch.engine} stretch`}
+          aria-label={`Your answer for the ${stretch.subject_name} stretch`}
           value={shown ? [shown] : []}
           disabled={pending !== null}
           onValueChange={(v) => { void choose(v[0] as UnusualAnswer | undefined) }}
           className="flex-wrap"
         >
           {UNUSUAL_ANSWERS.map((a) => (
-            <ToggleGroupItem key={a.answer} value={a.answer} className="text-xs" aria-label={`${a.label}: ${stretch.engine} stretch`}>
+            <ToggleGroupItem key={a.answer} value={a.answer} className="text-xs" aria-label={`${a.label}: ${stretch.subject_name} stretch`}>
               {a.label}
             </ToggleGroupItem>
           ))}

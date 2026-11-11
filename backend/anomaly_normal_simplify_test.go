@@ -61,7 +61,7 @@ func TestScore_AnEnginesTrainingProblemIsWhatItIsReportedWith(t *testing.T) {
 	if len(notJudgedOfKind(res, "thin_band")) != 0 {
 		t.Fatalf("an engine with a problem is not a thin band: %+v", res.NotJudged)
 	}
-	got := notJudgedOfKind(res, "engine_problem")
+	got := notJudgedOfKind(res, "subject_problem")
 	if len(got) != 1 || got[0].Reason != sm.Problem || got[0].SubjectName != "Port engine" {
 		t.Fatalf("not judged = %+v", res.NotJudged)
 	}
@@ -73,7 +73,7 @@ func TestScore_AGateReadingSwitchedOffAfterTrainingStopsTheEngine(t *testing.T) 
 	c := newScoreCase(trainedPort(t), steadyScoreFeed(92))
 	c.ignored = map[string]bool{"propulsion.port.temperature": true}
 	res := c.score(24 * time.Hour)
-	got := notJudgedOfKind(res, "engine_problem")
+	got := notJudgedOfKind(res, "subject_problem")
 	if res.JudgedMinutes != 0 || len(got) != 1 || got[0].Reason != "coolant temperature is switched off, so this engine cannot be judged" {
 		t.Fatalf("judged %d, not judged = %+v", res.JudgedMinutes, res.NotJudged)
 	}
@@ -185,7 +185,9 @@ func TestGatherWatchReportInput_NoInfluxLeavesTheUnusualBlockOut(t *testing.T) {
 			env := newProposalEnv(t)
 			d := statusTestDeps(t)
 			d.alarmLog = func() *alarmLogStore { return nil }
-			d.unusualReadings = func(context.Context, time.Time, time.Time, string, []normalAnswer) unusualResult { return tc.res }
+			d.unusualReadings = func(context.Context, time.Time, time.Time, unusualSubject, []normalAnswer) unusualResult {
+				return tc.res
+			}
 			w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Sections: []string{"instruments"}, Thresholds: defaultWatchThresholds()}
 			in, err := gatherWatchReportInput(context.Background(), d, env.docs, w, vesselStatusTestNow, time.UTC)
 			if err != nil {
@@ -200,15 +202,8 @@ func TestGatherWatchReportInput_NoInfluxLeavesTheUnusualBlockOut(t *testing.T) {
 
 // --- D. what wakes the trainer -------------------------------------------------------
 
-func TestNormalInputsChangedBySave_RolesNoLongerWakeTheTrainer(t *testing.T) {
+func TestNormalInputsChangedBySave_InfluxStillWakesTheTrainer(t *testing.T) {
 	base := settingsPayload{}
-	withRoles := base
-	withRoles.Roles = &vesselRoles{HouseBank: "a"}
-	otherRoles := base
-	otherRoles.Roles = &vesselRoles{HouseBank: "b"}
-	if normalInputsChangedBySave(base, withRoles) || normalInputsChangedBySave(withRoles, otherRoles) {
-		t.Error("a house bank or alternator is not an engine: a role change wakes nothing")
-	}
 	influx := base
 	influx.Influxdb.URL = "http://x"
 	if !normalInputsChangedBySave(base, influx) {
@@ -222,10 +217,14 @@ var modelEquipment map[string]string
 
 func saveModelWithEngines(t *testing.T, path string, ids ...string) {
 	t.Helper()
-	sm := normalSubsystemModel{Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}}
+	sm := normalSubsystemModel{State: normalStateTrained, Subjects: map[string]normalSubjectModel{}, Regimes: map[string]normalRegime{}}
+	var learned []normalSubject
 	for _, id := range ids {
-		sm.Subjects[id] = normalSubjectModel{Name: id, EquipmentID: modelEquipment[id]}
+		subjects := normalEngineSubjects(vesselView{Engines: []vesselEngineSetting{{Instance: id, EquipmentID: modelEquipment[id]}}})
+		sm.Subjects[id] = normalSubjectModel{Name: id, EquipmentIDs: equipmentIDs(modelEquipment[id]), Features: learnedVerdicts(subjects[0].Features)}
+		learned = append(learned, subjects[0])
 	}
+	sm.Inputs = normalInputsOf(learned)
 	if err := saveNormalModel(path, normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: sm}}); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +310,7 @@ func TestBuildWatchUnusual_AClippedWindowSaysOnlyTheLastSevenDaysWereJudged(t *t
 // An engine that could not be judged is said even when the other engine was.
 func TestBuildWatchUnusual_AnEngineWithAProblemIsSaidBesideOneThatWasJudged(t *testing.T) {
 	res := unusualResult{JudgedMinutes: 300, NotJudged: []unusualNotJudged{
-		{Kind: "engine_problem", Subject: "port", SubjectName: "Port", Reason: "coolant temperature is switched off, so this engine cannot be judged"},
+		{Kind: "subject_problem", Subject: "port", SubjectName: "Port", Reason: "coolant temperature is switched off, so this engine cannot be judged"},
 	}}
 	u := buildWatchUnusual(res, "metric", time.UTC, vesselStatusTestNow)
 	if u == nil || !strings.Contains(u.Note, "Port: coolant temperature is switched off, so this engine cannot be judged.") {
@@ -415,4 +414,13 @@ func TestScore_AMinuteMissingTwoReadingsIsCountedOnce(t *testing.T) {
 	if total != 20 || len(missing) != 1 || !strings.Contains(missing[0].Reason, "oil pressure") || !strings.Contains(missing[0].Reason, "boost pressure") {
 		t.Fatalf("missing = %+v", missing)
 	}
+}
+
+// learnedVerdicts are the verdicts a model saved for these readings carries.
+func learnedVerdicts(features []normalFeature) []normalFeatureVerdict {
+	var out []normalFeatureVerdict
+	for _, f := range features {
+		out = append(out, normalFeatureVerdict{Key: f.Key, Path: f.Path})
+	}
+	return out
 }

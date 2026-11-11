@@ -242,8 +242,8 @@ func TestTrain_AnUnknownZoneStopsTheRunOnlyWhenARepairNeedsPlacing(t *testing.T)
 		t.Fatalf("err = %v, want %q", err, repairZoneProblem)
 	}
 	after, _ := loadNormalModel(path)
-	if after.LastAttempt == nil || after.LastAttempt.OK || after.LastAttempt.Problem != repairZoneProblem {
-		t.Fatalf("last attempt = %+v", after.LastAttempt)
+	if rec := after.Subsystems[normalSubsystemEngines]; rec.State != normalStateFailed || rec.Problem != repairZoneProblem {
+		t.Fatalf("record = %+v", rec)
 	}
 	if len(after.Subsystems[normalSubsystemEngines].Regimes) != len(before.Subsystems[normalSubsystemEngines].Regimes) || len(before.Subsystems[normalSubsystemEngines].Regimes) == 0 {
 		t.Fatal("the last good model must be kept")

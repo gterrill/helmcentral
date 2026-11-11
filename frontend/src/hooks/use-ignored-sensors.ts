@@ -54,6 +54,12 @@ export function useIgnoredSensors() {
     }))
   }, [])
 
+  // Several identifiers on or off at once, in one request that changes them all or none.
+  const setIgnored = useCallback(async (identifiers: string[], ignored: boolean): Promise<void> => {
+    const body = await apiRequest<IgnoredSensorsBody>(PATH, { method: 'PUT', json: { identifiers, ignored } })
+    setQueryData<IgnoredSensors>([PATH], normalise(body))
+  }, [])
+
   return {
     identifiers: data?.identifiers ?? NO_IDENTIFIERS,
     sensors: data?.sensors ?? NO_SENSORS,
@@ -61,6 +67,7 @@ export function useIgnoredSensors() {
     error: error?.message ?? null,
     ignore,
     unignore,
+    setIgnored,
     refresh: refetch,
   }
 }

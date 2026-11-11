@@ -142,7 +142,7 @@ func TestRunningDurationsAt_StillResetsOnAnyGap(t *testing.T) {
 
 // --- 4. the report's budget ----------------------------------------------------------------------
 
-func gatherWithUnusual(t *testing.T, ctx context.Context, fn func(context.Context, time.Time, time.Time, string, []normalAnswer) unusualResult) watchReportInput {
+func gatherWithUnusual(t *testing.T, ctx context.Context, fn func(context.Context, time.Time, time.Time, unusualSubject, []normalAnswer) unusualResult) watchReportInput {
 	t.Helper()
 	env := newProposalEnv(t)
 	d := statusTestDeps(t)
@@ -162,7 +162,7 @@ func TestGatherWatchReportInput_TheBudgetIsDerivedFromTheRunsContext(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var seen error
-	gatherWithUnusual(t, ctx, func(c context.Context, _, _ time.Time, _ string, _ []normalAnswer) unusualResult {
+	gatherWithUnusual(t, ctx, func(c context.Context, _, _ time.Time, _ unusualSubject, _ []normalAnswer) unusualResult {
 		seen = c.Err()
 		return unusualResult{}
 	})
@@ -176,7 +176,7 @@ func TestGatherWatchReportInput_AResultThatCameBackIsKeptEvenIfTheDeadlinePassed
 	old := watchUnusualBudget
 	watchUnusualBudget = 20 * time.Millisecond
 	defer func() { watchUnusualBudget = old }()
-	in := gatherWithUnusual(t, context.Background(), func(c context.Context, _, _ time.Time, _ string, _ []normalAnswer) unusualResult {
+	in := gatherWithUnusual(t, context.Background(), func(c context.Context, _, _ time.Time, _ unusualSubject, _ []normalAnswer) unusualResult {
 		time.Sleep(60 * time.Millisecond)
 		return unusualResult{JudgedMinutes: 77}
 	})

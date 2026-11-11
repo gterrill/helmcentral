@@ -54,6 +54,10 @@ type vesselView struct {
 	// included) the operator answered "this boat has none". It reads as unset
 	// everywhere else in this view; only the setup status looks at it.
 	RolesNone map[string]bool
+	// RoleItems is the equipment item each role resolved to, by role field
+	// ("port_alternator"). A role that is unset, "none" or no longer fits is not in
+	// it.
+	RoleItems map[string]string
 }
 
 // vesselElectricalSettings holds bare SignalK instance ids as strings, so "0"
@@ -77,6 +81,8 @@ type vesselElectricalSettings struct {
 type vesselSolarSetting struct {
 	Instance string
 	Name     string
+	// EquipmentID is the item that owns the controller.
+	EquipmentID string
 }
 
 // solarName is the operator's name for solar controller id, or "".
@@ -290,7 +296,7 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 		case sourceBattery:
 			v.Batteries = append(v.Batteries, vesselBatterySetting{Instance: it.Instance, Name: it.Name})
 		case sourceSolar:
-			v.Solar = append(v.Solar, vesselSolarSetting{Instance: it.Instance, Name: it.Name})
+			v.Solar = append(v.Solar, vesselSolarSetting{Instance: it.Instance, Name: it.Name, EquipmentID: it.ID})
 		case sourceTank:
 			if v.Tanks == nil {
 				v.Tanks = map[string]string{}
@@ -321,6 +327,10 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 		if !ok {
 			continue
 		}
+		if v.RoleItems == nil {
+			v.RoleItems = map[string]string{}
+		}
+		v.RoleItems[spec.field] = it.ID
 		switch spec.field {
 		case "house_bank":
 			v.HouseBank = &vesselHouseBankSetting{

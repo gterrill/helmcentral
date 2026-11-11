@@ -7,6 +7,9 @@ twin gate gains a single-engine form, and the live detector is untouched.
 Amends [ADR 0255](0255-a-watch-report-gives-each-part-one-job.md): the report
 gains a block that is not a section and not a finding.
 
+Amended (2026-11-11): the house bank is the second subsystem, as the generic core
+promised. See The house bank. The Mate tool becomes `get_unusual_readings`.
+
 ## Context
 
 The engine detectors Helmcentral has are rules. The twin differentials of
@@ -67,8 +70,16 @@ rpm (see Rejected).
 `anomaly_normal.go` knows no engine and no path. A subsystem is a list of
 readings, a function that places a minute in a regime, a gate and a rule for which
 alarms belong to which subject (`normalSubsystem`). The saved model is keyed
-subsystem, then regime, then statistics, so the house electrical system (a later
-PR) adds a key and reshapes nothing. The engines are `anomaly_normal_engines.go`.
+subsystem, then regime, then statistics, so the house bank adds a key and reshapes
+nothing. The engines are `anomaly_normal_engines.go`; the house bank is
+`anomaly_normal_house.go`.
+
+Every sentence the core writes comes from the subsystem (`normalWording`): how a
+band follows a figure ("at 1,800 to 2,000 rpm"), what the minutes judged are
+called, why a minute outside the gate is not judged, and what a run is. A reading
+names itself (`normalFeature.Name`) where its path does not, so no shared path says
+"engine". A subsystem with nothing to learn from, such as a boat with no engines,
+is skipped with a sentence and never costs another its run.
 
 - **Subjects.** Every configured engine with an instance. There is no two-engine
   minimum: an engine is compared with itself. An engine is named as the alarm cards
@@ -86,6 +97,89 @@ PR) adds a key and reshapes nothing. The engines are `anomaly_normal_engines.go`
   and for the last five minutes rpm within 50 rpm and coolant warm. A minute missing
   rpm or coolant fails the gate and restarts the running clock, as does a missing
   minute.
+
+### The house bank
+
+One subject, `house`, named "House bank", chosen by the house bank role. Its
+equipment links are the bank and every role item that charges it: the alternators,
+shore charger, inverter and generator. A repair logged on any of them leaves out the
+bank's fault range. A boat with no house bank skips the subsystem with "No house
+bank is chosen", saved as that subsystem's record. That is not a failed run.
+
+- **Readings.** Bank voltage (a 0.05 V floor), bank current (2 A) and state of
+  charge (a point), all required by the gate. Charge may sit on one value, a bank on shore power
+  being full for nearly every minute, so it is exempt from the constant test. Voltage and current may be named;
+  charge, like rpm, only places the minute. The alternators are read one
+  by one and judged as one reading, their sum for the minute (`SumOf`): with no
+  alternator reporting the sum is missing and nothing stands in for it, and motoring
+  on one engine is judged, not a sender gone quiet. Each alternator's current is a
+  part of that sum (`Component`): read, never fitted or judged, and subject to the
+  ignored list. Settings shows one "Alternator current" row whose switch puts all the
+  parts on or off together, and with any part off the sum is not judged, since a
+  partial sum would be a different reading. An alarm on an alternator is an alarm
+  on the sum. The total is judged on whichever alternators report that minute, and a
+  missing one is never a quiet sender: a dead alternator sender while motoring shows
+  as an unusual stretch, the total or the bank's current running low. With none reporting the total is missing, and a
+  minute in a band that uses it is not judged. The sum itself is never reported as
+  a silent sender. The shore charger's current and
+  the inverter's AC load are explained readings too. The AC load
+  is published under three names, and the first with data in the window is used
+  (`normalFeature.Group`).
+- **Every source reading only places the minute.** Which sources are on comes from
+  four readings, none of which is fitted or judged (`Placing`): any
+  configured engine's revolutions above zero (the engines), the inverter's AC input
+  power, the shore AC input current, and solar, from each controller's `panelPower`
+  or the Victron total when there is none. A minute with one of them missing is a
+  minute with that source off, and it is never dropped for the gap: an engine
+  publishes nothing while it is off, the charger no shore input while the dock is
+  unplugged, and a controller nothing at night. These readings are read from any
+  sender, not the one pinned for the fitted readings, are out of the ignored
+  list's reach and have no switch in Settings. Nothing is ever filled in. A guard
+  for a silent revolutions sender was considered and dropped, because an alternator
+  that charges with no revolutions reported is rare and the guard dropped minutes
+  that were fine. There is no matching of an alternator to an engine. Known cost, chosen on purpose:
+  a dead sender for any of these reads as that source being off, so a failed
+  revolutions sender reads as the engines being stopped. The thresholds
+  are the overnight model's (`shorePowerPresentAmps`, 0.5 A, and
+  `inverterChargingPresentWatts`, 100 W), and solar from 100 W until it falls under
+  50 W, so cloud at the edge does not split a spell. Solar holds on in that band for
+  no longer than the scoring lead-in (15 minutes, `normalSolarHold`) and not across a
+  gap longer than a run's, so a minute is classified the same way in training and
+  scoring: the house bank is scored from the hold plus the gate's steady window
+  before the window (`LeadIn`). Classification is done once per minute (`Annotate`); a minute that skipped
+  it is a programming error and panics.
+- **Readings fitted where they report.** The alternators' current, the charger's
+  current and the inverter's AC load are explained readings, never required and
+  never placing (`PerRegime`). A regime fits one only when at least 80 % of its
+  minutes carry it, and the usual constant rule still applies, so the alternators
+  are fitted in the engines bands and the charger in the shore bands. A minute
+  missing a reading its regime uses is not judged, and that sender going quiet there
+  is reported like any other. A reading of this kind is not left out for being
+  missing from the minutes where its source is off.
+- **Regimes.** The set of sources and a quarter of the charge: under 40 %, 40 to
+  60 %, 60 to 80 % and 80 to 100 %. The key reads `house/solar+inv/soc60`, the same whether or not a generator is
+  chosen, and the label
+  "on solar and generator, 60 to 80 % charge". Nothing charging is "with nothing
+  charging". A reading fitted only where it reports (`PerRegime`) that holds one value
+  through a regime leaves that regime's fit (`dropStillColumns`). The engines' readings
+  are fitted as they always were.
+- **The gate.** The last ten minutes follow one another and had the same sources. A
+  run is an unbroken spell of one set of sources, and a gap of up to five minutes
+  joins it. A band needs an hour from two runs, as for the engines.
+- **Alarms.** The subject names its paths (`AlarmPaths`), because the bank's id is in
+  none of them: the bank, the alternators, the charger, the inverter, solar and the
+  generator under `electrical.`, and `helmcentral.anomaly.battery.fullBankCharging`.
+  Any alarm there takes its minutes out, with the same padding: a BMS fault such as
+  a high cell voltage, a charger, solar or generator fault, an alarm on an
+  alternator. The one exception is the operator's own rule for the bank's voltage or
+  charge going below a limit (a rule whose operator is "below"). Low is the bank
+  being used, and taking those minutes out would keep the
+  low bands from ever being learned. This replaces the engines' rule that only an
+  alarm on a reading the model uses counts. A high alarm at the bank's voltage or
+  charge, one the boat's own monitor raised, or one whose rule has since been
+  deleted, is a fault and takes its minutes out.
+- **Wording.** "House bank voltage ran low from 2.10 AM to 2.40 AM: 25.6 V against
+  a usual 26.1 V with nothing charging, 60 to 80 % charge."
 
 ### Which readings are used
 
@@ -176,10 +270,12 @@ minutes.
 
 `data/anomaly-normal.json` is relearned from scratch every 24 hours and when its inputs
 change: the InfluxDB settings or token, an engine added, removed or given a new
-instance when an equipment item is saved, or an engine reading switched on or off.
-A house bank or alternator role is not an input. One hook, `normalInputsChanged`, wakes the trainer, which waits 30 seconds for a
-burst of changes to end and runs once. At start it waits out the rest of the 24 hours
-when the last run succeeded from the same source. Each
+instance when an equipment item is saved, a role saved (the house bank, an
+alternator, the shore charger, the inverter or the generator), or an engine or house
+bank reading switched on or off. One hook, `normalInputsChanged`, wakes the trainer, which waits 30 seconds for a
+burst of changes to end and runs once. One 24 hour schedule trains every subsystem together. At start it waits out the
+rest of it when every subsystem was attempted within it, from the same source, and
+none failed; otherwise it trains them all. Each
 run reads the last 90 days of stored minutes, takes out the minutes that overlap an
 alarm for the same engine (from ten minutes before it was raised to five after it
 cleared, an open alarm to the end of the window), and fits every band that has an
@@ -202,9 +298,23 @@ hour of judged minutes from at least two runs.
   for 183 days, then are dropped.
 - **Shift.** A refitted band saves how far its new mean moved, seen through the old
   covariance. It is not shown yet.
-- **Failure.** A run that fails leaves the saved model alone and records why in
-  `last_attempt`. A run that learns no band where the saved model has some does the
-  same. A file that does not parse is reported and left untouched.
+- **One record per subsystem.** The file holds, for each subsystem, its latest
+  attempt (`state`: trained, skipped with its reason, or failed with its problem; when;
+  and the subjects, items and readings it was made from) beside the model from the
+  last run that learned something. A subsystem is trained on its own: one that fails,
+  or that learns no band where its saved model has some, keeps that model and says
+  why, and the others still train. A subsystem with nothing set up is skipped but
+  keeps its earlier model in the record, so a brief glitch in a role or an instance
+  loses no history. A kept model is used, and shown in Settings, only while the
+  subjects, items and readings it was learned from (`ModelInputs`) are what the boat
+  has now; with nothing set up the reason is given, and with something else the
+  subsystem is waiting to be learned. The first failure is the run's. A good run clears
+  a failure or a skip, and a failure clears a skip. Settings, the report and the tool
+  each read their own subsystem's record, so a failed first attempt still has its
+  group and its problem. The wake check compares a subsystem's inputs with its own
+  last attempt, not its model, so one that keeps failing is not trained again for
+  every unrelated equipment save. A file that does not parse is reported and left
+  untouched.
 
 ### Scoring
 
@@ -223,7 +333,14 @@ normal is counted by band. A minute missing readings its band uses is counted on
 under all of them, and is never filled in. Unusual means above the band's threshold. A stretch is three or
 more unusual minutes in a row on one engine, which may cross a band. They rank by
 peak distance over threshold, then length, and each carries a stable id,
-`engines:<engine>@<start>`.
+`<subsystem>:<subject>@<start>`.
+
+The report and the tool score every subsystem the boat has something set up for
+(`scoreUnusualAll`) and merge the results: stretches ranked together by peak
+distance over threshold, minutes and notes added up. A subsystem that cannot be
+judged, for example one with no model yet, is one note ("House bank: no learned
+normal yet.") and does not hide the others. A boat with no house bank hears
+nothing about one.
 
 ### Where it shows
 
@@ -236,11 +353,12 @@ peak distance over threshold, then length, and each carries a stable id,
   says so. A boat with no InfluxDB gets no block at all, since Settings already says
   it. An InfluxDB that is set up and fails still shows its error. A window cut to the
   last 7 days says so.
-- **`get_unusual_engine_readings`** gives Mate, reviews and outside assistants the
-  same stretches, with boat-time labels, UTC instants, the model's age, the minutes
+- **`get_unusual_readings`** gives Mate, reviews and outside assistants the
+  same stretches, for the engines and the house bank or one `subject` of them, with boat-time labels, UTC instants, the model's age, the minutes
   not judged and why. It is offered to outside assistants switched off.
 - **Settings, InfluxDB** shows when and from where the normal was learned, the bands
-  per engine, and each engine's readings with a switch and the verdict beside it.
+  per engine, and each engine's and the house bank's readings with a switch and the
+  verdict beside it, grouped under each subsystem's heading.
 
 ### The switch is the ignored-sensor list
 
@@ -284,15 +402,16 @@ a fault started. Both change the next training and nothing else: nothing is resc
 and no model is edited by hand.
 
 - **Answers.** The watch report's Unusual block keeps its `lines` as sentences and gains
-  `stretches`, indexed like them, each with the stretch's id, subsystem, subject, engine
-  name, start and end. An answer is recorded from those without scoring again. The
+  `stretches`, indexed like them, each with the stretch's id, subsystem, subject, the
+  subject's name (`subject_name`), start and end. An answer is recorded from those without scoring again. The
   operator answers real, normal or unknown, and can change it.
   `PUT /api/anomaly/normal/answers` takes `{watch_id, run_id, index, answer}`. The server
   reads the stretch from the stored run's `stretches[index]` and uses its subsystem,
   subject and times, so a client cannot answer a range it invented, and no id has to be
   escaped in a path. It refuses with a 400 a bad answer, a run that is not there, a line
-  with no stretch, and an engine that is no longer set up ("This engine is no longer set
-  up. It may have been renumbered or removed."). The file `data/anomaly-normal-answers.json`
+  with no stretch, and a subject that is no longer set up ("This engine is no longer set
+  up. It may have been renumbered or removed.", or for the bank "The house bank is no
+  longer set up. It may have been changed or removed."). The file `data/anomaly-normal-answers.json`
   keeps one engine's answers as ranges that never overlap: the latest answer replaces the
   parts of earlier ones it overlaps, trimming or splitting them, so training, scoring, the
   page and Mate all read the same set. It cannot be rebuilt. The run as the page reads it
@@ -327,7 +446,7 @@ and no model is edited by hand.
   date in a last column, "started showing". The only importer reads another program's
   export, which has no such field, so there is no import to round-trip it.
 - **Failure.** An answers file or a maintenance log that cannot be read stops the run
-  and is recorded in `last_attempt`, as an unopened alarm log is. Neither is replaced by
+  and is recorded as the subsystem's failure, as an unopened alarm log is. Neither is replaced by
   "no answers". A repair whose dates cannot be placed because the boat's zone is unknown
   stops the run the same way, with "The boat's time zone is unknown, so repair dates
   could not be placed.", and only when there is a repair to place.
@@ -345,7 +464,7 @@ and no model is edited by hand.
   sorts them once and walks them alongside the minutes. An engine's linked equipment item
   is saved with the model, so relinking it wakes the trainer. A model saved before this
   change retrains once on the first equipment save after the upgrade.
-- **Mate.** `get_unusual_engine_readings` gives each stretch the operator's answer
+- **Mate.** `get_unusual_readings` gives each stretch the operator's answer
   (`operator_answer`) from the latest answer whose range overlaps it, not only an exact
   id, since a stretch's start can move a minute between two scorings. A stretch called
   normal is not raised again.
@@ -406,8 +525,18 @@ while the healthy one is at 1,800.
 - **Engine renumbering.** An answer is saved against an engine instance. If the instance is
   later given to another engine, the answer applies to the new one. Answers do not follow
   an engine through a renumbering, and nothing yet asks.
-- **House electrical (later).** Charging sources by state of charge, with a gate of
-  about ten minutes of a stable source set, in the same file and with the same trainer.
+- **House electrical.** Built; see The house bank.
+- **Per-controller solar.** Each solar controller is its own reading, so a boat with
+  several has several. Their sum decides whether solar is charging, and the sum itself
+  is not a reading.
+- **The voltage readout battery** is not part of the house bank's equipment links.
+- **Choosing a generator role** changes the house subject's equipment links, so the
+  house model is not used until the retrain that the change wakes finishes, though
+  the band keys do not change.
+- **One resolver for the flags.** The per-reading flags (`PerRegime`, `AllowConstant`,
+  `Component`, `SumOf`, `Placing`, `Group`) are resolved in several places: training,
+  scoring, the ignored list and Settings. One "effective ignored set, and is this
+  reading off" resolver would replace them.
 - **A drift line and live scoring** are out of this change.
 
 ## Consequences

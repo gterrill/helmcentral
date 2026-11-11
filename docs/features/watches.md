@@ -121,21 +121,24 @@ why when it can't.
 - **Instruments:** Any sensor that has frozen, gone out of range, or gone silent.
 
 A watch that covers Instruments also gets an **Unusual** block, under **Needs a
-look**. It lists up to two stretches where an engine's readings were out of the
-ordinary for that engine. For example, "Port engine oil pressure ran low from
-2.10 AM to 2.40 AM: 280 kPa against a usual 340 kPa at 1,800 to 2,000 rpm". It's
-a suggestion from what Helmcentral has learned about each engine, not one of your
-thresholds. So it's never counted as something to look at, and it doesn't change
+look**. It lists up to two stretches where an engine's or the house bank's
+readings were out of the ordinary for that engine or the bank, worst first. For
+example, "Port engine oil pressure ran low from 2.10 AM to 2.40 AM: 280 kPa
+against a usual 340 kPa at 1,800 to 2,000 rpm". For the bank it might read
+"House bank voltage ran low from 2.10 AM to 2.40 AM: 25.6 V against a usual 26.1
+V with nothing charging, 60 to 80 % charge". It's a suggestion from what Helmcentral has learned about each
+engine and the bank, not one of your thresholds. So it's never counted as something to look at, and it doesn't change
 the title of a notification. Mate may mention it, but won't treat it as a finding
 or give a cause. When Helmcentral can't judge, the block says why, for example
 "Port engine: coolant temperature is switched off, so this engine cannot be
-judged." Under each stretch are three buttons, **Real**, **Normal** and **Don't know**,
+judged." If it can judge the engines but has learned nothing for the house bank
+yet, it says that in the same way and still shows the engines. Under each stretch are three buttons, **Real**, **Normal** and **Don't know**,
 for telling Helmcentral what you think of it. Your answer shows under the stretch,
 and you can change it. **Normal** means Helmcentral won't point out those minutes
-again. The same pattern on another day can still be raised, until the engine has
-run that way enough to learn it. Reports made before the buttons existed show the sentence
+again. The same pattern on another day can still be raised, until the engine or the
+bank has run that way enough to learn it. Reports made before the buttons existed show the sentence
 alone. When you have no InfluxDB set up, the block isn't shown at all. When the
-engines didn't run, or ran and nothing stood out, it isn't shown either. A watch
+engines didn't run and the bank's charging kept changing, or they ran and nothing stood out, it isn't shown either. A watch
 that was away for more than a week judges only the last 7 days and says so. See
 [Anomaly detection](anomaly-detection.md#unusual-engine-readings) for what each
 answer does.

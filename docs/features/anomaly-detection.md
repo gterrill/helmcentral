@@ -12,10 +12,13 @@ is what they cover:
   rpm.
 - **Unusual engine readings:** A stretch where one engine's readings, taken
   together, look different from how that engine normally runs.
+- **Unusual house bank readings:** A stretch where the house bank's voltage and
+  current look different from how the bank normally behaves with the same things
+  charging it.
 
-Apart from the last one, each raises an ordinary alarm, with severity, dwell,
-acknowledge, notifications and the alarm log behind it. Unusual engine readings
-are a suggestion in your watch reports and never an alarm. See
+Apart from the last two, each raises an ordinary alarm, with severity, dwell,
+acknowledge, notifications and the alarm log behind it. Unusual engine and house
+bank readings are a suggestion in your watch reports and never an alarm. See
 [Alarms](alarms.md) for how the alarm system itself behaves.
 
 See [Set up your vessel](../how-to/set-up-your-vessel.md) for picking the
@@ -171,6 +174,9 @@ Here's how it works:
   InfluxDB settings, add, remove or re-number an engine, or switch a reading on
   or off.
 
+The house bank is learned the same way, in its own right. See
+[Unusual house bank readings](#unusual-house-bank-readings).
+
 It needs InfluxDB set up under **Settings → InfluxDB**. Without it the watch
 report leaves the block out, and Settings and Mate say "No learned normal:
 InfluxDB is not set up." If you keep a bucket of
@@ -255,8 +261,8 @@ five cases:
   quiet while the engine runs, the report says so and Helmcentral relearns at the
   next update.
 
-**Settings → InfluxDB** lists each engine's readings with the reason beside any it
-left out. A sender you repair starts to count by itself once it has an hour of
+**Settings → InfluxDB** lists each engine's readings, and the house bank's, with
+the reason beside any it left out. A sender you repair starts to count by itself once it has an hour of
 running.
 
 You can also switch a reading off there yourself. The switch uses the same list
@@ -276,6 +282,94 @@ reading is off, and the switch stays there for you to turn it back on.
 - **Small changes:** A change smaller than about 1°C or 10 kPa is never called
   unusual, however steady the reading has been. A coolant sender that sits on one
   value and now and then dips a degree won't set it off.
+
+## Unusual house bank readings
+
+Helmcentral learns what's normal for your house bank from the bank's own
+history, and points out a stretch when its readings stop looking like that. It's
+the same kind of suggestion as for the engines: it never raises an alarm, and it
+never says why. A bank that sags on a quiet night, or charges at less than it
+usually does from the same source, shows up even when no alarm threshold has
+been crossed. Here's how it works:
+
+- **What it learns:** The bank's voltage and current, and how they move together,
+  for each combination of what's charging it and how full it is. It also takes in
+  the alternators' current added together, the shore charger's current and the
+  inverter's AC load, for whichever of those the boat has. That's how it
+  notices a voltage that's fine on its own but low for the current the bank is
+  taking.
+- **What's charging:** Four things, any number at once. Shore power counts when
+  the shore charger draws more than half an amp from the dock. Solar counts at
+  100 W or more, and keeps counting until it falls under 50 W. The generator counts when the inverter's AC input draws more than
+  100 W, and that reads as "AC input" if you haven't chosen a generator. The
+  engines count when any engine's revolutions are above zero. With none of them,
+  the bank is "with nothing charging".
+- **When a reading is missing:** An engine publishes nothing while it's off. The
+  charger publishes no shore input while the dock is unplugged. A solar controller
+  publishes nothing at night. Helmcentral reads each of those as that source being
+  off, and doesn't judge those readings, only uses them to tell what's charging.
+  Helmcentral never fills a gap in with a zero.
+- **How full:** Four bands of charge: under 40 %, 40 to 60 %, 60 to 80 % and 80 to
+  100 %. A bank on solar at 70 % is compared with itself on solar at 70 %.
+- **What counts as unusual:** Three minutes or more in a row. Helmcentral names
+  the reading that stood out most. It gives that figure against the usual one in
+  your units, for example "House bank voltage ran low from 2.10 AM to 2.40 AM:
+  25.6 V against a usual 26.1 V with nothing charging, 60 to 80 % charge."
+- **Where you see it:** In the same **Unusual** block of a
+  [watch report](watches.md) as the engines. The two share its two lines, worst
+  first. You can also ask Mate, and an [outside assistant](outside-assistants.md)
+  can read it once you switch that on for its token.
+- **What it learns from:** Your InfluxDB history over the last 90 days, for the
+  minutes when the same things had been charging for the last ten. Minutes close
+  to an alarm are left out. That means any alarm on the bank, an alternator, the
+  shore charger, the inverter, solar or the generator, such as a battery
+  management fault, and the full-bank charging warning. A rule of yours
+  for the bank's voltage or charge going below a limit isn't one, because a low
+  bank is the bank being used. A high one is. So are the
+  minutes of a stretch you've said was real. So are the days of a repair logged
+  on the bank or on any of those items with a start date. See [Telling it what you think](#telling-it-what-you-think).
+- **How much it needs:** An hour of such minutes from at least two separate runs
+  before it judges a combination. A run is an unbroken spell with the same things
+  charging, and a gap of up to five minutes doesn't end it. Until then the report
+  says so, for example "Not judged: the house bank on solar and generator, 60 to
+  80 % charge has 22 minutes of history, needs 60". A combination you stop using
+  keeps its last normal for about six months.
+- **When it updates:** Every 24 hours. It also updates straight away when you
+  change the InfluxDB settings or switch a reading on or off. The same goes when
+  you choose or change the house bank, an alternator, the shore charger, the
+  inverter or the generator.
+
+It needs a house bank chosen under **Settings → SignalK**, and InfluxDB set up
+under **Settings → InfluxDB**. Without a bank, Settings says "No house bank is
+chosen." and the engines are learned as usual. A boat with a bank but no engines
+is learned too.
+
+A few things work as they do for the engines:
+
+- **Your answers:** You answer a stretch with **Real**, **Normal** or **Don't
+  know**, and the answer is used the same way.
+- **Readings it leaves out:** A reading that never changes, is often missing or is
+  impossible is left out. **Settings → InfluxDB** lists the bank's readings with
+  the reason beside any it left out, and a switch for each. The alternators are one
+  row, "Alternator current", and its switch turns all of them off together. The inverter's load is one row
+in the same way, whatever the names it is published under.
+- **Readings that come and go:** The shore charger's current and the inverter's load
+  are learned only for the combinations where they report. A minute missing one of
+  them in a combination that normally has it isn't judged, and a sender that goes
+  quiet there is reported as gone quiet.
+- **The alternators:** They are judged together, as one total of whichever report
+  that minute. If one alternator's sender dies while you motor, the total, or the bank's
+  current, shows as running low. If none report, the minute isn't judged.
+
+Where it stops:
+
+- **While the charging changes:** The first ten minutes after something starts or
+  stops charging aren't judged, because the bank is still settling.
+- **A new bank or a changed setup:** A different battery bank, or a changed
+  charger, changes what's normal. Until Helmcentral has learned it, it can read as
+  unusual.
+- **A cause:** It says which reading and which way. It doesn't say what's wrong.
+- **A live alarm:** It looks at a stretch afterwards, when a report or Mate asks.
 
 ## Engine stumble
 

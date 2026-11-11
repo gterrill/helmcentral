@@ -117,7 +117,7 @@ func TestUpdateSettingsSavesAndRejectsElectricalRoles(t *testing.T) {
 	if saved.Electrical != want {
 		t.Fatalf("electrical: got %+v", saved.Electrical)
 	}
-	if len(saved.Solar) != 1 || saved.Solar[0] != (vesselSolarSetting{Instance: "289", Name: "Port array"}) {
+	if len(saved.Solar) != 1 || (saved.Solar[0].Instance != "289" || saved.Solar[0].Name != "Port array" || saved.Solar[0].EquipmentID == "") {
 		t.Fatalf("solar names come from the mapped item: got %+v", saved.Solar)
 	}
 

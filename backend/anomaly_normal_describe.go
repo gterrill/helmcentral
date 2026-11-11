@@ -10,8 +10,9 @@ import (
 // boat-time labels with the UTC instants beside them, and the figures in the
 // operator's units.
 type unusualStretchView struct {
-	ID        string   `json:"id"`
-	Engine    string   `json:"engine"`
+	ID string `json:"id"`
+	// Subject is the engine or the house bank, as the operator names it.
+	Subject   string   `json:"subject"`
 	From      string   `json:"from"`
 	To        string   `json:"to"`
 	FromISO   string   `json:"from_iso"`
@@ -42,8 +43,13 @@ func describeUnusualStretch(st unusualStretch, system string, loc *time.Location
 	if loc == nil {
 		loc = time.UTC
 	}
+	sub, ok := normalSubsystemNamed(st.Subsystem)
+	if !ok {
+		return unusualStretchView{}, fmt.Errorf("stretch %s is of %q, which is not learned", st.ID, st.Subsystem)
+	}
+	band := sub.Wording.BandPrefix + st.Band
 	v := unusualStretchView{
-		ID: st.ID, Engine: st.SubjectName, Minutes: st.Minutes, Band: st.Band,
+		ID: st.ID, Subject: st.SubjectName, Minutes: st.Minutes, Band: st.Band,
 		From: boatDayClock(st.Start, loc), To: boatDayClock(st.End, loc),
 		FromISO: st.Start.UTC().Format(time.RFC3339), ToISO: st.End.UTC().Format(time.RFC3339),
 	}
@@ -55,12 +61,19 @@ func describeUnusualStretch(st unusualStretch, system string, loc *time.Location
 
 	top := st.Top
 	if top.Key == "" {
-		v.Summary = fmt.Sprintf("%s's readings were outside their usual pattern from %s to %s at %s.", st.SubjectName, from, to, st.Band)
+		v.Summary = fmt.Sprintf("%s's readings were outside their usual pattern from %s to %s %s.", st.SubjectName, from, to, band)
 		return v, nil
 	}
-	reading := sensorQuantity(top.Path)
+	// A feature that names itself in full ("House bank voltage") is not worded
+	// from the subject and its path.
+	label := top.Name
+	reading := top.Name
 	if reading == "" {
-		reading = top.Key
+		reading = sensorQuantity(top.Path)
+		if reading == "" {
+			reading = top.Key
+		}
+		label = sensorLabel(st.SubjectName, reading)
 	}
 	unit, conv, err := describeDisplayFor(top.Path, top.SIUnit, system)
 	if err != nil {
@@ -69,8 +82,8 @@ func describeUnusualStretch(st unusualStretch, system string, loc *time.Location
 	shown := func(x float64) float64 { return roundTo(conv(x), statusDecimals(unit)) }
 	value, usual := shown(top.StretchMean), shown(top.Usual)
 	v.Reading, v.Direction, v.Unit, v.Value, v.Usual = reading, top.Direction, unit, &value, &usual
-	v.Summary = fmt.Sprintf("%s ran %s from %s to %s: %s %s against a usual %s %s at %s.",
-		sensorLabel(st.SubjectName, reading), top.Direction, from, to,
-		strconv.FormatFloat(value, 'f', -1, 64), unit, strconv.FormatFloat(usual, 'f', -1, 64), unit, st.Band)
+	v.Summary = fmt.Sprintf("%s ran %s from %s to %s: %s %s against a usual %s %s %s.",
+		label, top.Direction, from, to,
+		strconv.FormatFloat(value, 'f', -1, 64), unit, strconv.FormatFloat(usual, 'f', -1, 64), unit, band)
 	return v, nil
 }

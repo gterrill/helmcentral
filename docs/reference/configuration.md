@@ -205,7 +205,7 @@ Its keys are `enabled`, `url`, `org` and `bucket`, and one that's optional:
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `minute_bucket` | blank | A bucket that already holds one-minute averages of your readings. Helmcentral learns each engine's usual readings from it for [unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings). Leave it blank and Helmcentral works the minutes out from the main bucket. |
+| `minute_bucket` | blank | A bucket that already holds one-minute averages of your readings. Helmcentral learns the usual readings of each engine and of the house bank from it for [unusual engine readings](../features/anomaly-detection.md#unusual-engine-readings) and [unusual house bank readings](../features/anomaly-detection.md#unusual-house-bank-readings). Leave it blank and Helmcentral works the minutes out from the main bucket. |
 
 If you name a bucket and Helmcentral can't read it, it says so and keeps the
 normal it learned before. It doesn't quietly read the main bucket instead. The

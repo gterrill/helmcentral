@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
 
 /*
-get_unusual_engine_readings (ADR 0276): the stretches of a past window in which
-an engine's readings were unusual for the engine, against a normal learned from
-its own history. A read-only suggestion for Mate and for outside assistants to
-mention as worth a look, never a diagnosis and never a cause.
+get_unusual_readings (ADR 0276): the stretches of a past window in which an
+engine's or the house bank's readings were unusual for it, against a normal
+learned from its own history. A read-only suggestion for Mate and for outside
+assistants to mention as worth a look, never a diagnosis and never a cause.
 */
 
 const (
@@ -23,26 +24,27 @@ const (
 )
 
 type unusualToolArgs struct {
-	SinceISO string `json:"since_iso"`
-	Engine   string `json:"engine"`
-	Limit    *int   `json:"limit"`
+	SinceISO string  `json:"since_iso"`
+	Subject  string  `json:"subject"`
+	Engine   *string `json:"engine"`
+	Limit    *int    `json:"limit"`
 }
 
 type unusualToolLearned struct {
 	Learned    string         `json:"learned"`
 	LearnedISO string         `json:"learned_iso"`
 	Source     string         `json:"source"`
-	Bands      map[string]int `json:"bands_by_engine"`
+	Bands      map[string]int `json:"bands_by_subject"`
 }
 
 type unusualToolNotJudged struct {
-	Engine  string `json:"engine,omitempty"`
+	Subject string `json:"subject,omitempty"`
 	Reason  string `json:"reason"`
 	Minutes int    `json:"minutes"`
 }
 
 type unusualToolResult struct {
-	Engine               string                 `json:"engine,omitempty"`
+	Subject              string                 `json:"subject,omitempty"`
 	Since                string                 `json:"since"`
 	SinceISO             string                 `json:"since_iso"`
 	Until                string                 `json:"until"`
@@ -60,28 +62,33 @@ type unusualToolResult struct {
 	Note                 string                 `json:"note"`
 }
 
-const unusualToolNote = "These are suggestions from a normal learned from this engine's own history, not a rule and not a diagnosis. " +
+const unusualToolNote = "These are suggestions from a normal learned from the boat's own history, each engine's and the house bank's, not a rule and not a diagnosis. " +
 	"Mention one as worth a look, in the operator's units, and never give a cause for it. Minutes that were not judged are counted in not_judged: never fill them in. " +
-	"A stretch with an operator_answer has been answered: \"normal\" means the operator says it is the engine's usual, so do not raise it again; \"real\" means they agree something was wrong; \"unknown\" means they could not say."
+	"A stretch with an operator_answer has been answered: \"normal\" means the operator says it is usual for that engine or the house bank, so do not raise it again; \"real\" means they agree something was wrong; \"unknown\" means they could not say."
 
 func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if d.unusualReadings == nil || d.now == nil {
-		return "", errors.New("get_unusual_engine_readings: the learned normal is not wired")
+		return "", errors.New("get_unusual_readings: the learned normal is not wired")
 	}
 	var args unusualToolArgs
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
-			return "", fmt.Errorf("parse get_unusual_engine_readings arguments: %w", err)
+			return "", fmt.Errorf("parse get_unusual_readings arguments: %w", err)
 		}
+	}
+	// The old engine argument is refused: ignoring it would answer for every
+	// subject when one was asked for.
+	if args.Engine != nil {
+		return "", errors.New("get_unusual_readings: engine is no longer an argument, use subject")
 	}
 	limit := unusualToolDefaultLimit
 	if args.Limit != nil {
 		limit = *args.Limit
 		if limit < 1 || limit > unusualToolMaxLimit {
-			return "", fmt.Errorf("get_unusual_engine_readings: limit must be from 1 to %d", unusualToolMaxLimit)
+			return "", fmt.Errorf("get_unusual_readings: limit must be from 1 to %d", unusualToolMaxLimit)
 		}
 	}
 	now := d.now().UTC()
@@ -89,35 +96,35 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 	if s := strings.TrimSpace(args.SinceISO); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			return "", fmt.Errorf("get_unusual_engine_readings: since_iso %q is not an RFC 3339 time such as 2026-11-09T16:00:00Z", s)
+			return "", fmt.Errorf("get_unusual_readings: since_iso %q is not an RFC 3339 time such as 2026-11-09T16:00:00Z", s)
 		}
 		if !t.Before(now) {
-			return "", errors.New("get_unusual_engine_readings: since_iso must be in the past")
+			return "", errors.New("get_unusual_readings: since_iso must be in the past")
 		}
 		since = t.UTC()
 	}
 
-	engineID, engineName, err := d.unusualEngine(args.Engine)
+	which, subjectName, err := d.unusualSubjectNamed(args.Subject)
 	if err != nil {
 		return "", err
 	}
 	// The figures are worded in the operator's units, so units that cannot be
 	// read stop the call rather than fall back to a system.
 	if d.displayUnits == nil {
-		return "", errors.New("get_unusual_engine_readings: the display units are not wired")
+		return "", errors.New("get_unusual_readings: the display units are not wired")
 	}
 	system, err := d.displayUnits()
 	if err != nil {
-		return "", fmt.Errorf("get_unusual_engine_readings: the display units could not be read: %w", err)
+		return "", fmt.Errorf("get_unusual_readings: the display units could not be read: %w", err)
 	}
 	if d.unusualAnswers == nil {
-		return "", errors.New("get_unusual_engine_readings: the operator's answers are not wired")
+		return "", errors.New("get_unusual_readings: the operator's answers are not wired")
 	}
 	answers, err := d.unusualAnswers()
 	if err != nil {
-		return "", fmt.Errorf("get_unusual_engine_readings: the answers about unusual stretches could not be read: %w", err)
+		return "", fmt.Errorf("get_unusual_readings: the answers about unusual stretches could not be read: %w", err)
 	}
-	res := d.unusualReadings(ctx, since, now, engineID, answers)
+	res := d.unusualReadings(ctx, since, now, which, answers)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -127,8 +134,8 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 
 	loc, zone, tzNote := boatTimeNote(d.boatTime(), since, now)
 	out := unusualToolResult{
-		Engine: engineName,
-		Since:  boatDayClock(since, loc), SinceISO: since.Format(time.RFC3339),
+		Subject: subjectName,
+		Since:   boatDayClock(since, loc), SinceISO: since.Format(time.RFC3339),
 		Until: boatDayClock(now, loc), UntilISO: now.Format(time.RFC3339),
 		Timezone: zone, TimezoneNote: tzNote,
 		TrainingProblem: res.TrainingProblem, JudgedMinutes: res.JudgedMinutes,
@@ -149,13 +156,13 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 		}
 		v, err := describeUnusualStretch(st, system, loc, now)
 		if err != nil {
-			return "", fmt.Errorf("get_unusual_engine_readings: %w", err)
+			return "", fmt.Errorf("get_unusual_readings: %w", err)
 		}
 		v.OperatorAnswer = overlappingAnswer(answers, st.Subsystem, st.Subject, st.Start, st.End)
 		out.Stretches = append(out.Stretches, v)
 	}
 	for _, n := range res.NotJudged {
-		out.NotJudged = append(out.NotJudged, unusualToolNotJudged{Engine: n.SubjectName, Reason: n.Reason, Minutes: n.Minutes})
+		out.NotJudged = append(out.NotJudged, unusualToolNotJudged{Subject: n.SubjectName, Reason: n.Reason, Minutes: n.Minutes})
 	}
 	return capToolResultJSON(&out, func() bool {
 		if n := len(out.Stretches); n > 1 {
@@ -167,28 +174,35 @@ func (d assistantToolDeps) executeGetUnusualEngineReadings(ctx context.Context, 
 	})
 }
 
-// unusualEngine resolves the engine argument to a propulsion instance and its
-// name: the instance, the operator's name for it or that name with "engine".
-func (d assistantToolDeps) unusualEngine(arg string) (id, name string, err error) {
+// unusualSubjectNamed resolves the subject argument to an engine or the house
+// bank: the id, the operator's name for it, or the engine's name without "engine".
+// A blank argument is every subject.
+func (d assistantToolDeps) unusualSubjectNamed(arg string) (which unusualSubject, name string, err error) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		return "", "", nil
+		return unusualSubject{}, "", nil
 	}
 	if d.vesselView == nil {
-		return "", "", errors.New("get_unusual_engine_readings: the engines are not wired, so an engine cannot be named")
+		return unusualSubject{}, "", errors.New("get_unusual_readings: the vessel is not wired, so a subject cannot be named")
 	}
 	vessel, err := d.vesselView()
 	if err != nil {
-		return "", "", fmt.Errorf("get_unusual_engine_readings: vessel settings: %w", err)
+		return unusualSubject{}, "", fmt.Errorf("get_unusual_readings: vessel settings: %w", err)
 	}
 	var known []string
-	for _, s := range normalEngineSubjects(vessel) {
-		known = append(known, s.Name)
-		if strings.EqualFold(arg, s.ID) || strings.EqualFold(arg, s.Name) || strings.EqualFold(arg+" engine", s.Name) {
-			return s.ID, s.Name, nil
+	for _, sub := range normalSubsystems() {
+		for _, s := range sub.Subjects(vessel) {
+			known = append(known, s.Name)
+			names := []string{s.ID, s.Name}
+			if sub.Aliases != nil {
+				names = append(names, sub.Aliases(s)...)
+			}
+			if slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(arg, n) }) {
+				return unusualSubject{Subsystem: sub.Name, ID: s.ID}, s.Name, nil
+			}
 		}
 	}
-	return "", "", fmt.Errorf("get_unusual_engine_readings: no engine is called %q (the engines are: %s)", arg, strings.Join(known, ", "))
+	return unusualSubject{}, "", fmt.Errorf("get_unusual_readings: nothing is called %q (the subjects are: %s)", arg, strings.Join(known, ", "))
 }
 
 func unusualLearned(m *unusualModelInfo, loc *time.Location) *unusualToolLearned {
@@ -198,25 +212,25 @@ func unusualLearned(m *unusualModelInfo, loc *time.Location) *unusualToolLearned
 	}
 }
 
-var mateToolGetUnusualEngineReadings = mateTool{
-	name:      "get_unusual_engine_readings",
+var mateToolGetUnusualReadings = mateTool{
+	name:      "get_unusual_readings",
 	effect:    effectReads,
 	audiences: audienceReviewsAndMCP,
 	function: openRouterFunctionDef{
-		Description: "Stretches of the last day (or up to 7 days) in which an engine's readings were unusual for that engine, judged against a normal " +
-			"learned from the engine's own history at the same rpm. Each stretch is at least three minutes in a row, with the reading that stood out " +
-			"most, its value against the usual one in the operator's units, and the rpm band. These are suggestions to mention as worth a look, " +
-			"never a diagnosis and never a cause. It also says when the normal was learned and counts the minutes it could not judge, with the " +
-			"reason (not running steadily, too little history for a band, a reading missing). If there is no learned normal, " +
+		Description: "Stretches of the last day (or up to 7 days) in which an engine's or the house bank's readings were unusual for it, judged against a normal " +
+			"learned from its own history: an engine at the same rpm, the house bank with the same things charging at the same state of charge. Each stretch is " +
+			"at least three minutes in a row, with the reading that stood out most, its value against the usual one in the operator's units, and the band. " +
+			"These are suggestions to mention as worth a look, never a diagnosis and never a cause. It also says when the normal was learned and counts the " +
+			"minutes it could not judge, with the reason (not running steadily, too little history for a band, a reading missing). If there is no learned normal, " +
 			"learned_normal_missing says why: never fill it in. A stretch the operator has answered carries operator_answer (real, normal or unknown). " +
 			"Times are boat time with the UTC instant beside them.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {` +
 			`"since_iso": {"type": "string", "description": "Start of the window as an RFC 3339 time. Default 24 hours ago; at most 7 days back."},` +
-			`"engine": {"type": "string", "description": "One engine, by its name or instance. Default: every engine."},` +
+			`"subject": {"type": "string", "description": "One engine, by its name or instance, or the house bank (\"house bank\"). Default: every engine and the house bank."},` +
 			`"limit": {"type": "integer", "description": "How many stretches to return, 1 to 10. Default 5."}}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetUnusualEngineReadings),
 	describe: func(json.RawMessage) string {
-		return "Checking for unusual engine readings…"
+		return "Checking for unusual readings…"
 	},
 }

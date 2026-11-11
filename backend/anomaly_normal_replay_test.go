@@ -81,7 +81,7 @@ func windowOf(feed map[string][]normalMinuteRow) func(ctx context.Context, src n
 
 func replayVessel() func() (vesselView, error) {
 	return func() (vesselView, error) {
-		return vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"}}}, nil
+		return vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port", EquipmentID: "eq-port"}, {Instance: "starboard", Name: "Starboard", EquipmentID: "eq-starboard"}}}, nil
 	}
 }
 
@@ -133,7 +133,7 @@ func replayScoreWith(t *testing.T, feed map[string][]normalMinuteRow, model norm
 			return normalModelFile{Subsystems: map[string]normalSubsystemModel{normalSubsystemEngines: model}}, nil
 		},
 	}
-	return scoreUnusualReadings(context.Background(), normalEnginesSubsystem(), deps, from, to, "", answers)
+	return scoreOnly(context.Background(), normalEnginesSubsystem(), deps, from, to, "", answers)
 }
 
 // runningMinutes counts the minutes an engine was above 900 rpm in [from, to).

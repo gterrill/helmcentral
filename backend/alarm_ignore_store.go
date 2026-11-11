@@ -139,6 +139,46 @@ func (s *alarmIgnoreStore) add(list ignoreList, key string, at time.Time) error 
 	return nil
 }
 
+// setMany ignores every key, or stops ignoring every key, in one transaction: all
+// are changed or none is.
+func (s *alarmIgnoreStore) setMany(list ignoreList, keys []string, ignored bool, at time.Time) error {
+	if s == nil {
+		return fmt.Errorf("ignore lists are not available")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("change %d sensors: %w", len(keys), err)
+	}
+	defer tx.Rollback()
+	for _, key := range keys {
+		var err error
+		if ignored {
+			_, err = tx.Exec(fmt.Sprintf(`INSERT OR IGNORE INTO %s (%s, ignored_at) VALUES (?, ?)`, list.table, list.column), key, at.UTC().Unix())
+		} else {
+			_, err = tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE %s = ?`, list.table, list.column), key)
+		}
+		if err != nil {
+			return fmt.Errorf("change %s: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("change %d sensors: %w", len(keys), err)
+	}
+	for _, key := range keys {
+		switch _, has := s.cached[list.table][key]; {
+		case ignored && !has:
+			s.nextSeq++
+			s.cached[list.table][key] = ignoreRow{at: time.Unix(at.UTC().Unix(), 0).UTC(), seq: s.nextSeq}
+		case !ignored:
+			delete(s.cached[list.table], key)
+		}
+	}
+	return nil
+}
+
 // remove stops ignoring key. Removing a key that was never ignored is not an
 // error.
 func (s *alarmIgnoreStore) remove(list ignoreList, key string) error {
