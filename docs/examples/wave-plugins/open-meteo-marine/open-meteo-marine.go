@@ -23,6 +23,13 @@ const (
 	// noticeably lower/different here.
 	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=%d"
 
+	// Ocean current endpoint, for fetch_currents. Deliberately does not pin a
+	// models= param: the GFS-Wave model the wave fetch is pinned to carries no
+	// ocean currents (every value comes back null), so only the default blend
+	// answers. It asks for the two current variables alone. Velocity comes back
+	// in km/h, and the direction is where the water flows toward.
+	marineCurrentsURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=ocean_current_velocity,ocean_current_direction&timezone=auto&forecast_days=%d"
+
 	// modelGFSWave is the model the wave fetch is pinned to. Its 0.25 degree
 	// grid has land-masked cells, and over one Open-Meteo returns every wave
 	// field as 0, not null.
@@ -54,6 +61,105 @@ func waveURL(lat, lon float64, days int, fallback bool) string {
 		u += "&models=" + modelGFSWave
 	}
 	return u
+}
+
+// currentsURL builds the ocean-current request.
+func currentsURL(lat, lon float64, days int) string {
+	return fmt.Sprintf(marineCurrentsURLFmt, lat, lon, days)
+}
+
+// currentHourOutput is one hour of fetch_currents output: the modelled
+// current's speed in m/s and the direction it flows TOWARD, degrees true. Both
+// keys are left out for an hour with no figure, never emitted as 0.
+type currentHourOutput struct {
+	Time              string   `json:"time"`
+	CurrentVelocityMS *float64 `json:"current_velocity_ms,omitempty"`
+	CurrentSetDeg     *float64 `json:"current_set_deg,omitempty"`
+}
+
+// fetchCurrentsOutput mirrors the host's wasmFetchCurrentsOutput contract
+// (backend/wasm_wave_provider.go).
+type fetchCurrentsOutput struct {
+	Hourly []currentHourOutput `json:"hourly"`
+}
+
+// parseOpenMeteoCurrentsResponse reads the hourly ocean current series. Every
+// hour is listed. Only a JSON null in both arrays means "no current that hour"
+// (Open-Meteo returns null over land and near shore), and such an hour is never
+// read as slack. A reported 0 is a real figure and is kept. Anything else that
+// is not a clean answer is an error for the host to report: a missing or
+// mistyped array, arrays of unequal length, an unparseable time, a velocity unit
+// other than km/h (it would be converted wrongly) or missing, a null in only
+// one of the pair, or a figure out of range (negative velocity, direction
+// outside 0 to 360).
+func parseOpenMeteoCurrentsResponse(raw []byte) ([]currentHourOutput, error) {
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse ocean current response: %w", err)
+	}
+	units, ok := result["hourly_units"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly_units missing from ocean current response, so the velocity unit is unknown")
+	}
+	if u, ok := units["ocean_current_velocity"].(string); !ok || u != "km/h" {
+		return nil, fmt.Errorf("ocean_current_velocity unit is %v, expected km/h", units["ocean_current_velocity"])
+	}
+	offset := 0
+	if o, ok := result["utc_offset_seconds"].(float64); ok {
+		offset = int(o)
+	}
+	hourly, ok := result["hourly"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly missing from ocean current response")
+	}
+	times, ok := hourly["time"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly.time missing from ocean current response")
+	}
+	velocities, ok := hourly["ocean_current_velocity"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly.ocean_current_velocity missing from ocean current response")
+	}
+	directions, ok := hourly["ocean_current_direction"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly.ocean_current_direction missing from ocean current response")
+	}
+	if len(velocities) != len(times) || len(directions) != len(times) {
+		return nil, fmt.Errorf("ocean current arrays differ in length: %d times, %d velocities, %d directions", len(times), len(velocities), len(directions))
+	}
+
+	out := make([]currentHourOutput, 0, len(times))
+	for i, rawTime := range times {
+		timeStr, ok := rawTime.(string)
+		if !ok {
+			return nil, fmt.Errorf("hourly.time[%d] is not a string", i)
+		}
+		t, err := parseOpenMeteoLocalTime(timeStr, offset)
+		if err != nil {
+			return nil, err
+		}
+		hour := currentHourOutput{Time: t.UTC().Format(time.RFC3339)}
+		rv, rd := velocities[i], directions[i]
+		switch {
+		case rv == nil && rd == nil:
+			// The model has no current this hour (land, near shore).
+		case rv == nil || rd == nil:
+			return nil, fmt.Errorf("hourly[%d] has a null in one of velocity and direction but not the other", i)
+		default:
+			v, vok := rv.(float64)
+			d, dok := rd.(float64)
+			if !vok || !dok {
+				return nil, fmt.Errorf("hourly[%d] velocity or direction is not a number", i)
+			}
+			if v < 0 || d < 0 || d > 360 {
+				return nil, fmt.Errorf("hourly[%d] velocity %g km/h or direction %g degrees is out of range", i, v, d)
+			}
+			ms := v / 3.6
+			hour.CurrentVelocityMS, hour.CurrentSetDeg = &ms, &d
+		}
+		out = append(out, hour)
+	}
+	return out, nil
 }
 
 // fallbackEnabled reads the use_blend_fallback config value. Anything but

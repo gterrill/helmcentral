@@ -1167,16 +1167,23 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		// Fair-tide departures: the tide plugins give high and low water
 		// times only, and a model asked to time a departure to the stream
 		// does the half-cycle arithmetic itself and gets it wrong. The tool
-		// does the arithmetic; the model's job is to supply the set
-		// direction honestly (it is the one input the tool cannot know) and
-		// to weigh the result against the wind. Scoped to the same
+		// does the arithmetic and follows the Open-Meteo total current along
+		// the route; the model's job is to supply a flood direction only from
+		// the notes or the operator and to weigh the result against the wind. Scoped to the same
 		// now-or-forecast-range case as estimate_passage: the planning
 		// question above is already told to use general knowledge.
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
 		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg " +
-		"and the estimated hours as passage_hours. Take flood_set_deg, the direction the flood stream sets " +
-		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match. " +
-		"If you do not know which way the flood sets in that water, say so instead of calling it. Recommend a " +
+		"and the estimated hours as passage_hours, and pass estimate_passage's route as route when it returned one. " +
+		"Give flood_set_deg and flood_set_source only from the standing notes or the operator (or general knowledge you " +
+		"are sure of, labelled general_knowledge), and leave them out when you do not know which way the flood " +
+		"stream sets; they are used only where the model cannot cover the run. The Open-Meteo model's total current (tide plus ocean currents such as the East Australian Current, " +
+		"a forecast on a grid of about 8 km, which cannot resolve river entrances, narrow straits such as the Great Sandy " +
+		"Strait or shoals) ranks the departures where it covers the run, and you call those figures modelled and " +
+		"point to the tidal stream atlas for narrow water. If ranking_basis is tide_phase the stream was timed from high and " +
+		"low water and the direction you gave, so say that and where the direction came from. If the call says it " +
+		"has nothing to rank with, say the stream cannot be timed. " +
+		"Recommend a " +
 		"departure time from the best candidate and say how much of the run is with the stream (fair_fraction), " +
 		"name the departure time to avoid, and weigh the departure against the forecast wind. Do not use it for the planning " +
 		"question above.\n\n" +

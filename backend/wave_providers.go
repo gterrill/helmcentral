@@ -30,6 +30,24 @@
 // reads the missing key as absent (a nil *float64), never as 0 m, 0 s or a
 // sea from due north. A reported 0 is a real figure and is kept.
 //
+// Currents are a separate, optional export so a wave fetch costs nothing extra:
+//
+//	fetch_currents({"lat": float64, "lon": float64, "days": int}) -> {
+//	  "hourly": [{time, current_velocity_ms, current_set_deg}]
+//	}
+//
+// current_velocity_ms (metres per second) and current_set_deg (degrees true, the
+// direction the current flows TOWARD) are OPTIONAL and come as a pair: a plugin
+// omits both for an hour in which its model has no current (null over land and
+// near shore), and the host reads them as absent (nil *float64), never as
+// slack. A reported 0 m/s is a real figure and is kept. A velocity below 0 or
+// above 10 m/s, a set outside 0 to 360, or only one of the two is rejected as a
+// broken plugin. A plugin that does not export fetch_currents is still a valid
+// wave plugin; the host reports that it has no currents. The reference plugin
+// asks Open-Meteo for the two variables alone, without the GFS-Wave pin, which
+// carries no currents. Currents are the TOTAL current the model gives (tide plus
+// ocean currents), not a tide alone.
+//
 // The per-component direction and period fields are OPTIONAL in the sense
 // that a model without them may omit them; they then read as 0, and a
 // component with a zero period is treated as absent rather than as a wave
@@ -55,6 +73,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -103,6 +122,33 @@ type waveForecastBundle struct {
 	// FallbackModel names the model the provider swapped to because the usual
 	// one had no data at the point. Empty when the usual model answered.
 	FallbackModel string
+}
+
+// currentHourPoint is one hour of modelled current. Nil figures are absent,
+// not slack and not due north.
+type currentHourPoint struct {
+	Time       time.Time
+	VelocityMS *float64
+	SetDeg     *float64
+}
+
+// currentsBundle is one fetch_currents round-trip, mapped to typed values.
+type currentsBundle struct {
+	Hourly   []currentHourPoint
+	Cached   bool
+	CachedAt time.Time
+}
+
+// currentsProvider is the optional capability of a wave provider that can give
+// the modelled ocean current. A provider that implements the method but whose
+// plugin lacks the export answers false from SupportsCurrents. FetchCurrents
+// returns ctx.Err() once ctx is done and never serves a stale answer for a
+// failed fetch. A caller that fetches many points calls PersistCurrents once at
+// the end, because FetchCurrents keeps its cache in memory only.
+type currentsProvider interface {
+	SupportsCurrents() bool
+	FetchCurrents(ctx context.Context, lat, lon float64, days int) (currentsBundle, error)
+	PersistCurrents()
 }
 
 // waveProvider is the interface implemented by each pluggable wave data

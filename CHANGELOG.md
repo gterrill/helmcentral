@@ -11,6 +11,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Replace your Open-Meteo Marine plugin to keep Mate's fair-tide departure
+  working as described.** Mate now reads the Open-Meteo forecast of the total
+  current, the tide plus ocean currents such as the East Australian Current, at
+  points along your route. It ranks the departures on it and gives the average
+  and the strongest stream along your course, in knots, with you or against you.
+  The current comes from a new part of the Open-Meteo Marine plugin. What to do:
+  if you installed Helmcentral with the installer, nothing, as it replaces the
+  plugin. If you placed `open-meteo-marine.wasm` by hand, copy the one from this
+  release's plugin bundle over it. With the old plugin Mate says the plugin is
+  too old for currents, and times the stream from high and low water and the
+  flood direction in your standing notes, or says it can't time the stream if it
+  has neither. Where the forecast has nothing for part of your run, which can
+  happen near shore, Mate does the same and says what was missing. The forecast
+  is on a grid about 8 km wide, so it understates the stream in river entrances,
+  narrow straits such as the Great Sandy Strait, and over shoals, and Mate still
+  tells you to check those against the tidal stream atlas.
+
 ### Changed
 
 - **The impossible-reading check now also covers exhaust temperature and fuel

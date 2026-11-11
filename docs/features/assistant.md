@@ -162,17 +162,34 @@ time that gives you a fair tidal stream. It ranks departures over the next day
 by how much of the run has the stream with you, then recommends the best one
 and names the time to avoid.
 
-It times the stream from the tide station's high and low water. So it tells you
-which spell of flood or ebb you'll be in, not how fast it runs.
+Mate follows the Open-Meteo model's total current along your route. That's the
+tide plus the ocean currents, such as the East Australian Current, which can
+swamp the tide offshore. For each departure it gives the average stream along
+your course over the run, and the strongest, in knots, with you or against you.
 
-- **Which way the flood sets:** The direction comes from your standing notes
-  first. If they're silent, Mate uses its own general knowledge and says so.
-  Either way, check it against the tidal stream atlas or the cruising guide. If
-  Mate doesn't know which way the flood sets in that water, it says so instead
-  of guessing.
+- **How it ranks:** Where the model has a current for the whole run, Mate ranks
+  the departures on it, and the share of the run "with the stream" is the share
+  with a modelled current in your favour. Where the model has nothing for part of
+  the run, which can happen near shore, Mate times the stream from the tide
+  station's high and low water instead, using the flood direction from your
+  standing notes or that you give. Mate says which it used and what was missing.
+  It never mixes the two in one answer.
+- **Your route:** When Mate has the route from the passage estimate, it takes
+  the boat along it at a steady speed and reads the current at each point, with
+  the course of the leg it's on. Without a route it uses the one position and
+  course.
+- **A modelled figure, not a measured one:** The model works on a grid about 8 km
+  wide. It doesn't resolve river entrances, narrow straits such as the Great
+  Sandy Strait, or shoals, and the rates there are likely to be understated.
+  Mate says the figures are modelled and still tells you to check narrow water
+  against the tidal stream atlas or the cruising guide.
+- **When there's nothing to go on:** If the model has no current for the run and
+  you haven't given Mate a flood direction, it says it can't time the stream
+  instead of guessing. Mate also says so if the Open-Meteo marine plugin on the
+  boat is too old to give currents. Install the updated one.
 - **Your standing notes:** Put the local flood direction in your standing
   notes, along with any lag between high or low water and the stream turning,
-  and Mate uses them.
+  and Mate uses them when it has to time the stream from the tide.
 - **Stream against wind:** Where the stream sets against the forecast wind
   during the run, Mate warns that the seas will be steeper and shorter. It also
   says when the fair-tide departure runs into that.

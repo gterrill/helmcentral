@@ -397,3 +397,117 @@ func TestParseOpenMeteoWaveResponse_ZeroPeriodHourIsLeftOut(t *testing.T) {
 		t.Errorf("a real hour is kept: %+v", hours[1])
 	}
 }
+
+const currentsFixture = `{"utc_offset_seconds":36000,
+	"hourly_units":{"time":"iso8601","ocean_current_velocity":"km/h","ocean_current_direction":"°"},
+	"hourly":{
+	"time":["2026-11-11T00:00","2026-11-11T01:00","2026-11-11T02:00"],
+	"ocean_current_velocity":[3.6,0.0,null],
+	"ocean_current_direction":[153,0,null]
+}}`
+
+func TestCurrentsURL_LeavesTheModelUnpinnedAndAsksForOnlyCurrents(t *testing.T) {
+	u := currentsURL(-25.0, 152.6, 3)
+	if strings.Contains(u, "models=") {
+		t.Errorf("GFS-Wave carries no currents, so the request must not pin it: %s", u)
+	}
+	for _, want := range []string{"hourly=ocean_current_velocity,ocean_current_direction&", "latitude=-25.0000", "forecast_days=3", "timezone=auto"} {
+		if !strings.Contains(u, want) {
+			t.Errorf("currents request must contain %q: %s", want, u)
+		}
+	}
+	if strings.Contains(u, "wave_") {
+		t.Errorf("the currents request asks for no wave variables: %s", u)
+	}
+}
+
+func TestParseOpenMeteoCurrentsResponse_ConvertsToMetresPerSecondAndOmitsNulls(t *testing.T) {
+	got, err := parseOpenMeteoCurrentsResponse([]byte(currentsFixture))
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("every hour is listed, with keys only where there is a figure; got %d", len(got))
+	}
+	// 00:00 local at +10:00 is 14:00Z the day before.
+	if got[0].Time != "2026-11-10T14:00:00Z" {
+		t.Errorf("time: %s", got[0].Time)
+	}
+	if got[0].CurrentVelocityMS == nil || *got[0].CurrentVelocityMS < 0.999 || *got[0].CurrentVelocityMS > 1.001 || got[0].CurrentSetDeg == nil || *got[0].CurrentSetDeg != 153 {
+		t.Errorf("3.6 km/h should be 1 m/s toward 153: %+v", got[0])
+	}
+	// A reported 0 is a real slack figure and is kept.
+	if got[1].CurrentVelocityMS == nil || *got[1].CurrentVelocityMS != 0 || got[1].CurrentSetDeg == nil {
+		t.Errorf("a reported 0 must be kept: %+v", got[1])
+	}
+	// A JSON null in both is the only way an hour has no current.
+	if got[2].CurrentVelocityMS != nil || got[2].CurrentSetDeg != nil {
+		t.Errorf("a null hour must carry neither key: %+v", got[2])
+	}
+	out, err := json.Marshal(fetchCurrentsOutput{Hourly: got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Hourly []map[string]any `json:"hourly"`
+	}
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := back.Hourly[2]["current_velocity_ms"]; ok {
+		t.Errorf("a null hour must not emit the key: %v", back.Hourly[2])
+	}
+	if v, ok := back.Hourly[1]["current_velocity_ms"].(float64); !ok || v != 0 {
+		t.Errorf("a reported 0 must be emitted: %v", back.Hourly[1])
+	}
+}
+
+// Anything that is not a clean answer is an error for the host to report. Only
+// a JSON null for an hour means "no current that hour".
+func TestParseOpenMeteoCurrentsResponse_MalformedResponsesAreErrors(t *testing.T) {
+	units := `"hourly_units":{"ocean_current_velocity":"km/h"},`
+	cases := map[string]string{
+		"velocity array missing":     `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_direction":[90]}}`,
+		"direction array missing":    `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1]}}`,
+		"velocity not an array":      `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":"x","ocean_current_direction":[90]}}`,
+		"units missing":              `{"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[90]}}`,
+		"units not a string":         `{"hourly_units":{"ocean_current_velocity":3},"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[90]}}`,
+		"arrays of unequal length":   `{` + units + `"hourly":{"time":["2026-11-11T00:00","2026-11-11T01:00"],"ocean_current_velocity":[1],"ocean_current_direction":[90,90]}}`,
+		"time array shorter":         `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1,1],"ocean_current_direction":[90,90]}}`,
+		"unparseable time":           `{` + units + `"hourly":{"time":["yesterday"],"ocean_current_velocity":[1],"ocean_current_direction":[90]}}`,
+		"time not a string":          `{` + units + `"hourly":{"time":[5],"ocean_current_velocity":[1],"ocean_current_direction":[90]}}`,
+		"negative velocity":          `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[-1],"ocean_current_direction":[90]}}`,
+		"direction above 360":        `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[400]}}`,
+		"direction below 0":          `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[-5]}}`,
+		"non-numeric velocity":       `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":["fast"],"ocean_current_direction":[90]}}`,
+		"velocity without direction": `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[null]}}`,
+		"direction without velocity": `{` + units + `"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[null],"ocean_current_direction":[90]}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseOpenMeteoCurrentsResponse([]byte(raw)); err == nil {
+				t.Errorf("expected an error")
+			}
+		})
+	}
+}
+
+func TestParseOpenMeteoCurrentsResponse_RejectsOtherUnits(t *testing.T) {
+	raw := `{"hourly_units":{"ocean_current_velocity":"kn"},"hourly":{"time":["2026-11-11T00:00"],"ocean_current_velocity":[1],"ocean_current_direction":[90]}}`
+	if _, err := parseOpenMeteoCurrentsResponse([]byte(raw)); err == nil {
+		t.Errorf("a velocity in knots would be read as km/h, so the parse must fail")
+	}
+}
+
+func TestWaveHoursCarryNoCurrentFields(t *testing.T) {
+	out, err := json.Marshal(waveHourOutput{Time: "2026-11-10T14:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "current") {
+		t.Errorf("fetch_waves leaves currents to fetch_currents: %s", out)
+	}
+	if strings.Contains(marineWaveURLFmt, "ocean_current") {
+		t.Errorf("the wave request must not ask for currents: %s", marineWaveURLFmt)
+	}
+}

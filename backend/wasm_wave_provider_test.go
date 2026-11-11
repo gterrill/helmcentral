@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -403,5 +404,132 @@ func TestPostPluginConfigHandler_ConfigChangeYieldsAFreshFetch(t *testing.T) {
 	}
 	if fresh.Cached {
 		t.Fatal("a config change must yield a fresh fetch, not the cached answer")
+	}
+}
+
+// fetch_currents hours carry both figures or neither. A missing key is absent
+// (nil), a reported 0 is a real slack figure and is kept.
+func TestMapWasmFetchCurrentsOutput_FiguresAreOptional(t *testing.T) {
+	raw := `{"hourly":[
+		{"time":"2026-07-19T05:00:00Z","current_velocity_ms":0.3,"current_set_deg":153},
+		{"time":"2026-07-19T06:00:00Z","current_velocity_ms":0,"current_set_deg":0},
+		{"time":"2026-07-19T07:00:00Z"}]}`
+	var parsed wasmFetchCurrentsOutput
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mapWasmFetchCurrentsOutput(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := bundle.Hourly[0], bundle.Hourly[1], bundle.Hourly[2]
+	if a.VelocityMS == nil || *a.VelocityMS != 0.3 || a.SetDeg == nil || *a.SetDeg != 153 {
+		t.Errorf("current figures lost: %+v", a)
+	}
+	if b.VelocityMS == nil || *b.VelocityMS != 0 || b.SetDeg == nil || *b.SetDeg != 0 {
+		t.Errorf("a reported 0 must be kept: %+v", b)
+	}
+	if c.VelocityMS != nil || c.SetDeg != nil {
+		t.Errorf("no keys must be absent: %+v", c)
+	}
+}
+
+func TestMapWasmFetchCurrentsOutput_ImpossibleFiguresAreErrors(t *testing.T) {
+	cases := map[string]string{
+		"negative velocity":    `"current_velocity_ms":-0.1,"current_set_deg":90`,
+		"velocity above 10":    `"current_velocity_ms":11,"current_set_deg":90`,
+		"set below 0":          `"current_velocity_ms":0.2,"current_set_deg":-5`,
+		"set above 360":        `"current_velocity_ms":0.2,"current_set_deg":361`,
+		"velocity without set": `"current_velocity_ms":0.2`,
+		"set without velocity": `"current_set_deg":90`,
+	}
+	for name, fields := range cases {
+		t.Run(name, func(t *testing.T) {
+			var parsed wasmFetchCurrentsOutput
+			body := `{"hourly":[{"time":"2026-07-19T05:00:00Z"},{"time":"2026-07-19T06:00:00Z",` + fields + `}]}`
+			if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+				t.Fatal(err)
+			}
+			_, err := mapWasmFetchCurrentsOutput(parsed)
+			if err == nil || !strings.Contains(err.Error(), "hourly[1]") {
+				t.Fatalf("want an error naming hourly[1], got %v", err)
+			}
+		})
+	}
+}
+
+// A wave plugin built before currents existed has no fetch_currents. It still
+// loads and serves waves; asking it for currents says what to install.
+func TestWasmWaveProvider_PluginWithoutFetchCurrentsSaysSo(t *testing.T) {
+	t.Setenv("CURRENTS_WASM_CACHE_FILE_WAVE_VALID_FIXTURE", filepath.Join(t.TempDir(), "c.json"))
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	if p.SupportsCurrents() {
+		t.Fatal("the fixture exports no fetch_currents")
+	}
+	var cp currentsProvider = p
+	_, err := cp.FetchCurrents(context.Background(), -27.4, 153.0, 2)
+	if err == nil || !strings.Contains(err.Error(), "install the updated open-meteo-marine plugin") {
+		t.Fatalf("want the install hint, got %v", err)
+	}
+}
+
+func TestCurrentsCacheKey_SharesTheModelGrid(t *testing.T) {
+	// 1/12 degree cells: 152.60 and 152.62 are one cell, 152.60 and 152.70 are not.
+	if currentsCacheKey(-25.0, 152.60, 3) != currentsCacheKey(-25.01, 152.62, 3) {
+		t.Errorf("points in the same model cell must share a key")
+	}
+	if currentsCacheKey(-25.0, 152.60, 3) == currentsCacheKey(-25.0, 152.70, 3) {
+		t.Errorf("points in different cells must not share a key")
+	}
+	if currentsCacheKey(-25.0, 152.6, 3) == currentsCacheKey(-25.0, 152.6, 4) {
+		t.Errorf("days must be part of the key")
+	}
+}
+
+// A failed currents fetch is reported, never answered from an old cache entry.
+func TestWasmWaveProvider_FetchCurrentsDoesNotServeStale(t *testing.T) {
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	p.supportsCurrents = true // the fixture exports no fetch_currents, so the call fails
+	key := p.saltedCacheKey(currentsCacheKey(-27.4, 153.0, 2))
+	v := 0.3
+	set := 90.0
+	p.currentsCache.setInMemory(key, currentsBundle{Hourly: []currentHourPoint{{Time: time.Now(), VelocityMS: &v, SetDeg: &set}}})
+	// Expire it: older than the TTL, so only a stale fallback could serve it.
+	p.currentsCache.mu.Lock()
+	e := p.currentsCache.data[key]
+	e.CachedAt = time.Now().Add(-48 * time.Hour)
+	p.currentsCache.data[key] = e
+	p.currentsCache.mu.Unlock()
+	if _, err := p.FetchCurrents(context.Background(), -27.4, 153.0, 2); err == nil {
+		t.Fatal("expected the fetch error, not a stale answer")
+	}
+}
+
+func TestWasmWaveProvider_FetchCurrentsReturnsTheContextError(t *testing.T) {
+	p := mustNewWasmWaveProvider(t, waveValidFixtureWasm)
+	p.supportsCurrents = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.FetchCurrents(ctx, -27.4, 153.0, 2); err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestWasmPluginCache_CapIsConfigurableAndSetInMemoryDoesNotWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.json")
+	c := newWasmPluginCache[int](path)
+	c.maxEntries = 100
+	for i := 0; i < 90; i++ {
+		c.setInMemory(fmt.Sprintf("k%d", i), i)
+	}
+	if len(c.data) != 90 {
+		t.Errorf("a cap of 100 keeps 90 entries, kept %d", len(c.data))
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Errorf("setInMemory must not write the file")
+	}
+	c.persistToDisk()
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("persistToDisk should write the file: %v", err)
 	}
 }

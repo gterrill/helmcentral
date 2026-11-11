@@ -132,6 +132,11 @@ type wasmPluginBase struct {
 	// anchorage_features, the optional export behind the features section of
 	// Mate's anchorage_details tool. Like marina_details it stands alone.
 	supportsAnchorageFeatures bool
+	// supportsCurrents is true when a wave plugin exports fetch_currents, the
+	// optional export behind the modelled current Mate's fair-tide tool reads
+	// (ADR 0278). An older plugin lacks it, which is not a load failure: the
+	// tool reports that the installed plugin has no currents.
+	supportsCurrents bool
 	// positionBased is true when a tide plugin exports position_based returning
 	// "true" (ADR 0273): it has no station catalog and takes the position as
 	// "<lat>,<lon>" in place of a station id. Absent means station-based, so
@@ -157,8 +162,9 @@ func (b *wasmPluginBase) SupportsAnchorageFeatures() bool {
 }
 
 // PositionBased and HeightDatum make a tide plugin a positionTideProvider.
-func (b *wasmPluginBase) PositionBased() bool { return b.positionBased }
-func (b *wasmPluginBase) HeightDatum() string { return b.heightDatum }
+func (b *wasmPluginBase) SupportsCurrents() bool { return b.supportsCurrents }
+func (b *wasmPluginBase) PositionBased() bool    { return b.positionBased }
+func (b *wasmPluginBase) HeightDatum() string    { return b.heightDatum }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -789,6 +795,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		supportsMarinaDetails: instance.FunctionExists("marina_details"),
 
 		supportsAnchorageFeatures: instance.FunctionExists("anchorage_features"),
+		supportsCurrents:          instance.FunctionExists("fetch_currents"),
 		positionBased:             positionBasedOut == "true",
 		heightDatum:               heightDatum,
 	}, nil
@@ -860,6 +867,16 @@ type wasmPluginCache[T any] struct {
 	path    string
 	writeMu sync.Mutex
 	group   singleflight.Group
+	// maxEntries overrides wasmPluginCacheMaxEntries when above 0, for a cache
+	// whose keys are many small points rather than a few big ones.
+	maxEntries int
+}
+
+func (c *wasmPluginCache[T]) entryCap() int {
+	if c.maxEntries > 0 {
+		return c.maxEntries
+	}
+	return wasmPluginCacheMaxEntries
 }
 
 func newWasmPluginCache[T any](path string) *wasmPluginCache[T] {
@@ -885,11 +902,17 @@ func (c *wasmPluginCache[T]) getStale(key string) (T, bool) {
 }
 
 func (c *wasmPluginCache[T]) set(key string, value T) {
+	c.setInMemory(key, value)
+	c.persistToDisk()
+}
+
+// setInMemory stores and prunes without writing the file, for a caller that
+// sets many keys in a burst and calls persistToDisk once at the end.
+func (c *wasmPluginCache[T]) setInMemory(key string, value T) {
 	c.mu.Lock()
 	c.data[key] = wasmCacheEntry[T]{Value: value, CachedAt: time.Now().UTC()}
 	c.pruneLocked()
 	c.mu.Unlock()
-	c.persistToDisk()
 }
 
 // pruneLocked drops entries older than wasmPluginCacheMaxAge, then - if
@@ -905,7 +928,7 @@ func (c *wasmPluginCache[T]) pruneLocked() {
 		}
 	}
 
-	for len(c.data) > wasmPluginCacheMaxEntries {
+	for len(c.data) > c.entryCap() {
 		oldestKey := ""
 		var oldestAt time.Time
 		for key, entry := range c.data {

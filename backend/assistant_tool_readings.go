@@ -53,10 +53,15 @@ const (
 		"actually been there, since it may have arrived earlier and not been noticed until then: never state it as an arrival time. " +
 		"stationary_since, when present, comes from that vessel's own logged position history and is a separate, usually more precise figure."
 
-	ruleTidalDeparture = "flood_set_source says where the set direction came from: label it that way, as the standing notes, as general knowledge " +
-		"or as the operator's, and never present a guessed direction as the operator's own notes. The stream is timed from the tide station's high and " +
-		"low water and its rate is not known, so check the set against the tidal stream atlas and the cruising guide. " +
-		"If estimate_passage isn't available, ask for the course and passage hours; never guess them."
+	ruleTidalDeparture = "The modelled stream (mean_along_course_kn and peak_along_course_kn: positive with the boat, negative against) is the total current from the " +
+		"Open-Meteo model, tide plus ocean currents such as the East Australian Current, on a grid of about 8 km. It is a forecast, not an observation: call it modelled. " +
+		"It cannot resolve river entrances, narrow straits such as the Great Sandy Strait, or shoals, and the rates there are likely understated: " +
+		"say so for such water, and tell the operator to check it against the tidal stream atlas and the cruising guide. " +
+		"ranking_basis says how the departures were ranked. modelled_current: ranked on the modelled current along the route, the whole run covered. " +
+		"tide_phase: the model did not cover the run (modelled_current_missing says what was missing), so the stream was timed from the tide station's high and low water " +
+		"and the flood direction in flood_set_source: say that, and label the direction as the standing notes, general knowledge or the operator's, " +
+		"and never present a guessed direction as the operator's own notes. If a figure is missing the result says why: say it is missing, never that the stream is slack. " +
+		"Pass the route from estimate_passage when it returned one. If estimate_passage isn't available, ask for the course and passage hours; never guess them."
 
 	rulePassageWindow = "A go means none of the operator's no-go limits is reached: it is not a go-ahead and not a statement that conditions are safe or comfortable, " +
 		"so never present a go as a recommendation to sail. no_data means there is no forecast that far ahead; it is not a good day. " +
@@ -66,7 +71,9 @@ const (
 
 	// readingTidalDeparture depends on the wind and the course, which the
 	// result and the forecast supply.
-	readingTidalDeparture = "fair_fraction is the share of the run with the stream. Where the stream sets opposite to the forecast wind during the run, " +
+	readingTidalDeparture = "fair_fraction is the share of the run with the stream: under modelled_current, with a positive modelled current along the course; under tide_phase, by tide phase. " +
+		"mean_along_course_kn and peak_along_course_kn are the modelled current along the course where the model covers the run. " +
+		"Where the stream sets opposite to the forecast wind during the run, " +
 		"that is wind against tide, which steepens and shortens the seas: if the fair-tide departure lands in it, say so and say when. " +
 		"If a note says the course runs across the stream, timing the tide will barely help."
 )
