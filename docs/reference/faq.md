@@ -14,6 +14,15 @@ it in a web browser on your phones, tablets and screens. Here's what you need:
   USB adaptor for NMEA 0183 or an NMEA 2000 gateway. SignalK's
   [installation page](https://signalk.org/installation/) covers which adaptors
   and gateways work and how to connect them.
+- **Sensors, as many or as few as you have:** You don't need any particular
+  sensor to start. With no instruments at all you still get the inventory,
+  maintenance by the calendar, documents and notes. A GPS, with SignalK's
+  autostate plugin, adds the anchor watch, the logbook and the forecast. Each
+  sensor after that adds more. A depth sounder, wind instrument, AIS receiver,
+  battery monitor, engines and tanks each open up their own tiles and alarms.
+  When a sensor is missing, the tiles that need it say so rather than showing
+  an invented number. [Hierarchy of sensor needs](sensor-needs.md) shows what
+  each sensor adds, level by level.
 - **A SignalK server:** SignalK reads the gateway and turns the NMEA data into
   readings Helmcentral can use. If you don't have it yet, install it first,
   following the same [installation page](https://signalk.org/installation/).
@@ -171,11 +180,27 @@ Here's how Helmcentral keeps the boat safe:
   [Login and SignalK at startup](configuration.md#login-and-signalk-at-startup).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
-  never forward a port to it.
-- **Passwords and keys are encrypted:** You paste SignalK credentials, API keys
-  and your OpenRouter key into Settings, never into a file. They're stored
-  encrypted. Back up the whole `data/` folder, because without
-  `data/secrets.key` the stored credentials can't be read again. See
+  never forward a port to it. The one exception is Tailscale Funnel for
+  outside assistants, below. It passes on the assistant's address and refuses
+  everything else.
+- **Passwords and keys are encrypted:** Every password, token and API key goes
+  into its Settings section, not into `settings.yaml`. That covers the SignalK
+  login, the InfluxDB token, the email password, the ntfy token, the WeatherKit
+  and Google Places keys, and your OpenRouter key. Helmcentral keeps them in
+  its own store on the boat, encrypted with AES-256-GCM. The key that unlocks
+  them is the file `data/secrets.key`, unless you've set
+  `HELMCENTRAL_MASTER_KEY` instead.
+- **Some credentials belong to an address:** Changing the SignalK address
+  clears the SignalK login, and changing the InfluxDB address clears its
+  token. Changing the ntfy server clears the ntfy token, and changing the
+  email server or username clears the email password. Enter it again
+  afterwards, or that channel stays quiet.
+- **Back up the key with the store:** Back up the whole state directory,
+  `settings.yaml` included, and `HELMCENTRAL_MASTER_KEY` too if you use it.
+  Without the key, Helmcentral won't start until you move the old store aside.
+  Then every credential has to be entered again, and every phone has to turn
+  web push off and on again. Anyone with the folder and its key can read the
+  credentials, so keep the backup as safe as the boat's computer. See
   [Configuration](configuration.md#back-this-up).
 - **Provider plugins are fenced in:** A plugin can't read your files or start
   programs. It can only reach the web addresses listed alongside it, and it's
@@ -189,6 +214,70 @@ Here's how Helmcentral keeps the boat safe:
   you tap **Apply**.
   It can't start, stop, switch or steer anything.
 
-The NMEA network itself has no security. Any device on it can send anything,
-and no software can fix that. So keep the boat's network apart from the
-internet, and keep control of who can send commands.
+### What leaves the boat
+
+Helmcentral has no account, no cloud service and no usage reporting. Your
+records, documents, logs and settings stay on the boat's computer. These are
+the things that leave it. The forecast, map and place-name providers are free
+public services until you choose others, and the rest go only where you've
+pointed them:
+
+- **The boat's position, for forecasts and tides:** The weather, wave, tide
+  and warning providers are told where the boat is, so that they can answer for
+  it.
+- **The boat's exact position, for the Windy map:** Opening the Windy weather
+  map sends the boat's position to Windy, which shows it. Windy isn't a
+  provider plugin, so the plugin fence doesn't apply to it.
+- **The area around the boat, for maps and place names:** Maps, sea marks,
+  satellite photographs and place names are fetched for the area you're in or
+  looking at. So is the offline coastline. A server that answers those
+  requests can work out roughly where the boat is. Running your own
+  [Overpass server](../how-to/run-your-own-overpass-server.md) keeps the place
+  lookups aboard.
+- **Alarm and watch messages:** Each alarm goes to the notification channels
+  you've turned on, such as ntfy, email, a webhook or web push. It carries its
+  title, its reading and sometimes a small chart. Watch reports go the same
+  way, with their figures and findings. If you set a heartbeat, a regular
+  "still alive" message does too.
+- **Mate's questions, only with Mate on:** Each question goes to OpenRouter,
+  and from there to the model you chose. It carries the question, the boat's
+  position and whatever Mate looks up. Watch reports and uploaded documents
+  are sent too, and so are search words if you turn on web search. With Mate
+  off, nothing goes. [What leaves the
+  boat](../features/assistant.md#what-leaves-the-boat) lists each case.
+- **Your voice, if you talk to Mate:** The browser turns speech into text
+  before Mate sees it. Chrome sends the audio to Google's speech service.
+  Safari uses Apple's dictation, which runs on the device on recent hardware.
+- **What an outside assistant asks for:** A program you've given a token, such
+  as Claude or ChatGPT, gets the answers to what it asks. Those reach whoever
+  runs that program, such as Anthropic or OpenAI. The boat's particulars leave
+  out your name, phone, email and insurance details. See
+  [Outside assistants](../features/outside-assistants.md).
+
+### What Helmcentral can't protect you from
+
+NMEA 2000 and NMEA 0183 were built for a boat's own trusted wiring, so they
+have no security of their own. Any device on the network can claim to be any
+other and send any reading. Helmcentral reads those readings through SignalK
+and can't tell a real one from a fake. Here's what that means:
+
+- **Spoofed or jammed GPS:** Helmcentral catches a position that arrives with
+  a poor fix or stops arriving. At anchor or moored, it also catches a position
+  that jumps further than the boat could move. In each case it freezes the
+  last trusted position and raises its own alarm instead of a drag alarm. A
+  spoof that reports a good fix and drifts the position slowly gets through,
+  though. Helmcentral then shows the false position, and the anchor watch can
+  raise a false drag alarm or miss a real one.
+- **False AIS targets:** AIS has no way to prove who sent a message. A fake
+  target shows on the maps and can raise a collision alarm, and a real vessel
+  that isn't transmitting doesn't show at all.
+- **A faulty or rogue device:** A sensor or gateway that sends wrong readings
+  is believed. Anomaly detection catches readings that are frozen or
+  impossible, but it can't catch one that is wrong and still believable.
+- **Commands on the network:** Anything on the NMEA network can send commands
+  to the autopilot or switching directly, without going through Helmcentral.
+  Helmcentral's login only controls what's sent through Helmcentral.
+
+So keep the boat's network apart from the internet, and be careful which
+devices you connect to it. Keep a lookout and your chartplotter's own alarms
+too, rather than relying on any one screen.
