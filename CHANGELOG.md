@@ -35,6 +35,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A new help page shows what each sensor on the boat gives you.** The
+  Hierarchy of sensor needs starts from what works with no instruments at all,
+  then goes up through GPS, depth and compass, wind, AIS, batteries, engines
+  and tanks, and the systems you steer and switch. Each level lists the tiles
+  and features it opens up, and the SignalK plugins some of them need. You'll
+  find it under Reference on the help contents page.
 - **The help has a page of frequently asked questions.** It covers what
   Helmcentral needs to run, what works without an internet connection, what it
   costs, where in the world it works, where its forecasts and tides come from,
