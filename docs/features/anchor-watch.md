@@ -37,12 +37,12 @@ it. The panel in the top-left corner of the map shows the readings. At the top
 is the live depth under the keel, because on the hook that matters more than
 how far off the anchor you've swung.
 
-Under the depth, you'll see the tide and which way it's moving. The tide
-station the figures come from is named beside the **Tide** label. Below that,
-once Anchor Watch has a low-water figure for you, are two more lines. The first
-gives the next high and the next low at your boat, each with its time and the
-depth you can expect, and the clearance under the keel after the low. The
-second, labelled **Calibration**, says how far to trust those figures (see
+Under the depth, you'll see the tide and which way it's moving. Once Anchor
+Watch has a low-water figure for you, the high and the low at your boat each get
+a line, with the sooner one first. Each line gives the time and the depth you
+can expect, and the clearance under the keel sits under the low. Tap the small **i**
+beside the tide direction for the tide station and how far to trust those
+figures. It also gives the shallowest spot you've sounded (see
 [Where the depth at low water comes from](#where-the-depth-at-low-water-comes-from)).
 Without a low-water figure, the panel keeps the single line with the station's
 next high or low, its height and time.
@@ -448,13 +448,16 @@ There are two things to know about it:
 
 The tide lines in the map panel read like this when the calibration is ready:
 
-    High 9.24 AM · 5.7 m / Low 3.53 PM · 2.5 m · 1.3 m under keel
-    Calibration  83% of range · 8 min earlier · 12 h of readings
+    High   9.24 AM   5.7 m ±0.2
+    Low    3.53 PM   2.5 m ±0.2
+           1.3 m ±0.2 under keel
 
-The first line is the depth at your boat at the next high and the next low, in
-the order they come, and the clearance under the keel after the low. A margin of
+Each line is the depth at your boat at the next high and the next low, in the
+order they come. The clearance under the keel sits under the low. A margin of
 error such as **±0.2** shows only when it's 0.1 or more, so you never see **±0.0**.
-The **Calibration** line says what those figures rest on:
+Tap the **i** button beside the tide direction and the **Calibration** note opens,
+for example **83% of range · 8 min earlier · 12 h of readings**. It says what
+those figures rest on:
 
 - **Share of range:** How much of the station's tide range the water here
   really has, for example **83% of range**.
@@ -463,7 +466,7 @@ The **Calibration** line says what those figures rest on:
 - **Hours of readings:** How long Helmcentral has been learning from your
   sounder.
 
-Before the calibration is ready, the same first line shows the tide station's
+Before the calibration is ready, the same lines show the tide station's
 prediction. The high is the station's time with the depth at your boat marked
 **est.**, and the low is the depth now less the fall the station predicts. A
 station can be a long way off, and the water at your anchorage may rise and fall
@@ -485,9 +488,9 @@ just after the drop.
 It switches over by itself, with no fixed number of hours. The calibrated
 estimate takes over when its margin of error is smaller than the clearance you
 set in Settings → Anchor Watch. Until then the station estimate stays on screen
-and the **Calibration** line says why:
+and the **Calibration** note says why:
 
-- **Calibration in progress:** There aren't enough readings yet. The line gives
+- **Calibration in progress:** There aren't enough readings yet. The note gives
   a time such as **ready at ~6.40 PM** when Helmcentral can work one out, with
   the weekday in front if that's tomorrow. It only gives a time when the guess is
   between 10 minutes and 24 hours away. Otherwise it gives the hours so far.
@@ -513,8 +516,8 @@ lies now, the station estimate, and the shallowest spot the boat has sounded
 (with 0.2 m added, because the boat may never lie on that exact spot at low water). The warning goes off when the
 bottom of the margin of error on that figure is under your draft plus your
 margin. When the shallowest spot is what set it off, the warning says so. The
-panel also shows **Shallowest sounded spot** whenever it is 0.2 m or more
-shallower than the depth where you lie.
+**i** button also shows **Shallowest sounded spot** whenever it is 0.2 m or more
+shallower than the depth where you lie, and turns amber while it does.
 
 The high on the tide line is for information only. It never raises a warning.
 When the share of range is well under 100%, the station is a poor guide for this

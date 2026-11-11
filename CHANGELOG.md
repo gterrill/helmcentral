@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The Anchor Watch tide panel is easier to read.** The high and the low each
+  get their own line, with the sooner one first, and the clearance under the keel
+  sits under the low. The panel header now says just **Tide**. The tide station,
+  the calibration note and the shallowest sounded spot no longer take up room of
+  their own. Tap the small **i** beside the tide direction to read them. The
+  **i** turns amber when the boat has sounded ground shallower than where it lies.
+
 ## [0.64.0] - 2026-11-11
 
 ### Breaking

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { LowWaterClearanceResult } from '@/lib/low-water-clearance'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
@@ -32,6 +32,11 @@ vi.mock('react-map-gl/maplibre', async () => {
     Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
   }
 })
+
+// The calibration and shallowest-spot text sit behind the info button by the tide direction.
+function openTideInfo() {
+  fireEvent.click(screen.getByRole('button', { name: /^Tide details/ }))
+}
 
 const baseProps = {
   vesselLat: -25.2939,
@@ -138,7 +143,8 @@ describe('AnchorWatchDrawer low water clearance', () => {
     render(<AnchorWatchDrawer {...baseProps} />)
 
     const readout = screen.getByTestId('low-water-tide')
-    expect(readout).toHaveTextContent('Low 4.45 AM · 3.4 m · 2.2 m under keel')
+    expect(within(readout).getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 3.4 m')
+    expect(within(readout).getByTestId('low-water-keel')).toHaveTextContent('2.2 m under keel')
     expect(screen.queryByTestId('low-water-clearance')).not.toBeInTheDocument()
     expect(readout).not.toHaveTextContent('Too shallow')
   })
@@ -209,6 +215,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
+      openTideInfo()
       const line = screen.getByTestId('low-water-calibration')
       expect(line).toHaveTextContent("Calibration readings don't fit the tide model, not used")
       expect(line).not.toHaveTextContent('station')
@@ -237,7 +244,9 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 2.4 m · 1.2 m under keel')
+      expect(screen.getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 2.4 m')
+      expect(screen.getByTestId('low-water-keel')).toHaveTextContent('1.2 m under keel')
+      openTideInfo()
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (1 h of readings so far)')
       expect(screen.queryByTestId('low-water-shallowest')).not.toBeInTheDocument()
       expect(screen.queryByTestId('tide-match-note')).not.toBeInTheDocument()
@@ -253,6 +262,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (ready at ~8.40 AM)')
     })
@@ -264,6 +274,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('ready at ~Mon 2.00 AM')
     })
 
@@ -277,7 +288,9 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('High 2.00 AM · est. 5.6 m / Low 4.45 AM · 2.4 m · 1.2 m under keel')
+      expect(screen.getByTestId('low-water-high')).toHaveTextContent('High 2.00 AM est. 5.6 m')
+      expect(screen.getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 2.4 m')
+      expect(screen.getByTestId('low-water-keel')).toHaveTextContent('1.2 m under keel')
     })
 
     it('gives no ready time when the server has not said when the figures were worked out', () => {
@@ -289,6 +302,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: null, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration in progress (1 h of readings so far)')
     })
@@ -299,13 +313,18 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
-      expect(screen.getByTestId('anchor-watch-hud-header')).toHaveTextContent('Tide · Middle Island')
-      expect(screen.getByTestId('anchor-watch-hud-header')).not.toHaveTextContent('No tide station')
+      const header = screen.getByTestId('anchor-watch-hud-header')
+      expect(header).toHaveTextContent('Tide')
+      expect(header).not.toHaveTextContent('Middle Island')
+      expect(header).not.toHaveTextContent('No tide station')
+      openTideInfo()
+      expect(screen.getByTestId('tide-station-name')).toHaveTextContent('From Middle Island')
       unmount()
 
       mockLowWater = { lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW }, workedOutAt: WORKED, failed: false }
       render(<AnchorWatchDrawer {...baseProps} />)
       expect(screen.getByTestId('anchor-watch-hud-header')).not.toHaveTextContent('No tide station')
+      expect(screen.queryByRole('button', { name: /^Tide details/ })).not.toBeInTheDocument()
     })
 
     it('says a noisy sounder is the reason, in the operator words', () => {
@@ -317,6 +336,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration readings too scattered to calibrate yet')
     })
@@ -331,7 +351,13 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
-      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('High 2.00 AM · 5.1 m ±0.2 / Low 4.45 AM · 2.4 m ±0.2 · 1.2 m ±0.2 under keel')
+      expect(screen.getByTestId('low-water-high')).toHaveTextContent('High 2.00 AM 5.1 m ±0.2')
+      expect(screen.getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 2.4 m ±0.2')
+      expect(screen.getByTestId('low-water-keel')).toHaveTextContent('1.2 m ±0.2 under keel')
+      // Calibration and the shallowest spot are behind the info button until it is clicked.
+      expect(screen.queryByTestId('low-water-calibration')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('low-water-shallowest')).not.toBeInTheDocument()
+      openTideInfo()
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration 83% of range · 8 min earlier · 4 h of readings')
       expect(screen.getByTestId('low-water-shallowest')).toHaveTextContent('Shallowest sounded spot 2.0 m ±0.3')
       for (const gone of ['low-water-method', 'high-water-depth', 'tide-match-note']) {
@@ -348,7 +374,8 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
-      expect(screen.getByTestId('low-water-tide').textContent).toMatch(/^Low 4\.45 AM.* \/ High 10\.27 AM/)
+      const rows = screen.getByTestId('low-water-tide').querySelectorAll('[data-testid^="low-water-"]')
+      expect(Array.from(rows).map((r) => r.getAttribute('data-testid'))).toEqual(['low-water-low', 'low-water-keel', 'low-water-high'])
       unmount()
 
       mockLowWater = {
@@ -360,6 +387,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
       expect(screen.getByTestId('low-water-tide')).not.toHaveTextContent('High')
+      expect(screen.queryByTestId('low-water-high')).not.toBeInTheDocument()
     })
 
     it('never prints a plus-or-minus that reads 0.0, and leaves out a timing that rounds to 0 min', () => {
@@ -374,7 +402,9 @@ describe('AnchorWatchDrawer low water clearance', () => {
       render(<AnchorWatchDrawer {...baseProps} />)
 
       expect(screen.getByTestId('low-water-tide').textContent).not.toContain('±')
-      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 2.5 m · 1.3 m under keel')
+      expect(screen.getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 2.5 m')
+      expect(screen.getByTestId('low-water-keel')).toHaveTextContent('1.3 m under keel')
+      openTideInfo()
       expect(screen.getByTestId('low-water-calibration').textContent).not.toMatch(/min (earlier|later)/)
     })
 
@@ -387,6 +417,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('12 min later')
     })
@@ -399,7 +430,8 @@ describe('AnchorWatchDrawer low water clearance', () => {
       render(<AnchorWatchDrawer {...baseProps} />)
 
       const line = screen.getByTestId('low-water-tide')
-      expect(line).toHaveTextContent('not updated since 4.31 AM')
+      expect(line).toHaveTextContent('Not updated since 4.31 AM')
+      expect(screen.getByTestId('low-water-low')).not.toHaveTextContent('not updated')
       expect(line.className).toMatch(/opacity-70/)
     })
 
@@ -413,7 +445,81 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} />)
 
+      // Calibration text is still there, so the button is, but the spot is not worth a line.
+      openTideInfo()
+      expect(screen.getByTestId('low-water-calibration')).toBeInTheDocument()
       expect(screen.queryByTestId('low-water-shallowest')).not.toBeInTheDocument()
+    })
+
+    it('has no info button when there is no station name, calibration text or differing shallowest spot', () => {
+      mockLowWater = {
+        lowWater: { status: 'ok', depthAtLowM: 2.4, clearanceM: 1.2, lowTideTime: LOW },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+
+      expect(screen.queryByRole('button', { name: /^Tide details/ })).not.toBeInTheDocument()
+    })
+
+    it('turns the info button amber and says why only when a shallower spot was sounded', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: READY,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      const { unmount } = render(<AnchorWatchDrawer {...baseProps} />)
+      const amber = screen.getByRole('button', { name: 'Tide details, shallower spot sounded nearby' })
+      expect(amber.className).toMatch(/text-amber/)
+      unmount()
+
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: { ...READY, shallowestDiffers: false },
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+      const quiet = screen.getByRole('button', { name: 'Tide details' })
+      expect(quiet.className).not.toMatch(/text-amber/)
+    })
+
+    // The button sits inside the map, whose Adjust handler reads Escape as Cancel.
+    it('keeps Escape on the info button to itself while its popover is open', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: READY,
+        },
+        workedOutAt: WORKED, failed: false,
+      }
+      const onKeyDown = vi.fn()
+      render(<div onKeyDown={onKeyDown}><AnchorWatchDrawer {...baseProps} /></div>)
+      const button = screen.getByRole('button', { name: /^Tide details/ })
+
+      fireEvent.keyDown(button, { key: 'Escape' })
+      expect(onKeyDown).toHaveBeenCalledTimes(1)
+
+      openTideInfo()
+      fireEvent.keyDown(button, { key: 'Escape' })
+      expect(onKeyDown).toHaveBeenCalledTimes(1)
+    })
+
+    it('fades the popover figures with the rest when the verdict is stale', () => {
+      mockLowWater = {
+        lowWater: {
+          status: 'ok', depthAtLowM: 2.4, depthAtLowHalfWidthM: 0.2, clearanceM: 1.2, lowTideTime: LOW,
+          cautiousSource: 'boat_now', calibration: READY,
+        },
+        workedOutAt: WORKED, failed: true,
+      }
+      render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
+
+      expect(screen.getByTestId('low-water-calibration').className).toMatch(/italic/)
+      expect(screen.getByTestId('low-water-shallowest').className).toMatch(/italic/)
     })
 
     it('says when the shallowest sounded spot, not the boat cell, set the warning', () => {
@@ -496,6 +602,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('Calibration working out the calibration')
     })
@@ -509,6 +616,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
         workedOutAt: WORKED, failed: false,
       }
       render(<AnchorWatchDrawer {...baseProps} />)
+      openTideInfo()
 
       expect(screen.getByTestId('low-water-calibration')).toHaveTextContent('set a low-water clearance in Anchor Watch settings to judge the calibration')
     })
@@ -523,7 +631,7 @@ describe('AnchorWatchDrawer low water clearance', () => {
       }
       render(<AnchorWatchDrawer {...baseProps} isImperial />)
 
-      expect(screen.getByTestId('low-water-tide')).toHaveTextContent('Low 4.45 AM · 7.9 ft ±0.7')
+      expect(screen.getByTestId('low-water-low')).toHaveTextContent('Low 4.45 AM 7.9 ft ±0.7')
     })
   })
 })

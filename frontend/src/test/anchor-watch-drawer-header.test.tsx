@@ -234,11 +234,12 @@ describe('AnchorWatchDrawer header — depth hero', () => {
 })
 
 describe('AnchorWatchDrawer header — tide context', () => {
-  it('names the tide station as visible text beside the Tide label', () => {
+  it('keeps the tide station off the header and names it in the info popover', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ station_name: 'Goold Island' })} />)
 
-    const panel = hud()
-    expect(panel).toHaveTextContent(/tide\s*·\s*goold island/i)
+    expect(hud()).not.toHaveTextContent(/goold island/i)
+    fireEvent.click(within(hud()).getByRole('button', { name: /^Tide details/ }))
+    expect(screen.getByTestId('tide-station-name')).toHaveTextContent('From Goold Island')
   })
 
   it('shows Falling with the falling arrow', () => {
@@ -429,7 +430,9 @@ describe('AnchorWatchDrawer header — fallback card when there is no map', () =
 
     const card = screen.getByTestId('anchor-watch-header')
     expect(card).toHaveTextContent('Depth')
-    expect(card).toHaveTextContent(/goold island/i)
+    expect(card).not.toHaveTextContent(/goold island/i)
+    fireEvent.click(within(card).getByRole('button', { name: /^Tide details/ }))
+    expect(screen.getByTestId('tide-station-name')).toHaveTextContent('From Goold Island')
     expect(within(card).getByTestId('low-water-clearance')).toBeInTheDocument()
   })
 

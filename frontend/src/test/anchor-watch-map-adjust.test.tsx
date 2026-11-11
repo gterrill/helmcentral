@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi, afterEach } from 'vitest'
+import { createPortal } from 'react-dom'
 import { AnchorWatchMap, type AnchorAdjustPosition } from '@/components/anchor-watch-map'
 import { haversineMeters, bearingDeg as geoBearingDeg } from '@/lib/geo'
 
@@ -278,6 +279,26 @@ describe('AnchorWatchMap Adjust mode — keyboard scoped to the map container', 
     render(<AnchorWatchMap {...baseProps} adjustActive onAdjustSetKey={onAdjustSetKey} />)
     fireEvent.keyDown(screen.getByTestId('anchor-watch-map-wrapper'), { key: 'Enter' })
     expect(onAdjustSetKey).toHaveBeenCalledTimes(1)
+  })
+
+  // A popover opened from the HUD portals to <body>, but React still bubbles its
+  // keys up the component tree to the map wrapper.
+  it('keys from content portalled out of the map do not drive Adjust', () => {
+    const onAdjustSetKey = vi.fn()
+    const onAdjustCancelKey = vi.fn()
+    render(
+      <AnchorWatchMap
+        {...baseProps}
+        adjustActive
+        onAdjustSetKey={onAdjustSetKey}
+        onAdjustCancelKey={onAdjustCancelKey}
+        hudHeader={createPortal(<p data-testid="portalled">Popover text</p>, document.body)}
+      />,
+    )
+    fireEvent.keyDown(screen.getByTestId('portalled'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByTestId('portalled'), { key: 'Escape' })
+    expect(onAdjustSetKey).not.toHaveBeenCalled()
+    expect(onAdjustCancelKey).not.toHaveBeenCalled()
   })
 
   it('arrow keys pan the camera (panBy) rather than doing nothing', () => {
