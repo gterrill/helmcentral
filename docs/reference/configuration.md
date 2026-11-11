@@ -28,6 +28,12 @@ credential is unrecoverable.** You'd have to re-enter the SignalK login, the
 InfluxDB token and the WeatherKit keys. Back up the whole state directory, or at
 minimum that file. There is no key recovery.
 
+Helmcentral won't start with a secrets store it can't unlock. The error names
+`HELMCENTRAL_MASTER_KEY` and the key file. If the key really is gone, move
+`data/secrets.sqlite` aside so that Helmcentral starts with an empty store.
+Then enter each credential again, and sign every phone up for web push again,
+because the web push keys were in the old store too.
+
 `data/documents/` (every uploaded file's bytes) and `data/helmcentral.sqlite`
 are one backup unit. The database holds documents, notes, the equipment
 registry, inventory, maintenance, Mate's conversation history, the AIS sighting

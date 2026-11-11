@@ -44,8 +44,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The help has a page of frequently asked questions.** It covers what
   Helmcentral needs to run, what works without an internet connection, what it
   costs, where in the world it works, where its forecasts and tides come from,
-  using it from ashore, and keeping it secure. You'll find it under Reference
-  on the help contents page.
+  using it from ashore, and keeping it secure. The security answer says how
+  passwords and keys are kept, what leaves the boat and where, and what
+  Helmcentral can't protect you from, such as a spoofed GPS position or a false
+  AIS target. You'll find it under Reference on the help contents page.
 - **A new Current tile shows whether the water is helping or hindering you.** Add
   it from **Add Tile**, under Navigation. It gives the speed of the current and
   the angle it comes from, read off the bow the way the Wind tile reads wind, so
