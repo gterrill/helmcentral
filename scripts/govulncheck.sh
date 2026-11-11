@@ -12,6 +12,18 @@ set -eu
 # Run from backend/ of this script's own checkout, wherever this was started.
 cd "$(dirname "$0")/../backend"
 
+# Scan with the toolchain go.mod names, as CI does. A newer Go on the Mac would
+# otherwise win over the `toolchain` line and scan a different standard library.
+# A GOTOOLCHAIN set in the environment or with `go env -w` is kept. `go mod tidy` drops the toolchain line
+# when it matches the go line, and Go then uses the go line, so this does too.
+if [ "$(go env GOTOOLCHAIN)" = auto ]; then
+	toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+	[ -n "$toolchain" ] || toolchain=go$(awk '$1 == "go" { print $2 }' go.mod)
+	[ "$toolchain" != go ] || { echo "govulncheck: no go line in backend/go.mod" >&2; exit 1; }
+	GOTOOLCHAIN=$toolchain
+	export GOTOOLCHAIN
+fi
+
 govulncheck=golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 # One advisory per line: the OSV id, then why it's excused. An excuse states

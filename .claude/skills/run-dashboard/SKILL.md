@@ -132,10 +132,12 @@ worktree's absolute path; Playwright is a pinned devDependency of `frontend`:
 node <worktree>/frontend/scripts/phone-preview.mjs http://localhost:5175/ <scratchpad>/phone.png
 ```
 
-It opens a 390x844 context with touch, `isMobile` and 2x scale, waits for the
+It opens a 390x844 context with touch and `isMobile`, waits for the
 page to settle (3 s, or `--wait-for`) and prints the page's `scrollWidth`, with a warning when that
 is wider than the viewport. `--width`, `--height`, `--wait-for <selector>` and
-`--full-page` are optional. From a worktree, use its own port in place of 5173,
+`--full-page` are optional. `--clip <selector>` shoots just that element, and
+`--scale <n>` sets the pixel ratio (2 below 768 px wide, else 1; use `--scale 1`
+to keep a full-page shot small enough to read). From a worktree, use its own port in place of 5173,
 or the shot shows the main checkout's code. Then view the PNG with the Read tool.
 `Executable doesn't exist at .../chromium-NNNN` means the cached browser does
 not match the pinned Playwright: run `npx playwright install chromium` from
@@ -172,7 +174,8 @@ Pass `--width`/`--height` from the table. The overflow tell is the script's
 To click, type or read a page, import Playwright the same way the script does.
 Run the file with `node` from inside `frontend`'s tree (for instance a scratch
 `.mjs` that does `import { chromium } from '<worktree>/frontend/node_modules/playwright/index.mjs'`).
-Use `devices['iPhone 14']` or the same context options as `phone-preview.mjs`.
+Use `devices['iPhone 14']` or the same context options as `phone-preview.mjs`,
+whose scale is 2 below 768 px wide and 1 from there up.
 Keep the script in the session scratchpad, not the repo.
 
 Gotchas for driving:

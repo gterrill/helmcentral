@@ -35,7 +35,16 @@ review; its fixes then get reviewed with the rest. It applies its fixes,
 so run it only in your own worktree or a tree holding nothing but your changes.
 Its edits are refactors: no test-first, no CHANGELOG entry.
 
-**Done:** its fixes are applied, or the change is a small edit.
+A docs-only diff (files under `docs/` outside `docs/examples/`, `README.md`
+and `CHANGELOG.md`, the same rule CI uses) skips this step and step 7. Step 4
+runs `make docs-lint-changed`, `npx vitest run src/test/help-links.test.ts
+src/test/docs-vocabulary.test.ts` from `<worktree>/frontend`, `go test -short
+-run TestLoadHelp_RealDocsTree .` from `<worktree>/backend`, and the
+`CHANGELOG.md` check when that file changed.
+Step 5 is one `/code-review medium` framed as checking the prose's factual
+claims against the code.
+
+**Done:** its fixes are applied, or the change is a small edit or docs-only.
 
 ## 4. Test
 
@@ -81,17 +90,32 @@ desktop and phone widths. Keep the pass counts for the PR body.
 
 ## 5. Review
 
-Run `/code-review medium <worktree path>`. Then read the
+Keep a Decisions list in `<worktree>/.review-decisions.md` (gitignored): the
+operator's choices from AskUserQuestion, and every finding you dismissed with
+its reason. Run `/code-review medium <worktree path> — read
+<worktree>/.review-decisions.md first; findings it already settles are not
+findings`. Then read the
 `CODING_STANDARDS.md` sections the diff touches and check every changed line
 against them. Check each finding against the code. Fix the real ones
 test-first, then go back to step 4. Test-first means the new test has been run
 and seen failing on the unfixed code; a builder subagent's brief asks for that
 run and its hand-back shows it.
 
+A builder's brief is self-contained and says: run tests only through `make
+check-frontend` and `make check-backend`, or `npx vitest run <file>` from
+`<worktree>/frontend` and `go -C <worktree>/backend test -short ./...`; edit
+with the Edit tool only. Start a fresh builder for each review round; never
+`SendMessage` to the old one.
+
 When the second `/code-review` pass still finds bugs in the function or
 mechanism the first pass flagged, the design is the problem, not the next
 finding. Stop fixing and ask the operator, naming the logic and the findings
 it keeps producing, whether to simplify it, cut it or carry on.
+
+Otherwise a third `/code-review` pass is the last: act only on its correctness
+findings (wrong behaviour, data loss, security), and put the rest under
+"Follow-ups" in the PR body or the ADR. If the change still needs another pass
+after that, ask the operator.
 
 A real finding gets fixed in this PR, even when it sits in code the change
 only passes through. Dismiss a finding only when the code proves it wrong.
@@ -127,8 +151,10 @@ committed work only, so it runs after step 6. The script fails when the branch
 has no commits ahead of `origin/HEAD`. Fix each confirmed finding test-first,
 then go back to step 4.
 
+A docs-only diff skips this step (see step 3).
+
 **Done:** the script ran and its report covers this branch's commits, and it
-has no findings or every finding is fixed and pushed.
+has no findings or every finding is fixed and pushed; or the diff is docs-only.
 
 ## 8. Watch until merged
 

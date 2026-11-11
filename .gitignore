@@ -69,6 +69,8 @@ settings.yaml
 /plugins/*
 # Scratch notes kept across branches, not part of any change
 /temp.md
+# The ship skill's review decisions, kept in each worktree
+/.review-decisions.md
 
 # Plugin binaries built in place by the TinyGo build documented in each
 # plugin's README; the deployed copies live in the ignored /plugins/.

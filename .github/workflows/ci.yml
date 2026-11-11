@@ -14,8 +14,48 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Branch protection requires most of the jobs below by name, so a docs-only
+  # PR cannot skip them with a workflow-level paths-ignore: they would sit at
+  # "Expected" forever. Every job still reports instead, and the expensive ones
+  # are gated on `code`. A job skipped by its own `if` reports as skipped,
+  # which branch protection counts as passed. Pushes to main run everything.
+  # The gates test `code != 'false'` under `!cancelled()`, so a failed Changes
+  # job leaves `code` empty and everything runs rather than skips.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The PR merge commit and its first parent, the current base.
+          fetch-depth: 2
+
+      # code=false only when every changed file is under docs/ (but not
+      # docs/examples/, which holds plugin source), or is README.md or
+      # CHANGELOG.md. AGENTS.md and the other root Markdown steer agents, so
+      # they count as code. A failed diff fails the job rather than reading
+      # as "docs only". --no-renames lists a file moved into docs/ under its
+      # old path too.
+      - id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only --no-renames HEAD^1 HEAD)
+          if echo "$files" | grep -qE '^docs/examples/' \
+            || echo "$files" | grep -qvE '^(docs/|README\.md$|CHANGELOG\.md$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   backend:
     name: Backend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,8 +81,16 @@ jobs:
 
   # ~5,000 tests in one package, mostly run one after another, so one runner
   # is bound by count; scripts/go-test-shard.sh deals them across three.
+  #
+  # Matrix job, so its `if` never tests `code`: a skipped matrix job reports
+  # under its unexpanded name ("Backend tests (${{ matrix.shard }}/3)"), which
+  # matches no required check. The job runs and expands its name, and each step
+  # is gated on `code` instead, so a docs-only PR gets "Backend tests (1/3)" as
+  # success.
   backend-test:
     name: Backend tests (${{ matrix.shard }}/3)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,8 +98,10 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
 
       - uses: actions/setup-go@v7
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -61,6 +111,7 @@ jobs:
       # files rotate, so they fail for reasons that have nothing to do with a
       # change under review; run them locally when touching the FTP fetch path.
       - name: Test
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
         working-directory: backend
         run: sh ../scripts/go-test-shard.sh ${{ matrix.shard }} 3
 
@@ -96,6 +147,8 @@ jobs:
   # arm64 runners, run the same command on the Pi itself before a release.
   zone-index-arm64:
     name: Zone index on arm64
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
@@ -112,8 +165,11 @@ jobs:
   # The suite is ~500 files whose cost is almost all per-file setup, so it
   # splits cleanly across runners; on one 4-core runner it was the slowest
   # job. Lint and build run in the Frontend job alongside the shards.
+  # Steps, not the job, are gated on `code`: see Backend tests above.
   frontend-test:
     name: Frontend tests (${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -121,23 +177,29 @@ jobs:
         shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
 
       - uses: actions/setup-node@v7
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
         working-directory: frontend
         run: npm ci
 
       - name: Test
+        if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
         working-directory: frontend
         run: npm test -- --shard=${{ matrix.shard }}/5
 
   frontend:
     name: Frontend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -173,6 +235,8 @@ jobs:
 
   docs:
     name: Help pages prose
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -193,6 +257,34 @@ jobs:
       # Only vale errors fail the job.
       - name: Lint
         run: vale --no-global docs
+
+      # These tests read the help pages from disk: help links against the
+      # docs' headings, the dashboard vocabulary, and the help tree Mate loads.
+      # The test jobs run them when code changed; a docs-only PR runs them here.
+      - uses: actions/setup-go@v7
+        if: needs.changes.outputs.code == 'false'
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Help tree loads
+        if: needs.changes.outputs.code == 'false'
+        working-directory: backend
+        run: go test -short -run 'TestLoadHelp_RealDocsTree' .
+
+      - uses: actions/setup-node@v7
+        if: needs.changes.outputs.code == 'false'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Docs-reading tests
+        if: needs.changes.outputs.code == 'false'
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vitest run src/test/help-links.test.ts src/test/docs-vocabulary.test.ts
 
   # actionlint through `go run` at the version pinned in the Makefile, so a
   # broken workflow fails here instead of when it first runs on main.
@@ -234,6 +326,8 @@ jobs:
   # the tag.
   release-targets:
     name: Release build targets
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
@@ -275,6 +369,8 @@ jobs:
   release-build:
     name: Release build (dry run, ${{ matrix.goos }}/${{ matrix.goarch }})
     needs: release-targets
+    # release-targets runs after a failed Changes job, and so does this.
+    if: ${{ !cancelled() && needs.release-targets.result == 'success' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -309,16 +405,19 @@ jobs:
   # The one release check branch protection requires. A PR builds only the
   # targets release-targets picks, so requiring each target by name would leave
   # most PRs waiting on checks that never report. always() keeps this reporting
-  # when a job it needs fails, because a skipped check counts as passed.
+  # when a job it needs fails, because a skipped check counts as passed. On a
+  # docs-only PR both jobs are skipped on purpose, which passes here.
   release-builds:
     name: Release builds
-    needs: [release-targets, release-build]
+    needs: [changes, release-targets, release-build]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
+          CODE: ${{ needs.changes.outputs.code }}
           TARGETS: ${{ needs.release-targets.result }}
           BUILDS: ${{ needs.release-build.result }}
         run: |
-          echo "Release build targets: $TARGETS, release builds: $BUILDS"
+          echo "Code changed: $CODE, release build targets: $TARGETS, release builds: $BUILDS"
+          [ "$CODE" = false ] && exit 0
           [ "$TARGETS" = success ] && [ "$BUILDS" = success ]
