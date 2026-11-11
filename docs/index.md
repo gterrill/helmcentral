@@ -166,6 +166,9 @@ Details to look up: settings, file formats and where things are stored.
   a YachtWave export ends up.
 - [POI categories](reference/poi-categories.md): the eleven points-of-interest
   categories and what each provider covers.
+- [Frequently asked questions](reference/faq.md): what Helmcentral needs,
+  what it costs, where it works, where its forecasts come from, using it
+  ashore, and keeping it secure.
 
 ## Engineering notes
 
