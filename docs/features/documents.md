@@ -2,21 +2,21 @@
 
 The document library keeps the files that matter to the boat where you can find
 them from the boat, not from an inbox ashore. That means manuals, receipts,
-invoices, service logs, passage notes, and a photo of a part number or a data
+invoices, service logs, passage notes and a photo of a part number or a data
 plate. Upload one and Helmcentral reads whatever text it can find and indexes
 it for search. With Mate switched on, a scan or photo is also OCR'd properly,
 and the document gets a short summary and a few suggested tags.
 
-The sidebar's **Documents** panel is where this happens day to day. You browse
-folders, upload by button or drag-and-drop, search, and open, download, rename,
-move, reindex or edit the details of anything in the library. The page is
-titled with the folder you are in. **Upload** is the button at the top right.
-**New folder** and **New note** are under the menu beside it (**More
-actions**). The list holds documents only, and each row has its own menu.
-Folders live in the pane on the left, described below. You can also attach a
-file straight from Mate's composer (see [Documents](assistant.md#documents) on
-the Mate page). A chip on a past message opens the same viewer this panel
-uses.
+The sidebar's **Documents** panel is where you do the day-to-day work. You
+browse folders, upload by button or drag-and-drop, search, and open, download,
+rename, move, reindex or edit the details of anything in the library. The page
+is headed with the name of the folder you're in, or **Documents** at the top
+level. **Upload** is the button at the top right. **New folder** and **New
+note** are under the menu beside it (**More actions**). The list holds
+documents only, and each row has its own menu. Folders live in the pane on the
+left, described below. You can also attach a file straight from Mate's
+composer (see [Documents](assistant.md#documents) on the Mate page). A chip on
+an earlier message opens the same viewer this panel uses.
 
 The viewer opens as a panel down the right-hand side, which is fine for a note
 but small for a network diagram or an engine drawing. Tap **Full screen**
@@ -51,9 +51,9 @@ With Mate on, anything uploaded (or reindexed, see below) also gets:
 
 This runs as soon as the document is uploaded. There's no button to press and
 no per-document prompt. It costs real money, though the amounts are small. A
-one-page scanned invoice cost $0.0023, the same document split across two pages
-cost $0.0046, and a photographed receipt cost $0.0012, all measured against a
-live OpenRouter account.
+one-page scanned invoice cost $0.0023. Split across two pages, the same
+document cost $0.0046. A photographed receipt cost $0.0012. All three were
+measured against a live OpenRouter account.
 
 Each document tracks what has been spent reading it, added up across every
 reindex, not just the last pass. That figure is on the document's Details page,
@@ -79,12 +79,12 @@ levels.
 
 - **Documents:** It's at the top and shows the documents filed at the root of
   the library.
-- **Folders:** They sit below it, each with a count on the right of the
-  documents filed directly in it.
+- **Folders:** They sit below it, each with a count on the right of how many
+  documents are filed directly in it.
 - **Chevrons:** A chevron opens or closes a folder that has subfolders, and
   Helmcentral remembers which ones you left open on that device.
 - **Links:** If you open a document's folder from a link, its parents open
-  themselves and the folder is highlighted.
+  up and the folder is highlighted.
 
 A folder marked as a manual shows a book icon. Its sections are read inside
 the manual, so they are not listed as folders in the pane, and its count is
@@ -110,12 +110,11 @@ The pane has the same look as the Rode Planner on the Anchor Watch page, with
 its name and a small arrow at the top. Tap the arrow (**Hide folders**) and the
 pane shrinks to a thin strip down the left edge, which gives the list the
 whole width. Tap the arrow at the top of the strip (**Show folders**) to bring
-the pane back.
-Helmcentral remembers on that device whether you left it hidden. On a phone the
-pane isn't on the page. Tap **Folders** to open it, and it closes as soon as
-you pick a folder. In the pane the up and down
-arrows move between folders, right opens a folder, left closes it, and Enter
-opens the folder you are on.
+the pane back. Helmcentral remembers on that device whether you left it hidden.
+On a phone the pane isn't on the page. Tap **Folders** to open it, and it
+closes as soon as you pick a folder. In the pane the up and down arrows move
+between folders, right opens a folder, left closes it and Enter opens the
+folder you're on.
 
 ## Folders, tags, notes and title
 
@@ -126,9 +125,9 @@ is untouched, so refiling never means re-uploading.
 
 **Move…** opens a folder picker you can browse one level at a time. The
 destination doesn't have to exist yet. Type a name and click **Create folder**.
-The picker makes the folder inside the one it's showing and drops straight into
-it, so **Move here** means the folder you just made. Filing the first receipt
-of a new year is one trip, not three.
+The picker makes the folder inside the one it's showing and drops you straight
+into it, so **Move here** means the folder you just made. Filing the first
+receipt of a new year is one trip, not three.
 
 Every document carries:
 
@@ -139,14 +138,14 @@ Every document carries:
   a suggestion until you keep it, and it never replaces or hides a tag you
   added.
 - **Notes**, a free-text field for anything about the document that isn't in
-  the file itself: where the paper original lives, who to call about it, why
-  it's worth keeping.
+  the file itself. Use it for where the paper original lives, who to call
+  about it or why it's worth keeping.
 
-A tag can also link a document to a marina. Give a marina's own map or berth
-plan a tag that is the marina's name, such as "Coral Sea Marina Resort", and
-Mate reads it whenever it looks at that marina. Only tags you've kept or typed
-yourself link a document. A tag Mate merely suggested does not. The marina card shows it too,
-with a link back here. See "A marina's own map" in
+A tag can also link a document to a marina. Tag a marina's own map or berth
+plan with the marina's name, such as "Coral Sea Marina Resort". Mate then reads
+it whenever it looks at that marina. Only tags you've kept or typed yourself
+link a document. A tag Mate merely suggested does not. The marina card shows it
+too, with a link back here. See "A marina's own map" in
 [Mate](assistant.md#a-marinas-own-map).
 
 Title, filename, folder, tags, summary and notes are all searched along with
@@ -173,8 +172,9 @@ of a manual, they walk the manual in the order it reads.
 A search is a window over the list rather than a list of its own. So if you
 reached a document from a search result, the arrows walk the folder the document
 is in. The same goes for any document that isn't in the list you came from, such
-as one from another folder or one without the tag you had chosen. The arrows grey out at the first and last document. The **[** and **]**
-keys do the same, as long as you aren't typing in a field.
+as one from another folder or one without the tag you had chosen. The arrows
+grey out at the first and last document. The **[** and **]** keys do the same,
+as long as you aren't typing in a field.
 
 Nothing is written until you press **Save**. As soon as you change anything, a
 save bar appears at the top of the screen with **Save** and **Discard**.
@@ -211,8 +211,8 @@ it left the boat.
 An upload is capped at 100 MB. Supported types are PDF (text or scanned), plain
 text, Markdown, CSV, JSON, NMEA and GPX logs, and JPEG, PNG, GIF and WebP
 images. HEIC and HEIF photos, which is what an iPhone saves by default, are
-accepted and stored but not read. Convert them to JPEG first if you want Mate
-to see what's in one. Any other file type is still accepted, stored and
+accepted and stored but not read. If you want Mate to see what's in one,
+convert it to JPEG first. Any other file type is still accepted, stored and
 downloadable later. It just isn't indexed, since there's no text in it to
 search and nothing for Mate to read.
 
@@ -227,7 +227,7 @@ use the arrow keys to move between the results below the box, and press Enter
 to open the highlighted one, or just click it. **Esc** or the close button
 dismisses the overlay and clears the search.
 
-The search box always searches words. Type a part number, a boat name or an
+The search box always searches for words. Type a part number, a boat name or an
 invoice number and it finds the documents containing it, instantly, with no
 connection and no account. Titles, filenames, folder paths, tags, summaries and
 notes are searched along with the document's own text, so a receipt filed under
@@ -237,10 +237,10 @@ A search only looks in the folder you're browsing unless you turn on the **All
 folders** switch inside the search box, which widens it to the whole library.
 
 With Mate on, search also works by meaning. Ask "how often should I service the
-engine's cooling system impeller" and the manual page that says "raw water
-pump: inspect the rubber vanes... replace every 500 hours" comes back, even
-though the two share no useful word. Both searches run and the results are
-merged. So a document both agree on ranks above one that only one side found.
+engine's cooling system impeller". It finds the manual page that says "raw
+water pump: inspect the rubber vanes... replace every 500 hours", even though
+the two share no useful word. Both searches run and the results are merged.
+So a document both agree on ranks above one that only one side found.
 
 For this, each document's text first has to be turned into vectors. Turning
 Mate on with an embedding model chosen sweeps the whole library in the
@@ -251,7 +251,7 @@ a dropped connection) it picks up where it left off, so nothing is paid for
 twice.
 
 The cost is small. Embeddings bill around $0.02 per million tokens, which is
-fractions of a cent for a whole library. A search query costs about two
+a fraction of a cent for a whole library. A search query costs about two
 hundredths of a cent, and less if you've searched the same thing recently,
 since queries are cached.
 
@@ -275,9 +275,10 @@ size. Added is the day the file came into Helmcentral, shown as "12 Oct" for
 this year and "3 Jan 2025" for earlier ones. Click **Name**, **Added** or
 **Size** to sort by it, and click again to reverse. The list opens newest
 first, and Helmcentral remembers your choice on that device. A row shows its
-first three tags with a "+2" style count for the rest. Hover to see them all.
-The tag you've filtered by and the **Unfiled notes** view are kept in the web
-address. Going back from a document returns you to the same list.
+first three tags with a "+2" style count for the rest. Hover over the tags to
+see them all. The tag you've filtered by and the **Unfiled notes** view are
+kept in the web address. Going back from a document returns you to the same
+list.
 
 ## Status and Reindex
 
@@ -290,7 +291,7 @@ A document is one of three things:
 - **Pending**: just uploaded, not read yet.
 - **Indexed**: read and searchable, and summarised and tagged if Mate was on at
   the time. A PDF that read cleanly except for one or two broken pages still
-  reaches indexed, with a note saying "N of M pages unreadable" so the gap is
+  shows as Indexed, with a note saying "N of M pages unreadable" so the gap is
   visible.
 - **Failed**: something went wrong, with the reason shown alongside.
 
@@ -302,20 +303,20 @@ Reindex is also how a scan longer than 200 pages gets past the automatic cost
 cap. A document that size is turned away the first time, with its page count
 and an estimated cost. It only goes ahead once you ask for it through Reindex.
 
-Select more than one document, using the checkbox on each row or **Select all**
-in the header for everything listed. A bar then appears above the list showing
-how many are selected, with **Move to…**, **Reindex…**, **Delete** and **Clear
-selection**. Reindex covers everything you picked in one confirmation. That's
-useful after re-scanning a folder of receipts, or once Mate is switched on for
-a batch uploaded while it was off. The confirmation shows the combined page
-count. If any of it is a scan or a photo, it also shows the estimated OCR cost
-for just those.
+Select more than one document using the checkbox on each row, or **Select
+all** in the header for everything listed. A bar then appears above the list
+showing how many are selected, with **Move to…**, **Reindex…**, **Delete** and
+**Clear selection**. Reindex covers everything you picked in one confirmation.
+That's useful after re-scanning a folder of receipts, or once Mate is switched
+on for a batch uploaded while it was off. The confirmation shows the combined
+page count. If any of it is a scan or a photo, it also shows the estimated OCR
+cost for just those.
 
 ## Attaching a document to Mate, and Mate searching on its own
 
 When you ask Mate a question with a document attached, Mate gets a short
-preamble ahead of your question: the filename, the kind of file, the page
-count, whether indexing has finished, and up to around 4,000 characters of
+preamble ahead of your question. It gives the filename, the kind of file, the
+page count, whether indexing has finished and up to around 4,000 characters of
 what's in it. If the answer needs more, Mate reads further into the same
 document itself. The attachment stays on the message as a small chip, and the
 chip reopens this panel's viewer for that file.
@@ -337,7 +338,7 @@ The library is two things, and you need both:
   the nearby-vessel history.
 
 The database alone describes files it can no longer produce. The folder alone
-is just anonymous names. Back both up as one unit.
+is just a collection of anonymous names. Back both up as one unit.
 
 Copying `helmcentral.sqlite` while Helmcentral is running can miss changes
 still waiting to be written. Stop Helmcentral first, or use the `sqlite3`
