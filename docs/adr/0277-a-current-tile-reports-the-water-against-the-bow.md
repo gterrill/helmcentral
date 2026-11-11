@@ -32,15 +32,17 @@ go stale like the Wind tile does. A frontend test holds the id lists equal.
 - **Speed.** `currentDriftKts` to 0.1 kt.
 - **From.** The angle the water comes from, off the bow, in the wind's
   convention: `normalize(set + 180 - heading)`, rounded to a whole degree.
-  0 to 180 reads `S<n>`, over 180 reads `P<360-n>`. Exactly ahead reads "Ahead"
-  and exactly astern reads "Astern", since "S0" and "S180" name no side.
+  0 to 180 reads `S<n>`, over 180 reads `P<360-n>`. Exactly ahead reads `0`
+  and exactly astern reads `180`, since "S0" and "S180" name no side. A word such
+  as "Astern" does not fit two columns at the reading's size floor.
 - **Helping or Hindering.** `currentDriftImpactKts` to 0.1 kt, as a small word
-  over a large figure so the number never truncates: "Helping" over "+0.4 kt"
+  over a reading in the same size as the other two, so the number never truncates:
+  "Helping" over "+0.4 kt"
   (teal, `text-gauge-secondary`) or "Hindering" over "−1.8 kt" (amber,
   `text-amber-600`, matching the Wind tile's SET and DRIFT cards), with a true
   minus sign. An impact that rounds to 0.0 reads "No effect" in the muted colour.
   "Across the course" was rejected: a weak head current rounds to zero too, and
-  that wording contradicted an "Ahead" angle.
+  that wording contradicted an ahead angle.
 - **Still water.** Drift that rounds to 0.0 kt keeps the speed, drops the angle
   to `—` (still water has no direction) and reads "No current".
 
@@ -85,6 +87,9 @@ tile this small would compete with them.
   operator adds it from the picker.
 - The tile reads the vessel state store directly, like Wind, so it needs no new
   stream or poll.
-- The tile needs four columns and four rows, so "Astern" and the figure never
-  truncate.
+- The tile is two columns wide, like a Gauge tile, so it can sit under one. Speed,
+  From and the effect figure are three stacked rows, each a small label over a
+  reading in the Gauge tile's own fluid size (`lib/fluid-readout.ts`). A reason
+  replaces the effect word, or the From label for "No heading", so it needs no
+  line of its own. Three readings at the 36px floor need five rows.
 - A later arrow, or a trend over the last hour, builds on the same three fields.

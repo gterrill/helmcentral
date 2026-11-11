@@ -139,11 +139,12 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'clock': { minW: 2, minH: 6 },
   'current-conditions': { minW: 3, minH: 6 },
   'forecast-conditions': { minW: 4, minH: 6 },
-  // Content is ~163px (card chrome 32, two cards 57, effect label and
-  // figure 46 with an 8px gap, reason line 20); four rows are 176px. Two
-  // cards holding "Astern" at text-2xl need ~260px, which three columns
-  // do not give on a laptop board.
-  'water-current': { minW: 4, minH: 4 },
+  // Three stacked readings at a gauge's 2.25rem (36px) floor, two columns wide
+  // like a gauge. Five rows are 5*32 + 4*16 = 224px; the card sits 8px lower in
+  // its cell (216px), less 32px of chrome (24 above, 8 below) leaves 184px, and
+  // two 4px gaps leave 176px, so 58.7px a row. A 10px label leaves 48.7px for
+  // the 36px reading. Four rows would leave 32.7px, which clips it.
+  'water-current': { minW: 2, minH: 5 },
 }
 
 // The hero's uniform enlargement (ADR 0072). Applied as a CSS transform rather

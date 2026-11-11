@@ -216,7 +216,7 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   // and wider than its own WIDGET_CONSTRAINTS floor (4x6) since that floor
   // is the tightest fit, not the comfortable one.
   'forecast-conditions': { w: 6, h: 7 },
-  'water-current': { w: 4, h: 4 },
+  'water-current': { w: 2, h: 5 },
 }
 
 export interface EmbedWidgetConfig {
