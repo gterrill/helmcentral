@@ -82,8 +82,9 @@ Stuck, or not sure it suits your boat? Ask in
 ## Requirements
 
 - **Linux, macOS or Windows.** Builds cover Linux on x86-64, arm64 and armv7
-  (which covers the Raspberry Pi 2 and every later model, but not the Pi 1
-  or the first Pi Zero), plus macOS and Windows. Linux gets a
+  (which covers the Raspberry Pi 2, 3, 4 and 5 and the Zero 2 W, but not the
+  older ARMv6 boards: the Pi 1, Pi Zero, Zero W and Compute Module 1), plus
+  macOS and Windows. Linux gets a
   systemd service. There's nothing else to install alongside it.
 - **A SignalK server** on your network, with
   [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) for
@@ -259,9 +260,12 @@ Turn on SignalK's security first, then turn on login in Settings → Security.
 Helmcentral won't save the setting until SignalK security is on. With login
 on, Helmcentral checks SignalK's security every time it starts, and it won't
 start if SignalK can't be reached or its security has been turned off. That
-includes a SignalK that's still starting up after a power cut. To get going
-again, set `auth.mode: none` in `settings.yaml` and restart. Turning login off
-doesn't need SignalK to be reachable.
+includes a SignalK that's still starting up after a power cut. Under Docker the
+container keeps retrying and comes up once SignalK answers. The systemd service
+gives up after five failed starts in two minutes, so once SignalK is up, run
+`sudo systemctl restart helmcentral`. Set `auth.mode: none` in `settings.yaml`
+only if SignalK's security really is off. Turning login off doesn't need
+SignalK to be reachable.
 
 Every environment variable, state path and startup behaviour:
 [docs/reference/configuration.md](docs/reference/configuration.md).

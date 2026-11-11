@@ -10,8 +10,8 @@ need:
 
 - **A computer on the boat:** Linux, macOS or Windows. Linux builds cover
   x86-64, arm64 and armv7, which covers the Raspberry Pi 2 and every later
-  model, including the Zero 2 W. The original Pi 1 and the first Pi Zero
-  aren't covered. On Linux it runs as a
+  model, including the Zero 2 W. The older ARMv6 boards aren't covered: the
+  Pi 1, Pi Zero, Zero W and Compute Module 1. On Linux it runs as a
   systemd service. It also runs in Docker, and the image works on the same
   three kinds of processor.
 - **A SignalK server:** Helmcentral reads the boat's instruments through
@@ -149,8 +149,11 @@ Here's how Helmcentral keeps the boat safe:
 - **Login depends on SignalK at startup:** With login on, Helmcentral checks
   SignalK's security when it starts. If SignalK isn't running yet, or its
   security has been turned off, Helmcentral won't start, and nothing else
-  works until it does, alarms and anchor watch included. To get going again,
-  set `auth.mode: none` in `settings.yaml` and restart. See
+  works until it does, alarms and anchor watch included. Under Docker it keeps
+  trying and comes up once SignalK answers. The systemd service gives up after
+  five failed starts in two minutes, so once SignalK is up, run
+  `sudo systemctl restart helmcentral`. Set `auth.mode: none` in
+  `settings.yaml` only if SignalK's security really is off. See
   [Configuration](configuration.md).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
