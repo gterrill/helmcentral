@@ -5,27 +5,27 @@ Each one links to the page that covers it in full.
 
 ## What hardware and software does it need?
 
-Helmcentral runs on a computer that stays on aboard the boat, and you look at
-it in a web browser on your phones, tablets and screens. Here's what you need:
+Helmcentral operates on a computer that remains on the boat, and you access it 
+via a web browser on your phones, tablets, and screens. Here's what you need:
 
-- **A connection to the boat's instruments:** Your instruments talk to each
-  other over NMEA 2000, NMEA 0183 or both. Helmcentral can't plug into those
-  directly. It needs a gateway that passes their data to a computer, such as a
-  USB adaptor for NMEA 0183 or an NMEA 2000 gateway. SignalK's
+- **A connection to the boat's instruments:** Your instruments communicate with
+  each other via NMEA 2000, NMEA 0183 or both. However, Helmcentral can’t connect
+  directly to these systems.  It requires a gateway to transmit their data to a
+  computer.  This could be a USB adaptor for NMEA 0183 or an NMEA 2000 gateway. SignalK's
   [installation page](https://signalk.org/installation/) covers which adaptors
   and gateways work and how to connect them.
 - **Sensors, as many or as few as you have:** You don't need any particular
-  sensor to start. With no instruments at all you still get the inventory,
-  maintenance by the calendar, documents and notes. A GPS, with SignalK's
-  autostate plugin, adds the anchor watch, the logbook and the forecast. Each
+  sensor to start. With no instruments at all, you still get the inventory,
+  maintenance by the calendar, documents, and notes. A GPS, with SignalK's
+  autostate plugin, adds the anchor watch, the logbook, and the forecast. Each
   sensor after that adds more. A depth sounder, wind instrument, AIS receiver,
-  battery monitor, engines and tanks each open up their own tiles and alarms.
+  battery monitor, engines, and tanks each open up their own tiles and alarms.
   When a sensor is missing, the tiles that need it say so rather than showing
   an invented number. [Hierarchy of sensor needs](sensor-needs.md) shows what
   each sensor adds, level by level.
 - **A SignalK server:** SignalK reads the gateway and turns the NMEA data into
   readings Helmcentral can use. If you don't have it yet, install it first,
-  following the same [installation page](https://signalk.org/installation/).
+  following the [installation page](https://signalk.org/installation/).
   It can run on the same computer as Helmcentral. Add the
   `signalk-derived-data` plugin for true wind and other worked-out navigation
   figures. If you have a Victron GX, add `signalk-venus-plugin` too, so that
@@ -35,12 +35,11 @@ it in a web browser on your phones, tablets and screens. Here's what you need:
   model, including the Zero 2 W. The older ARMv6 boards aren't covered: the
   Pi 1, Pi Zero, Zero W and Compute Module 1. On Linux it runs as a
   systemd service. It also runs in Docker, and the image works on the same
-  three kinds of processor.
+  three kinds of processors.
 - **Phones, tablets and screens to look at it on:** There's no app to install.
   Any phone, tablet, laptop or wall screen with a recent browser works: Chrome
   or Edge 111 or later, Firefox 111 or later, or Safari 16.4 or later. On an
-  iPad or iPhone that means iOS 16.4 or later. Older tablets aren't supported,
-  so check a wall screen with `/display-probe.html` before you mount it.
+  iPad or iPhone, that means iOS 16.4 or later.
 - **A network on the boat:** Each phone, tablet and screen has to be on the
   same network as the computer running Helmcentral. On most boats that's the
   boat's WiFi. If your boat doesn't have WiFi yet, you'll need a WiFi router
@@ -56,10 +55,9 @@ InfluxDB is optional, and only adds a longer history. The steps are in
 
 ## Does it need an internet connection?
 
-No, not for the parts that look after the boat. The dashboard, alarms, anchor
-watch, passages, inventory, maintenance, documents and the help pages all work
-with no connection at all. An alarm can still reach a buzzer or a chartplotter
-through SignalK when the boat is offline.
+No, not for the boat’s systems.  The dashboard, alarms, anchor watch, passages, 
+inventory, maintenance, documents, and help pages all function independently. Even 
+without a connection, an alarm can still trigger a buzzer or chartplotter via SignalK.
 
 These parts do use the internet:
 
@@ -90,7 +88,7 @@ The default weather, wave, tide and place-name providers are free and need no
 key. The notification channels don't need a paid service either, although an
 email server or ntfy server you already pay for works fine.
 
-The only running cost is Mate, if you turn it on. You use your own
+The only running cost is Mate (AI assistant), if you turn it on. You use your own
 [OpenRouter](https://openrouter.ai/) account and pay OpenRouter for each
 question. Each reply shows what it cost, for example `$0.056`. Mate is off
 until you turn it on. See [Mate](../features/assistant.md#conversations-and-cost).
@@ -113,12 +111,11 @@ Some providers only cover certain waters:
   Elsewhere, the forecast shows no official warnings.
 - **Place names and nearby places:** OpenStreetMap, worldwide. How much it
   knows depends on how well local people have mapped your area. A Google
-  Places provider is also included. It needs a key and covers some kinds of
-  place.
+  Places provider is also included (key required).
 - **Offline coastline:** Worldwide, except across the 180° meridian and near
   the poles.
 
-Other regions can be added as a plugin without changing Helmcentral itself.
+You can add other regions as a plugin without changing Helmcentral itself.
 See [Provider plugins](plugins.md).
 
 ## Where does it get weather, wave and tide information?
@@ -133,8 +130,7 @@ Each comes from its own provider plugin, and you choose which one in Settings:
 - **Marine warnings:** BOM in Australia and NWS in the US.
 
 The forecast card says which provider answered, whether the data came from the
-cache, and how long ago it was refreshed. If one provider is down, only that
-section shows the failure. See [Forecast](../features/forecast.md).
+cache, and how long ago it was refreshed. See [Forecast](../features/forecast.md).
 
 ## Can I use it while off the boat?
 
@@ -171,44 +167,20 @@ Here's how Helmcentral keeps the boat safe:
   account. SignalK's read-only, read-write and admin levels decide what each
   person can do, and an unknown level gets no access at all. Helmcentral won't
   save the setting until SignalK security is on.
-- **Login depends on SignalK at startup:** With login on, Helmcentral checks
-  SignalK's security when it starts. If SignalK isn't running yet, or its
-  security has been turned off, Helmcentral won't start, and nothing else
-  works until it does, alarms and anchor watch included. Depending on how you
-  run it, a power cut can leave it stopped until you start it again. How to
-  get it going again on Docker, systemd, macOS and Windows is in
-  [Login and SignalK at startup](configuration.md#login-and-signalk-at-startup).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
   never forward a port to it. The one exception is Tailscale Funnel for
   outside assistants, below. It passes on the assistant's address and refuses
   everything else.
 - **Passwords and keys are encrypted:** Every password, token and API key goes
-  into its Settings section, not into `settings.yaml`. That covers the SignalK
-  login, the InfluxDB token, the email password, the ntfy token, the WeatherKit
-  and Google Places keys, and your OpenRouter key. Helmcentral keeps them in
-  its own store on the boat, encrypted with AES-256-GCM. The key that unlocks
-  them is the file `data/secrets.key`, unless you've set
-  `HELMCENTRAL_MASTER_KEY` instead.
-- **Some credentials belong to an address:** Changing the SignalK address
-  clears the SignalK login, and changing the InfluxDB address clears its
-  token. Changing the ntfy server clears the ntfy token, and changing the
-  email server or username clears the email password. Enter it again
-  afterwards, or that channel stays quiet.
-- **Back up the key with the store:** Back up the whole state directory,
-  `settings.yaml` included, and `HELMCENTRAL_MASTER_KEY` too if you use it.
-  Without the key, Helmcentral won't start until you move the old store aside.
-  Then every credential has to be entered again, and every phone has to turn
-  web push off and on again. Anyone with the folder and its key can read the
-  credentials, so keep the backup as safe as the boat's computer. See
-  [Configuration](configuration.md#back-this-up).
-- **Provider plugins are fenced in:** A plugin can't read your files or start
-  programs. It can only reach the web addresses listed alongside it, and it's
-  stopped if it runs too long.
-- **Outside assistants can only read:** Each program gets its own token, which
-  you can revoke at any time. Without a token, every request is refused. Only
+  into its own store on the boat, encrypted with AES-256-GCM.
+- **Provider plugins are fenced in:** A plugin can’t access your files or
+  launch programs. It can only visit the web addresses listed with it and is
+  terminated if it runs for too long.
+- **AI Agents can only read:** Each agent gets its own token, which
+  you can revoke at any time. Without a token, it refuses every request. Only
   Claude on a phone or the web and ChatGPT need a public address, through
-  Tailscale Funnel, and that address leads to the assistant and nothing else.
+  Tailscale Funnel, and that address leads only to the assistant.
 - **Mate asks before it changes anything:** Mate can suggest changes to alarms,
   maintenance, the inventory and the boat's details, but nothing changes until
   you tap **Apply**.
@@ -217,10 +189,9 @@ Here's how Helmcentral keeps the boat safe:
 ### What leaves the boat
 
 Helmcentral has no account, no cloud service and no usage reporting. Your
-records, documents, logs and settings stay on the boat's computer. These are
-the things that leave it. The forecast, map and place-name providers are free
-public services until you choose others, and the rest go only where you've
-pointed them:
+records, documents, logs and settings stay on the boat's computer. 
+
+These are the things that leave it:
 
 - **The boat's position, for forecasts and tides:** The weather, wave, tide
   and warning providers are told where the boat is, so that they can answer for
@@ -248,7 +219,7 @@ pointed them:
 - **Your voice, if you talk to Mate:** The browser turns speech into text
   before Mate sees it. Chrome sends the audio to Google's speech service.
   Safari uses Apple's dictation, which runs on the device on recent hardware.
-- **What an outside assistant asks for:** A program you've given a token, such
+- **What an outside AI agent asks for:** An agent you've given a token, such
   as Claude or ChatGPT, gets the answers to what it asks. Those reach whoever
   runs that program, such as Anthropic or OpenAI. The boat's particulars leave
   out your name, phone, email and insurance details. See
