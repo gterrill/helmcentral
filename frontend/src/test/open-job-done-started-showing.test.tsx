@@ -34,7 +34,7 @@ describe('OpenJobDoneDialog: Started showing', () => {
   it('asks for it on a repair, filled with the day the job was opened, and says what it is for', () => {
     render(<OpenJobDoneDialog job={job} onClose={vi.fn()} />)
     expect(screen.getByLabelText('Started showing')).toHaveValue('2026-11-03')
-    expect(screen.getByText(/Engine readings from then until this repair are left out of what the engine learns as normal/)).toBeInTheDocument()
+    expect(screen.getByText(/On an engine, the house battery or what charges it, readings from then until this repair are left out of what counts as normal/)).toBeInTheDocument()
   })
 
   it('sends the date, or blank once it is cleared', async () => {

@@ -385,8 +385,9 @@ func drainWake(ch <-chan struct{}) bool {
 func normalPathMatters(path string) bool { return normalPathsMatter(path) }
 
 // normalPathsMatter is normalPathMatters for several paths, checking the boat once.
-// A vessel that cannot be read is logged, and wakes the trainer for a path the
-// bank might use rather than hide the change.
+// A vessel that cannot be read is logged. An engine reading is recognised by its
+// path alone, so it still counts; a path the bank might use wakes the trainer
+// rather than hide the change.
 func normalPathsMatter(paths ...string) bool {
 	vessel, err := normalPathVessel()
 	if err != nil {

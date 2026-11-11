@@ -274,3 +274,30 @@ func TestMaintenanceLog_ABadKindIsTheFirstThingSaid(t *testing.T) {
 		t.Fatalf("update: %v %d %s", err, rec.Code, rec.Body)
 	}
 }
+
+// The house bank reads the repairs of the bank and of every charging item, so a
+// dated repair on the alternator wakes the trainer though it is no engine.
+func TestMaintenanceLog_ARepairOnAChargingItemWakesTheTrainer(t *testing.T) {
+	withTestDocumentStore(t)
+	alt := mustCreateHandlerTestEquipment(t, "Port alternator")
+	watermaker := mustCreateHandlerTestEquipment(t, "Watermaker")
+	v := houseVessel()
+	v.RoleItems["port_alternator"] = alt.ID
+	withVessel(t, v)
+
+	drainWake(normalTrainWake)
+	code, body := postLog(t, `{"equipment_id":"`+watermaker.ID+`","performed_at":"2026-11-08","kind":"repair","started_at":"2026-11-01"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("code %d: %s", code, body)
+	}
+	if drainWake(normalTrainWake) {
+		t.Fatal("a repair on the watermaker wakes nothing")
+	}
+	code, body = postLog(t, `{"equipment_id":"`+alt.ID+`","performed_at":"2026-11-08","kind":"repair","started_at":"2026-11-01"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("code %d: %s", code, body)
+	}
+	if !drainWake(normalTrainWake) {
+		t.Fatal("the house bank reads a repair on a charging item")
+	}
+}

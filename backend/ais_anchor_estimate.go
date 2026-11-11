@@ -361,15 +361,16 @@ func (s *passageStore) anchorTrailThinned(spacing time.Duration) ([]*trailPoint,
 	return out, rows.Err()
 }
 
-// aisAnchorMaxSeq is the newest stored point's seq, 0 for an empty table. It
-// changes whenever a point is stored, which is all that changes the fit's input
-// (pruning aside, see aisAnchorEstimateKey).
-func (s *passageStore) aisAnchorMaxSeq() (int64, error) {
-	var seq int64
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM ais_anchor_track_points`).Scan(&seq); err != nil {
+// aisAnchorNewestMs is the newest stored point's time in Unix ms, 0 for an empty
+// table. The cache key takes it at a coarse step (aisAnchorOwnTrailKeyStep): a
+// point is stored per target every ~30 s, and a refit per point would run the
+// whole O(n^2) fit on every poll.
+func (s *passageStore) aisAnchorNewestMs() (int64, error) {
+	var ms int64
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(t_ms), 0) FROM ais_anchor_track_points`).Scan(&ms); err != nil {
 		return 0, fmt.Errorf("read newest ais anchor track point: %w", err)
 	}
-	return seq, nil
+	return ms, nil
 }
 
 // anchorTrailStamp is our own swing trail's start and newest point time in Unix
@@ -387,9 +388,11 @@ func (s *passageStore) anchorTrailStamp() (startedMs, newestMs int64, err error)
 
 // aisAnchorEstimateKey is what the handler's answer depends on: the stored AIS
 // points, the watch, and our own swing trail (it sets the ratio). Nothing ages
-// out while the watch runs, so no clock is in it.
+// out while the watch runs, so no clock is in it. The newest times are taken at
+// a coarse step, so a fit is redone about once a minute, not per stored point.
+// A table emptied at a drop or raise reads 0, and trailStartedMs changes then.
 type aisAnchorEstimateKey struct {
-	maxSeq                 int64
+	newestAISMs            int64
 	lat, lon, radiusMeters float64
 	trailStartedMs         int64
 	trailNewestMs          int64
@@ -423,7 +426,7 @@ var aisAnchorEstimateComputes atomic.Int64
 // margin_ratio, once at the top level). Empty with no watch, and empty until our
 // own swing trail fits a circle: without our ratio the drawn circles would be
 // wrong, so none is offered. The fit reads every point recorded since the watch
-// started and is cached until a point is stored, the watch changes or our own
+// started and is cached until the newest point moves to a new minute, the watch changes or our own
 // trail grows. Only targets the recorder last saw inside the 500 m circle are
 // served (insideAISEstimates). Errors are never cached.
 func getAISAnchorsHandler(c echo.Context) error {
@@ -445,7 +448,7 @@ func getAISAnchorsHandler(c echo.Context) error {
 	cache := &aisAnchorEstimateCache
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	maxSeq, err := store.aisAnchorMaxSeq()
+	newestAISMs, err := store.aisAnchorNewestMs()
 	if err != nil {
 		log.Printf("ais anchor estimates: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "AIS anchor estimates unavailable: could not read the tracks"})
@@ -456,7 +459,7 @@ func getAISAnchorsHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "AIS anchor estimates unavailable: could not read our own trail"})
 	}
 	key := aisAnchorEstimateKey{
-		maxSeq: maxSeq, lat: watch.Lat, lon: watch.Lon, radiusMeters: watch.RadiusMeters,
+		newestAISMs: time.UnixMilli(newestAISMs).Truncate(aisAnchorOwnTrailKeyStep).UnixMilli(), lat: watch.Lat, lon: watch.Lon, radiusMeters: watch.RadiusMeters,
 		trailStartedMs: trailStartedMs,
 		trailNewestMs:  time.UnixMilli(trailNewestMs).Truncate(aisAnchorOwnTrailKeyStep).UnixMilli(),
 	}

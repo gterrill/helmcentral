@@ -143,10 +143,14 @@ func (s *passageStore) pruneAISAnchorTracks(now time.Time) error {
 	// one per target per aisAnchorOldPointSpacing: the first of each bucket stays.
 	thinCutoffMs := now.Add(-aisAnchorRetention).UnixMilli()
 	spacingMs := aisAnchorOldPointSpacing.Milliseconds()
-	if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ? AND seq NOT IN (
-			SELECT MIN(seq) FROM ais_anchor_track_points WHERE t_ms < ? GROUP BY mmsi, t_ms / ?)`,
-		thinCutoffMs, thinCutoffMs, spacingMs); err != nil {
-		return fmt.Errorf("thin old ais anchor tracks: %w", err)
+	// Only a watch that started before the thinning cutoff leaves points older than
+	// it; with no watch, or one started since, the delete below removes them all.
+	if !started.IsZero() && started.UnixMilli() < thinCutoffMs {
+		if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ? AND seq NOT IN (
+				SELECT MIN(seq) FROM ais_anchor_track_points WHERE t_ms < ? GROUP BY mmsi, t_ms / ?)`,
+			thinCutoffMs, thinCutoffMs, spacingMs); err != nil {
+			return fmt.Errorf("thin old ais anchor tracks: %w", err)
+		}
 	}
 	if _, err := s.db.Exec(`DELETE FROM ais_anchor_track_points WHERE t_ms < ?`, cutoffMs); err != nil {
 		return fmt.Errorf("prune ais anchor tracks: %w", err)
