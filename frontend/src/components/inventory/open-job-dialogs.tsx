@@ -340,7 +340,7 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
                     onChange={(e) => update({ startedAt: e.target.value })}
                   />
                   <FieldDescription>
-                    When the fault first showed. Engine readings from then until this repair are left out of what the engine learns as normal.
+                    When the fault first showed. On an engine, the house battery or what charges it, readings from then until this repair are left out of what counts as normal.
                   </FieldDescription>
                   {startedTooLate && <FieldError errors={[{ message: STARTED_AFTER_REPAIR }]} />}
                 </Field>

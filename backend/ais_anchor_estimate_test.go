@@ -598,7 +598,7 @@ func TestAISAnchorsHandlerDoesNotRefitWhenNothingChanged(t *testing.T) {
 	}
 
 	// A new stored point changes the answer's input.
-	insertAISPoints(t, store, "222222222", base, []aisTrackPointWire{{Lat: aisTestAnchorLat, Lon: aisTestAnchorLon}})
+	insertAISPoints(t, store, "222222222", base.Add(100*time.Minute), []aisTrackPointWire{{Lat: aisTestAnchorLat, Lon: aisTestAnchorLon}})
 	getAISAnchors(t)
 	if got := aisAnchorEstimateComputes.Load() - before; got != 2 {
 		t.Fatalf("a new stored point must recompute, computed %d times", got)
@@ -612,6 +612,35 @@ func TestAISAnchorsHandlerDoesNotRefitWhenNothingChanged(t *testing.T) {
 	getAISAnchors(t)
 	if got := aisAnchorEstimateComputes.Load() - before; got != 3 {
 		t.Fatalf("a changed radius must recompute, computed %d times", got)
+	}
+}
+
+// A point stored within the same key step does not refit: the recorder stores a
+// point per target every 30 s, and a refit per point would run on every poll.
+func TestAISAnchorsHandlerDoesNotRefitForAPointInTheSameStep(t *testing.T) {
+	store := aisEnv(t)
+	dropWatch(t)
+	rng := rand.New(rand.NewSource(14))
+	// Start of a key step, so the next point is certainly inside it.
+	base := time.Now().UTC().Add(-2 * time.Hour).Truncate(aisAnchorOwnTrailKeyStep)
+	markAISInside("111111111", "222222222")
+	insertAISPoints(t, store, "111111111", base, estArc(rng, 40, 100, 200, 40, 1))
+	appendOwnSwing(t, store, ownSwing(rng, 40, 30))
+	before := aisAnchorEstimateComputes.Load()
+	getAISAnchors(t)
+
+	newest, err := store.aisAnchorNewestMs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := time.UnixMilli(newest).Truncate(aisAnchorOwnTrailKeyStep).Add(aisAnchorOwnTrailKeyStep - time.Second)
+	if _, err := store.db.Exec(`INSERT INTO ais_anchor_track_points (mmsi, t_ms, lat, lon, new_segment) VALUES (?,?,?,?,1)`,
+		"222222222", inside.UnixMilli(), aisTestAnchorLat, aisTestAnchorLon); err != nil {
+		t.Fatal(err)
+	}
+	getAISAnchors(t)
+	if got := aisAnchorEstimateComputes.Load() - before; got != 1 {
+		t.Fatalf("a new point inside the same step must be served from the cache, computed %d times", got)
 	}
 }
 

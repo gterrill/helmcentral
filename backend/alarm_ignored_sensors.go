@@ -188,7 +188,8 @@ func setIgnoredSensorsHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("at most %d identifiers at once", maxIgnoredSensorBatch)})
 	}
 	if err := globalIgnoreStore.setMany(ignoredSensorsList, keys, req.Ignored, time.Now().UTC()); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		log.Printf("ignored sensors: could not change %d sensors: %v", len(keys), err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	if normalPathsMatter(keys...) {
 		normalInputsChanged()

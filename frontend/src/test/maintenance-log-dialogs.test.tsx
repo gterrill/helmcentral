@@ -94,7 +94,7 @@ describe('MaintenanceLogEntryDialog: Started showing (ADR 0276)', () => {
       <MaintenanceLogEntryDialog entry={makeEntry({ kind: 'repair' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,
     )
     expect(screen.getByLabelText('Started showing')).toBeInTheDocument()
-    expect(screen.getByText(/Engine readings from then until this repair are left out of what the engine learns as normal/)).toBeInTheDocument()
+    expect(screen.getByText(/On an engine, the house battery or what charges it, readings from then until this repair are left out of what counts as normal/)).toBeInTheDocument()
     unmount()
     render(
       <MaintenanceLogEntryDialog entry={makeEntry({ kind: 'improvement' })} equipmentId="eq-1" open onCancel={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />,

@@ -937,8 +937,8 @@ func TestSelectFeatures_EvidenceWithoutWordingHasNoDefault(t *testing.T) {
 	}
 }
 
-// An unavailable store is a 400, as for a single sensor, and a batch has a limit.
-func TestIgnoredSensors_ABatchHasALimitAndAnUnavailableStoreIsABadRequest(t *testing.T) {
+// An unavailable store is a server error, and a batch has a limit.
+func TestIgnoredSensors_ABatchHasALimitAndAnUnavailableStoreIsAServerError(t *testing.T) {
 	put := func(body string) int {
 		e := echo.New()
 		req := httptest.NewRequest(http.MethodPut, "/api/alarms/ignored-sensors", strings.NewReader(body))
@@ -950,7 +950,7 @@ func TestIgnoredSensors_ABatchHasALimitAndAnUnavailableStoreIsABadRequest(t *tes
 	prev := globalIgnoreStore
 	globalIgnoreStore = nil
 	t.Cleanup(func() { globalIgnoreStore = prev })
-	if code := put(`{"identifiers":["a"],"ignored":true}`); code != http.StatusBadRequest {
+	if code := put(`{"identifiers":["a"],"ignored":true}`); code != http.StatusInternalServerError {
 		t.Errorf("no store: %d", code)
 	}
 	withTempIgnoreStore(t)
@@ -961,5 +961,15 @@ func TestIgnoredSensors_ABatchHasALimitAndAnUnavailableStoreIsABadRequest(t *tes
 	body, _ := json.Marshal(map[string]any{"identifiers": many, "ignored": true})
 	if code := put(string(body)); code != http.StatusBadRequest {
 		t.Errorf("65 identifiers: %d", code)
+	}
+}
+
+// A vessel that cannot be read wakes the trainer for an engine path too.
+func TestNormalPathMatters_AnUnreadableVesselWakesForAnEnginePath(t *testing.T) {
+	old := normalPathVessel
+	normalPathVessel = func() (vesselView, error) { return vesselView{}, errors.New("settings.yaml is unreadable") }
+	t.Cleanup(func() { normalPathVessel = old })
+	if !normalPathMatters("propulsion.port.oilPressure") {
+		t.Error("the trainer must hear of an engine change it cannot place")
 	}
 }

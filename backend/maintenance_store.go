@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -689,24 +690,27 @@ func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (
 }
 
 // wakeNormalForRepairRange asks the learned normal to train again when a log
-// entry that has, or had, a "started showing" date was written on a configured
-// engine's item: only those are a fault range it reads (ADR 0276). A repair on
-// the watermaker wakes nothing. It must be called without the store's lock held.
+// entry that has, or had, a "started showing" date was written on an item some
+// subject reads as a fault range: a configured engine, the house bank or one of
+// the items that charge it (ADR 0276). A repair on the watermaker wakes nothing.
+// It must be called without the store's lock held.
 func wakeNormalForRepairRange(equipmentID *string, involved bool) {
 	if !involved || equipmentID == nil {
 		return
 	}
-	items, err := listSourceItems()
+	vessel, err := normalPathVessel()
 	if err != nil {
 		// Waking on doubt costs one debounced run.
-		log.Printf("anomaly normal: could not tell whether %s is an engine, so the trainer is woken: %v", *equipmentID, err)
+		log.Printf("anomaly normal: could not tell whether %s is read by the learned normal, so the trainer is woken: %v", *equipmentID, err)
 		normalInputsChanged()
 		return
 	}
-	for _, it := range items {
-		if it.Group == sourceEngine && it.Instance != "" && it.ID == *equipmentID {
-			normalInputsChanged()
-			return
+	for _, sub := range normalSubsystems() {
+		for _, subject := range sub.Subjects(vessel) {
+			if slices.Contains(subject.EquipmentIDs, *equipmentID) {
+				normalInputsChanged()
+				return
+			}
 		}
 	}
 }

@@ -30,8 +30,8 @@ Tap the job's title to change its item, title, notes, Before date or photos.
 2. Check the date, which starts as today, and the kind. It starts as **Repair**.
 3. For a repair, check **Started showing**. It starts as the day you opened the
    job. Change it to the day the fault really began, or clear it if the fault didn't show then. On an engine,
-   its readings from then until the repair are left out of what Helmcentral
-   learns as normal.
+   or on the house battery or anything that charges it, its readings from
+   then until the repair are left out of what Helmcentral learns as normal.
 4. Type the hours off the gauge if the job is on an engine or another piece of
    gear with an hour meter. Add what you did, who did it, the cost and any parts.
 5. Tap **Mark done**. One line goes into the service log and the job closes. Its

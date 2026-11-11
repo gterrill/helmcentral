@@ -2,11 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // withTempIgnoreStore installs an empty ignore store in a temp database and
@@ -166,4 +170,18 @@ func TestIgnoredSensorsKeepInsertionOrderThroughMigrationAndReopen(t *testing.T)
 	}
 	defer reopened.Close()
 	check(reopened)
+}
+
+// A store that cannot write is a server error, not a bad request.
+func TestSetIgnoredSensorsHandler_AStoreFailureIs500(t *testing.T) {
+	store := withTempIgnoreStore(t)
+	store.Close()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"identifiers":["electrical.batteries.1.voltage"],"ignored":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	_ = setIgnoredSensorsHandler(e.NewContext(req, rec))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code %d, want 500: %s", rec.Code, rec.Body)
+	}
 }
