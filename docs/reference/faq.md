@@ -14,6 +14,15 @@ it in a web browser on your phones, tablets and screens. Here's what you need:
   USB adaptor for NMEA 0183 or an NMEA 2000 gateway. SignalK's
   [installation page](https://signalk.org/installation/) covers which adaptors
   and gateways work and how to connect them.
+- **Sensors, as many or as few as you have:** You don't need any particular
+  sensor to start. With no instruments at all you still get the inventory,
+  maintenance by the calendar, documents and notes. A GPS, with SignalK's
+  autostate plugin, adds the anchor watch, the logbook and the forecast. Each
+  sensor after that adds more. A depth sounder, wind instrument, AIS receiver,
+  battery monitor, engines and tanks each open up their own tiles and alarms.
+  When a sensor is missing, the tiles that need it say so rather than showing
+  an invented number. [Hierarchy of sensor needs](sensor-needs.md) shows what
+  each sensor adds, level by level.
 - **A SignalK server:** SignalK reads the gateway and turns the NMEA data into
   readings Helmcentral can use. If you don't have it yet, install it first,
   following the same [installation page](https://signalk.org/installation/).
@@ -171,21 +180,28 @@ Here's how Helmcentral keeps the boat safe:
   [Login and SignalK at startup](configuration.md#login-and-signalk-at-startup).
 - **Keep it off the open internet:** Run it on a boat network you trust. For
   access from ashore, use a VPN or a reverse proxy that asks for a login, and
-  never forward a port to it.
-- **Passwords and keys are encrypted:** You paste your SignalK login, the
-  InfluxDB token, WeatherKit keys and your OpenRouter key into the matching
-  Settings section, not into `settings.yaml`. Helmcentral keeps them in its own
-  store on the boat, encrypted with AES-256-GCM. The key that unlocks them is
-  the file `data/secrets.key`, unless you've set `HELMCENTRAL_MASTER_KEY`
-  instead. The SignalK login and the InfluxDB token belong to the address you
-  entered them for. Changing that address clears them, and you enter them
-  again.
-- **Back up the key with the store:** Back up the whole `data/` folder, and
-  `HELMCENTRAL_MASTER_KEY` too if you use it. Without the key, Helmcentral
-  won't start until you move the old store aside. Then you have to enter every
-  credential again and sign every phone up for web push again. Anyone with the
-  folder and its key can read the credentials, so keep the backup as safe as
-  the boat's computer. See [Configuration](configuration.md#back-this-up).
+  never forward a port to it. The one exception is Tailscale Funnel for
+  outside assistants, below. It passes on the assistant's address and refuses
+  everything else.
+- **Passwords and keys are encrypted:** Every password, token and API key goes
+  into its Settings section, not into `settings.yaml`. That covers the SignalK
+  login, the InfluxDB token, the email password, the ntfy token, the WeatherKit
+  and Google Places keys, and your OpenRouter key. Helmcentral keeps them in
+  its own store on the boat, encrypted with AES-256-GCM. The key that unlocks
+  them is the file `data/secrets.key`, unless you've set
+  `HELMCENTRAL_MASTER_KEY` instead.
+- **Some credentials belong to an address:** Changing the SignalK address
+  clears the SignalK login, and changing the InfluxDB address clears its
+  token. Changing the ntfy server clears the ntfy token, and changing the
+  email server or username clears the email password. Enter it again
+  afterwards, or that channel stays quiet.
+- **Back up the key with the store:** Back up the whole state directory,
+  `settings.yaml` included, and `HELMCENTRAL_MASTER_KEY` too if you use it.
+  Without the key, Helmcentral won't start until you move the old store aside.
+  Then every credential has to be entered again, and every phone has to turn
+  web push off and on again. Anyone with the folder and its key can read the
+  credentials, so keep the backup as safe as the boat's computer. See
+  [Configuration](configuration.md#back-this-up).
 - **Provider plugins are fenced in:** A plugin can't read your files or start
   programs. It can only reach the web addresses listed alongside it, and it's
   stopped if it runs too long.
@@ -208,7 +224,10 @@ pointed them:
 
 - **The boat's position, for forecasts and tides:** The weather, wave, tide
   and warning providers are told where the boat is, so that they can answer for
-  it. A provider plugin can only reach the addresses listed alongside it.
+  it.
+- **The boat's exact position, for the Windy map:** Opening the Windy weather
+  map sends the boat's position to Windy, which shows it. Windy isn't a
+  provider plugin, so the plugin fence doesn't apply to it.
 - **The area around the boat, for maps and place names:** Maps, sea marks,
   satellite photographs and place names are fetched for the area you're in or
   looking at. So is the offline coastline. A server that answers those
@@ -242,12 +261,13 @@ have no security of their own. Any device on the network can claim to be any
 other and send any reading. Helmcentral reads those readings through SignalK
 and can't tell a real one from a fake. Here's what that means:
 
-- **Spoofed or jammed GPS:** If a jammer or a spoofer sends a false position
-  with a good fix, Helmcentral shows it and the anchor watch uses it. It does
-  catch a position that arrives with a poor fix, or stops arriving. Then it
-  freezes the last trusted position and raises its own alarm instead of a drag
-  alarm. A convincing spoof gets through, though, so it can raise a false drag
-  alarm or hide a real one.
+- **Spoofed or jammed GPS:** Helmcentral catches a position that arrives with
+  a poor fix or stops arriving. At anchor or moored, it also catches a position
+  that jumps further than the boat could move. In each case it freezes the
+  last trusted position and raises its own alarm instead of a drag alarm. A
+  spoof that reports a good fix and drifts the position slowly gets through,
+  though. Helmcentral then shows the false position, and the anchor watch can
+  raise a false drag alarm or miss a real one.
 - **False AIS targets:** AIS has no way to prove who sent a message. A fake
   target shows on the maps and can raise a collision alarm, and a real vessel
   that isn't transmitting doesn't show at all.

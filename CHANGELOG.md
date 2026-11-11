@@ -47,7 +47,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   using it from ashore, and keeping it secure. The security answer says how
   passwords and keys are kept, what leaves the boat and where, and what
   Helmcentral can't protect you from, such as a spoofed GPS position or a false
-  AIS target. You'll find it under Reference on the help contents page.
+  AIS target. The hardware answer says which sensors you need, and points to
+  the hierarchy of sensor needs. You'll find it under Reference on the help
+  contents page.
+- **The configuration help now says what to do if the key to your stored
+  passwords is lost.** Helmcentral won't start with a store it can't unlock.
+  The page explains how to tell a damaged key from a lost one, how to start
+  again with an empty store, and how to get web push working again on each
+  phone.
 - **A new Current tile shows whether the water is helping or hindering you.** Add
   it from **Add Tile**, under Navigation. It gives the speed of the current and
   the angle it comes from, read off the bow the way the Wind tile reads wind, so

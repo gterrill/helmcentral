@@ -25,14 +25,17 @@ plugins mounted separately at `/app/plugins`.
 
 `data/secrets.key` decrypts the secrets store. **If you lose it, every stored
 credential is unrecoverable.** You'd have to re-enter the SignalK login, the
-InfluxDB token and the WeatherKit keys. Back up the whole state directory, or at
+InfluxDB token, the email password, the ntfy token, the WeatherKit and Google
+Places keys and the OpenRouter key. Back up the whole state directory, or at
 minimum that file. There is no key recovery.
 
-Helmcentral won't start with a secrets store it can't unlock. The error names
-`HELMCENTRAL_MASTER_KEY` and the key file. If the key really is gone, move
-`data/secrets.sqlite` aside so that Helmcentral starts with an empty store.
-Then enter each credential again, and sign every phone up for web push again,
-because the web push keys were in the old store too.
+Helmcentral won't start with a secrets store it can't unlock. Read the error
+first. A key that's the wrong length or can't be read is a damaged key, not a
+lost one, and restoring it from a backup brings the store back. If the key
+really is gone, move `data/secrets.sqlite` aside so that Helmcentral starts
+with an empty store. Then enter each credential again. The web push keys were
+in the old store too, so on each phone turn web push off and then on again
+in Settings → Alarms.
 
 `data/documents/` (every uploaded file's bytes) and `data/helmcentral.sqlite`
 are one backup unit. The database holds documents, notes, the equipment
