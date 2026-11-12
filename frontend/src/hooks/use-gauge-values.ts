@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
 
 import { useSelection } from '@/lib/selection'
 import { ageFromPayload, shownAge } from '@/lib/staleness'
@@ -141,13 +141,15 @@ const store = createTelemetryStore('gauge-values', INITIAL, applyGaugeValuesEven
 /** The raw SI value on one path, or null when the event does not carry it. */
 export function useGaugeValue(path: string): number | null {
   const subscribe = useCallback((cb: () => void) => store.subscribeKeys([valueKey(path)], cb), [path])
-  return useSyncExternalStore(subscribe, () => store.getSnapshot().values[path] ?? null)
+  const select = useCallback((snapshot: GaugeState) => snapshot.values[path] ?? null, [path])
+  return useSelection({ subscribe, getSnapshot: store.getSnapshot, select })
 }
 
 /** Age, in seconds, of the last update on one path (ADR 0083); null is unknown. */
 export function useGaugeAge(path: string): number | null {
   const subscribe = useCallback((cb: () => void) => store.subscribeKeys([ageKey(path)], cb), [path])
-  return useSyncExternalStore(subscribe, () => store.getSnapshot().ages[path] ?? null)
+  const select = useCallback((snapshot: GaugeState) => snapshot.ages[path] ?? null, [path])
+  return useSelection({ subscribe, getSnapshot: store.getSnapshot, select })
 }
 
 function pick(source: PathMap, paths: readonly string[]): PathMap {
@@ -191,5 +193,9 @@ export function useEngineStatus(id: string | null): EngineStatus | undefined {
     (cb: () => void) => store.subscribeKeys(id === null ? [] : [engineKey(id)], cb),
     [id],
   )
-  return useSyncExternalStore(subscribe, () => (id === null ? undefined : store.getSnapshot().engines[id]))
+  const select = useCallback(
+    (snapshot: GaugeState) => (id === null ? undefined : snapshot.engines[id]),
+    [id],
+  )
+  return useSelection({ subscribe, getSnapshot: store.getSnapshot, select })
 }

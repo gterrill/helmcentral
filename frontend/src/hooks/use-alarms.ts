@@ -179,7 +179,9 @@ function applyAlarmsEvent(snapshot: AlarmsSnapshot, data: unknown): TelemetryUpd
   return { state: { alarms, worst } }
 }
 
-const store = createTelemetryStore('alarms', INITIAL, applyAlarmsEvent)
+// Live on a resting wall page too (ADR 0217): an alarm must sound and show
+// whatever page is up. The list ticks every two seconds and is cheap to read.
+const store = createTelemetryStore('alarms', INITIAL, applyAlarmsEvent, 'live')
 const useAlarmsSelector = store.useSelector
 
 const selectAlarms = (state: AlarmsSnapshot) => state.alarms

@@ -25,6 +25,7 @@ import {
   type AgeBandedLine,
 } from '@/lib/trail-age-bands'
 import { serverNow, subscribeTrailClock } from '@/lib/trail-clock'
+import { useWallPageActive } from '@/lib/wall-page-active'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 import { MapIconButton } from '@/components/map-icon-button'
@@ -802,14 +803,23 @@ export function AnchorWatchMap({
   // instead of waiting for its next mark, and the epoch re-runs the own trail.
   const [clockEpoch, setClockEpoch] = useState(0)
   const [bandNowMs, setBandNowMs] = useState(() => bandClock(serverNow()))
-  useEffect(
-    () =>
-      subscribeTrailClock(() => {
-        setBandNowMs(bandClock(serverNow()))
-        setClockEpoch(n => n + 1)
-      }),
-    [],
-  )
+  // On a resting wall page neither clock here runs. On waking, this effect sets
+  // the band clock and the epoch to the present and listens for offset moves
+  // again; the AIS effect below only restarts its timeout to the next mark.
+  // A mount already holds the present, so only a wake ticks at once.
+  const pageActive = useWallPageActive()
+  const wasActive = useRef(pageActive)
+  useEffect(() => {
+    const woke = pageActive && !wasActive.current
+    wasActive.current = pageActive
+    if (!pageActive) return
+    const tick = () => {
+      setBandNowMs(bandClock(serverNow()))
+      setClockEpoch(n => n + 1)
+    }
+    if (woke) tick()
+    return subscribeTrailClock(tick)
+  }, [pageActive])
   const postAnchorTrailGeoJSON = useMemo(() => {
     const nowMs = serverNow()
     const windowMs = trailWindowMs(vesselTrail, nowMs)
@@ -831,6 +841,7 @@ export function AnchorWatchMap({
   // The clock is the server's: the points carry its times. The timeout's length
   // is a duration, the same on either clock.
   useEffect(() => {
+    if (!pageActive) return
     let id: ReturnType<typeof setTimeout>
     const schedule = () => {
       id = setTimeout(() => {
@@ -840,7 +851,7 @@ export function AnchorWatchMap({
     }
     schedule()
     return () => clearTimeout(id)
-  }, [])
+  }, [pageActive])
   const activeAisSet = useMemo(
     () => new Set(activeAisMmsis === '' ? [] : activeAisMmsis.split('\n')),
     [activeAisMmsis],

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { sameJSON } from '@/lib/same-value'
 import { useSelection } from '@/lib/selection'
@@ -639,6 +639,9 @@ export function useApiQuerySelector<T, S>(
 // Snapshots that differ only in isFetching or status feed select the same input.
 const sameAnswer = (a: Snapshot, b: Snapshot) => a.data === b.data && a.error === b.error
 
+// Same, and the status too: what useApiQuery renders besides the answer.
+const sameStatus = (a: Snapshot, b: Snapshot) => sameAnswer(a, b) && a.status === b.status
+
 export function useApiQuery<T>({
   queryKey,
   path,
@@ -655,15 +658,8 @@ export function useApiQuery<T>({
   // asked (trackFetching) re-renders on those flips (ADR 0215): every other
   // reader keeps the snapshot it holds while the data, the error and the
   // status are the same, and so is not notified.
-  const held = useRef<Snapshot | null>(null)
-  const getSnapshot = useCallback((): Snapshot => {
-    const source = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
-    const last = held.current
-    if (!trackFetching && last && last.data === source.data && last.error === source.error && last.status === source.status) return last
-    held.current = source
-    return source
-  }, [hash, enabled, trackFetching])
-  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const getSnapshot = useCallback((): Snapshot => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY), [hash, enabled])
+  const snap = useSelection({ subscribe, getSnapshot, sameSnapshot: trackFetching ? Object.is : sameStatus })
 
   const refetch = useCallback(
     () => (enabled ? refetchQuery(key, path) : Promise.resolve()),

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { DisplayShell } from '@/components/display-shell'
-import { WallPageActiveContext } from '@/components/wall-page-stack'
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 import { EmbedTile, MOUNT_IDLE_TIMEOUT_MS } from '@/components/embed-tile'
 import type { Display } from '@/lib/displays'
 
