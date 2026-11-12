@@ -53,6 +53,15 @@ describe('the drag handle', () => {
     expect(next.find((w) => w.id === 'wind')).toMatchObject({ x: 1, y: 0, w: 4, h: 6 })
   })
 
+  it('commits the lifted Today & Now height when a keyboard move saves an old short tile', () => {
+    setViewportWidth(1280)
+    const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'today-now', x: 0, y: 0, w: 4, h: 4 }])
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Today & Now tile/i), { key: 'ArrowRight' })
+
+    const [next] = onLayoutSettle.mock.calls[0] as [DashboardLayoutItem[]]
+    expect(next.find((w) => w.id === 'today-now')).toMatchObject({ x: 1, h: 5 })
+  })
+
   it('ArrowDown moves the widget one row', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])

@@ -555,6 +555,19 @@ export const DEPTH_TREND = {
   "since": "window"
 }
 
+export const BAROMETER_TREND = {
+  "points": [
+    { "time": "2026-10-27T04:15:00Z", "pressure_pa": 101320 },
+    { "time": "2026-10-27T04:20:00Z", "pressure_pa": 101310.5 },
+    { "time": "2026-10-27T04:25:00Z", "pressure_pa": 101300 },
+    { "time": "2026-10-27T04:30:00Z", "pressure_pa": 101290 },
+    { "time": "2026-10-27T04:35:00Z", "pressure_pa": 101280 }
+  ],
+  "current_pa": 101280,
+  "change_pa": -40,
+  "change_span_s": 3600
+}
+
 export const CZONE_SWITCHES = {
   "switches": [
     {

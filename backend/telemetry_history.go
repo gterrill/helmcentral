@@ -65,6 +65,42 @@ func (b *telemetryRingBuffer) since(cutoff time.Time) []telemetryPoint {
 	return result
 }
 
+// bucketMean is one bucket of bucketMeans: the first sample's timestamp and
+// the mean of the bucket's values.
+type bucketMean struct {
+	Time time.Time
+	Mean float64
+}
+
+// bucketMeans groups chronological points into wall-clock buckets and returns
+// each bucket's first timestamp and mean, rounded to 1/scale (100 for 0.01,
+// 10 for 0.1).
+func bucketMeans(points []telemetryPoint, bucket time.Duration, scale float64) []bucketMean {
+	if len(points) == 0 {
+		return nil
+	}
+	bucketSeconds := int64(bucket.Seconds())
+	var out []bucketMean
+	sum, count := 0.0, 0
+	bucketKey := points[0].Timestamp.Unix() / bucketSeconds
+	bucketTime := points[0].Timestamp
+	flush := func() {
+		out = append(out, bucketMean{Time: bucketTime, Mean: math.Round(sum/float64(count)*scale) / scale})
+	}
+	for _, p := range points {
+		key := p.Timestamp.Unix() / bucketSeconds
+		if key != bucketKey {
+			flush()
+			sum, count = 0, 0
+			bucketKey, bucketTime = key, p.Timestamp
+		}
+		sum += p.Value
+		count++
+	}
+	flush()
+	return out
+}
+
 var (
 	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 	depthHistory    = newTelemetryRingBuffer(telemetryHistoryCapacity)
@@ -238,25 +274,10 @@ func inMemoryDepthTrend(window string) []depthTrendPoint {
 		return nil
 	}
 
-	const bucketSeconds = int64(5 * 60)
-	var result []depthTrendPoint
-	sum := 0.0
-	count := 0
-	bucketKey := points[0].Timestamp.Unix() / bucketSeconds
-	bucketTime := points[0].Timestamp
-
-	for _, p := range points {
-		key := p.Timestamp.Unix() / bucketSeconds
-		if key != bucketKey {
-			result = append(result, depthTrendPoint{Time: bucketTime, DepthM: math.Round((sum/float64(count))*100) / 100})
-			sum, count = 0, 0
-			bucketKey = key
-			bucketTime = p.Timestamp
-		}
-		sum += p.Value
-		count++
+	buckets := bucketMeans(points, 5*time.Minute, 100)
+	result := make([]depthTrendPoint, len(buckets))
+	for i, b := range buckets {
+		result[i] = depthTrendPoint{Time: b.Time, DepthM: b.Mean}
 	}
-	result = append(result, depthTrendPoint{Time: bucketTime, DepthM: math.Round((sum/float64(count))*100) / 100})
-
 	return result
 }
