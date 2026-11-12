@@ -25,6 +25,12 @@ type tankLevelData struct {
 	WarnPercent  float64 `json:"warn_percent"`
 	AlarmPercent float64 `json:"alarm_percent"`
 	AlarmsOff    bool    `json:"alarms_off"`
+	// Filling is true while a water or fuel tank is being filled with the boat
+	// stopped (ADR 0282). SecondsToFull is the time to 100% at the fill's rate,
+	// null when the rate is unsteady, the tank is under a minute from full, or
+	// it is not filling.
+	Filling       bool     `json:"filling"`
+	SecondsToFull *float64 `json:"seconds_to_full"`
 }
 
 // buildTanksStatePayload produces the /api response body. Split from the handler so
@@ -53,6 +59,7 @@ func buildTanksStatePayload() map[string]any {
 		stateTanks, datetime, fetchErr := fetchSignalKTanksState(labelOverrides)
 		if fetchErr == nil {
 			tanks = stateTanks
+			annotateTankFilling(tanks, time.Now().UTC())
 			if err := annotateTankLevels(tanks); err != nil {
 				log.Printf("tanks: %v", err)
 				tanks = []tankLevelData{}

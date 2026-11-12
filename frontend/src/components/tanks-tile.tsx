@@ -4,7 +4,7 @@ import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { useTanksState, type TankLevel } from '@/hooks/use-tanks-state'
-import { isLowBadKind, tankTone, type TankTone } from '@/lib/tank-levels'
+import { fillingWord, isLowBadKind, tankTone, type TankTone } from '@/lib/tank-levels'
 import { worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
@@ -135,6 +135,10 @@ export const TanksTile = memo(function TanksTile({
                   const percent = feedStale ? null : clampPercent(tank.level_percent)
                   const tone: TankTone = percent === null ? 'normal' : tankToneFor(tank, percent)
                   const percentLabel = percent === null ? NO_VALUE : `${Math.round(percent)}%`
+                  // The time to full (FILLING until there is one) takes the status word's place, and its colour: the
+                  // fill is news, not a warning. The bar, label and percent keep
+                  // the tone the alarm levels give them.
+                  const fillWord = percent !== null && tank.filling ? fillingWord(tank.seconds_to_full) : null
                   const toneWord = percent === null ? NO_VALUE : tankToneWord(tank.kind, tone)
 
                   return (
@@ -148,7 +152,21 @@ export const TanksTile = memo(function TanksTile({
                       </div>
                       <div className="flex w-20 shrink-0 flex-col items-end">
                         <p className={cn('font-display text-2xl leading-none tabular-nums', toneTextClass(tone))}>{percentLabel}</p>
-                        <p className={cn('font-display text-[10px] uppercase leading-none tracking-[0.12em]', toneWordClass(tone))}>{toneWord}</p>
+                        <p
+                          className={cn(
+                            'font-display text-[10px] uppercase leading-none',
+                            fillWord ? 'tracking-[0.06em] text-muted-foreground' : cn('tracking-[0.12em]', toneWordClass(tone)),
+                          )}
+                        >
+                          {fillWord ? (
+                            <>
+                              <span aria-hidden="true">{fillWord.text}</span>
+                              <span className="sr-only">{fillWord.spoken}</span>
+                            </>
+                          ) : (
+                            toneWord
+                          )}
+                        </p>
                       </div>
                     </div>
                   )
