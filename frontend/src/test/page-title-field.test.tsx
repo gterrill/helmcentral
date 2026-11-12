@@ -61,4 +61,41 @@ describe('PageTitleField', () => {
 
     expect(onSave).toHaveBeenCalledTimes(1)
   })
+
+  it('an Escape that cancels an IME candidate does not discard the edit, a plain Escape does', () => {
+    const onSave = vi.fn()
+    render(<PageTitleField page={page} naming={false} onSave={onSave} onDone={vi.fn()} />)
+    const field = screen.getByLabelText('Page name') as HTMLInputElement
+
+    field.focus()
+    fireEvent.change(field, { target: { value: 'Anchored' } })
+    fireEvent.keyDown(field, { key: 'Escape', isComposing: true })
+
+    expect(field.value).toBe('Anchored')
+    expect(field).toHaveFocus()
+    expect(onSave).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(field, { key: 'Escape' })
+
+    expect(field.value).toBe('Untitled page')
+    expect(field).not.toHaveFocus()
+  })
+
+  it('an Enter that picks an IME candidate does not commit the name, a plain Enter does', async () => {
+    const onSave = vi.fn()
+    render(<PageTitleField page={page} naming={false} onSave={onSave} onDone={vi.fn()} />)
+    const field = screen.getByLabelText('Page name') as HTMLInputElement
+
+    field.focus()
+    fireEvent.change(field, { target: { value: 'Anchored' } })
+    fireEvent.keyDown(field, { key: 'Enter', isComposing: true })
+
+    expect(field).toHaveFocus()
+    expect(onSave).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(field, { key: 'Enter' })
+
+    expect(field).not.toHaveFocus()
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('p1', 'Anchored'))
+  })
 })

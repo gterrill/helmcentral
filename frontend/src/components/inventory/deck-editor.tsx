@@ -1,4 +1,5 @@
 import { errorMessage } from '@/lib/errors'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 
@@ -267,7 +268,7 @@ export function DeckEditor(
               disabled={!canWrite}
               className="max-w-sm"
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && dirty) { e.preventDefault(); void performSave().catch(() => {}) } }}
+              onKeyDown={(e) => { if (isSubmitEnter(e) && dirty) { e.preventDefault(); void performSave().catch(() => {}) } }}
             />
           </Field>
         </FormSection>

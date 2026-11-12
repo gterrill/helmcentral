@@ -7,6 +7,7 @@ import { BinPhotoGrid } from '@/components/inventory/bin-page'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { resolveScannedText } from '@/lib/app-location'
 import { inventoryWorkClosedBy } from '@/lib/inventory-navigation-guard'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { nfcSupported, scanTags } from '@/lib/nfc'
 import {
   EquipmentNotFoundError,
@@ -268,7 +269,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
   }
 
   const handleScanFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return
+    if (!isSubmitEnter(e)) return
     e.preventDefault()
     const value = scanFieldValue
     setScanFieldValue('')

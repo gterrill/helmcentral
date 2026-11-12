@@ -272,6 +272,33 @@ describe('AssistantThread', () => {
     await waitFor(() => expect(onHasDraftChange).toHaveBeenLastCalledWith(false))
   })
 
+  it('an Enter that picks an IME candidate does not send, a plain Enter does', async () => {
+    const session = fakeMateSession()
+    render(<AssistantThread canWrite session={session} />)
+
+    const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'nihao' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true })
+
+    expect(session.send).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('nihao')
+
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(session.send).toHaveBeenCalledWith('nihao', { attachments: [] }))
+  })
+
+  it('Safari\'s confirming Enter (keyCode 229, isComposing false) does not send', () => {
+    const session = fakeMateSession()
+    render(<AssistantThread canWrite session={session} />)
+
+    const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'nihao' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 229 })
+
+    expect(session.send).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('nihao')
+  })
+
   it('Shift+Enter does not send', () => {
     const session = fakeMateSession()
     render(<AssistantThread canWrite session={session} />)

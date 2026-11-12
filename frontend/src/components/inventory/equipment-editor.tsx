@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { CHOICE_INDENT, ChoiceCheckbox, ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, RefreshFailedNote, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 import { DocumentViewerSheet } from '@/components/documents/document-viewer-sheet'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -1184,7 +1185,7 @@ export function EquipmentEditor(
                       aria-label="Add alias"
                       value={aliasInput}
                       onChange={(e) => setAliasInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
+                      onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); addAlias() } }}
                       className="max-w-48"
                     />
                     <Button type="button" variant="outline" size="sm" onClick={addAlias}>Add</Button>

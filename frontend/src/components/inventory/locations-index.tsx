@@ -10,6 +10,7 @@ import { PrintBinLabelsDialog } from '@/components/inventory/label-print'
 import { EmptyState, IndexFilters, IndexTable, Page, RefreshFailedNote } from '@/components/patterns'
 import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
 import type { InventoryList } from '@/lib/app-location'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { orderLocations } from '@/lib/index-order'
 import { useLocationDeckLabel } from '@/hooks/use-location-deck-label'
 import { patchList } from '@/lib/list-order'
@@ -316,7 +317,7 @@ export function LocationsIndex({
             value={newName}
             autoFocus
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleCreate() } }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void handleCreate() } }}
           />
           {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
           <DialogFooter>

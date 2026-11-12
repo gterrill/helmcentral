@@ -29,6 +29,7 @@ import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { DisplayFields } from '@/hooks/use-displays'
 import { DEFAULT_DWELL_SECONDS, type Display } from '@/lib/displays'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { moveWithinDisplay } from '@/lib/page-order'
 import { recordPager } from '@/lib/record-pager'
 import { cn } from '@/lib/utils'
@@ -394,7 +395,7 @@ export function DisplayEditorPanel({
   }
 
   const commitOnEnter = (commit: (value: string) => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return
+    if (!isSubmitEnter(e)) return
     e.preventDefault()
     commit(e.currentTarget.value)
   }

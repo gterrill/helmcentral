@@ -76,6 +76,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **A file too big to upload now says so.** Uploading an oversized file to
   Documents, an equipment item, a deck plan, a maintenance entry, an import or
   an open job showed a bare error code. It now says the file is over the limit.
+- **Typing in Chinese, Japanese or Korean no longer submits early.** Pressing
+  Enter to pick a character used to send a Mate question or save a field before
+  you'd finished typing, and Escape to cancel a character threw the edit away.
+  Both keys now only work the character picker until it closes.
 
 ## [0.64.0] - 2026-11-11
 

@@ -1,4 +1,5 @@
 import { errorMessage } from '@/lib/errors'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { useCallback, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
@@ -289,7 +290,7 @@ export function LocationEditor(
               disabled={!canWrite}
               className="max-w-sm"
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && dirty) { e.preventDefault(); void performSave().catch(() => {}) } }}
+              onKeyDown={(e) => { if (isSubmitEnter(e) && dirty) { e.preventDefault(); void performSave().catch(() => {}) } }}
             />
           </Field>
         </FormSection>
@@ -322,7 +323,7 @@ export function LocationEditor(
                 className="h-9 w-28 font-mono"
                 value={newBinCode}
                 onChange={(e) => setNewBinCode(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleAddBin() } }}
+                onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void handleAddBin() } }}
               />
               <Input
                 aria-label="New bin name"
@@ -330,7 +331,7 @@ export function LocationEditor(
                 className="h-9 min-w-0 flex-1 basis-40"
                 value={newBinName}
                 onChange={(e) => setNewBinName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleAddBin() } }}
+                onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void handleAddBin() } }}
               />
               <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => { void handleAddBin() }}>
                 <Plus className="h-4 w-4" aria-hidden="true" />

@@ -7,6 +7,7 @@ import { PhotoStripEditor, type PhotoStripPhoto } from '@/components/inventory/p
 import { BLANK_DRAFT, createEquipment, type EquipmentInput } from '@/hooks/use-inventory'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { inventoryWorkClosedBy } from '@/lib/inventory-navigation-guard'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-staging'
 import { errorMessage } from '@/lib/errors'
 
@@ -198,7 +199,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, binCode
             value={name}
             placeholder="Gaffer tape"
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleSave() } }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void handleSave() } }}
           />
         </Field>
         <Field className="w-20 shrink-0">

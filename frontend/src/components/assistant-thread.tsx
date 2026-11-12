@@ -30,6 +30,7 @@ import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-up
 import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
+import { isComposing } from '@/lib/keyboard'
 import { runOutcomeText, type AssistantRun } from '@/lib/mate-run'
 import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
 import { cn } from '@/lib/utils'
@@ -451,6 +452,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
   }, [content, status.sending, send, canWrite, uploads, dictation])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isComposing(event)) return
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void handleSend()

@@ -10,6 +10,7 @@ import { prefetchDeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { EmptyState, IndexTable, Page } from '@/components/patterns'
 import { useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
 import type { InventoryList } from '@/lib/app-location'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { deckRows, orderDecks, type DeckRow } from '@/lib/index-order'
 import { patchList } from '@/lib/list-order'
 import { errorMessage } from '@/lib/errors'
@@ -147,7 +148,7 @@ export function DecksIndex({ list, onListChange, onOpenDeck, onOpenLocations, ca
             value={newName}
             autoFocus
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void handleCreate() } }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void handleCreate() } }}
           />
           {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
           <DialogFooter>

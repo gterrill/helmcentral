@@ -42,6 +42,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Textarea } from '@/components/ui/textarea'
 import { apiBaseUrl } from '@/config/api'
 import { uploadDocument } from '@/lib/document-upload'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { downscaleAll, photoFilename } from '@/lib/image-downscale'
 import {
   LIST_STYLE_TYPE,
@@ -699,7 +700,7 @@ function LinkButton({ editor }: { editor: PlateEditor }) {
             autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) submit() }}
             placeholder="hc-note:… or https://…"
             aria-label="Link URL"
           />
@@ -957,7 +958,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
           <Input
             value={alt}
             onChange={(e) => setAlt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submitDocId() }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) submitDocId() }}
             placeholder="Caption (e.g. Fuel manifold)"
             aria-label="Photo caption"
             disabled={uploading}

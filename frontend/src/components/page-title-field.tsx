@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isComposing } from '@/lib/keyboard'
 
 export interface NameablePage {
   id: string
@@ -80,6 +81,7 @@ export function PageTitleField({ page, naming, onSave, onDone }: PageTitleFieldP
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isComposing(e)) return
     if (e.key === 'Enter') {
       e.preventDefault()
       // Blur so commit runs exactly once, from onBlur below — calling it

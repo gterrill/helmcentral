@@ -405,6 +405,23 @@ describe('App-wide voice (ADR 0093)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'false'))
   })
 
+  it('an Escape that cancels an IME candidate does not cancel push-to-talk', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to Mate' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'true'))
+
+    fireEvent.keyDown(window, { key: 'Escape', isComposing: true })
+    fireEvent.keyDown(window, { key: 'Escape', keyCode: 229 })
+
+    expect(currentRecognition().aborted).toBe(false)
+    expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(currentRecognition().aborted).toBe(true)
+  })
+
   // ADR 0094: "Open the Mate page" (renamed from "Open in Mate" - impeccable
   // critique 2026-09-12 P2) hands the sheet's active conversation to the
   // full panel and navigates there, closing the sheet - without it, the

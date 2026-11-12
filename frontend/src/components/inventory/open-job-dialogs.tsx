@@ -30,6 +30,7 @@ import {
 } from '@/hooks/use-open-jobs'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { errorMessage } from '@/lib/errors'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { STARTED_AFTER_REPAIR, startedAfterRepair, todayISO } from '@/lib/local-date'
 
 // ADR 0269: the three dialogs behind the Open jobs list. Add/edit takes the
@@ -441,7 +442,7 @@ export function OpenJobDropDialog({ job, onClose }: OpenJobDropDialogProps) {
             id="open-job-drop-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !saving) void handleDrop() }}
+            onKeyDown={(e) => { if (isSubmitEnter(e) && !saving) void handleDrop() }}
             placeholder="Optional"
             autoFocus
           />
