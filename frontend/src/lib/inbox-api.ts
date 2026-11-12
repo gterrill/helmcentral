@@ -1,4 +1,6 @@
 import { invalidateDocumentLists } from '@/hooks/use-documents'
+import { equipmentPhotosAdded } from '@/hooks/use-inventory'
+import { openJobPhotosAdded } from '@/hooks/use-open-jobs'
 import { apiRequest, invalidateQueries } from '@/lib/api-query'
 import { REPLAY_SIGNS_KEY } from '@/lib/replay-signs-api'
 
@@ -146,6 +148,42 @@ export const inboxApi = {
       }
     } finally {
       await inboxChanged()
+      invalidateDocumentLists({ counts: true })
+    }
+    return results
+  },
+  /** Photos only: a PDF comes back as an item that stayed, with the reason. */
+  fileToEquipment: async (equipmentId: string, items: readonly { id: string }[]): Promise<InboxFilingResult[]> => {
+    const results: InboxFilingResult[] = []
+    try {
+      for (const chunk of inChunks(items)) {
+        const res = await apiRequest<{ results: InboxFilingResult[] }>('/api/inbox/file-to-equipment', {
+          method: 'POST',
+          json: { equipment_id: equipmentId, items: chunk },
+        })
+        results.push(...res.results)
+      }
+    } finally {
+      await inboxChanged()
+      equipmentPhotosAdded(equipmentId)
+      invalidateDocumentLists({ counts: true })
+    }
+    return results
+  },
+  /** Photos only, onto a job that is still open. */
+  fileToOpenJob: async (jobId: string, items: readonly { id: string }[]): Promise<InboxFilingResult[]> => {
+    const results: InboxFilingResult[] = []
+    try {
+      for (const chunk of inChunks(items)) {
+        const res = await apiRequest<{ results: InboxFilingResult[] }>('/api/inbox/file-to-open-job', {
+          method: 'POST',
+          json: { job_id: jobId, items: chunk },
+        })
+        results.push(...res.results)
+      }
+    } finally {
+      await inboxChanged()
+      openJobPhotosAdded()
       invalidateDocumentLists({ counts: true })
     }
     return results

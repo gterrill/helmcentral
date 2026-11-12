@@ -1,9 +1,10 @@
-import { AlertTriangle, Compass, Copy, FileText, FolderInput, ImagePlus, Route, Trash2 } from 'lucide-react'
+import { AlertTriangle, Compass, Copy, FileText, FolderInput, ImagePlus, ListChecks, Route, Trash2, Wrench } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { FolderPickerDialog } from '@/components/documents/folder-picker-dialog'
 import { InboxAssignDialog } from '@/components/passages/inbox-assign-dialog'
+import { InboxEquipmentDialog, InboxJobDialog } from '@/components/passages/inbox-target-dialog'
 import { ConfirmDelete, EmptyState, Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
@@ -11,7 +12,7 @@ import { useInbox } from '@/hooks/use-inbox'
 import { useLocalStorageId } from '@/hooks/use-local-storage-id'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { errorMessage } from '@/lib/errors'
-import { inboxApi, inboxPreviewUrl, type InboxItem } from '@/lib/inbox-api'
+import { inboxApi, inboxPreviewUrl, type InboxFilingResult, type InboxItem } from '@/lib/inbox-api'
 import { findBlurry, findDuplicates, groupInbox } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { cn } from '@/lib/utils'
@@ -23,20 +24,27 @@ export interface InboxViewProps {
   onOpenUpload: () => void
 }
 
+const isPhoto = (i: InboxItem) => i.mime.startsWith('image/')
+
 const MISMATCH_TEXT =
   "The phone's own position was more than a nautical mile from the boat's track when this was taken. The phone's clock or time zone may be wrong, so the time may not match the track."
 
 // The Inbox: what was shared from a phone and is waiting to be sorted. A
 // contact sheet per group; tapping a picture marks it, and whatever is marked
-// can be added to a passage, sent to Documents or deleted. The duplicate and
+// can be added to a passage, an equipment item or a job, sent to Documents or
+// deleted. The duplicate and
 // soft-focus flags are suggestions: nothing is marked or removed unless the
 // operator says so.
 export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) {
   const inbox = useInbox()
   const timeZone = useVesselStateSelector(selectTimeZone)
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set())
-  const [dialog, setDialog] = useState<'passage' | 'documents' | 'bin' | null>(null)
+  const [dialog, setDialog] = useState<'passage' | 'documents' | 'equipment' | 'job' | 'bin' | null>(null)
   const [busy, setBusy] = useState(false)
+  // The equipment item and job last used (a per-device convenience). Each
+  // picker checks the id is still in its list before highlighting it.
+  const [lastEquipment, setLastEquipment] = useLocalStorageId('inbox.lastEquipment')
+  const [lastJob, setLastJob] = useLocalStorageId('inbox.lastJob')
 
   // The folder last sent to (a per-device convenience) opens the picker, but
   // only while it still exists: it may have been deleted since, on this or
@@ -75,6 +83,11 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
     : passages.length === 0 ? 'There is no recorded passage to add them to'
     : null
 
+  const cannotAddTo = (noun: string): string | null =>
+    selected.length === 0 ? 'Mark some photos first' : selected.every((i) => !isPhoto(i)) ? `Only photos can go on ${noun}` : null
+  const cannotEquipment = cannotAddTo('equipment')
+  const cannotJob = cannotAddTo('a job')
+
   const bin = async () => {
     setBusy(true)
     try {
@@ -86,6 +99,38 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
       setDialog(null)
     } catch (err) {
       toast.error('Could not delete', { description: errorMessage(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Equipment and jobs take photos only. A PDF in the selection is left out of
+  // the call and stays marked, so Send to Documents is one tap away.
+  const addPhotos = async (
+    destination: string,
+    file: (photoIds: { id: string }[]) => Promise<InboxFilingResult[]>,
+    remember: () => void,
+    failure: string,
+  ) => {
+    const photos = selected.filter(isPhoto)
+    const pdfs = selected.filter((i) => !isPhoto(i))
+    setDialog(null)
+    setBusy(true)
+    try {
+      const results = await file(photos.map((i) => ({ id: i.id })))
+      remember()
+      const failed = results.filter((r) => !r.ok)
+      const added = results.length - failed.length
+      if (added > 0) toast.success(`Added ${added === 1 ? '1 photo' : `${added} photos`} to ${destination}`)
+      if (failed.length > 0) {
+        toast.error(failed.length === 1 ? '1 item stayed in the Inbox' : `${failed.length} items stayed in the Inbox`, { description: failed[0].error })
+      }
+      if (pdfs.length > 0) {
+        toast.message(`${pdfs.length === 1 ? '1 PDF' : `${pdfs.length} PDFs`} stayed in the Inbox`, { description: 'Only photos can go on equipment or a job. Send a PDF to Documents.' })
+      }
+      setMarked(new Set([...failed.map((f) => f.id), ...pdfs.map((p) => p.id)]))
+    } catch (err) {
+      toast.error(failure, { description: errorMessage(err) })
     } finally {
       setBusy(false)
     }
@@ -125,6 +170,14 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         <FolderInput className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
         Send to Documents
       </Button>
+      <Button type="button" size="sm" variant="outline" disabled={busy || cannotEquipment !== null} title={cannotEquipment ?? undefined} onClick={() => setDialog('equipment')}>
+        <Wrench className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+        Add to equipment
+      </Button>
+      <Button type="button" size="sm" variant="outline" disabled={busy || cannotJob !== null} title={cannotJob ?? undefined} onClick={() => setDialog('job')}>
+        <ListChecks className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+        Add to a job
+      </Button>
       <Button type="button" size="sm" variant="outline" disabled={busy || selected.length === 0} onClick={() => setDialog('bin')}>
         <Trash2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
         Delete
@@ -152,7 +205,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         <EmptyState
           icon={<ImagePlus className="h-8 w-8 text-muted-foreground" aria-hidden="true" />}
           title="Nothing waiting"
-          description="Photos and PDFs you share from a phone wait here until you put them on a passage, send them to Documents or delete them."
+          description="Photos and PDFs you share from a phone wait here until you put them on a passage, equipment item or job, send them to Documents or delete them."
           action={canWrite ? <Button type="button" variant="outline" onClick={onOpenUpload}>Share photos</Button> : undefined}
         />
       )}
@@ -251,6 +304,22 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         showLoadError
         onPick={(folderId) => void sendToDocuments(folderId)}
       />
+      {dialog === 'equipment' && (
+        <InboxEquipmentDialog
+          count={selected.filter(isPhoto).length}
+          lastId={lastEquipment}
+          onClose={() => setDialog(null)}
+          onPick={(id, name) => void addPhotos(name, (photos) => inboxApi.fileToEquipment(id, photos), () => setLastEquipment(id), 'Could not add to equipment')}
+        />
+      )}
+      {dialog === 'job' && (
+        <InboxJobDialog
+          count={selected.filter(isPhoto).length}
+          lastId={lastJob}
+          onClose={() => setDialog(null)}
+          onPick={(id, name) => void addPhotos(name, (photos) => inboxApi.fileToOpenJob(id, photos), () => setLastJob(id), 'Could not add to the job')}
+        />
+      )}
       <ConfirmDelete
         open={dialog === 'bin'}
         onOpenChange={(open) => { if (!open) setDialog(null) }}

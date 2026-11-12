@@ -49,6 +49,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   refreshes an installed app's details now and then. To get it straight away,
   remove the app from the Home Screen and install it again from Chrome's menu.
 
+- **Put Inbox photos on an equipment item or an open job.** Mark the photos in
+  the Inbox and tap **Add to equipment** or **Add to a job**, then search for the
+  item or job and tap **Add here**. The photos join that item's or job's own
+  photos, and leave the Inbox. You pick the item yourself, and the list opens on
+  the one you used last. Only photos go: a PDF stays in the Inbox, and if you
+  marked both, Helmcentral says how many PDFs stayed.
+
 ### Changed
 
 - **The Anchor Watch tide panel is easier to read.** The high and the low each

@@ -135,6 +135,26 @@ describe('inboxApi', () => {
     expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/document-folders/tree'])
   })
 
+  it('files photos to equipment or a job in requests of at most 500 and refreshes what shows them', async () => {
+    const items = Array.from({ length: 600 }, (_, i) => ({ id: `id${i}` }))
+    net.apiRequest.mockImplementation(async (_p: string, init: { json: { items: { id: string }[] } }) => ({ results: init.json.items.map((i) => ({ id: i.id, ok: true })) }))
+
+    expect(await inboxApi.fileToEquipment('e 1', items)).toHaveLength(600)
+    expect(net.apiRequest.mock.calls.map(([p, init]) => [p, (init as { json: { equipment_id: string; items: unknown[] } }).json.equipment_id, (init as { json: { items: unknown[] } }).json.items.length]))
+      .toEqual([['/api/inbox/file-to-equipment', 'e 1', 500], ['/api/inbox/file-to-equipment', 'e 1', 100]])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/inventory/equipment'])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/inventory/equipment/e%201'])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['inbox'])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['inbox-count'])
+
+    net.apiRequest.mockClear()
+    net.invalidateQueries.mockClear()
+    expect(await inboxApi.fileToOpenJob('j1', items)).toHaveLength(600)
+    expect(net.apiRequest.mock.calls.map(([p, init]) => [p, (init as { json: { job_id: string } }).json.job_id])).toEqual([['/api/inbox/file-to-open-job', 'j1'], ['/api/inbox/file-to-open-job', 'j1']])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/inventory/open-jobs'])
+    expect(net.invalidateQueries).toHaveBeenCalledWith(['inbox'])
+  })
+
   it('asks which original hashes are known', async () => {
     net.apiRequest.mockResolvedValue({ known: ['h1'] })
     await expect(inboxApi.known(['h1', 'h2'])).resolves.toEqual(['h1'])

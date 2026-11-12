@@ -145,6 +145,11 @@ export async function deleteOpenJobPhoto(id: string, documentId: string, deleteP
   return data.job
 }
 
+/** Photos reached a job without going through uploadOpenJobPhoto (the Inbox filed them). */
+export function openJobPhotosAdded(): void {
+  invalidateQueries([JOBS])
+}
+
 /** Mate's Apply added a job. */
 export function openJobRecordApplied(): void {
   invalidateQueries([JOBS])
