@@ -220,13 +220,15 @@ boat. You can see a thundery spell coming and pick your day before it arrives.
   chance, such as "Lightning 40%", for the hour you're reading.
 - **Four steps, not a gradient:** Under 10% draws nothing, so a quiet stretch
   is an empty slot. From 10% to 30% is a pale block, 30% to 60% is stronger, and
-  60% or more is solid. The key under each chart shows the three shades.
+  60% or more is solid. The key under each chart, "Lightning chance", shows
+  the three shades. Its ⓘ button says what the band measures and who the
+  data comes from.
 - **Hatched means no data:** The forecast reaches about 14.5 days, and the
   Upper Air trace runs a day or two longer. Hours the forecast doesn't
   cover are hatched with thin diagonal lines. That includes the hours before
   now on today's chart and the days past the end of the run. A hatched
   stretch means there's no forecast there, and an empty stretch means the
-  forecast says it's quiet. The key shows a "no data" swatch to match.
+  forecast says it's quiet.
 - **It's the boat's position only:** Lightning is worked out for the grid
   square the boat is in, roughly 20 by 30 kilometres. When you switch the page
   to a [planned stay](#looking-ahead-to-a-planned-stay), the bands aren't drawn
@@ -239,8 +241,9 @@ alarm.
 ### Where it comes from
 
 The default source is the Met Office's global blended forecast, which is free
-and needs no key. "Lightning data © Crown copyright, Met Office, CC BY-SA 4.0." The
-credit shows under the charts whenever that source is in use.
+and needs no key. Its credit, "Lightning data © Crown copyright, Met Office,
+CC BY-SA 4.0.", is behind the ⓘ button in the lightning key while that source
+is in use.
 
 It comes from its own plugin, separate from your weather and upper-air
 providers. The plugin bundle includes the Met Office lightning plugin, so a

@@ -35,9 +35,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   key, even beside a band that's still drawn. Until it has answered, the key
   stays empty, and a boat with no lightning plugin sees nothing about it. The
   plugin bundle includes the Met Office lightning plugin, which needs no key.
-  It downloads about 60 MB a day, so mind that on a metered connection. The
-  credit "Lightning data © Crown copyright, Met Office, CC BY-SA 4.0." shows under
-  the charts while it's in use.
+  It downloads about 60 MB a day, so mind that on a metered connection. Its
+  credit is behind the ⓘ button in the lightning key.
 
 ## [0.65.0] - 2026-11-12
 

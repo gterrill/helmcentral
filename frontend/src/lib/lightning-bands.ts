@@ -84,7 +84,7 @@ export type LightningStep = 0 | 1 | 2 | 3
 const LIGHTNING_STEP_OPACITY = [0, 0.4, 0.7, 1] as const
 
 /** Step legend labels, for steps 1 to 3. */
-export const LIGHTNING_STEP_LABELS = ['10 to 30%', '30 to 60%', '60% or more'] as const
+export const LIGHTNING_STEP_LABELS = ['10 to 30%', '30 to 60%', '60%+'] as const
 
 /** Which step a probability falls in. A value that is not a probability throws: there is no step to invent for it. */
 export function lightningStep(probability: number): LightningStep {
