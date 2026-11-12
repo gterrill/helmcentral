@@ -673,12 +673,13 @@ func inboxThumbHandler(c echo.Context) error {
 
 // removeInboxFiles deletes an item's stored file and its preview.
 func removeInboxFiles(it inboxItem) error {
+	var errs []error
 	for _, p := range []string{inboxFilePath(it.SHA256), inboxThumbPath(it.SHA256)} {
 		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove inbox file: %w", err)
+			errs = append(errs, fmt.Errorf("remove inbox file: %w", err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // removeInboxItem deletes the row, then the files, under the content's lock.
@@ -751,9 +752,10 @@ func binInboxHandler(c echo.Context) error {
 			}
 			continue
 		}
+		// The row is already gone, so a file that will not go is logged and the
+		// rest are still removed; the answer matches what left the Inbox.
 		if err := removeInboxFiles(it); err != nil {
 			log.Printf("inbox: bin %s: %v", it.ID, err)
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "could not remove every item", "deleted": len(removed)})
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"deleted": len(removed), "busy": busy})
