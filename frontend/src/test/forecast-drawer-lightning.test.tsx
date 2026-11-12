@@ -240,7 +240,6 @@ describe('ForecastDrawer lightning band on the Cloud, Temperature & Rain chart',
     const pattern = screen.getByTestId('forecast-cloud-lightning-band').querySelector('pattern')
     expect(pattern).not.toBeNull()
     expect(pattern?.querySelector('line')?.getAttribute('stroke')).toBe('hsl(var(--chart-lightning))')
-    expect(screen.getByTestId('forecast-cloud-lightning-key')).toHaveTextContent('no data')
   })
 
   it('draws no hatch where windows cover the whole day', () => {
@@ -283,22 +282,25 @@ describe('ForecastDrawer lightning band on the Cloud, Temperature & Rain chart',
     expect(screen.getByText(/Lightning 20%/)).toBeInTheDocument()
   })
 
-  it('explains the steps and the window, and credits the Met Office for its provider', () => {
+  it('keeps the key to the three steps, with the window and the credit behind its info button', () => {
     renderDrawer(feed())
 
     const key = screen.getByTestId('forecast-cloud-lightning-key')
-    expect(key).toHaveTextContent('the chance of at least one lightning flash within about 20 km in each 3-hour window:')
-    expect(key).toHaveTextContent('10 to 30%')
-    expect(key).toHaveTextContent('30 to 60%')
-    expect(key).toHaveTextContent('60% or more')
-    expect(key).toHaveTextContent('Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.')
+    expect(key).toHaveTextContent(/^Lightning chance: 10 to 30% 30 to 60% 60%\+$/)
+    expect(screen.queryByText(/Crown copyright/)).toBeNull()
+
+    fireEvent.click(within(key).getByRole('button', { name: 'Lightning details' }))
+    expect(screen.getByText('The chance of at least one lightning flash within about 20 km in each 3-hour window. Hatched hours have no data.')).toBeInTheDocument()
+    expect(screen.getByText('Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.')).toBeInTheDocument()
   })
 
   it('gives no Met Office credit for another provider', () => {
     renderDrawer(feed({ provider: 'someone-else' }))
 
     expect(screen.getAllByTestId('forecast-cloud-lightning-block').length).toBeGreaterThan(0)
-    expect(screen.getByTestId('forecast-cloud-lightning-key')).not.toHaveTextContent(/Met Office/)
+    fireEvent.click(within(screen.getByTestId('forecast-cloud-lightning-key')).getByRole('button', { name: 'Lightning details' }))
+    expect(screen.getByText(/within about 20 km/)).toBeInTheDocument()
+    expect(screen.queryByText(/Met Office/)).toBeNull()
   })
 
   it('draws no band and says why when the forecast is for a stay', () => {
@@ -502,7 +504,6 @@ describe('ForecastDrawer lightning band on the Upper Air chart', () => {
     // Past the run's last window to the end of the trace.
     expect(Number(gaps[2].getAttribute('x'))).toBeCloseTo(upperAirX(5.5), 1)
     expect(Number(gaps[2].getAttribute('x')) + Number(gaps[2].getAttribute('width'))).toBeCloseTo(upperAirX(7), 1)
-    expect(screen.getByTestId('forecast-upper-air-lightning-key')).toHaveTextContent('no data')
   })
 
   it('draws no hatch where windows cover the whole trace', () => {
@@ -573,15 +574,18 @@ describe('ForecastDrawer lightning band on the Upper Air chart', () => {
     expect(screen.getByText(/Lightning 35%/)).toBeInTheDocument()
   })
 
-  it('credits the Met Office only for its provider', () => {
+  it('credits the Met Office behind the info button, only for its provider', () => {
     const { unmount } = renderUpperAir(upperFeed())
-    expect(screen.getByTestId('forecast-upper-air-lightning-key')).toHaveTextContent(
-      'Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.',
-    )
+    const key = screen.getByTestId('forecast-upper-air-lightning-key')
+    expect(key).not.toHaveTextContent(/Met Office/)
+    fireEvent.click(within(key).getByRole('button', { name: 'Lightning details' }))
+    expect(screen.getByText(/Hatched hours have no data\./)).toBeInTheDocument()
+    expect(screen.getByText('Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.')).toBeInTheDocument()
     unmount()
 
     renderUpperAir(upperFeed({ provider: 'someone-else' }))
-    expect(screen.getByTestId('forecast-upper-air-lightning-key')).not.toHaveTextContent(/Met Office/)
+    fireEvent.click(within(screen.getByTestId('forecast-upper-air-lightning-key')).getByRole('button', { name: 'Lightning details' }))
+    expect(screen.queryByText(/Met Office/)).toBeNull()
   })
 
   it('draws no band and says why when the forecast is for a stay', () => {

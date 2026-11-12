@@ -1,6 +1,8 @@
 import { useId, type ReactNode } from 'react'
+import { Info } from 'lucide-react'
 
 import { LegendSwatch } from '@/components/legend-swatch'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import {
   LIGHTNING_STEP_LABELS,
@@ -89,19 +91,6 @@ export function LightningBand({ testId, blockTestId, gapTestId, chartWidth, char
   )
 }
 
-/** The key's "no data" sample: the band's hatch in a small box. */
-function NoDataSwatch() {
-  const patternId = `${useId()}-swatch`
-  return (
-    <svg width="14" height="8" viewBox="0 0 14 8" className="inline-block align-middle" aria-hidden="true">
-      <defs>
-        <NoDataPattern id={patternId} />
-      </defs>
-      <rect x="2" y="1" width="10" height="6" rx="1" fill={`url(#${patternId})`} />
-    </svg>
-  )
-}
-
 interface LightningKeyProps {
   testId: string
   status: LightningStatus
@@ -116,7 +105,9 @@ interface LightningKeyProps {
 const UKMO_PROVIDER = 'ukmo-lightning'
 
 /**
- * The key line under a chart's lightning band. It says what the band is, why
+ * The key line under a chart's lightning band: the three steps, then an info
+ * button holding what the band measures and the data credit, as a map keeps
+ * its attribution behind one. It also says why
  * the forecast is not drawn (it is for the boat, not a stay, or the chart's
  * times will not read), and, whenever the feed has failed, one line saying
  * so, even beside a band that is drawn from windows already held. A boat with
@@ -135,16 +126,24 @@ export function LightningKey({ testId, status, provider, held, staleBadge }: Lig
       <>
         {status.error ? <p>{held ? 'Lightning not updated' : 'Lightning unavailable'}: {status.error}</p> : null}
         <p>
-          Lightning band, the chance of at least one lightning flash within about 20 km in each 3-hour window:{' '}
+          Lightning chance:{' '}
           {([1, 2, 3] as const).map((step) => (
             <span key={step} className="mr-1.5 inline-flex items-center gap-1 align-middle">
               <LegendSwatch kind="bar" color={`hsl(var(--chart-lightning) / ${lightningOpacity(step)})`} /> {LIGHTNING_STEP_LABELS[step - 1]}
             </span>
           ))}
-          <span className="mr-1.5 inline-flex items-center gap-1 align-middle">
-            <NoDataSwatch /> no data
-          </span>
-          {provider === UKMO_PROVIDER ? ' Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.' : ''}
+          <Popover>
+            <PopoverTrigger
+              aria-label="Lightning details"
+              className="-my-2 inline-flex h-8 w-8 items-center justify-center rounded-full align-middle transition-opacity hover:opacity-70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-64 space-y-2 p-3 text-xs">
+              <p>The chance of at least one lightning flash within about 20 km in each 3-hour window. Hatched hours have no data.</p>
+              {provider === UKMO_PROVIDER ? <p>Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.</p> : null}
+            </PopoverContent>
+          </Popover>
           {staleBadge ? <> {staleBadge}</> : null}
         </p>
       </>

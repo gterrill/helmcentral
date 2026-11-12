@@ -3,7 +3,8 @@
 ## Status
 Accepted. The plugin and host landed first, then the chart bands: a four-step
 violet band on the Cloud, Temperature & Rain chart and the Upper Air trace,
-with the Met Office credit in each chart's key. Both are drawn for the boat
+keyed by its three steps, with the Met Office credit behind an info button
+in that key, as a map keeps its attribution. Both are drawn for the boat
 only; a planned stay shows no band and the key says why.
 
 ## Context
@@ -184,8 +185,9 @@ downloaded grid.
 
 ## Consequences
 
-- The Met Office credit, "Lightning probability: © Crown copyright, Met
-  Office, CC BY-SA 4.0", goes with the forecast credits.
+- The Met Office credit goes with the lightning key, behind its info button:
+  "Lightning data © Crown copyright, Met Office, CC BY-SA 4.0." The plugin's
+  own description words it "Lightning probability: © Crown copyright…".
 - `ukmo-lightning` carries its own HDF5 reader, written for this file's
   layout alone: superblock version 2, a version 2 object header, and the
   grid in one chunk under gzip and shuffle. It finds the grid by its
