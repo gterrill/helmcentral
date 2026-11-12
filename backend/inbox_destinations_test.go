@@ -95,7 +95,7 @@ func TestInboxFileToEquipmentMovesThePhotoAndClearsTheItem(t *testing.T) {
 			t.Errorf("%s still there: %v", p, err)
 		}
 	}
-	if where, _ := w.inbox.SourceWhere(src); where != inboxWhereFiled {
+	if where, _ := w.inbox.SourceWhere(src, w.docs.HasSHA); where != inboxWhereFiled {
 		t.Errorf("original remembered as %q", where)
 	}
 }
@@ -491,5 +491,69 @@ func TestInboxPhotoBodyRejectsUnknownKeysAndWrongTypes(t *testing.T) {
 	code, resp := send(t, fileInboxToOpenJobHandler, http.MethodPost, `{"equipment_id":"x","job_id":"y","items":[{"id":"`+id+`"}]}`)
 	if code != 400 || resp["error"] != "invalid body" {
 		t.Errorf("job endpoint with equipment_id: %d %v", code, resp)
+	}
+}
+
+// A filed original is remembered only while the copy it became is still held.
+func TestInboxFiledOriginalIsForgottenWhenItsCopyIsDeleted(t *testing.T) {
+	w := newInboxWorld(t)
+	pump, err := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.Repeat("d", 64)
+	jpg := inboxTestJPEG(t, 61)
+	code, body := inboxUpload(t, jpg, "pump.jpg", map[string]string{"source_sha256": src})
+	if code != http.StatusCreated {
+		t.Fatal(code, body)
+	}
+	id := body["item"].(map[string]any)["id"].(string)
+	code, results := fileToEquipment(t, pump.ID, id)
+	if code != 200 || len(results) != 1 || results[0]["ok"] != true {
+		t.Fatal(code, results)
+	}
+	docID := results[0]["document_id"].(string)
+
+	known := inboxRouteHandler(t, http.MethodPost, "/api/inbox/known")
+	knownNow := func() bool {
+		code, body := send(t, known, http.MethodPost, `{"hashes":["`+src+`"]}`)
+		if code != 200 {
+			t.Fatal(code, body)
+		}
+		return len(body["known"].([]any)) == 1
+	}
+	if !knownNow() {
+		t.Fatal("original not remembered while its copy is held")
+	}
+	code, body = inboxUpload(t, inboxTestJPEG(t, 62), "again.jpg", map[string]string{"source_sha256": src})
+	if code != http.StatusOK || body["status"] != "already_uploaded" || body["where"] != "filed" {
+		t.Fatalf("while held: %d %v", code, body)
+	}
+
+	if _, err := w.docs.Delete(docID); err != nil {
+		t.Fatal(err)
+	}
+	if knownNow() {
+		t.Error("original still reported known after its copy was deleted")
+	}
+	code, body = inboxUpload(t, inboxTestJPEG(t, 62), "again.jpg", map[string]string{"source_sha256": src})
+	if code != http.StatusCreated || body["status"] != "stored" {
+		t.Fatalf("after delete: %d %v", code, body)
+	}
+}
+
+// A row with no recorded copy keeps skipping the original, the safe side.
+func TestInboxFiledOriginalWithoutACopyIsRemembered(t *testing.T) {
+	w := newInboxWorld(t)
+	src := strings.Repeat("e", 64)
+	if err := w.inbox.MarkFiled(src, ""); err != nil {
+		t.Fatal(err)
+	}
+	held := func(string) (bool, error) { return false, nil }
+	if where, err := w.inbox.SourceWhere(src, held); err != nil || where != inboxWhereFiled {
+		t.Fatalf("where %q, err %v", where, err)
+	}
+	if known, err := w.inbox.KnownSources([]string{src}, held); err != nil || len(known) != 1 {
+		t.Fatalf("known %v, err %v", known, err)
 	}
 }

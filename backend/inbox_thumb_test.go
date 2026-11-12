@@ -30,7 +30,7 @@ func TestInboxKnownAnswersTheOriginalsAlreadyHeld(t *testing.T) {
 	if code, body := inboxUpload(t, inboxTestJPEG(t, 140), "a.jpg", map[string]string{"source_sha256": shaA}); code != http.StatusCreated {
 		t.Fatal(code, body)
 	}
-	if err := w.inbox.MarkFiled(shaB); err != nil {
+	if err := w.inbox.MarkFiled(shaB, ""); err != nil {
 		t.Fatal(err)
 	}
 	shaC := strings.Repeat("c", 64)

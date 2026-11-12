@@ -314,7 +314,7 @@ func looksLikeJPEG(b []byte) bool {
 // the Inbox before), "documents", or "" when they are new.
 func inboxDuplicateWhere(store *inboxStore, docs *documentStore, sourceSHA, sha string) (string, error) {
 	if sourceSHA != "" {
-		if where, err := store.SourceWhere(sourceSHA); err != nil || where != inboxWhereNone {
+		if where, err := store.SourceWhere(sourceSHA, docs.HasSHA); err != nil || where != inboxWhereNone {
 			return where, err
 		}
 	}
@@ -476,7 +476,11 @@ func inboxKnownHandler(c echo.Context) error {
 			return inboxError(c, http.StatusBadRequest, "every hash must be 64 lowercase hex characters")
 		}
 	}
-	known, err := store.KnownSources(body.Hashes)
+	docs, err := requireDocumentStore("inbox known")
+	if err != nil {
+		return inboxError(c, http.StatusServiceUnavailable, err.Error())
+	}
+	known, err := store.KnownSources(body.Hashes, docs.HasSHA)
 	if err != nil {
 		return inboxRespond(c, err)
 	}
@@ -824,7 +828,7 @@ func withClaimedInboxItem(store *inboxStore, id string, file func(it inboxItem) 
 // it is shared again; clear the item; wake the indexer. A failed clear comes
 // back as a refusal saying clearFailed.
 func finishFiled(store *inboxStore, it inboxItem, clearFailed string) error {
-	if err := store.MarkFiled(it.SourceSHA256); err != nil {
+	if err := store.MarkFiled(it.SourceSHA256, it.SHA256); err != nil {
 		log.Printf("inbox: %v", err)
 	}
 	if err := inboxRemoveItem(store, it); err != nil {

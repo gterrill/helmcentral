@@ -150,11 +150,49 @@ func createInboxSchema(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_inbox_items_source ON inbox_items(source_sha256)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
 	}
-	// Originals already filed out of the Inbox, so sharing the roll again skips them.
+	// Originals already filed out of the Inbox, so sharing the roll again skips
+	// them. copy_sha256 is the hash of the stored copy the original became, so
+	// the original is forgotten once that copy is deleted; '' means no copy was
+	// recorded, and the original is remembered for good.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS inbox_filed (
-		source_sha256 TEXT PRIMARY KEY
+		source_sha256 TEXT PRIMARY KEY,
+		copy_sha256 TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	return addInboxFiledCopyColumn(db)
+}
+
+// addInboxFiledCopyColumn upgrades an inbox_filed table made before it
+// recorded copies. Its existing rows record no copy, which keeps them remembered.
+func addInboxFiledCopyColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(inbox_filed)`)
+	if err != nil {
+		return fmt.Errorf("inspect inbox_filed: %w", err)
+	}
+	have := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect inbox_filed: %w", err)
+		}
+		if name == "copy_sha256" {
+			have = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspect inbox_filed: %w", err)
+	}
+	rows.Close()
+	if have {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE inbox_filed ADD COLUMN copy_sha256 TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add inbox_filed.copy_sha256: %w", err)
 	}
 	return nil
 }
@@ -206,56 +244,112 @@ const (
 	inboxWhereFiled = "filed"
 )
 
+// copyHeld says whether a stored copy with this hash still exists in Documents.
+type copyHeld func(copySHA string) (bool, error)
+
+// filedHeld says whether an original is still remembered as filed: its row
+// exists and either records no copy or the copy it records is still held.
+func (s *inboxStore) filedHeld(sha string, held copyHeld) (bool, error) {
+	var copySHA string
+	err := s.db.QueryRow(`SELECT copy_sha256 FROM inbox_filed WHERE source_sha256 = ?`, sha).Scan(&copySHA)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check filed source hash: %w", err)
+	}
+	if copySHA == "" {
+		return true, nil
+	}
+	return held(copySHA)
+}
+
 // SourceWhere says where an original with this hash is already held: waiting
-// in the Inbox, filed out of it before, or nowhere ("").
-func (s *inboxStore) SourceWhere(sha string) (string, error) {
-	for _, t := range []struct{ where, query string }{
-		{inboxWhereInbox, `SELECT 1 FROM inbox_items WHERE source_sha256 = ? LIMIT 1`},
-		{inboxWhereFiled, `SELECT 1 FROM inbox_filed WHERE source_sha256 = ? LIMIT 1`},
-	} {
-		found, err := rowExists(s.db, t.query, sha)
-		if err != nil {
-			return "", fmt.Errorf("check %s source hash: %w", t.where, err)
-		}
-		if found {
-			return t.where, nil
-		}
+// in the Inbox, filed out of it with its copy still held, or nowhere ("").
+func (s *inboxStore) SourceWhere(sha string, held copyHeld) (string, error) {
+	found, err := rowExists(s.db, `SELECT 1 FROM inbox_items WHERE source_sha256 = ? LIMIT 1`, sha)
+	if err != nil {
+		return "", fmt.Errorf("check inbox source hash: %w", err)
+	}
+	if found {
+		return inboxWhereInbox, nil
+	}
+	filed, err := s.filedHeld(sha, held)
+	if err != nil {
+		return "", err
+	}
+	if filed {
+		return inboxWhereFiled, nil
 	}
 	return inboxWhereNone, nil
 }
 
 // KnownSources answers which of these original-file hashes are already in the
-// Inbox or filed out of it.
-func (s *inboxStore) KnownSources(shas []string) ([]string, error) {
+// Inbox or filed out of it with the copy still held.
+func (s *inboxStore) KnownSources(shas []string, held copyHeld) ([]string, error) {
 	if len(shas) == 0 {
 		return []string{}, nil
 	}
 	marks, one := inPlaceholders(shas)
-	args := append(append(make([]any, 0, 2*len(shas)), one...), one...)
-	rows, err := s.db.Query(
-		`SELECT source_sha256 FROM inbox_items WHERE source_sha256 IN (`+marks+`)
-		 UNION SELECT source_sha256 FROM inbox_filed WHERE source_sha256 IN (`+marks+`)`, args...)
+	rows, err := s.db.Query(`SELECT source_sha256 FROM inbox_items WHERE source_sha256 IN (`+marks+`)`, one...)
 	if err != nil {
 		return nil, fmt.Errorf("check known source hashes: %w", err)
 	}
-	defer rows.Close()
+	seen := map[string]bool{}
 	out := []string{}
 	for rows.Next() {
 		var sha string
 		if err := rows.Scan(&sha); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("check known source hashes: %w", err)
 		}
+		seen[sha] = true
+		out = append(out, sha)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	// Filed originals come in one query; only those with a recorded copy ask
+	// the library, so a big roll of new photos costs the library nothing.
+	rows, err = s.db.Query(`SELECT source_sha256, copy_sha256 FROM inbox_filed WHERE source_sha256 IN (`+marks+`)`, one...)
+	if err != nil {
+		return nil, fmt.Errorf("check known source hashes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sha, copySHA string
+		if err := rows.Scan(&sha, &copySHA); err != nil {
+			return nil, fmt.Errorf("check known source hashes: %w", err)
+		}
+		if seen[sha] {
+			continue
+		}
+		if copySHA != "" {
+			ok, err := held(copySHA)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		seen[sha] = true
 		out = append(out, sha)
 	}
 	return out, rows.Err()
 }
 
-// MarkFiled remembers that an original left the Inbox for a passage or Documents.
-func (s *inboxStore) MarkFiled(sha string) error {
+// MarkFiled remembers that an original left the Inbox for a passage, Documents,
+// equipment or a job, as the stored copy with hash copySHA. Filing it again
+// replaces the recorded copy.
+func (s *inboxStore) MarkFiled(sha, copySHA string) error {
 	if sha == "" {
 		return nil
 	}
-	if _, err := s.db.Exec(`INSERT OR IGNORE INTO inbox_filed (source_sha256) VALUES (?)`, sha); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO inbox_filed (source_sha256, copy_sha256) VALUES (?, ?)
+		ON CONFLICT(source_sha256) DO UPDATE SET copy_sha256 = excluded.copy_sha256`, sha, copySHA); err != nil {
 		return fmt.Errorf("record filed source hash: %w", err)
 	}
 	return nil
