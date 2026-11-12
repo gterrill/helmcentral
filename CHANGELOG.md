@@ -11,14 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-11-12
+
 ### Added
 
 - **The Tanks tile shows the time left while you fill a water or fuel tank.**
   With the boat stopped, the state word (OK, LOW or CRIT) gives way to the time
   to full, such as "12 MIN", once the level has stepped up a couple of times.
   It reads FILLING until the time can be worked out. A step down in the level
-  ends it at once. When a hose is turned off it clears about seven minutes later,
-  and a watermaker's can linger for up to 15 minutes. Waste tanks never say it,
+  ends it at once. When a hose is turned off it clears within about seven
+  minutes, and a watermaker's can linger for up to 15 minutes. Waste tanks never say it,
   and the tank alarms don't change.
 - **The Today & Now tile shows your barometer.** A new row along the bottom
   gives the reading in millibars, a small chart of the last three hours, and
@@ -29,14 +31,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   reporting, the row reads `—` with no chart. If Helmcentral can't load the
   reading, the row says "Barometer unavailable" where the chart would be. The
   tile is now at least five rows tall, so a page that had it four rows tall
-  shows it one row taller.
+  shows it one row taller and the tiles below it move down a row. On a wall
+  page laid out to fill the screen, check the bottom row still fits.
 
 - **Share photos and PDFs from your phone to a new Inbox, then sort them on
   the laptop.** Open **Inbox** in the sidebar, then tap **Share photos**, or put
   `/inbox/upload` on your phone's Home Screen. The sidebar shows how many are
   waiting. Pick a whole camera roll:
   photos already in the Inbox, or already filed from it, are skipped before any
-  work is done, so picking the same ones twice is harmless and quick. The rest
+  work is done, so picking the same ones twice is harmless and quick. A photo
+  whose filed copy you have since deleted from Documents comes in again. The rest
   are shrunk on the phone and sent one at a time with a small preview.
 
   In the Inbox, photos sit in groups by passage in the order they were taken.
@@ -135,6 +139,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   get a capital first letter or autocorrect.** Saved places also waits until
   you leave the latitude, longitude or depth box before saying it's wrong, and
   pressing Save on a wrong one says what is wrong instead of doing nothing.
+  Pressing Sign in with a box empty says which one and puts you in it.
 - **A file too big to upload now says so.** Uploading an oversized file to
   Documents, an equipment item, a deck plan, a maintenance entry, an import or
   an open job showed a bare error code. It now says the file is over the limit.
@@ -3614,7 +3619,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/gterrill/helmcentral/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/gterrill/helmcentral/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/gterrill/helmcentral/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/gterrill/helmcentral/compare/v0.61.0...v0.62.0
