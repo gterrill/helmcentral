@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { useWallPageActive } from '@/lib/wall-page-active'
+
 /**
  * Cycles through the indices of a set of size `count`, advancing by one
  * every `intervalSeconds`, wrapping back to 0 after the last one.
@@ -30,15 +32,18 @@ export function useCyclingIndex(count: number, intervalSeconds: number, resetKey
     setIndex(0)
   }
 
+  // The index drives the Nearby map's camera, so it holds still while the
+  // tile's wall page rests (ADR 0217) and carries on from there on waking.
+  const pageActive = useWallPageActive()
   useEffect(() => {
     // resetKey is a dependency only to restart the interval on a reset, so the
     // first item after it gets a full interval rather than the old remainder.
-    if (count <= 1) return
+    if (count <= 1 || !pageActive) return
     const timer = window.setInterval(() => {
       setIndex((i) => (i + 1) % count)
     }, intervalSeconds * 1000)
     return () => window.clearInterval(timer)
-  }, [count, intervalSeconds, resetKey])
+  }, [count, intervalSeconds, resetKey, pageActive])
 
   if (count === 0) return null
   return resetting ? 0 : index % count

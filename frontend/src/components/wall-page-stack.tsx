@@ -1,12 +1,6 @@
-import { createContext, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-
-/**
- * True for the page a wall display is showing, and for every tile outside a
- * wall. A tile that holds something live and heavy (a camera stream in an
- * embed) reads this to let go of it while its page rests.
- */
-export const WallPageActiveContext = createContext(true)
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 
 interface WallPageStackProps<P extends { id: string }> {
   pages: readonly P[]

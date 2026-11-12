@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { sameShallow } from '@/lib/same-value'
-import { useSelection } from '@/lib/selection'
+import { useSelection, type RestingPolicy } from '@/lib/selection'
 import { onTelemetryTestReset } from '@/lib/test-reset'
 
 export { sameJSON, sameShallow } from '@/lib/same-value'
@@ -90,6 +90,8 @@ export function createTelemetryStore<S>(
   event: string,
   initial: S,
   apply: (previous: S, data: unknown, receivedAt: number) => TelemetryUpdate<S> | null,
+  /** 'live' for a store whose readers must not wait for a resting wall page (the alarms). */
+  whileResting: RestingPolicy = 'hold',
 ): TelemetryStore<S> {
   let snapshot = initial
   let heard = false
@@ -175,7 +177,7 @@ export function createTelemetryStore<S>(
   const getSnapshot = () => snapshot
 
   function useSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
-    return useSelection({ subscribe, getSnapshot, select, isEqual })
+    return useSelection({ subscribe, getSnapshot, select, isEqual, whileResting })
   }
 
   const getView = () => view
@@ -183,7 +185,7 @@ export function createTelemetryStore<S>(
   function useHeardSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T | null {
     const selectHeard = useCallback((v: HeardView<S>): T | null => (v.heard ? select(v.state) : null), [select])
     const equal = useCallback((a: T | null, b: T | null) => a !== null && b !== null && isEqual(a, b), [isEqual])
-    return useSelection({ subscribe, getSnapshot: getView, select: selectHeard, isEqual: equal })
+    return useSelection({ subscribe, getSnapshot: getView, select: selectHeard, isEqual: equal, whileResting })
   }
 
   return { getSnapshot, subscribe, subscribeKeys, useSelector, useHeardSelector }

@@ -1,7 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 import { resetTelemetryStoresForTest } from '@/lib/test-reset'
 
 afterEach(() => {
@@ -121,6 +123,29 @@ describe('createSharedPoller', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     unmount()
     expect(poller.getSnapshot()).toEqual([7])
+  })
+
+  it('a snapshot reader on a resting wall page is not re-rendered, and shows the latest value once its page wakes', async () => {
+    vi.useFakeTimers()
+    const poll = vi.fn<(signal: AbortSignal, store: PollStore<number[]>) => Promise<void>>(async () => {})
+    const poller = createSharedPoller<number[]>([], poll, () => {})
+    poll.mockImplementationOnce(async (_s, store) => { store.publish([1]) })
+    poll.mockImplementationOnce(async (_s, store) => { store.publish([1, 2]) })
+    let active = false
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(WallPageActiveContext.Provider, { value: active }, children)
+    let renders = 0
+    const { result, rerender } = renderHook(() => { renders += 1; return poller.useSnapshot(1000) }, { wrapper })
+    // The first read happened, so the tile has a value; later polls are not pushed.
+    const settled = renders
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(poller.getSnapshot()).toEqual([1, 2])
+    expect(renders).toBe(settled)
+    expect(result.current).toEqual([])
+    active = true
+    rerender()
+    expect(result.current).toEqual([1, 2])
   })
 
   it('tells its listeners when a test reset empties the snapshot', async () => {

@@ -6,6 +6,9 @@ Accepted (2026-10-27). Changes how [ADR 0110](0110-wall-displays-are-records.md)
 page: the rotation still picks the page, but it no longer builds and destroys
 the tiles.
 
+Amended (2026-11-12). A resting page stops most of its live-data renders. The
+Decision gains a bullet and the Cost section changes. The pause is best effort.
+
 ## Context
 
 The flybridge kiosk is a 3.7 GB ODROID running WPE WebKit 2.44. With the
@@ -44,6 +47,21 @@ Only the active page is visible.
   serves one client at a time, so a hidden but live iframe would hold the
   stream and lock the next viewer out. The embed reloads on each lap, exactly
   as it did before this change. Nothing is gained or lost for embeds.
+- **Resting tiles stop taking live updates, as far as it goes.** The pause is
+  best effort. Every live reader goes through `useSelection`
+  ([ADR 0215](0215-tiles-subscribe-to-live-data.md)), and the query hook and
+  the shared pollers go through it too. A reader on a resting page keeps its
+  subscription, so its poll or stream lives on. The store still notifies, but
+  the reader returns the value it last showed, and React skips the render. That
+  stops the renders live-data ticks cause in resting tiles. A reader that has
+  shown nothing yet, or whose path or query changed, reads the snapshot once.
+  The tile renders once when its page goes to rest and once when it wakes,
+  because the page flag changes; on waking it reads the current value. Readers
+  of the alarms store stay live by design, so an alarm sounds and shows
+  whatever page is up.
+  A timer a tile owns stops through `useWallPageActive`: the anchor map's
+  clocks and the Nearby tile's cycling hold still while the page rests and
+  carry on when it wakes. A new tile with its own timer should use the hook too.
 - **The polls follow the mounted pages.** Trails and the CZone switches poll
   when any mounted wall page has a tile that reads them, not only the page on
   screen.
@@ -65,9 +83,15 @@ through the same function the wall uses for each of its pages.
 The shell re-renders on live-data ticks ([ADR 0215](0215-tiles-subscribe-to-live-data.md))
 and now renders the board of every feed page, not one. Tiles are memoized and
 subscribe to their own data, so the added work is the grid and tile element
-creation, not tile renders. Hidden maps stay alive and still apply data
-updates, but MapLibre draws only when something changes and `visibility:
-hidden` is not painted.
+creation, not tile renders. The pause does not promise a resting tile never
+renders. It can still render when a parent passes new props, when an alarm
+reader changes, and then a reader whose `select` is not stable (an inline
+closure) reads current values. The subscription and the polls stay on resting
+pages, so fetching costs what it did before, and a page that wakes renders the
+current value at once. Anything else that must act on a change (a countdown,
+say) may not live in a tile that only reads: such work belongs in the shell or
+a hook outside the stack. The alarms store is the exception, because its
+readers opt out of resting.
 
 ## Not verified
 
