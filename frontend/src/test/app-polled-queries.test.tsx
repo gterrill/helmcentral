@@ -48,6 +48,7 @@ const BASE_ANSWERS: Record<string, unknown> = {
   '/api/upper-air': polls.UPPER_AIR,
   '/api/routes/active': polls.ROUTE_ACTIVE,
   '/api/depth-trend': polls.DEPTH_TREND,
+  '/api/barometer-trend': polls.BAROMETER_TREND,
   '/api/czone/switches': polls.CZONE_SWITCHES,
   '/api/electrical/overnight': polls.OVERNIGHT,
   '/api/alarm-rules': polls.ALARM_RULES,
@@ -169,7 +170,7 @@ async function mountApp() {
 // Each poll the shell used to make, keyed by its endpoint.
 const POLLED = [
   '/api/weather-forecast', '/api/weather-today', '/api/tide-today', '/api/forecast-warnings',
-  '/api/wave-forecast', '/api/upper-air', '/api/routes/active', '/api/depth-trend',
+  '/api/wave-forecast', '/api/upper-air', '/api/routes/active', '/api/depth-trend', '/api/barometer-trend',
   '/api/czone/switches', '/api/electrical/overnight', '/api/alarm-rules',
   '/api/dashboard-pages', '/api/displays', '/api/dashboard-ribbon',
 ]
@@ -222,6 +223,13 @@ describe('App polled queries (ADR 0215 phase 6)', () => {
       key: '/api/depth-trend',
       answer: { ...polls.DEPTH_TREND, points: [...polls.DEPTH_TREND.points.slice(1), { ...polls.DEPTH_TREND.points[0], depth_m: 15.1 }] },
       shows: ['Depth & Tide'],
+    },
+    {
+      key: '/api/barometer-trend',
+      answer: { ...polls.BAROMETER_TREND, current_pa: 101250, change_pa: -70 },
+      // The barometer row polls for itself, so the tile around it (which the
+      // spy counts) does not re-render.
+      shows: [],
     },
     {
       key: '/api/czone/switches',

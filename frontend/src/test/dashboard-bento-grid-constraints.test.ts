@@ -11,6 +11,7 @@ import {
   gaugeWidgetConstraints,
   CLUSTER_DEFAULT_SIZE,
   liftClusterBox,
+  liftTodayNowHeight,
   raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
@@ -188,5 +189,23 @@ describe('a new engine cluster tile', () => {
     expect(CLUSTER_DEFAULT_SIZE.h).toBe(rowsForHeight(32 + CLUSTER_H + 8))
     expect(CLUSTER_DEFAULT_SIZE.w).toBeGreaterThanOrEqual(CLUSTER_WIDGET_CONSTRAINTS.minW)
     expect(CLUSTER_DEFAULT_SIZE.h).toBeGreaterThanOrEqual(CLUSTER_WIDGET_CONSTRAINTS.minH)
+  })
+})
+
+/**
+ * react-grid-layout applies minH only while resizing, so a saved Today & Now
+ * tile four rows tall would be drawn four rows tall and clip the barometer row.
+ * Its height is lifted to the minimum when drawn.
+ */
+describe('liftTodayNowHeight', () => {
+  const min = WIDGET_CONSTRAINTS['today-now']!.minH!
+
+  test('raises a saved Today & Now tile that is too short', () => {
+    expect(liftTodayNowHeight('today-now', 4)).toBe(min)
+  })
+
+  test('keeps a taller one, and leaves other tiles alone', () => {
+    expect(liftTodayNowHeight('today-now', min + 2)).toBe(min + 2)
+    expect(liftTodayNowHeight('depth-tide', 4)).toBe(4)
   })
 })

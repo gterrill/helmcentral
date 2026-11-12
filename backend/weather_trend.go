@@ -142,6 +142,22 @@ func changeOverWindow(points []telemetryPoint) (float64, bool) {
 	return points[len(points)-1].Value - points[0].Value, true
 }
 
+// pressureChange is the three-hour change gate shared by
+// environment.pressureChange3h and the Today & Now barometer row: last minus
+// first, and the seconds of history it covers, present only once that history
+// reaches trendMinimumSpan (the same gate linearSlopePerSecond applies).
+func pressureChange(samples []telemetryPoint) (change, spanS float64, ok bool) {
+	if len(samples) < 2 {
+		return 0, 0, false
+	}
+	span := samples[len(samples)-1].Timestamp.Sub(samples[0].Timestamp)
+	if span < trendMinimumSpan {
+		return 0, 0, false
+	}
+	change, _ = changeOverWindow(samples)
+	return change, span.Seconds(), true
+}
+
 // tendencyOverWindow is changeOverWindow's counterpart for a window with
 // nothing shorter to lean on while its buffer fills (ADR 0095): last minus
 // first, present only once the span covers window minus tendencySpanSlack.
