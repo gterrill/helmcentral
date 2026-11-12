@@ -1,5 +1,5 @@
 import { Anchor } from 'lucide-react'
-import { useCallback, useId, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,8 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
   const shownError = formError ?? error
   const usernameId = useId()
   const passwordId = useId()
+  const usernameRef = useRef<HTMLInputElement>(null)
+  const passwordRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -41,10 +43,12 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
       const trimmedUsername = username.trim()
       if (trimmedUsername === '') {
         setFormError('Enter your username.')
+        usernameRef.current?.focus()
         return
       }
       if (password === '') {
         setFormError('Enter your password.')
+        passwordRef.current?.focus()
         return
       }
 
@@ -72,11 +76,12 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
           </p>
         </div>
 
-        <form className="flex flex-col gap-4" onSubmit={(e) => { void handleSubmit(e) }}>
+        <form noValidate className="flex flex-col gap-4" onSubmit={(e) => { void handleSubmit(e) }}>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={usernameId}>Username</Label>
             <Input
               id={usernameId}
+              ref={usernameRef}
               name="username"
               type="text"
               autoComplete="username"
@@ -84,7 +89,10 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
               required
               autoFocus
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value)
+                setFormError(null)
+              }}
               disabled={submitting}
             />
           </div>
@@ -93,12 +101,16 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
             <Label htmlFor={passwordId}>Password</Label>
             <Input
               id={passwordId}
+              ref={passwordRef}
               name="password"
               type="password"
               autoComplete="current-password"
               required
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                setFormError(null)
+              }}
               disabled={submitting}
             />
           </div>

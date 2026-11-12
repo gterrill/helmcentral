@@ -69,6 +69,28 @@ describe('LoginScreen', () => {
     expect(onLogin).not.toHaveBeenCalled()
   })
 
+  it('shows its own message when Sign in is clicked with an empty password, not the browser tooltip', () => {
+    const onLogin = vi.fn().mockResolvedValue(true)
+    render(<LoginScreen onLogin={onLogin} error={null} />)
+
+    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'skipper' } })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter your password.')
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it('puts the cursor in the empty field the message names, and drops the message once it is typed in', () => {
+    render(<LoginScreen onLogin={vi.fn()} error={null} />)
+
+    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'skipper' } })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+
+    expect(screen.getByLabelText(/password/i)).toHaveFocus()
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'h' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('disables the submit button while a login attempt is in flight', async () => {
     let resolveLogin: (value: boolean) => void = () => {}
     const onLogin = vi.fn(() => new Promise<boolean>((resolve) => { resolveLogin = resolve }))
