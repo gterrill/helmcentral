@@ -30,6 +30,7 @@ import type { MateAskOptions } from '@/hooks/use-mate-sheet-request'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 import { errorMessage } from '@/lib/errors'
+import { identifierInputProps } from '@/lib/identifier-input'
 
 function formatTime(value: string | undefined, timeZone: string | undefined): string {
   if (!value) return '--'
@@ -692,6 +693,7 @@ function RuleForm({ draft, error, isEditing, unitsByPath, mateOn, onChange, onCa
           <FieldLabel htmlFor="alarm-path">SignalK path</FieldLabel>
           <Input
             id="alarm-path"
+            {...identifierInputProps}
             value={draft.path}
             disabled={draft.path_role === 'house_bank_soc'}
             onChange={(e) => set('path', e.target.value)}

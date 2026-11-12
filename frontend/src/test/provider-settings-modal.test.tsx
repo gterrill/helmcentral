@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { getQueryData, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 const secretsGetResponse = {
   SIGNALK_USERNAME: false,
@@ -70,6 +71,11 @@ describe('ProviderSettingsModal', () => {
 
     expect(screen.queryByLabelText('WeatherKit Key ID')).toBeNull()
     expect(screen.getByText(/Allowlist changes require a backend restart/i)).toBeTruthy()
+
+    for (const name of ['Allowed Hosts', 'Allowed Secrets']) {
+      const field = screen.getByLabelText(name)
+      expectIdentifierInput(field, name)
+    }
   })
 
   it('Save posts the edited allowlists and Reset issues a DELETE, both updating from the response', async () => {
@@ -267,6 +273,26 @@ describe('ProviderSettingsModal config fields', () => {
     )
     expect(screen.getByText('Blank uses the public overpass-api.de.')).toBeTruthy()
     expect(screen.getByText(/Applies on the next call/i)).toBeTruthy()
+  })
+
+  it('keeps the phone keyboard from correcting a config field', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/plugins/poi/osm-overpass')) {
+          return { ok: true, json: async () => osmOverpassInfo('https://overpass.openstreetmap.fr/api/interpreter') }
+        }
+        if (url.includes('/api/settings/secrets')) {
+          return { ok: true, json: async () => secretsGetResponse }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+
+    renderModal('poi', 'osm-overpass')
+
+    const field = await screen.findByLabelText('Overpass server')
+    expectIdentifierInput(field)
   })
 
   it('keeps a typed draft when a background refetch of the provider lands', async () => {

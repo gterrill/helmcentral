@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import type { AlarmRule } from '@/hooks/use-alarm-rules'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 /**
  * Rules are a prop now (lifted into App, see alarms-drawer-actions.test.tsx),
@@ -58,6 +59,17 @@ function renderDrawer(rules: AlarmRule[], paths: SignalKPath[] = []) {
     />,
   )
 }
+
+describe('RuleForm SignalK path', () => {
+  it('keeps the phone keyboard from correcting the path', () => {
+    renderDrawer([])
+
+    fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+    const field = screen.getByLabelText('SignalK path')
+    expectIdentifierInput(field)
+  })
+})
 
 describe('RuleForm advanced disclosure', () => {
   it('hides Deadband, Must hold for and Escalate after until Advanced is opened when creating', () => {

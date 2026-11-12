@@ -4,6 +4,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { GaugeFields, defaultGaugeConfig } from '@/components/gauge-fields'
 import type { GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
   return {
@@ -22,6 +23,14 @@ function renderFields(value: GaugeWidgetConfig, onChange = vi.fn(), paths: Signa
   render(<GaugeFields value={value} onChange={onChange} paths={paths} idPrefix="g" />)
   return onChange
 }
+
+describe('path field', () => {
+  test('keeps the phone keyboard from correcting a SignalK path', () => {
+    renderFields(config())
+    const field = screen.getByLabelText('SignalK path')
+    expectIdentifierInput(field)
+  })
+})
 
 describe('zone editing', () => {
   test('offers zones for the scaled display kinds', () => {

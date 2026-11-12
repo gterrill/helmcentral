@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
+import { expectSecretInput } from '@/test/helpers/input-attributes'
 
 const secretsGetResponse = {
   SIGNALK_USERNAME: true,
@@ -55,6 +56,17 @@ describe('SecretFieldGroup', () => {
 
     const influxdbTokenField = screen.getByLabelText('InfluxDB Token') as HTMLInputElement
     expect(influxdbTokenField.placeholder).toBe('not set')
+  })
+
+  it('keeps the browser from offering its saved sign-in for a secret', async () => {
+    renderGroup()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('InfluxDB Token')).toBeTruthy()
+    })
+
+    const field = screen.getByLabelText('InfluxDB Token')
+    expectSecretInput(field)
   })
 
   it('renders no Save button — saving is owned by the page-level/modal-level Save button now', async () => {

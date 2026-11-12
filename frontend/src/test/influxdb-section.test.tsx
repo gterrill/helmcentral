@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
 import { initialRegularSettingsDraft } from '@/components/settings/settings-draft'
 import { resetQueryStore } from '@/lib/api-query'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 // The token group needs the secrets provider and is not what this is about.
 vi.mock('@/components/settings/secret-field-group', () => ({ SecretFieldGroup: () => null }))
@@ -26,6 +27,14 @@ describe('InfluxdbSection one-minute bucket', () => {
     expect(
       screen.getByText("Leave blank to roll up the main bucket. Helmcentral learns the usual readings of each engine and the house bank from it."),
     ).toBeInTheDocument()
+  })
+
+  it('keeps the phone keyboard from correcting the address, org and buckets', () => {
+    render(<InfluxdbSection draft={initialRegularSettingsDraft} onChange={() => {}} />)
+    for (const name of ['InfluxDB URL', 'InfluxDB organization', 'InfluxDB bucket', 'One-minute bucket (optional)']) {
+      const field = screen.getByLabelText(name)
+      expectIdentifierInput(field, name)
+    }
   })
 
   it('reports the typed bucket through onChange', () => {

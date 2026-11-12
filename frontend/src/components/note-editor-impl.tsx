@@ -42,6 +42,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Textarea } from '@/components/ui/textarea'
 import { apiBaseUrl } from '@/config/api'
 import { uploadDocument } from '@/lib/document-upload'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { isSubmitEnter } from '@/lib/keyboard'
 import { downscaleAll, photoFilename } from '@/lib/image-downscale'
 import {
@@ -698,6 +699,7 @@ function LinkButton({ editor }: { editor: PlateEditor }) {
         <div className="flex flex-col gap-2">
           <Input
             autoFocus
+            {...identifierInputProps}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (isSubmitEnter(e)) submit() }}
@@ -949,6 +951,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
           <div className="h-px bg-border" aria-hidden="true" />
 
           <Input
+            {...identifierInputProps}
             value={docId}
             onChange={(e) => setDocId(e.target.value)}
             placeholder="Or paste a document id (from Documents)"

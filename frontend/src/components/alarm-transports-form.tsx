@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useSetupFocus } from '@/hooks/use-setup-focus'
+import { identifierInputProps, secretInputProps } from '@/lib/identifier-input'
 import { cn } from '@/lib/utils'
 import { WebPushSection } from '@/components/web-push-section'
 import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
@@ -67,17 +68,17 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
             <div className={cn('mt-3 grid gap-3 sm:grid-cols-2', CHOICE_INDENT)}>
               <Field>
                 <FieldLabel htmlFor="ntfy-server">Server</FieldLabel>
-                <Input id="ntfy-server" value={draft.ntfy.server} placeholder="https://ntfy.sh"
+                <Input id="ntfy-server" type="url" {...identifierInputProps} value={draft.ntfy.server} placeholder="https://ntfy.sh"
                   onChange={(e) => setSection('ntfy', { server: e.target.value })} />
               </Field>
               <Field>
                 <FieldLabel htmlFor="ntfy-topic">Topic</FieldLabel>
-                <Input id="ntfy-topic" value={draft.ntfy.topic} placeholder="pikorua-alarms"
+                <Input id="ntfy-topic" {...identifierInputProps} value={draft.ntfy.topic} placeholder="pikorua-alarms"
                   onChange={(e) => setSection('ntfy', { topic: e.target.value })} />
               </Field>
               <Field>
                 <FieldLabel htmlFor="ntfy-token">Access token (optional)</FieldLabel>
-                <Input id="ntfy-token" type="password" autoComplete="off"
+                <Input id="ntfy-token" type="password" {...secretInputProps}
                   placeholder={secretsPresent.NTFY_TOKEN ? 'Saved — enter to replace' : 'Only for a protected topic'}
                   value={secrets.NTFY_TOKEN ?? ''}
                   onChange={(e) => setSecret('NTFY_TOKEN', e.target.value)} />
@@ -93,7 +94,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
             <div className={cn('mt-3 grid gap-3 sm:grid-cols-2', CHOICE_INDENT)}>
               <Field>
                 <FieldLabel htmlFor="smtp-host">Server</FieldLabel>
-                <Input id="smtp-host" value={draft.smtp.host} placeholder="smtp.example.com"
+                <Input id="smtp-host" {...identifierInputProps} value={draft.smtp.host} placeholder="smtp.example.com"
                   onChange={(e) => setSection('smtp', { host: e.target.value })} />
               </Field>
               <Field>
@@ -103,22 +104,22 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="smtp-from">From</FieldLabel>
-                <Input id="smtp-from" value={draft.smtp.from} placeholder="boat@example.com"
+                <Input id="smtp-from" inputMode="email" {...identifierInputProps} value={draft.smtp.from} placeholder="boat@example.com"
                   onChange={(e) => setSection('smtp', { from: e.target.value })} />
               </Field>
               <Field>
                 <FieldLabel htmlFor="smtp-to">To (comma separated)</FieldLabel>
-                <Input id="smtp-to" value={(draft.smtp.to ?? []).join(', ')} placeholder="skipper@example.com"
+                <Input id="smtp-to" inputMode="email" {...identifierInputProps} value={(draft.smtp.to ?? []).join(', ')} placeholder="skipper@example.com"
                   onChange={(e) => setSection('smtp', { to: e.target.value.split(',').map((v) => v.trim()).filter(Boolean) })} />
               </Field>
               <Field>
                 <FieldLabel htmlFor="smtp-username">Username</FieldLabel>
-                <Input id="smtp-username" value={draft.smtp.username} autoComplete="off"
+                <Input id="smtp-username" value={draft.smtp.username} autoComplete="off" {...identifierInputProps}
                   onChange={(e) => setSection('smtp', { username: e.target.value })} />
               </Field>
               <Field>
                 <FieldLabel htmlFor="smtp-password">Password</FieldLabel>
-                <Input id="smtp-password" type="password" autoComplete="off"
+                <Input id="smtp-password" type="password" {...secretInputProps}
                   placeholder={secretsPresent.SMTP_PASSWORD ? 'Saved — enter to replace' : ''}
                   value={secrets.SMTP_PASSWORD ?? ''}
                   onChange={(e) => setSecret('SMTP_PASSWORD', e.target.value)} />
@@ -133,7 +134,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
           {draft.webhook.enabled && (
             <Field className={cn('mt-3', CHOICE_INDENT)}>
               <FieldLabel htmlFor="webhook-url">URL</FieldLabel>
-              <Input id="webhook-url" value={draft.webhook.url} placeholder="https://home-assistant.local/api/webhook/…"
+              <Input id="webhook-url" type="url" {...identifierInputProps} value={draft.webhook.url} placeholder="https://home-assistant.local/api/webhook/…"
                 onChange={(e) => setSection('webhook', { url: e.target.value })} />
             </Field>
           )}
@@ -153,7 +154,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         <section className="rounded-md border bg-background/60 p-3">
           <Field>
             <FieldLabel htmlFor="link-address">Address for links</FieldLabel>
-            <Input id="link-address" value={draft.link_address} placeholder="http://boat.local:9091"
+            <Input id="link-address" type="url" {...identifierInputProps} value={draft.link_address} placeholder="http://boat.local:9091"
               onChange={(e) => setLinkAddress(e.target.value)} />
             <p className="text-xs text-muted-foreground">
               Only used to put a link in notifications about a watch, so a tap opens that report. Use the address you reach

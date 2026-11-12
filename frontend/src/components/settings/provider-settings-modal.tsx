@@ -15,6 +15,7 @@ import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/se
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { useFollowingDraft } from '@/hooks/use-following-draft'
 import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { sameSet } from '@/lib/same-value'
 
 export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-warnings'
@@ -306,6 +307,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                     <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
                     <Input
                       id={`config-field-${field.key}`}
+                      {...identifierInputProps}
                       value={draft[configKey(field.key)] ?? ''}
                       disabled={busy}
                       onChange={(e) => setField(configKey(field.key), e.target.value)}
@@ -329,6 +331,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
               <FieldLabel htmlFor="allowed-hosts">Allowed Hosts</FieldLabel>
               <Input
                 id="allowed-hosts"
+                {...identifierInputProps}
                 value={hostsInput}
                 disabled={busy}
                 onChange={(e) => setField('hosts', e.target.value)}
@@ -340,6 +343,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
               <FieldLabel htmlFor="allowed-secrets">Allowed Secrets</FieldLabel>
               <Input
                 id="allowed-secrets"
+                {...identifierInputProps}
                 value={secretsInput}
                 disabled={busy}
                 onChange={(e) => setField('secrets', e.target.value)}

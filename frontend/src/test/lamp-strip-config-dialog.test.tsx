@@ -5,6 +5,7 @@ import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import type { EquipmentTileContext, TileItem } from '@/lib/equipment-tiles'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 vi.mock('@/hooks/use-signalk-paths', () => ({
   useSignalKPaths: vi.fn(),
@@ -48,6 +49,14 @@ describe('LampStripConfigDialog', () => {
       />,
     )
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Status')
+  })
+
+  test('keeps the phone keyboard from correcting a SignalK path', () => {
+    render(
+      <LampStripConfigDialog widget={{ id: 'lamps:m1x8abcd', lamps: statusStrip }} onCancel={vi.fn()} onSave={vi.fn()} />,
+    )
+    const field = screen.getByLabelText('Path')
+    expectIdentifierInput(field)
   })
 
   test('the CHK checkbox is described by the CHK sentence', () => {
