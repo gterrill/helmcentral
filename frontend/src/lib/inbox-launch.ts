@@ -1,41 +1,49 @@
 // How the upload page was opened (ADR 0280). The service worker sends the phone
-// to /inbox/upload?shared=1 after keeping a share, or ?share_error=1 when it
-// could not. The router rewrites the address bar to its canonical form soon
-// after the app starts, which drops the query, so this module reads it once when
-// it is first imported (main.tsx imports it first) and the page takes the flags
-// from here, once.
+// to /inbox/upload?shared=1 after keeping a share, or ?share_error=<code> when
+// it could not. The flags come from the address as the page was opened
+// (lib/opened-search.ts), because the router drops the query soon after start.
+//
+// They are cleared once the page is mounted, so going back to the page later does not say a share
+// just arrived. Nothing starts by itself: a share lands on the page with its
+// photos listed and the operator taps Upload.
 
+import { OPENED_SEARCH } from '@/lib/opened-search'
+
+/** Why a share did not reach the waiting list. The codes are the share_error values sw.js and the server send. */
 export type ShareError =
   /** The worker ran but the phone would not keep the files (storage full or blocked). */
-  | 'not-kept'
+  | 'store-failed'
   /** The files reached the server, which has no use for them: no worker was running. */
   | 'no-worker'
+  /** The worker ran but the share held no files it can take. */
+  | 'no-files'
 
 export interface Launch {
-  /** Start the upload now: files were just shared, or the waiting banner asked. */
-  autoStart: boolean
+  /** Files were just shared and are on the waiting list. */
+  shared: boolean
   shareError: ShareError | null
 }
 
-function readSearch(): Launch {
-  const params = new URLSearchParams(globalThis.location?.search ?? '')
+function readSearch(search: string): Launch {
+  const params = new URLSearchParams(search)
   const code = params.get('share_error')
   return {
-    autoStart: params.get('shared') === '1',
-    shareError: code === '1' ? 'not-kept' : code === '2' ? 'no-worker' : null,
+    shared: params.get('shared') === '1',
+    shareError: code === 'store-failed' || code === 'no-worker' || code === 'no-files' ? code : null,
   }
 }
 
-let pending: Launch = readSearch()
+let pending: Launch = readSearch(OPENED_SEARCH)
 
-/** The flags, once. The next call gets none. */
+/**
+ * The flags, the same on every call until clearLaunch. A render that React throws
+ * away (a suspended or interrupted first draw, StrictMode) may ask more than once.
+ */
 export function takeLaunch(): Launch {
-  const taken = pending
-  pending = { autoStart: false, shareError: null }
-  return taken
+  return pending
 }
 
-/** Asks the upload page, when it opens, to start sending what is waiting. */
-export function requestAutoUpload(): void {
-  pending = { ...pending, autoStart: true }
+/** Forgets the flags once the page has them mounted, so returning later does not say a share just arrived. */
+export function clearLaunch(): void {
+  pending = { shared: false, shareError: null }
 }

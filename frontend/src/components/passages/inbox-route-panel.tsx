@@ -15,8 +15,10 @@ export interface InboxRoutePanelProps {
 // AppShell re-renders on every live delta; memo keeps this page out of it.
 export const InboxRoutePanel = memo(function InboxRoutePanel({ canWrite }: InboxRoutePanelProps) {
   const nav = useInboxRoute()
+  // One closure for both buttons; a click event must not reach openIndex as its options.
+  const openIndex = () => { nav.openIndex() }
   if (nav.route.view === 'upload') {
-    return <InboxUploadPage canWrite={canWrite} onBack={() => { nav.openIndex() }} onOpenInbox={() => { nav.openIndex() }} />
+    return <InboxUploadPage canWrite={canWrite} onBack={openIndex} onOpenInbox={openIndex} />
   }
   return <InboxIndex canWrite={canWrite} onOpenUpload={() => { nav.openUpload() }} />
 })

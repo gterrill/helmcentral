@@ -34,12 +34,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Share to Helmcentral from an Android phone.** Install Helmcentral as an app
   from Chrome, over the secure Tailscale address, then pick **Helmcentral** in
   the phone's share sheet from Photos or Files. The photos go onto a waiting list
-  on the phone and the upload starts at once. Whatever is not yet in Helmcentral
-  stays on that list, so a lost connection or a closed app doesn't lose a share.
-  Next time you open Helmcentral on that phone, a banner says how many photos are
-  waiting, with **Upload now** and **Discard**. Files you pick on the upload page
-  use the same list. An iPhone has no share sheet entry for web apps, so it keeps
-  using the upload page.
+  on the phone and Helmcentral opens on the upload page with them listed. Tap
+  **Upload** to send them; nothing is sent until you do. Whatever is not yet in
+  Helmcentral stays on that list, so a lost connection or a closed app doesn't
+  lose a share. Next time you open Helmcentral on that phone, a banner says how
+  many photos are waiting, with **Upload now**, which opens the upload page, and
+  **Discard**. Files you pick on the upload page upload straight away and don't
+  use the list; to carry on after an interruption, pick them again and
+  Helmcentral skips what it already has. An iPhone has no share sheet entry for
+  web apps, so it keeps using the upload page.
 
   If Helmcentral is already installed as an app on your phone, **Helmcentral**
   can take up to a day to appear in the share sheet, because Chrome only

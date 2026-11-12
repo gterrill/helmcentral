@@ -355,8 +355,15 @@ describe('App sidebar navigation', () => {
 
   it('shows how many files wait in the Inbox on its sidebar row', async () => {
     render(<App />)
-    const row = screen.getByRole('button', { name: /^Inbox/ }).closest('[data-sidebar="menu-item"]') as HTMLElement
-    expect(await within(row).findByLabelText('4 waiting')).toHaveTextContent('4')
+    const button = screen.getByRole('button', { name: /^Inbox/ })
+    const badge = await within(button).findByLabelText('4 waiting')
+    expect(badge).toHaveTextContent('4')
+    // Placed like the amber dots: inside the row's button, so it takes the button's
+    // own padding and hover colours when the sidebar is expanded.
+    expect(button.contains(badge)).toBe(true)
+    // Collapsed to icons, the row is a square icon and the count is hidden by the
+    // same group state the sidebar uses for its other badges.
+    expect(badge.className).toContain('group-data-[collapsible=icon]:hidden')
   })
 
   // The order of the top-level sidebar items is a deliberate product

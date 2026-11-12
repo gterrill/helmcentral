@@ -16,6 +16,12 @@ class FakeRequest<T> {
 export interface FakeIdbOptions {
   /** Makes the nth write request from now (1 is the next) fail with this error, aborting its transaction. */
   failWrite?: { n: number; error: Error }
+  /** Makes the next open report `blocked` (another connection held up an upgrade) before it succeeds. */
+  blockOpen?: boolean
+  /** Makes the next open report `blocked` and then never answer (another connection never lets go). */
+  blockOpenForever?: boolean
+  /** Makes `db.transaction` throw this error, as a connection that is closing does. */
+  transactionError?: Error
 }
 
 class FakeStore {
@@ -134,6 +140,10 @@ class FakeObjectStore {
     return this.tx.request(() => [...this.store.rows.values()].map((r) => ({ ...r })), false)
   }
 
+  count() {
+    return this.tx.request(() => this.store.rows.size, false)
+  }
+
   delete(key: string) {
     return this.tx.request(() => {
       const prior = this.store.rows.get(key)
@@ -157,6 +167,9 @@ class FakeDatabase {
   stores = new Map<string, FakeStore>()
   version = 0
   objectStoreNames = { contains: (name: string) => this.stores.has(name) }
+  closed = false
+  onversionchange: Listener = null
+  onclose: Listener = null
 
   constructor(readonly name: string, readonly factory: FakeIdbFactory) {}
 
@@ -167,10 +180,12 @@ class FakeDatabase {
   }
 
   transaction(names: string | string[], mode: string = 'readonly') {
+    if (this.closed) throw new Error('InvalidStateError: the connection is closing')
+    if (this.factory.options.transactionError) throw this.factory.options.transactionError
     return new FakeTransaction(this, Array.isArray(names) ? names : [names], mode)
   }
 
-  close() {}
+  close() { this.closed = true }
 }
 
 class FakeOpenRequest extends FakeRequest<FakeDatabase> {
@@ -194,7 +209,17 @@ export class FakeIdbFactory {
         db = new FakeDatabase(name, this)
         this.databases.set(name, db)
       }
+      if (this.options.blockOpenForever) {
+        this.options.blockOpenForever = false
+        req.onblocked?.({ target: req })
+        return
+      }
       req.result = db
+      db.closed = false
+      if (this.options.blockOpen) {
+        this.options.blockOpen = false
+        req.onblocked?.({ target: req })
+      }
       if (fresh || (version !== undefined && version > db.version)) {
         db.version = version ?? 1
         req.onupgradeneeded?.({ target: req })
@@ -202,6 +227,37 @@ export class FakeIdbFactory {
       req.onsuccess?.({ target: req })
     })
     return req
+  }
+
+  /** The browser dropping the connection (storage cleared, profile closed): `close` fires, the handle is dead. */
+  forceClose(name: string) {
+    const db = this.databases.get(name)
+    if (!db) return
+    db.closed = true
+    db.onclose?.({ target: db })
+  }
+
+  /** Another tab upgrading the database: every open connection is asked to let go. */
+  versionChange(name: string) {
+    this.databases.get(name)?.onversionchange?.({ target: this.databases.get(name) })
+  }
+
+  /**
+   * Writes rows straight into a store, creating the database at `version` with
+   * its stores if it is not there yet: what another writer (the service worker)
+   * leaves behind. It opens no connection, so `opened` is untouched.
+   */
+  seed(dbName: string, version: number, storeNames: string[], storeName: string, rows: Record<string, unknown>[]) {
+    let db = this.databases.get(dbName)
+    if (!db) {
+      db = new FakeDatabase(dbName, this)
+      db.version = version
+      this.databases.set(dbName, db)
+    }
+    for (const name of storeNames) {
+      if (!db.stores.has(name)) db.createObjectStore(name, { keyPath: 'id' })
+    }
+    for (const row of rows) db.stores.get(storeName)!.rows.set(String(row.id), { ...row })
   }
 
   /** The rows of a store, for a test to look at what is really saved. */

@@ -5,12 +5,13 @@
 // on first paint for no reason. Push registers the same worker on its own
 // click; registering twice is harmless.
 
-const SERVICE_WORKER_PATH = '/sw.js'
+import { runningFromHomeScreen } from '@/hooks/use-screen-wake-lock'
+import { registerAppWorker } from '@/lib/service-worker'
 
 /** Resolves once registered or when there is nothing to do; rejects if the browser refuses. */
 export async function registerShareWorker(): Promise<void> {
   if (!globalThis.isSecureContext) return
   if (!('serviceWorker' in globalThis.navigator)) return
-  if (!globalThis.matchMedia('(display-mode: standalone)').matches) return
-  await globalThis.navigator.serviceWorker.register(SERVICE_WORKER_PATH, { scope: '/' })
+  if (!runningFromHomeScreen()) return
+  await registerAppWorker()
 }

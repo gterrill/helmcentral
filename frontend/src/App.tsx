@@ -22,7 +22,6 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
-import { InboxWaitingBanner } from '@/components/inbox-waiting-banner'
 import { useInboxCount } from '@/hooks/use-inbox'
 import { LiveAlarmBanner } from '@/components/live-alarm-banner'
 import { LiveDisplayShell } from '@/components/display-shell'
@@ -87,6 +86,7 @@ import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
+import { InboxBannerSlot } from '@/components/inbox-banner-slot'
 import { useHasActiveWindBulletin } from '@/hooks/use-forecast-warnings'
 import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useForecastSunTimes } from '@/hooks/use-weather-forecast'
@@ -136,7 +136,6 @@ import {
   SidebarInset,
   SidebarMenu,
   SidebarMenuItem,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuSub,
   SidebarMenuSubButton,
@@ -167,7 +166,15 @@ import { cn } from '@/lib/utils'
 function InboxNavBadge() {
   const count = useInboxCount()
   if (count === null || count === 0) return null
-  return <SidebarMenuBadge aria-label={`${count} waiting`}>{count}</SidebarMenuBadge>
+  return (
+    <span
+      role="img"
+      aria-label={`${count} waiting`}
+      className="ml-auto min-w-5 rounded-md px-1 text-center text-xs font-medium tabular-nums group-data-[collapsible=icon]:hidden"
+    >
+      {count}
+    </span>
+  )
 }
 
 /**
@@ -1109,6 +1116,7 @@ function AppShell() {
   // single stable callback per destination covers every call site.
   const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
   const openAlarmsPanel = useCallback(() => navigate.toPanel('alarms'), [navigate])
+  const openInboxUpload = useCallback(() => navigate({ panel: 'inbox', route: { view: 'upload' } }), [navigate])
   const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
@@ -1870,8 +1878,8 @@ function AppShell() {
                   {id === 'settings' && settingsDirty && (
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
+                  {id === 'inbox' && <InboxNavBadge />}
                 </SidebarMenuButton>
-                {id === 'inbox' && <InboxNavBadge />}
               </SidebarMenuItem>
             ))}
             {/* ADR 0095: opens the contents page of the in-app help. Never
@@ -2194,7 +2202,7 @@ function AppShell() {
             {/* Files shared from this phone and not yet uploaded (ADR 0280).
                 The upload page lists them itself. */}
             {!(appLocation.panel === 'inbox' && appLocation.route.view === 'upload') && (
-              <InboxWaitingBanner canWrite={canWrite} onUploadNow={() => { navigate({ panel: 'inbox', route: { view: 'upload' } }) }} />
+              <InboxBannerSlot canWrite={canWrite} onUploadNow={openInboxUpload} />
             )}
             {/* z-55 keeps a live alarm above the Mate sheet's backdrop (z-50)
                 while staying under the dashboard header, which sits at

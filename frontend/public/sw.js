@@ -106,9 +106,11 @@ async function openDashboard(url) {
  * the top still holds: no caching, no rewriting).
  *
  * The files go to the waiting list in IndexedDB, in one transaction, and the
- * phone is sent to the upload page, which uploads them. If they cannot be kept
- * the phone is sent there with share_error=1 and the page says so. A share is
- * never dropped quietly.
+ * phone is sent to the upload page, which uploads them. Other open windows of
+ * the app are told on the queue's BroadcastChannel so their lists refresh. If
+ * the share held no files the phone is sent there with share_error=no-files,
+ * and if they cannot be kept, with share_error=store-failed; the page says
+ * which. The real cause is logged either way. A share is never dropped quietly.
  *
  * The database below is the same one src/lib/inbox-queue.ts opens. That file
  * defines the schema; src/test/service-worker-share.test.ts reads what this
@@ -117,8 +119,14 @@ async function openDashboard(url) {
 const SHARE_ACTION = '/share-target'
 const SHARE_FIELD = 'files'
 const QUEUE_DB = 'helmcentral-inbox-queue'
-const QUEUE_DB_VERSION = 1
-const QUEUE_STORE = 'pending'
+const QUEUE_DB_VERSION = 2
+const QUEUE_META_STORE = 'meta'
+const QUEUE_BLOB_STORE = 'blobs'
+// How long a blocked open may wait for the other window to let go.
+const OPEN_BLOCKED_LIMIT_MS = 5000
+// The channel and message the app's queue store (src/hooks/use-inbox-queue.ts) listens on.
+const QUEUE_CHANNEL = 'helmcentral-inbox-queue'
+const QUEUE_CHANGED = 'changed'
 
 self.addEventListener('fetch', (event) => {
   const request = event.request
@@ -132,40 +140,82 @@ async function receiveShare(request) {
   try {
     const form = await request.formData()
     const files = form.getAll(SHARE_FIELD).filter((v) => typeof v !== 'string')
-    if (files.length === 0) throw new Error('the share held no files')
+    if (files.length === 0) {
+      console.error('Share to Helmcentral: the share held no files', form)
+      return Response.redirect(origin + '/inbox/upload?share_error=no-files', 303)
+    }
     await queueShared(files)
+    tellOtherWindows()
     return Response.redirect(origin + '/inbox/upload?shared=1', 303)
   } catch (err) {
-    return Response.redirect(origin + '/inbox/upload?share_error=1', 303)
+    console.error('Share to Helmcentral: could not keep the shared files', err)
+    return Response.redirect(origin + '/inbox/upload?share_error=store-failed', 303)
+  }
+}
+
+// Other open windows read the list again when they hear this. A failure to say
+// so must not undo a share that is already kept.
+function tellOtherWindows() {
+  try {
+    const channel = new self.BroadcastChannel(QUEUE_CHANNEL)
+    channel.postMessage(QUEUE_CHANGED)
+    channel.close()
+  } catch (err) {
+    console.error('Share to Helmcentral: could not tell the open windows', err)
   }
 }
 
 function queueShared(files) {
   return new Promise((resolve, reject) => {
     const open = self.indexedDB.open(QUEUE_DB, QUEUE_DB_VERSION)
+    let blockedTimer = null
+    let gaveUp = false
     open.onupgradeneeded = () => {
-      if (!open.result.objectStoreNames.contains(QUEUE_STORE)) {
-        open.result.createObjectStore(QUEUE_STORE, { keyPath: 'id' })
+      for (const name of [QUEUE_META_STORE, QUEUE_BLOB_STORE]) {
+        if (!open.result.objectStoreNames.contains(name)) open.result.createObjectStore(name, { keyPath: 'id' })
       }
     }
-    open.onerror = () => reject(open.error || new Error('could not open the waiting list'))
+    open.onerror = () => {
+      clearTimeout(blockedTimer)
+      reject(open.error || new Error('could not open the waiting list'))
+    }
+    // Another window holding the old version open stalls an upgrade until it lets go.
+    // Give it a few seconds, then fail the share so the phone is not left waiting.
+    open.onblocked = () => {
+      console.error('Share to Helmcentral: opening the waiting list is blocked by another open window of the app')
+      if (blockedTimer !== null) return
+      blockedTimer = setTimeout(() => {
+        gaveUp = true
+        console.error('Share to Helmcentral: gave up waiting for the waiting list to open')
+        reject(new Error('the waiting list stayed blocked by another open window of the app'))
+      }, OPEN_BLOCKED_LIMIT_MS)
+    }
     open.onsuccess = () => {
+      clearTimeout(blockedTimer)
       const db = open.result
-      const tx = db.transaction(QUEUE_STORE, 'readwrite')
-      tx.oncomplete = () => { db.close(); resolve() }
-      tx.onerror = () => { db.close(); reject(tx.error || new Error('could not write the waiting list')) }
-      tx.onabort = () => { db.close(); reject(tx.error || new Error('the waiting list write was aborted')) }
-      const now = Date.now()
-      files.forEach((file, i) => {
-        tx.objectStore(QUEUE_STORE).add({
-          id: now.toString(36).padStart(9, '0') + '-' + String(i).padStart(5, '0') + '-' + Math.random().toString(36).slice(2, 8),
-          blob: file,
-          name: file.name,
-          type: file.type,
-          lastModified: file.lastModified,
-          addedAt: now,
+      // The share was already refused; do not leave the connection open.
+      if (gaveUp) { db.close(); return }
+      let tx = null
+      try {
+        tx = db.transaction([QUEUE_META_STORE, QUEUE_BLOB_STORE], 'readwrite')
+        tx.oncomplete = () => { db.close(); resolve() }
+        tx.onerror = () => { db.close(); reject(tx.error || new Error('could not write the waiting list')) }
+        tx.onabort = () => { db.close(); reject(tx.error || new Error('the waiting list write was aborted')) }
+        const meta = tx.objectStore(QUEUE_META_STORE)
+        const blobs = tx.objectStore(QUEUE_BLOB_STORE)
+        const now = Date.now()
+        files.forEach((file, i) => {
+          const id = now.toString(36).padStart(9, '0') + '-' + String(i).padStart(5, '0') + '-' + Math.random().toString(36).slice(2, 8)
+          meta.add({ id, name: file.name, type: file.type, size: file.size, lastModified: file.lastModified, addedMs: now })
+          blobs.add({ id, blob: file })
         })
-      })
+      } catch (err) {
+        // A throw here would escape the promise and leave the share hanging.
+        // Undo what was already added, so a share is kept whole or not at all.
+        try { if (tx) tx.abort() } catch (abortErr) { /* already finished */ }
+        db.close()
+        reject(err)
+      }
     }
   })
 }

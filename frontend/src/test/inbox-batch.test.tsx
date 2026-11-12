@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resetInboxQueue } from '@/hooks/use-inbox-queue'
 import { InboxUploadPage } from '@/components/passages/inbox-upload-page'
 import { inboxApi, type InboxUploadMeta } from '@/lib/inbox-api'
 import { uploadFiles, type PreparedFile } from '@/lib/inbox-upload'
@@ -159,6 +160,7 @@ describe('InboxUploadPage', () => {
     upl.hashFile.mockImplementation(async (f: File) => `h-${f.name}`)
     upl.prepareFile.mockImplementation(async (f: File) => prepared(f.name))
     vi.stubGlobal('indexedDB', new FakeIdbFactory())
+    resetInboxQueue()
     render(<InboxUploadPage canWrite onBack={vi.fn()} onOpenInbox={vi.fn()} />)
     const input = screen.getByTestId('inbox-file-input') as HTMLInputElement
     fireEvent.change(input, { target: { files: files('a.jpg', 'b.jpg', 'c.jpg') } })

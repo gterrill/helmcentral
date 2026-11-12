@@ -26,21 +26,32 @@ from the Home Screen and install it again from Chrome's menu.
 
 1. In Photos or Files, select the photos or PDFs you want to send.
 2. Tap **Share**, then **Helmcentral**.
-3. Helmcentral opens on its upload page and starts sending. Each photo is
-   checked against what the boat already has, shrunk on the phone, and sent one
-   at a time with a running count.
+3. Helmcentral opens on its upload page with your photos listed. Tap **Upload**
+   and the photos go. Each is checked against what the boat already has, shrunk
+   on the phone, and sent one at a time with a running count.
+
+Nothing is sent until you tap **Upload**. The button waits a few seconds, saying
+"Getting the boat's time zone…", so each photo keeps the time it was taken. If the
+boat's time zone doesn't arrive in about ten seconds, the button turns on anyway,
+and a photo that carries no zone of its own goes up with no time.
 
 Everything you share goes on a waiting list on the phone first. A file comes off
 the list only when the boat has stored it or already had it. If the connection
-drops, or you close the app, the rest stays on the list. The next time you open
-Helmcentral on that phone, a banner says how many are waiting, such as "7 photos
-waiting to upload". Choose **Upload now** to carry on, or **Discard** to throw
-the waiting files away. Discarding doesn't touch the originals in your phone's
-photos.
+drops, or you close the app, the rest stays on the list. If you share more while
+an upload is running, the page says how many are "more waiting" when it ends, and
+**Upload** is there again. The next time you open the installed app on that phone,
+a banner says how many are waiting, such as "7 photos waiting to upload". Choose
+**Upload now** to open the upload page, then tap **Upload**, or **Discard** to
+throw the waiting files away. Discarding doesn't touch the originals in your
+phone's photos, and it is off while an upload is running.
 
 A file that the boat refused stays on the list with the reason beside it. The
 upload page lists the waiting files, and the cross beside one removes just that
 file.
+
+Photos you pick on the upload page instead don't go on the list. They upload
+straight away, so to carry on after an interruption, pick them again. The boat
+skips what it already has.
 
 ## If something doesn't work
 

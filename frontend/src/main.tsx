@@ -1,7 +1,6 @@
-// First, so the development switches see the query the page was opened with.
-import '@/lib/dev-flags'
-// Also first: it reads the share target's flags from the address before the router rewrites it.
-import '@/lib/inbox-launch'
+// First: it keeps the query the page was opened with before the router rewrites
+// the address. The development switches and the share target's flags read it.
+import '@/lib/opened-search'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 

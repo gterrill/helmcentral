@@ -72,19 +72,31 @@ Setting it up is in [Share photos from an Android
 phone](../how-to/share-photos-from-an-android-phone.md). An iPhone has no share
 sheet entry for web apps, so it uses the upload page.
 
-Shared files and files you pick on the upload page both go on a waiting list on
-the phone before anything is sent. That is what lets an interrupted upload carry
-on:
+Files shared from the share sheet go on a waiting list on the phone before
+anything is sent. That is what lets an interrupted share carry on. Files you
+pick on the upload page upload straight away and don't use the list: to carry
+on after an interruption, pick them again, and the boat skips what it already
+has.
 
 - Leaving the list: A file comes off only when the boat has stored it or already
   had it. If you remove it yourself, it comes off too.
-- A file that fails: It stays on the list with the reason, and **Upload now**
-  tries it again.
-- Next time you open Helmcentral: A banner says how many are waiting, such as "7
-  photos waiting to upload", with **Upload now** and **Discard**. Nothing is sent
-  until you say so, apart from straight after a share.
+- After a share: Helmcentral opens on the upload page with the files listed and an
+  **Upload** button, such as "Upload 7 photos". Nothing is sent until you tap it.
+  The button, and **Choose photos and files**, wait up to about ten seconds with
+  "Getting the boat's time zone…", then turn on whether or not the zone arrived.
+- A file that fails: It stays on the list with the reason, and **Upload** tries it
+  again.
+- Next time you open the installed app: A banner says how many are waiting, such
+  as "7 photos waiting to upload", with **Upload now**, which opens the upload
+  page, and **Discard**, which is off while an upload runs. A browser tab or a
+  wall display doesn't show the banner. If the phone can't read its waiting list,
+  the banner says so.
 - One upload at a time: Two open windows on the same phone don't both upload. The
-  second one tells you the first is already working.
+  second one tells you the first is already working, and anything shared in the
+  meantime waits for the next upload. If you leave the upload page while it runs
+  and come back, the page shows the upload still going. When a run ends and more
+  files are waiting, the page says how many are "more waiting" and offers
+  **Upload** again.
 
 Helmcentral doesn't upload in the background. The upload runs while the app is
 open, so keep it open until the count reaches the end.

@@ -295,7 +295,49 @@ func TestStaticHandler_ShareWithoutWorkerIsRefusedVisibly(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("POST /share-target = %d, want 303", rec.Code)
 	}
-	if got, want := rec.Header().Get("Location"), "/inbox/upload?share_error=2"; got != want {
+	if got, want := rec.Header().Get("Location"), "/inbox/upload?share_error=no-worker"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
+}
+
+// countingReader counts the bytes read from a share's body.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// A redirect sent before the body is read makes Go close the connection
+// mid-upload, and the phone shows a network error instead of following it.
+func TestStaticHandler_ShareWithoutWorkerReadsTheBody(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	const size = 5 << 20
+	body := &countingReader{r: io.LimitReader(zeroReader{}, size)}
+	req := httptest.NewRequest(http.MethodPost, "/share-target", body)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /share-target = %d, want 303", rec.Code)
+	}
+	if body.n != size {
+		t.Errorf("read %d of %d body bytes before redirecting", body.n, size)
+	}
+	if got := rec.Header().Get("Connection"); got == "close" {
+		t.Errorf("Connection = close, want the connection kept open")
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }
