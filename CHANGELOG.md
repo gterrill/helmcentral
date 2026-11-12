@@ -73,6 +73,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The browser no longer offers your Helmcentral sign-in for API keys, the ntfy
+  token or the SMTP password.**
+- **On a phone, sign-in, SignalK paths, web addresses and bin codes no longer
+  get a capital first letter or autocorrect.** Saved places also waits until
+  you leave the latitude, longitude or depth box before saying it's wrong, and
+  pressing Save on a wrong one says what is wrong instead of doing nothing.
 - **A file too big to upload now says so.** Uploading an oversized file to
   Documents, an equipment item, a deck plan, a maintenance entry, an import or
   an open job showed a bare error code. It now says the file is over the limit.

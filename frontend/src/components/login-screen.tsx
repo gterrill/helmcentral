@@ -4,6 +4,7 @@ import { useCallback, useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { identifierInputProps } from '@/lib/identifier-input'
 
 interface LoginScreenProps {
   /** Forwards to useAuth().login — resolves to whether the attempt succeeded. */
@@ -28,6 +29,9 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Says what is missing before any request; the `error` prop is the backend's reply.
+  const [formError, setFormError] = useState<string | null>(null)
+  const shownError = formError ?? error
   const usernameId = useId()
   const passwordId = useId()
 
@@ -35,8 +39,16 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
     async (e: React.FormEvent) => {
       e.preventDefault()
       const trimmedUsername = username.trim()
-      if (trimmedUsername === '' || password === '') return
+      if (trimmedUsername === '') {
+        setFormError('Enter your username.')
+        return
+      }
+      if (password === '') {
+        setFormError('Enter your password.')
+        return
+      }
 
+      setFormError(null)
       setSubmitting(true)
       try {
         await onLogin(trimmedUsername, password)
@@ -68,6 +80,8 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
               name="username"
               type="text"
               autoComplete="username"
+              {...identifierInputProps}
+              required
               autoFocus
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -82,18 +96,19 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
               name="password"
               type="password"
               autoComplete="current-password"
+              required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={submitting}
             />
           </div>
 
-          {error && (
+          {shownError && (
             <div
               role="alert"
               className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
             >
-              {error}
+              {shownError}
             </div>
           )}
 

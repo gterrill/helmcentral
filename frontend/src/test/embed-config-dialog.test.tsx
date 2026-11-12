@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 const widget: DashboardLayoutItem = {
   id: 'embed:m1x8abcd',
@@ -43,6 +44,13 @@ describe('EmbedConfigDialog', () => {
 
     expect(urlField()).toHaveValue('http://boat.local:3000/d-solo/abc?panelId=2')
     expect(titleField()).toHaveValue('Windrose')
+  })
+
+  test('keeps the phone keyboard from correcting the address', () => {
+    renderDialog()
+
+    expect(urlField()).toHaveAttribute('type', 'url')
+    expectIdentifierInput(urlField())
   })
 
   test('saves the trimmed title and URL', () => {

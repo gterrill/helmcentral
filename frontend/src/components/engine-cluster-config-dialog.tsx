@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { GaugeFields, slotFromProfileGauge } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { cn } from '@/lib/utils'
 import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
@@ -1419,7 +1420,7 @@ function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onCh
       />
       <Field>
         <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
-        <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} value={slot.suffix ?? ''}
+        <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} {...identifierInputProps} value={slot.suffix ?? ''}
           placeholder={item ? 'reading this equipment sends' : (spec.suffix || 'reading under the equipment')}
           onChange={(e) => set({ suffix: e.target.value })} />
         <datalist id={`${idPrefix}-suffixes`}>
@@ -1485,7 +1486,7 @@ function AlternatorRowForm({ idPrefix, slotKey, slot, alternator, choices, ctx, 
   return (
     <Field>
       <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
-      <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} value={slot.suffix ?? ''} disabled={!alternator}
+      <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} {...identifierInputProps} value={slot.suffix ?? ''} disabled={!alternator}
         placeholder={alternator ? 'reading this alternator sends' : 'pick the alternator first'}
         onChange={(e) => set(e.target.value)} />
       <datalist id={`${idPrefix}-suffixes`}>

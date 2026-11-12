@@ -2,6 +2,7 @@ import { FormSection, SettingsLayout } from '@/components/patterns'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import { LearnedNormalStatus } from '@/components/settings/sections/learned-normal-status'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -25,6 +26,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               <FieldLabel htmlFor="influxdb-url">URL</FieldLabel>
               <Input
                 id="influxdb-url"
+                {...identifierInputProps}
                 value={draft.influxdbUrl}
                 onChange={(e) => onChange({ influxdbUrl: e.target.value })}
                 aria-label="InfluxDB URL"
@@ -35,6 +37,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               <FieldLabel htmlFor="influxdb-org">Org</FieldLabel>
               <Input
                 id="influxdb-org"
+                {...identifierInputProps}
                 value={draft.influxdbOrg}
                 onChange={(e) => onChange({ influxdbOrg: e.target.value })}
                 aria-label="InfluxDB organization"
@@ -45,6 +48,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
               <FieldLabel htmlFor="influxdb-bucket">Bucket</FieldLabel>
               <Input
                 id="influxdb-bucket"
+                {...identifierInputProps}
                 value={draft.influxdbBucket}
                 onChange={(e) => onChange({ influxdbBucket: e.target.value })}
                 aria-label="InfluxDB bucket"
@@ -56,6 +60,7 @@ export function InfluxdbSection({ draft, onChange }: InfluxdbSectionProps) {
             <FieldLabel htmlFor="influxdb-minute-bucket">One-minute bucket (optional)</FieldLabel>
             <Input
               id="influxdb-minute-bucket"
+              {...identifierInputProps}
               value={draft.influxdbMinuteBucket}
               onChange={(e) => onChange({ influxdbMinuteBucket: e.target.value })}
             />

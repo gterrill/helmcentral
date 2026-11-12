@@ -11,6 +11,7 @@ import { SignalKSetupSection } from '@/components/settings/sections/signalk-setu
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
 import { apiRequest } from '@/lib/api-query'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { useSetupFocus } from '@/hooks/use-setup-focus'
 
 interface SignalKConnectionSectionProps {
@@ -104,6 +105,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
             <FieldLabel htmlFor="signalk-address">Address</FieldLabel>
             <Input
               id="signalk-address"
+              {...identifierInputProps}
               value={draft.signalkAddress}
               onChange={(e) => onChange({ signalkAddress: e.target.value })}
               aria-label="SignalK address"

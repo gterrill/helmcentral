@@ -12,6 +12,7 @@ import type { DashboardLayoutItem, EngineClusterConfig, GaugeWidgetConfig } from
 import type { EngineProfile } from '@/lib/engine-profiles'
 import type { SourceKind } from '@/lib/vessel-settings'
 import { resolveCluster, type EquipmentTileContext } from '@/lib/equipment-tiles'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 import captured from './fixtures/engine-cluster-paths-2026-10-09.json'
 
 /**
@@ -663,6 +664,18 @@ describe('typing in an alternator row', () => {
     fireEvent.click(saveButton())
     const saved = await savedConfig(onSave)
     expect(saved.footer?.altLimit).toMatchObject({ suffix: 'foo', min: 1, max: 9, zones })
+  })
+})
+
+describe('reading boxes hold SignalK path suffixes', () => {
+  test('every reading box, alternator rows included, is an identifier box', async () => {
+    await setup('port')
+    open({ ...blank, footer: { alternatorId: 'alt-2', altLimit: { ...blankAmps, suffix: 'foo' } } })
+    const boxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[list$="-suffixes"]'))
+    expect(boxes.length).toBeGreaterThan(1)
+    expect(boxes.some((b) => b.id.startsWith('cluster-footer-alt'))).toBe(true)
+    expect(boxes.some((b) => !b.id.startsWith('cluster-footer-alt'))).toBe(true)
+    for (const box of boxes) expectIdentifierInput(box, box.id)
   })
 })
 

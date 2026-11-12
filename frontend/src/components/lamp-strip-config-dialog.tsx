@@ -24,6 +24,7 @@ import {
   type DashboardLayoutItem,
   type LampStripWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { LAMP_ICON_NAMES } from '@/lib/lamp-icons'
 import { LAMP_READINGS, suggestRibbonLamps } from '@/lib/ribbon-defaults'
 import { liveReadings } from '@/lib/live-readings'
@@ -182,6 +183,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
                       <Input
                         id={`lamp-${index}-path`}
                         list="lamp-path-options"
+                        {...identifierInputProps}
                         value={lamp.path}
                         onChange={(e) => setLamp(index, { path: e.target.value, label: lamp.label || e.target.value.split('.').slice(-1)[0] })}
                         placeholder="electrical.switches.bilge"

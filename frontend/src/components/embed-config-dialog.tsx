@@ -21,6 +21,7 @@ import {
   type DashboardWidgetId,
   type EmbedWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { identifierInputProps } from '@/lib/identifier-input'
 
 interface EmbedConfigDialogProps {
   widget: DashboardLayoutItem | null
@@ -72,6 +73,8 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
             <FieldLabel htmlFor="embed-url">URL</FieldLabel>
             <Input
               id="embed-url"
+              type="url"
+              {...identifierInputProps}
               value={url}
               maxLength={EMBED_URL_MAX_LENGTH}
               placeholder="http://boat.local:3000/d-solo/abc?panelId=2&kiosk"

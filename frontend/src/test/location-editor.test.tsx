@@ -4,6 +4,7 @@ import { LocationEditor } from '@/components/inventory/location-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import { stubImageSize } from './stub-image'
 import { testRouter } from './helpers/router'
+import { expectIdentifierInput } from './helpers/input-attributes'
 
 let zones: InventoryZone[]
 const fetchMock = vi.fn()
@@ -235,6 +236,15 @@ describe('LocationEditor', () => {
     expect(screen.queryByRole('button', { name: 'Remove bin ER-01' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the phone keyboard from correcting a bin code', async () => {
+    renderEditor()
+    await screen.findByDisplayValue('Engine room (stbd)')
+    for (const name of ['Bin code', 'New bin code']) {
+      const field = screen.getByLabelText(name)
+      expectIdentifierInput(field, name)
+    }
   })
 
   // ADR 0127: each bin's code opens its bin page.

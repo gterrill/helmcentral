@@ -5,6 +5,7 @@ import { AlarmTransportsForm } from '@/components/alarm-transports-form'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 import { resetQueryStore } from '@/lib/api-query'
 import { clearPendingSetupFocus, requestSetupFocus } from '@/lib/setup-status'
+import { expectIdentifierInput, expectSecretInput } from '@/test/helpers/input-attributes'
 
 // The address for links: where Helmcentral is reached from off the boat, so a
 // notification can carry a link to a watch run. Empty by default.
@@ -59,6 +60,51 @@ describe('the address for links', () => {
     stub('https://boat.example')
     render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
     expect(await screen.findByLabelText('Address for links')).toHaveValue('https://boat.example')
+  })
+})
+
+describe('the fields that hold addresses and secrets', () => {
+  const noCorrection = (field: HTMLElement) => {
+    expectIdentifierInput(field)
+  }
+
+  it('keep the phone keyboard from correcting them and say what kind of address they take', async () => {
+    stub('')
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ntfy (phone push)' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Email' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Webhook' }))
+
+    const link = screen.getByLabelText('Address for links')
+    const webhook = screen.getByLabelText('URL')
+    const ntfyServer = document.getElementById('ntfy-server')!
+    for (const field of [link, webhook, ntfyServer]) {
+      noCorrection(field)
+      expect(field).toHaveAttribute('type', 'url')
+    }
+    noCorrection(document.getElementById('ntfy-topic')!)
+    noCorrection(document.getElementById('smtp-host')!)
+    noCorrection(document.getElementById('smtp-username')!)
+    noCorrection(document.getElementById('smtp-from')!)
+    // The backend accepts a display name ("Name <a@b>"), which type=email rejects.
+    expect(document.getElementById('smtp-from')).not.toHaveAttribute('type', 'email')
+    expect(document.getElementById('smtp-from')).toHaveAttribute('inputmode', 'email')
+    noCorrection(document.getElementById('smtp-to')!)
+    expect(document.getElementById('smtp-to')).not.toHaveAttribute('type', 'email')
+    expect(document.getElementById('smtp-to')).toHaveAttribute('inputmode', 'email')
+  })
+
+  it('keep the browser from offering its saved sign-in for the token and the password', async () => {
+    stub('')
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ntfy (phone push)' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Email' }))
+
+    expectSecretInput(document.getElementById('ntfy-token'))
+    expectSecretInput(document.getElementById('smtp-password'))
+    expect(document.getElementById('smtp-username')).toHaveAttribute('autocomplete', 'off')
   })
 })
 

@@ -1,4 +1,5 @@
 import { errorMessage } from '@/lib/errors'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { isSubmitEnter } from '@/lib/keyboard'
 import { useCallback, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
@@ -318,6 +319,7 @@ export function LocationEditor(
           {canWrite && (
             <div className="flex flex-wrap items-center gap-2">
               <Input
+                {...identifierInputProps}
                 aria-label="New bin code"
                 placeholder="Code"
                 className="h-9 w-28 font-mono"

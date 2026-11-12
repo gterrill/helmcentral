@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { LoginScreen } from '@/components/login-screen'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 // LoginScreen is deliberately dumb: all it owns is the form and the pending
 // state for its own submit button. Auth state (mode/user/error) lives in
@@ -14,6 +15,15 @@ describe('LoginScreen', () => {
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign in|log in/i })).toBeInTheDocument()
+  })
+
+  it('requires both fields and keeps the phone keyboard from correcting the username', () => {
+    render(<LoginScreen onLogin={vi.fn()} error={null} />)
+
+    const username = screen.getByLabelText(/username/i)
+    expect(username).toBeRequired()
+    expect(screen.getByLabelText(/password/i)).toBeRequired()
+    expectIdentifierInput(username)
   })
 
   it('submits the entered credentials to onLogin', async () => {
@@ -33,6 +43,29 @@ describe('LoginScreen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /sign in|log in/i }))
 
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it('says so when the username is only spaces, and makes no request', () => {
+    const onLogin = vi.fn().mockResolvedValue(true)
+    render(<LoginScreen onLogin={onLogin} error={null} />)
+
+    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: '   ' } })
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'hunter2' } })
+    fireEvent.submit(screen.getByRole('button', { name: /sign in/i }).closest('form')!)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter your username.')
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it('says so when the password is empty, and makes no request', () => {
+    const onLogin = vi.fn().mockResolvedValue(true)
+    render(<LoginScreen onLogin={onLogin} error={null} />)
+
+    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'skipper' } })
+    fireEvent.submit(screen.getByRole('button', { name: /sign in/i }).closest('form')!)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter your password.')
     expect(onLogin).not.toHaveBeenCalled()
   })
 
