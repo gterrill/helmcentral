@@ -71,6 +71,15 @@ type inboxItem struct {
 	SourceSHA256 string
 	// HasThumb says a small preview is stored beside the file.
 	HasThumb bool
+	// BearingRef says what BearingDeg is measured from: "T" true, "M"
+	// magnetic, or empty when the phone did not say (read as true).
+	BearingRef string
+	// SuggestedKind is what Mate made of the photo: scenery, document or
+	// equipment. Empty until Mate has looked, and for good when it is not set up.
+	SuggestedKind string
+	// ClassifyError is why Mate could not tell, shown to the operator. A
+	// failed item is not retried by itself.
+	ClassifyError string
 }
 
 type inboxStore struct {
@@ -110,9 +119,15 @@ func createInboxSchema(db *sql.DB) error {
 		created_ms INTEGER NOT NULL,
 		source_sha256 TEXT NOT NULL DEFAULT '',
 		has_thumb INTEGER NOT NULL DEFAULT 0,
-		filing_ms INTEGER
+		filing_ms INTEGER,
+		bearing_ref TEXT NOT NULL DEFAULT '',
+		suggested_kind TEXT,
+		classify_error TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	if err := addInboxMateColumns(db); err != nil {
+		return err
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_inbox_items_capture ON inbox_items(capture_ms)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
@@ -125,6 +140,44 @@ func createInboxSchema(db *sql.DB) error {
 		source_sha256 TEXT PRIMARY KEY
 	)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	return nil
+}
+
+// addInboxMateColumns upgrades an inbox_items table made before Mate sorting
+// (ADR 0282). It is a no-op on a table that already has them.
+func addInboxMateColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(inbox_items)`)
+	if err != nil {
+		return fmt.Errorf("inspect inbox_items: %w", err)
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect inbox_items: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspect inbox_items: %w", err)
+	}
+	rows.Close()
+	for _, col := range []struct{ name, ddl string }{
+		{"bearing_ref", `bearing_ref TEXT NOT NULL DEFAULT ''`},
+		{"suggested_kind", `suggested_kind TEXT`},
+		{"classify_error", `classify_error TEXT NOT NULL DEFAULT ''`},
+	} {
+		if have[col.name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE inbox_items ADD COLUMN ` + col.ddl); err != nil {
+			return fmt.Errorf("add inbox_items.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }
@@ -230,17 +283,19 @@ func (s *inboxStore) Release(id string, token int64) error {
 	return nil
 }
 
-const inboxColumns = `id, sha256, filename, mime, size_bytes, capture_ms, bearing_deg, phone_lat, phone_lon, fingerprint, sharpness, created_ms, source_sha256, has_thumb`
+const inboxColumns = `id, sha256, filename, mime, size_bytes, capture_ms, bearing_deg, phone_lat, phone_lon, fingerprint, sharpness, created_ms, source_sha256, has_thumb, bearing_ref, suggested_kind, classify_error`
 
 func scanInboxItem(row interface{ Scan(...any) error }) (inboxItem, error) {
 	var it inboxItem
 	var capture sql.NullInt64
 	var bearing, lat, lon sql.NullFloat64
+	var kind sql.NullString
 	var thumb int
 	if err := row.Scan(&it.ID, &it.SHA256, &it.Filename, &it.MIME, &it.SizeBytes, &capture, &bearing, &lat, &lon,
-		&it.Fingerprint, &it.Sharpness, &it.CreatedMs, &it.SourceSHA256, &thumb); err != nil {
+		&it.Fingerprint, &it.Sharpness, &it.CreatedMs, &it.SourceSHA256, &thumb, &it.BearingRef, &kind, &it.ClassifyError); err != nil {
 		return it, err
 	}
+	it.SuggestedKind = kind.String
 	if capture.Valid {
 		v := capture.Int64
 		it.CaptureMs = &v
@@ -259,10 +314,10 @@ func (s *inboxStore) Insert(it inboxItem) (inboxItem, error) {
 		return existing, errInboxDuplicate
 	}
 	it.ID, it.CreatedMs = uuid.NewString(), time.Now().UnixMilli()
-	_, err := s.db.Exec(`INSERT INTO inbox_items (`+inboxColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO inbox_items (`+inboxColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'')`,
 		it.ID, it.SHA256, it.Filename, it.MIME, it.SizeBytes, nullInt64(it.CaptureMs),
 		nullFloat(it.BearingDeg), nullFloat(it.PhoneLat), nullFloat(it.PhoneLon), it.Fingerprint, it.Sharpness, it.CreatedMs,
-		it.SourceSHA256, boolToInt(it.HasThumb))
+		it.SourceSHA256, boolToInt(it.HasThumb), it.BearingRef)
 	if err != nil {
 		return inboxItem{}, fmt.Errorf("insert inbox item: %w", err)
 	}
@@ -332,6 +387,42 @@ func (s *inboxStore) List() ([]inboxItem, error) {
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// Unclassified returns the items Mate has not looked at yet: no kind and no
+// recorded failure, oldest arrival first. A failed item waits for the operator.
+func (s *inboxStore) Unclassified() ([]inboxItem, error) {
+	rows, err := s.db.Query(`SELECT ` + inboxColumns + ` FROM inbox_items WHERE suggested_kind IS NULL AND classify_error = '' ORDER BY created_ms, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list unclassified inbox items: %w", err)
+	}
+	defer rows.Close()
+	var out []inboxItem
+	for rows.Next() {
+		it, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan inbox item: %w", err)
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// SetSuggestedKind records what Mate made of an item and clears any earlier
+// failure. An item gone since (filed or deleted) is left alone, not an error.
+func (s *inboxStore) SetSuggestedKind(id, kind string) error {
+	if _, err := s.db.Exec(`UPDATE inbox_items SET suggested_kind = ?, classify_error = '' WHERE id = ?`, kind, id); err != nil {
+		return fmt.Errorf("record suggested kind: %w", err)
+	}
+	return nil
+}
+
+// SetClassifyError records why Mate could not sort an item.
+func (s *inboxStore) SetClassifyError(id, msg string) error {
+	if _, err := s.db.Exec(`UPDATE inbox_items SET classify_error = ? WHERE id = ?`, msg, id); err != nil {
+		return fmt.Errorf("record classify error: %w", err)
+	}
+	return nil
 }
 
 func (s *inboxStore) Count() (int, error) {

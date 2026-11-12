@@ -13,7 +13,7 @@ import { useLocalStorageId } from '@/hooks/use-local-storage-id'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { errorMessage } from '@/lib/errors'
 import { filingOutcome, inboxApi, inboxPreviewUrl, isPhotoItem, plural, type InboxFilingResult, type InboxItem } from '@/lib/inbox-api'
-import { findBlurry, findDuplicates, groupInbox } from '@/lib/inbox-groups'
+import { findBlurry, findDuplicates, groupInbox, isUnsortedByMate, type InboxGroup } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { cn } from '@/lib/utils'
 import { formatTimeOrDayTime, selectTimeZone } from '@/lib/vessel-time'
@@ -53,6 +53,20 @@ const photoDestinations: Record<PhotoDestinationKind, PhotoDestination> = {
   },
 }
 
+// What a group Mate fills says it is for. The group sets where the photos go by
+// default; every button still works on them.
+const GROUP_HINTS: Partial<Record<InboxGroup['kind'], string>> = {
+  documents: 'Mate took these for receipts and paperwork. Send them to Documents, or add any of them to a passage.',
+  equipment: 'Mate took these for pictures of gear. Add them to an equipment item or a job, or to a passage.',
+  unsorted: 'Mate has not sorted these, and they were not taken on a passage. Mark them and send them where they go.',
+}
+
+/** What to say beside an item Mate has not sorted: that it has not looked, or why it could not. */
+function mateNote(item: InboxItem, mateSorting: boolean): string | null {
+  if (item.classify_error) return `Mate could not sort this: ${item.classify_error}`
+  return isUnsortedByMate(item, mateSorting) ? 'Mate has not looked at this yet' : null
+}
+
 const MISMATCH_TEXT =
   "The phone's own position was more than a nautical mile from the boat's track when this was taken. The phone's clock or time zone may be wrong, so the time may not match the track."
 
@@ -85,10 +99,9 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
   const { folders, loading: foldersLoading } = useDocumentFolderTree()
   const rememberedFolder = lastFolder !== null && folders.some((f) => f.id === lastFolder) ? lastFolder : null
 
-  const groups = useMemo(() => groupInbox(inbox.items, passages), [inbox.items, passages])
+  const groups = useMemo(() => groupInbox(inbox.items, passages, inbox.mateSorting), [inbox.items, passages, inbox.mateSorting])
   const duplicates = useMemo(() => findDuplicates(inbox.items), [inbox.items])
   const blurry = useMemo(() => findBlurry(inbox.items), [inbox.items])
-  const groupOf = useMemo(() => new Map(groups.flatMap((g) => g.items.map((i) => [i.id, g] as const))), [groups])
 
   // Marks only count for items still here: a filed or deleted one has gone.
   const selected = useMemo(() => inbox.items.filter((i) => marked.has(i.id)), [inbox.items, marked])
@@ -115,7 +128,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
   const cannotAssign =
     selected.length === 0 ? 'Mark some photos first'
     : selected.some((i) => !i.mime.startsWith('image/')) ? 'Only photos can be signs'
-    : selected.some((i) => groupOf.get(i.id)?.canAssign === false) ? 'Photos taken underway can be added once the passage is recorded'
+    : selected.some((i) => i.group.kind === 'underway') ? 'Photos taken underway can be added once the passage is recorded'
     : passages.length === 0 ? 'There is no recorded passage to add them to'
     : null
 
@@ -284,6 +297,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
                 The passage is recorded once it ends. You can delete from this group now, and add the rest to the passage afterwards.
               </p>
             )}
+            {GROUP_HINTS[group.kind] && <p className="text-xs text-muted-foreground">{GROUP_HINTS[group.kind]}</p>}
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2">
               {group.items.map((item) => {
                 const isMarked = marked.has(item.id)
@@ -341,6 +355,9 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
                         </span>
                       )}
                     </button>
+                    {mateNote(item, inbox.mateSorting) && (
+                      <p className={cn('mt-1 line-clamp-3 break-words text-xs', item.classify_error ? 'text-destructive' : 'text-muted-foreground')}>{mateNote(item, inbox.mateSorting)}</p>
+                    )}
                     {reasons[item.id] && <p className="mt-1 line-clamp-3 break-words text-xs text-destructive">{reasons[item.id]}</p>}
                   </li>
                 )
@@ -350,7 +367,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         ))}
       </div>
 
-      {dialog === 'passage' && <InboxAssignDialog items={selected} passages={passages} onClose={() => setDialog(null)} />}
+      {dialog === 'passage' && <InboxAssignDialog items={selected} passages={passages} mateTitles={inbox.mateSorting} onClose={() => setDialog(null)} />}
       <FolderPickerDialog
         open={dialog === 'documents' && !foldersLoading}
         onOpenChange={(open) => { if (!open) setDialog(null) }}

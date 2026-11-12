@@ -1,56 +1,50 @@
 import { apiBaseUrl } from '@/config/api'
-import { apiRequest, ApiError } from '@/lib/api-query'
+import { apiRequest } from '@/lib/api-query'
 import { uploadDocument } from '@/lib/document-upload'
 import { readExifCapture, type ExifCapture } from '@/lib/exif-time'
+import { downscaleImage, photoFilename } from '@/lib/image-downscale'
+import { INBOX_MAX_DIMENSION } from '@/lib/inbox-image'
 
-// Photos for signs live in one Documents folder at the root. It is looked up
-// by name and made on first use; two uploads at once share one lookup so the
-// folder is never made twice.
+// Photos for signs live in one Documents folder at the root. The box finds or
+// makes it, so the Inbox and this editor share one rule (ADR 0282); the browser
+// no longer reads the folder tree or creates folders of its own.
 
 export const PASSAGE_PHOTOS_FOLDER = 'Passage photos'
 
-/** Accepts the picture types the documents API takes. */
+/** The picture types a photo already in the library can have and still be a sign. */
 export const SIGN_PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 export const isSignPhotoType = (mime: string) => (SIGN_PHOTO_TYPES as readonly string[]).includes(mime)
 
-interface FolderList { folders?: { id: string; name: string; parent_id?: string | null }[] }
+/**
+ * What the file picker offers: the types above and HEIC/HEIF, which the phone
+ * shrinks to JPEG before anything is sent. Phones often give a HEIC file no
+ * type, so the picker is told the extensions too.
+ */
+export const SIGN_UPLOAD_ACCEPT = [...SIGN_PHOTO_TYPES, 'image/heic', 'image/heif', '.heic', '.heif'].join(',')
 
-// The folder tree (folders only), matched by name at the root without regard
-// to capitals: the server refuses a second folder whose name matches in lower
-// case, so "Passage Photos" is the same folder.
-async function findFolder(): Promise<string | null> {
-  const { folders } = await apiRequest<FolderList>('/api/document-folders/tree')
-  const want = PASSAGE_PHOTOS_FOLDER.toLowerCase()
-  return (folders ?? []).find((f) => f.name.toLowerCase() === want && !f.parent_id)?.id ?? null
+/** Whether a picked file is a picture the editor takes, by its type or, failing that, its name. */
+export const isSignUploadFile = (file: Pick<File, 'type' | 'name'>): boolean =>
+  isSignPhotoType(file.type) || /^image\/hei[cf]$/.test(file.type) || /\.hei[cf]$/i.test(file.name)
+
+/** The id of the Passage photos folder, made by the box if it does not exist. */
+export async function ensurePassagePhotosFolder(): Promise<string> {
+  const { id } = await apiRequest<{ id: string }>('/api/passage-photos-folder', { method: 'POST' })
+  return id
 }
 
-let pending: Promise<string> | null = null
-
-export function ensurePassagePhotosFolder(): Promise<string> {
-  if (pending) return pending
-  const run = async (): Promise<string> => {
-    const found = await findFolder()
-    if (found) return found
-    try {
-      const created = await apiRequest<{ id: string }>('/api/document-folders', { method: 'POST', json: { name: PASSAGE_PHOTOS_FOLDER } })
-      return created.id
-    } catch (err) {
-      // Someone else made it between the look and the create: use theirs.
-      if (err instanceof ApiError && err.status === 409) {
-        const theirs = await findFolder()
-        if (theirs) return theirs
-      }
-      throw err
-    }
-  }
-  pending = run().finally(() => { pending = null })
-  return pending
-}
-
-/** Uploads the picture into the Passage photos folder; the document id comes back. */
-export async function uploadSignPhoto(file: File): Promise<string> {
+/**
+ * Shrinks the picture on the device to the Inbox's size (2560 px on the long
+ * edge, JPEG at the same quality; HEIC becomes JPEG), then uploads that copy
+ * into the Passage photos folder; the document id comes back. A picture that
+ * cannot be shrunk is an error: the original is never sent in its place. The
+ * capture time is read from the original by `captureOfFile`, before this runs.
+ * `downscale` is a seam for tests, as jsdom has no canvas.
+ */
+export async function uploadSignPhoto(file: File, downscale: typeof downscaleImage = downscaleImage): Promise<string> {
+  const shrunk = await downscale(file, INBOX_MAX_DIMENSION, { reduceDecode: true, opaque: true })
+  const name = photoFilename(file.name)
   const folder = await ensurePassagePhotosFolder()
-  const { id } = await uploadDocument(file, file.name, undefined, folder)
+  const { id } = await uploadDocument(new File([shrunk], name, { type: 'image/jpeg' }), name, undefined, folder)
   return id
 }
 

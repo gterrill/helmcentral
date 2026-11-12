@@ -16,6 +16,15 @@ export const INBOX_COUNT_PATH = '/api/inbox/count'
 
 export type InboxGroupKind = 'passage' | 'underway' | 'off_passage' | 'no_time'
 
+/** What Mate made of an item: where it most likely belongs. */
+export type InboxKind = 'scenery' | 'document' | 'equipment'
+
+/** The Inbox as the box lists it. `mate_sorting` says Mate is set up, so an item with no kind yet is waiting for it. */
+export interface InboxList {
+  items?: InboxItem[]
+  mate_sorting?: boolean
+}
+
 export interface InboxItem {
   id: string
   filename: string
@@ -34,6 +43,10 @@ export interface InboxItem {
   /** A small preview, absent for an item with none (a PDF). */
   thumb_url?: string
   group: { kind: InboxGroupKind; passage_id?: string }
+  /** Mate's view of the item, or null until it has looked and for good when Mate is not set up. */
+  suggested_kind?: InboxKind | null
+  /** Why Mate could not sort the item, when it tried and failed. */
+  classify_error?: string
   /** The phone's own position was over a nautical mile from the track: the clock or zone is off. */
   gps_mismatch: boolean
 }
@@ -55,6 +68,8 @@ export const isPhotoItem = (item: Pick<InboxItem, 'mime'>): boolean => PHOTO_MIM
 export interface InboxUploadMeta {
   captureMs: number | null
   bearingDeg: number | null
+  /** Which north the bearing is measured from, T true or M magnetic; left out when the phone did not say. */
+  bearingRef?: 'T' | 'M' | null
   phoneLat: number | null
   phoneLon: number | null
   fingerprint: string
@@ -66,6 +81,11 @@ export interface InboxUploadMeta {
 export type InboxUploadResult =
   | { status: 'stored'; item: InboxItem }
   | { status: 'already_uploaded'; where: 'inbox' | 'documents' | 'filed' }
+
+export interface SuggestedTitles {
+  titles: Record<string, string>
+  errors: Record<string, string>
+}
 
 /** The outcome for one item of a filing call. */
 export interface InboxFilingResult {
@@ -163,7 +183,10 @@ export const inboxApi = {
   upload: async (file: Blob, filename: string, meta: InboxUploadMeta, thumb: Blob | null = null): Promise<InboxUploadResult> => {
     const form = new FormData()
     if (meta.captureMs !== null) form.append('capture_ms', String(meta.captureMs))
-    if (meta.bearingDeg !== null) form.append('bearing_deg', String(meta.bearingDeg))
+    if (meta.bearingDeg !== null) {
+      form.append('bearing_deg', String(meta.bearingDeg))
+      if (meta.bearingRef) form.append('bearing_ref', meta.bearingRef)
+    }
     if (meta.phoneLat !== null && meta.phoneLon !== null) {
       form.append('phone_lat', String(meta.phoneLat))
       form.append('phone_lon', String(meta.phoneLon))
@@ -218,13 +241,19 @@ export const inboxApi = {
       openJobRecordApplied()
       invalidateDocumentLists({ counts: true })
     }),
-  /** The nearest named place to the boat when each photo was taken, by id; blank where there is none. */
-  suggestedTitles: async (ids: readonly string[]): Promise<Record<string, string>> => {
-    const titles: Record<string, string> = {}
+  /**
+   * A suggested title for each photo, by id: Mate's when it is set up, else the
+   * nearest named place to the boat when the photo was taken (or the feature in
+   * the direction it faced). Blank where there is none. `errors` gives the
+   * reason a title could not be made, by id.
+   */
+  suggestedTitles: async (ids: readonly string[]): Promise<SuggestedTitles> => {
+    const out: SuggestedTitles = { titles: {}, errors: {} }
     for (const chunk of inChunks(ids)) {
-      const res = await apiRequest<{ titles: Record<string, string> }>(`/api/inbox/suggested-titles?ids=${chunk.map(encodeURIComponent).join(',')}`)
-      Object.assign(titles, res.titles)
+      const res = await apiRequest<Partial<SuggestedTitles>>(`/api/inbox/suggested-titles?ids=${chunk.map(encodeURIComponent).join(',')}`)
+      Object.assign(out.titles, res.titles)
+      Object.assign(out.errors, res.errors)
     }
-    return titles
+    return out
   },
 }

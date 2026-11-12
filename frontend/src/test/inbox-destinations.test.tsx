@@ -170,7 +170,7 @@ describe('InboxView equipment and job destinations', () => {
     env.items = [item(), item()]
     api.fileToEquipment.mockResolvedValue([{ id: 'i1', ok: true }, { id: 'i2', ok: false, error: 'that equipment item no longer exists' }])
     const passage = { id: 'p1', start: '2026-10-14T00:00:00Z', end: '2026-10-14T02:00:00Z', title: 'Out to Hook', from_name: '', to_name: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', timezone: 'Australia/Brisbane', stats: {} } as unknown as PassageSummary
-    api.suggestedTitles.mockResolvedValue({})
+    api.suggestedTitles.mockResolvedValue({ titles: {}, errors: {} })
     render(<InboxView canWrite passages={[passage]} onOpenUpload={vi.fn()} />)
     mark(/IMG_1\.jpg/)
     mark(/IMG_2\.jpg/)

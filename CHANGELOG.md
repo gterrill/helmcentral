@@ -65,7 +65,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   stays in the Inbox, and if you marked both, Helmcentral says how many files
   stayed.
 
+- **Mate sorts the Inbox and writes the titles.** If Mate is set up, it looks at
+  each photo as it arrives and suggests whether it's scenery, a document or
+  equipment. The Inbox then gathers them into **Documents**, **Equipment** and
+  **Unsorted** groups, beside the passages. Nothing is filed for you, and every
+  button still works on every group. When you tap **Add to passage**, Mate also
+  writes each title from the photo, the way the boat was heading and the five
+  nearest named islands and bays. It names a place only if the photo shows it. If
+  Mate can't sort a photo or write a title, the Inbox says why instead of quietly
+  doing something else. Each photo is sent to your document model, so it costs a
+  little, and only when Mate is set up. If it isn't, nothing changes.
+
+- **Photos that carry a direction get a better title without Mate.** When the
+  phone recorded which way it faced, the suggested title is now the nearest named
+  island or bay within 25 degrees of that direction, out to 10 nautical miles. If
+  there's none, it's the nearest named place, as before.
+
 ### Changed
+
+- **Uploading a photo in the Replay sign editor shrinks it first, and takes HEIC.**
+  The photo is shrunk on your device to 2560 pixels, as in the Inbox, and sent as
+  a JPEG. An iPhone's HEIC or HEIF photos now work too. The time the photo was
+  taken is still read from the original. Photos you pick from Documents are used
+  as they are.
 
 - **Equipment search now matches each word you type, and also looks in the zone.**
   Typing "Volvo Penta D2-40" or "engine room" finds the item, because every

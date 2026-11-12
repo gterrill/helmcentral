@@ -13,6 +13,12 @@ import { jsonResponse, stubApi, type StubRequest } from './helpers/stub-api'
 let framing: { overview: { center: [number, number]; zoom: number; pitch: number; bearing: number }; bearing: number } | null = null
 vi.mock('@/lib/replay-intro', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/replay-intro')>()), INTRO_MS: 600_000 }))
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
+// jsdom cannot decode or draw a picture. The shrunk copy has no Exif, so a sign
+// placed by the photo's time proves the time was read from the original.
+vi.mock('@/lib/image-downscale', async (orig) => ({
+  ...(await orig<typeof import('@/lib/image-downscale')>()),
+  downscaleImage: vi.fn(async () => new Blob(['shrunk'], { type: 'image/jpeg' })),
+}))
 vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, longitude, latitude }: { children: ReactNode; longitude: number; latitude: number }) => (
     <div data-testid="marker" data-lon={longitude} data-lat={latitude}>{children}</div>
@@ -420,7 +426,7 @@ describe('ReplayPanel signs: writes in order', () => {
     signs = [sign('s1', 250)]
     let releaseUpload: (r: Response) => void = () => {}
     stub({
-      'GET /api/document-folders/tree': { folders: [{ id: 'pp', name: 'Passage photos', parent_id: null }] },
+      'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' },
       'POST /api/documents': () => new Promise<Response>((resolve) => { releaseUpload = resolve }),
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
@@ -447,7 +453,7 @@ describe('ReplayPanel signs: writes in order', () => {
 describe('ReplayPanel signs: the placement note', () => {
   const jpegFile = () => new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'a.jpg', { type: 'image/jpeg' })
   const withFolder = (extra: Record<string, unknown> = {}) => stub({
-    'GET /api/document-folders/tree': { folders: [{ id: 'pp', name: 'Passage photos', parent_id: null }] },
+    'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' },
     'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
     ...extra,
   })
@@ -483,7 +489,7 @@ describe('ReplayPanel signs: photos', () => {
 
   function stubUpload() {
     stub({
-      'GET /api/document-folders/tree': { folders: [{ id: 'pp', name: 'Passage photos', parent_id: null }] },
+      'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' },
       'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
     })
   }
@@ -897,5 +903,45 @@ describe('ReplayPanel signs: photo moment', () => {
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
     expect(screen.queryByRole('switch', { name: 'Photo moment' })).toBeNull()
+  })
+})
+
+describe('ReplayPanel signs: the photo upload', () => {
+  const heic = () => new File([new Uint8Array([0, 0, 0, 24])], 'IMG_0500.HEIC', { type: '' })
+
+  it('offers HEIC and HEIF in the file picker, which iPhones and some Android phones take', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Signs' }))
+    const accept = (screen.getByLabelText('Photo file for a new sign') as HTMLInputElement).accept
+    for (const want of ['image/jpeg', 'image/png', 'image/heic', 'image/heif', '.heic', '.heif']) expect(accept).toContain(want)
+  })
+
+  it('shrinks the photo on the device and sends a JPEG, even when it is HEIC', async () => {
+    stub({
+      'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' },
+      'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Signs' }))
+    fireEvent.change(screen.getByLabelText('Photo file for a new sign'), { target: { files: [heic()] } })
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toMatchObject({ document_id: 'doc1' })
+    const sent = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit][] } }).mock.calls.find(([, init]) => init?.body instanceof FormData && (init.body as FormData).has('file'))![1].body as FormData
+    const file = sent.get('file') as File
+    expect(file.name).toBe('IMG_0500.jpg')
+    expect(file.type).toBe('image/jpeg')
+    expect(await file.text()).toBe('shrunk')
+    expect(sent.get('folder_id')).toBe('pp')
+  })
+
+  it('does not send the original when it cannot be shrunk', async () => {
+    const { downscaleImage } = await import('@/lib/image-downscale')
+    vi.mocked(downscaleImage).mockRejectedValueOnce(new Error('could not decode the photo'))
+    stub({ 'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' } })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Signs' }))
+    fireEvent.change(screen.getByLabelText('Photo file for a new sign'), { target: { files: [heic()] } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not decode the photo')
+    expect(writes).toHaveLength(0)
   })
 })

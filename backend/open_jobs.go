@@ -297,6 +297,22 @@ func (s *documentStore) GetOpenJob(id string) (openJob, error) {
 	return openJobByID(s.db, id)
 }
 
+// OpenJobStatus reads only a job's status, for a caller that needs to know
+// whether it is still open and not its photos.
+func (s *documentStore) OpenJobStatus(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var status string
+	err := s.db.QueryRow(`SELECT status FROM open_jobs WHERE id = ?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errOpenJobNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get open job status: %w", err)
+	}
+	return status, nil
+}
+
 func (s *documentStore) ListOpenJobs(f openJobFilter) ([]openJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -96,6 +96,68 @@ describe('groupInbox', () => {
   })
 })
 
+describe('groupInbox with Mate sorting', () => {
+  const p1 = passage('p1', T0, T0 + 120 * min)
+
+  it('groups documents and equipment by what Mate made of them, wherever they were taken', () => {
+    const items = [
+      item({ id: 'scene', suggested_kind: 'scenery', group: { kind: 'passage', passage_id: 'p1' }, capture_ms: T0 + 5 * min }),
+      item({ id: 'receipt', suggested_kind: 'document', group: { kind: 'passage', passage_id: 'p1' }, capture_ms: T0 + 6 * min }),
+      item({ id: 'pump', suggested_kind: 'equipment', group: { kind: 'underway' }, capture_ms: T0 + 7 * min }),
+      item({ id: 'pdf', mime: 'application/pdf', suggested_kind: 'document', group: { kind: 'no_time' }, capture_ms: null }),
+    ]
+    const groups = groupInbox(items, [p1], true)
+    expect(groups.map((g) => [g.key, g.items.map((i) => i.id)])).toEqual([
+      ['passage:p1', ['scene']],
+      ['documents', ['receipt', 'pdf']],
+      ['equipment', ['pump']],
+    ])
+    expect(groups.map((g) => g.label)).toEqual([expect.stringContaining('Airlie'), 'Documents', 'Equipment'])
+  })
+
+  it('orders them: underway, passages, Documents, Equipment, then the time groups and Unsorted', () => {
+    const items = [
+      item({ id: 'u', suggested_kind: null, group: { kind: 'off_passage' } }),
+      item({ id: 'n', suggested_kind: 'scenery', group: { kind: 'no_time' }, capture_ms: null }),
+      item({ id: 'o', suggested_kind: 'scenery', group: { kind: 'off_passage' } }),
+      item({ id: 'e', suggested_kind: 'equipment' }),
+      item({ id: 'd', suggested_kind: 'document' }),
+      item({ id: 'p', suggested_kind: 'scenery', group: { kind: 'passage', passage_id: 'p1' } }),
+      item({ id: 'w', suggested_kind: 'scenery', group: { kind: 'underway' } }),
+    ]
+    expect(groupInbox(items, [p1], true).map((g) => g.key)).toEqual(['underway', 'passage:p1', 'documents', 'equipment', 'off_passage', 'no_time', 'unsorted'])
+  })
+
+  it('puts an item Mate has not sorted, or could not, in Unsorted when its time does not place it', () => {
+    const items = [
+      item({ id: 'pending', suggested_kind: null, group: { kind: 'off_passage' } }),
+      item({ id: 'failed', suggested_kind: null, classify_error: 'out of credit', group: { kind: 'no_time' }, capture_ms: null }),
+      item({ id: 'in', suggested_kind: null, group: { kind: 'passage', passage_id: 'p1' } }),
+    ]
+    const groups = groupInbox(items, [p1], true)
+    expect(groups.map((g) => [g.key, g.items.map((i) => i.id)])).toEqual([
+      ['passage:p1', ['in']],
+      ['unsorted', ['pending', 'failed']],
+    ])
+    expect(groups[1]).toMatchObject({ label: 'Unsorted', canAssign: true })
+  })
+
+  it('keeps the time rule when Mate is not set up, whatever an old kind says', () => {
+    const items = [
+      item({ id: 'a', suggested_kind: null, group: { kind: 'off_passage' } }),
+      item({ id: 'b', suggested_kind: null, group: { kind: 'no_time' }, capture_ms: null }),
+      item({ id: 'c', suggested_kind: null, group: { kind: 'passage', passage_id: 'p1' } }),
+    ]
+    expect(groupInbox(items, [p1], false).map((g) => g.key)).toEqual(['passage:p1', 'off_passage', 'no_time'])
+    expect(groupInbox(items, [p1]).map((g) => g.key)).toEqual(['passage:p1', 'off_passage', 'no_time'])
+  })
+
+  it('lets a document taken underway be sent on, since the group only sets the default', () => {
+    const groups = groupInbox([item({ suggested_kind: 'document', group: { kind: 'underway' } })], [p1], true)
+    expect(groups[0]).toMatchObject({ key: 'documents', canAssign: true })
+  })
+})
+
 describe('findDuplicates', () => {
   it('groups near-identical frames taken close together and keeps the sharpest', () => {
     const a = item({ id: 'a', capture_ms: T0, fingerprint: '00ff00ff00ff00ff', sharpness: 50 })

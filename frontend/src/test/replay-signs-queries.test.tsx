@@ -1,10 +1,11 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { resetQueryStore } from '@/lib/api-query'
+import { INBOX_MAX_DIMENSION } from '@/lib/inbox-image'
 import { replaySignsApi } from '@/lib/replay-signs-api'
-import { captureOfDocument, ensurePassagePhotosFolder, PASSAGE_PHOTOS_FOLDER, uploadSignPhoto } from '@/lib/sign-photo'
+import { captureOfDocument, ensurePassagePhotosFolder, isSignPhotoType, isSignUploadFile, PASSAGE_PHOTOS_FOLDER, SIGN_UPLOAD_ACCEPT, uploadSignPhoto } from '@/lib/sign-photo'
 import { jsonResponse, stubApi, type StubRequest } from './helpers/stub-api'
 
 const sign = (id: string, t_ms: number) => ({
@@ -47,63 +48,64 @@ describe('replay signs', () => {
 })
 
 describe('Passage photos folder', () => {
-  it('finds the folder at the root by name and does not create another', async () => {
-    const mock = stubApi({
-      'GET /api/document-folders/tree': { folders: [{ id: 'other', name: 'Manuals', parent_id: null }, { id: 'pp', name: PASSAGE_PHOTOS_FOLDER, parent_id: null }] },
-    })
+  // The box finds or makes the folder (one rule, the one the Inbox uses); the
+  // browser no longer reads the folder tree or creates folders itself.
+  it('asks the box for the folder and uses the id it gives', async () => {
+    const mock = stubApi({ 'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER } })
     expect(await ensurePassagePhotosFolder()).toBe('pp')
-    expect(mock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+    expect(mock.mock.calls.map(([u, init]) => `${init?.method} ${new URL(String(u), 'http://x').pathname}`)).toEqual(['POST /api/passage-photos-folder'])
   })
 
-  it('matches the name without regard to capitals, as the server does, and reads folders only', async () => {
+  it('says why when the box cannot give the folder', async () => {
+    stubApi({ 'POST /api/passage-photos-folder': () => jsonResponse({ error: 'the document library is not running' }, 503) })
+    await expect(ensurePassagePhotosFolder()).rejects.toThrow('the document library is not running')
+  })
+
+  it('uploads the shrunk copy into it, as a JPEG', async () => {
     const mock = stubApi({
-      'GET /api/document-folders/tree': { folders: [{ id: 'sub', name: 'Passage photos', parent_id: 'x' }, { id: 'pp', name: 'Passage Photos', parent_id: null }] },
-    })
-    expect(await ensurePassagePhotosFolder()).toBe('pp')
-    expect(mock.mock.calls.map(([u]) => String(u))).toEqual([expect.stringContaining('/api/document-folders/tree')])
-  })
-
-  it('creates it on first use', async () => {
-    const mock = stubApi({
-      'GET /api/document-folders/tree': { folders: [] },
-      'POST /api/document-folders': (req: StubRequest) => jsonResponse({ id: 'new', name: (req.body as { name: string }).name }, 201),
-    })
-    expect(await ensurePassagePhotosFolder()).toBe('new')
-    expect(mock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
-  })
-
-  it('two uploads at once make one folder', async () => {
-    let created = 0
-    stubApi({
-      'GET /api/document-folders/tree': { folders: [] },
-      'POST /api/document-folders': () => { created += 1; return jsonResponse({ id: 'new', name: PASSAGE_PHOTOS_FOLDER }, 201) },
-    })
-    const ids = await Promise.all([ensurePassagePhotosFolder(), ensurePassagePhotosFolder()])
-    expect(ids).toEqual(['new', 'new'])
-    expect(created).toBe(1)
-  })
-
-  it('if another tab made it first, uses theirs', async () => {
-    let listed = 0
-    stubApi({
-      'GET /api/document-folders/tree': () => { listed += 1; return { folders: listed === 1 ? [] : [{ id: 'theirs', name: 'passage PHOTOS', parent_id: null }] } },
-      'POST /api/document-folders': () => jsonResponse({ error: 'folder name already exists' }, 409),
-    })
-    expect(await ensurePassagePhotosFolder()).toBe('theirs')
-  })
-
-  it('uploads into it', async () => {
-    let fields: FormData | null = null
-    const mock = stubApi({
-      'GET /api/document-folders/tree': { folders: [{ id: 'pp', name: PASSAGE_PHOTOS_FOLDER, parent_id: null }] },
+      'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER },
       'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
     })
-    const id = await uploadSignPhoto(new File([new Uint8Array([1])], 'wave.jpg', { type: 'image/jpeg' }))
+    const shrink = vi.fn(async () => new Blob(['small'], { type: 'image/jpeg' }))
+    const original = new File([new Uint8Array([1])], 'wave.HEIC', { type: 'image/heic' })
+    const id = await uploadSignPhoto(original, shrink)
     expect(id).toBe('doc1')
-    const upload = mock.mock.calls.find(([, init]) => init?.method === 'POST')!
-    fields = upload[1]!.body as FormData
+    // The same size and quality as the Inbox's: its long edge and the encoder's default.
+    expect(shrink).toHaveBeenCalledWith(original, INBOX_MAX_DIMENSION, expect.objectContaining({ reduceDecode: true }))
+    expect(INBOX_MAX_DIMENSION).toBe(2560)
+    const upload = mock.mock.calls.find(([u]) => String(u).endsWith('/api/documents'))!
+    const fields = upload[1]!.body as FormData
     expect(fields.get('folder_id')).toBe('pp')
-    expect((fields.get('file') as File).name).toBe('wave.jpg')
+    const sent = fields.get('file') as File
+    expect(sent.name).toBe('wave.jpg')
+    expect(sent.type).toBe('image/jpeg')
+    expect(await sent.text()).toBe('small')
+  })
+
+  it('uploads nothing when the photo cannot be shrunk, rather than sending the original', async () => {
+    const mock = stubApi({ 'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER } })
+    const shrink = vi.fn(async () => { throw new Error('could not decode the photo') })
+    await expect(uploadSignPhoto(new File([new Uint8Array([1])], 'x.jpg', { type: 'image/jpeg' }), shrink)).rejects.toThrow('could not decode the photo')
+    expect(mock.mock.calls.some(([u]) => String(u).endsWith('/api/documents'))).toBe(false)
+  })
+})
+
+describe('what the sign editor takes from a phone', () => {
+  const file = (name: string, type: string) => new File([new Uint8Array([1])], name, { type })
+
+  it('accepts HEIC and HEIF as well as the usual pictures, by type or by name', () => {
+    for (const f of [file('a.jpg', 'image/jpeg'), file('a.png', 'image/png'), file('a.gif', 'image/gif'), file('a.webp', 'image/webp'),
+      file('a.heic', 'image/heic'), file('a.heif', 'image/heif'), file('IMG_1.HEIC', ''), file('IMG_2.heif', '')]) {
+      expect(isSignUploadFile(f), f.name).toBe(true)
+    }
+    expect(isSignUploadFile(file('r.pdf', 'application/pdf'))).toBe(false)
+    expect(SIGN_UPLOAD_ACCEPT).toEqual(expect.stringContaining('image/heic'))
+    expect(SIGN_UPLOAD_ACCEPT).toEqual(expect.stringContaining('.heif'))
+  })
+
+  it('still takes only the types a library photo can be, from the library', () => {
+    expect(isSignPhotoType('image/heic')).toBe(false)
+    expect(isSignPhotoType('image/jpeg')).toBe(true)
   })
 })
 

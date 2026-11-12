@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { isSubmitEnter } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
-import { isSignPhotoType, SIGN_PHOTO_TYPES } from '@/lib/sign-photo'
+import { isSignPhotoType, SIGN_UPLOAD_ACCEPT } from '@/lib/sign-photo'
 import {
   photoMomentOn,
   SIGN_NOTE_MAX,
@@ -196,7 +196,7 @@ const NUDGES: readonly { seconds: number; short: string; words: string }[] = [
   { seconds: 60, short: '+1 min', words: '1 minute later' },
 ]
 
-const ACCEPT = SIGN_PHOTO_TYPES.join(',')
+const ACCEPT = SIGN_UPLOAD_ACCEPT
 
 export function SignEditor({
   sign, signs, onPick, disabled = false, whenLabel, busy, error, notice, onAdd, onAddPhoto, onAddFromLibrary, onChange, onReplacePhoto, onReplaceFromLibrary, onRemovePhoto, onDelete, onMoveHere, moveHereDisabled, onNudge, onBackToPhotoTime,

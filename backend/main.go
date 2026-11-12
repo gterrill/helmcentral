@@ -355,6 +355,20 @@ func main() {
 		},
 	)
 	documentIndexerWake = docIndexer.Wake
+
+	// Mate on the Inbox (ADR 0282): when Mate is set up, each item that arrives
+	// is sorted by the document vision model, off the upload request, and the
+	// pass at boot catches anything that arrived while it was off. The readiness
+	// check reads the settings fresh each time, so switching Mate on or off
+	// takes effect on the next item. The same long-timeout client as the
+	// indexer's; each call is bounded by its own context.
+	globalInboxMate = &inboxMate{
+		readiness: func() (assistantReadiness, string, error) { return checkAssistantReadiness(settingsPath) },
+		doer:      documentsHTTPClient,
+	}
+	inboxSorter := newInboxClassifier(globalInboxStore)
+	inboxClassifierWake = inboxSorter.Wake
+	go inboxSorter.Run(context.Background())
 	// documentIndexerBackfillStatus (documents_handlers.go, E1c) connects
 	// GET /api/documents/embeddings to this same indexer's backfill state -
 	// the same wiring as documentIndexerWake immediately above.

@@ -12,9 +12,11 @@ export interface ExifGps {
   lon: number | null
   /** Degrees clockwise from north (true or magnetic) the phone faced, or null. */
   bearingDeg: number | null
+  /** Which north that bearing is measured from: T true, M magnetic. Null when there is no bearing. */
+  bearingRef: 'T' | 'M' | null
 }
 
-const NONE: ExifGps = { lat: null, lon: null, bearingDeg: null }
+const NONE: ExifGps = { lat: null, lon: null, bearingDeg: null, bearingRef: null }
 
 const TAG_GPS_IFD = 0x8825
 const TAG_LAT_REF = 1
@@ -78,10 +80,14 @@ export function readExifGps(buffer: ArrayBuffer): ExifGps {
     }
 
     let bearingDeg: number | null = null
+    let bearingRef: 'T' | 'M' | null = null
     const dirRef = letter(TAG_DIR_REF)
     const dir = rationals(TAG_DIR, 1)
-    if (dir !== null && (dirRef === 'T' || dirRef === 'M') && dir[0] >= 0 && dir[0] < 360) bearingDeg = dir[0]
+    if (dir !== null && (dirRef === 'T' || dirRef === 'M') && dir[0] >= 0 && dir[0] < 360) {
+      bearingDeg = dir[0]
+      bearingRef = dirRef
+    }
 
-    return { lat, lon, bearingDeg }
+    return { lat, lon, bearingDeg, bearingRef }
   })
 }

@@ -6,10 +6,13 @@ import { formatLocalDate, passageRoute, type PassageSummary } from '@/lib/passag
 // about culling. Nothing here removes or files anything: the flags are hints
 // the operator can ignore.
 
+/** The groups Mate's view of an item adds to the time groups. */
+export type InboxMateGroupKind = 'documents' | 'equipment' | 'unsorted'
+
 export interface InboxGroup {
-  /** `underway`, `passage:<id>`, `off_passage` or `no_time`. */
+  /** `underway`, `passage:<id>`, `documents`, `equipment`, `off_passage`, `no_time` or `unsorted`. */
   key: string
-  kind: InboxGroupKind
+  kind: InboxGroupKind | InboxMateGroupKind
   passageId: string | null
   label: string
   items: InboxItem[]
@@ -32,11 +35,25 @@ const byCapture = (a: InboxItem, b: InboxItem) =>
   (a.capture_ms ?? Infinity) - (b.capture_ms ?? Infinity) || a.created_ms - b.created_ms || a.id.localeCompare(b.id)
 
 /**
- * Groups in the order the operator works through them: what is happening now,
- * each passage newest first, photos between passages, photos with no time.
- * Items are in capture order within a group.
+ * Whether Mate is set up and has not yet sorted the item, because it has not
+ * looked yet or looked and failed. The item waits for the operator's say.
  */
-export function groupInbox(items: readonly InboxItem[], passages: readonly PassageSummary[]): InboxGroup[] {
+export const isUnsortedByMate = (item: Pick<InboxItem, 'suggested_kind' | 'classify_error'>, mateSorting: boolean): boolean =>
+  mateSorting && !item.suggested_kind
+
+/**
+ * Groups in the order the operator works through them: what is happening now,
+ * each passage newest first, then what Mate made of the rest (Documents,
+ * Equipment), photos between passages, photos with no time, and last what Mate
+ * has not sorted. Items are in capture order within a group.
+ *
+ * With Mate set up, an item Mate calls a document or equipment goes to that
+ * group wherever it was taken. Scenery, and anything Mate has not sorted that a
+ * passage or the track places, keeps the time rule; what is left of the
+ * unsorted goes to Unsorted. With Mate off every item takes the time rule. The
+ * group sets the default only: each item can still be sent anywhere.
+ */
+export function groupInbox(items: readonly InboxItem[], passages: readonly PassageSummary[], mateSorting = false): InboxGroup[] {
   const byPassage = new Map(passages.map((p) => [p.id, p]))
   const buckets = new Map<string, InboxGroup>()
   const add = (key: string, make: () => Omit<InboxGroup, 'key' | 'items'>, item: InboxItem) => {
@@ -49,7 +66,14 @@ export function groupInbox(items: readonly InboxItem[], passages: readonly Passa
   }
   for (const item of items) {
     const { kind, passage_id: passageId } = item.group
-    if (kind === 'passage' && passageId) {
+    // Mate's view only counts while it is set up: a kind left from before it was switched off is not acted on.
+    if (mateSorting && item.suggested_kind === 'document') {
+      add('documents', () => ({ kind: 'documents', passageId: null, canAssign: true, label: 'Documents' }), item)
+    } else if (mateSorting && item.suggested_kind === 'equipment') {
+      add('equipment', () => ({ kind: 'equipment', passageId: null, canAssign: true, label: 'Equipment' }), item)
+    } else if (isUnsortedByMate(item, mateSorting) && (kind === 'off_passage' || kind === 'no_time')) {
+      add('unsorted', () => ({ kind: 'unsorted', passageId: null, canAssign: true, label: 'Unsorted' }), item)
+    } else if (kind === 'passage' && passageId) {
       const p = byPassage.get(passageId)
       add(`passage:${passageId}`, () => ({
         kind, passageId, canAssign: true,
@@ -67,7 +91,8 @@ export function groupInbox(items: readonly InboxItem[], passages: readonly Passa
     const p = g.passageId ? byPassage.get(g.passageId) : undefined
     return p ? Date.parse(p.start) : g.items[0]?.capture_ms ?? 0
   }
-  const rank = (g: InboxGroup) => (g.kind === 'underway' ? 0 : g.kind === 'passage' ? 1 : g.kind === 'off_passage' ? 2 : 3)
+  const ranks: Record<InboxGroup['kind'], number> = { underway: 0, passage: 1, documents: 2, equipment: 3, off_passage: 4, no_time: 5, unsorted: 6 }
+  const rank = (g: InboxGroup) => ranks[g.kind]
   const groups = [...buckets.values()]
   for (const g of groups) g.items.sort(byCapture)
   return groups.sort((a, b) => rank(a) - rank(b) || (a.kind === 'passage' ? startOf(b) - startOf(a) : 0))

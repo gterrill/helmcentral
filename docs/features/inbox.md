@@ -15,6 +15,11 @@ into Documents.
   it was taken on, using the time it was taken and the boat's own track.
 - Not part of Documents yet: A photo you're about to delete is never read,
   searched or counted. It becomes a document only when you send it there.
+- Mate can sort and title them: If Mate is set up, it looks at each photo as it
+  arrives and suggests where it belongs, and it can write the title for a photo
+  going on a passage. If Mate isn't set up, none of that happens and the Inbox
+  works as described everywhere else on this page. See
+  [Mate in the Inbox](#mate-in-the-inbox).
 
 ## Sharing from your phone
 
@@ -122,13 +127,28 @@ taken, in groups:
 - Not on a passage: Photos taken while the boat was stopped, between passages.
 - No time: Files that carried no time at all, such as most PDFs.
 
+When Mate is set up, three more groups appear, and a photo goes to the one Mate
+suggests whatever its time:
+
+- Documents: Receipts, paperwork and PDFs. Mate sorts a PDF here without looking.
+- Equipment: Close pictures of gear on the boat, such as an engine, a pump or a
+  label.
+- Unsorted: Photos Mate hasn't looked at yet, or couldn't sort, that no passage
+  claims by time. Each one says which it is.
+
+The group sets the starting suggestion and nothing more. Every button still works
+on every group, so you can add a photo from Documents to a passage, or send an
+Unsorted photo wherever it belongs. Photos Mate calls scenery stay where their
+time puts them.
+
 Tap a picture to mark it, and tap again to unmark it. **Mark all** does a whole
 group. Whatever is marked can then be sent on, using the buttons above the
 pictures. Each picture also shows the time it was taken, in the boat's time, and
 a few small marks:
 
 - A compass: The phone gave the direction it was facing. Its tooltip gives the
-  bearing.
+  bearing. Helmcentral uses that bearing to find what the photo was pointing at,
+  as described under [Putting photos on a passage](#putting-photos-on-a-passage).
 - A warning triangle: The phone said it was more than a nautical mile from where
   the boat's track was at that time, allowing for how far the boat could have
   gone since the last recorded position. That nearly always means the phone's clock
@@ -148,10 +168,22 @@ confirm.
 
 Mark the photos and tap **Add to passage**. A list opens with one row for each
 photo, and each row needs a title of up to 80 characters. Helmcentral fills in
-the title where it can, with the nearest named place to the boat at the moment
-the photo was taken, such as a bay or an island. It leaves the title empty when
-there's no name to give, or when the place lookup is slow and runs out of time
-after a few seconds. You can change any of them before you confirm.
+the title where it can. You can change any of them before you confirm. It leaves
+a title empty when there's no name to give, or when the lookup is slow and runs
+out of time. What it fills in depends on the photo and on whether Mate is set up:
+
+- A photo with no direction, without Mate: The nearest named place to the boat at
+  the moment the photo was taken, such as a bay or an island.
+- A photo that carries a direction, without Mate: The nearest named island or bay
+  in the way the phone faced. That means within 25 degrees either side, and out to
+  10 nautical miles from where the boat was. If there's nothing that way, it uses
+  the nearest named place instead.
+- With Mate: Mate writes the title. See [Mate in the Inbox](#mate-in-the-inbox).
+
+The direction on a phone photo is usually measured from true north. Some phones
+record it from magnetic north instead. Helmcentral doesn't know your magnetic
+variation, so it reads that direction as if it were true. The error is a few
+degrees, which sits well inside the 25 degrees either side.
 
 When you confirm, each photo becomes a sign on its passage at the moment it was
 taken, with a photo moment, so the replay stops and shows it full frame. The
@@ -167,6 +199,51 @@ sign editor uses, and the photo leaves the Inbox. Signs are described under
 - One photo at a time: If a photo can't be added, it stays in the Inbox with the
   reason beside it. An example is a time that isn't on any passage. The rest
   still go through.
+
+## Mate in the Inbox
+
+Mate helps in two places, and only when it's set up under Settings, Assistant,
+with an OpenRouter key and a document model. If it isn't set up, the Inbox makes
+no calls at all and the groups are the ones described above.
+
+- Sorting what arrives: As each photo is stored, Mate looks at its small preview
+  and says whether it's scenery, a document or equipment. This happens a moment
+  after the upload finishes, so sharing a roll never waits on it, and a few
+  photos at a time are sent. A PDF is a document without being sent anywhere.
+  The Inbox updates by itself while Mate works through what's waiting.
+- Writing titles: When you tap **Add to passage**, Mate looks at each photo at its
+  stored size, up to 2560 pixels. It's told which way the boat was heading when the
+  photo was taken. It's also given the five nearest named islands and bays, each
+  with its distance and which side of the bow it lies on, such as "Cape
+  Capricorn, 3.1 nm, 40° to port". If the photo carried a direction, the ones
+  within 25 degrees of it are marked. Mate uses a place's name only if the photo
+  shows it. Otherwise it names what's in the picture, such as "Dolphins off the
+  bow". It writes one title of up to 80 characters and no note.
+- The boat's heading: This is the course the boat was making at the time. When it
+  was barely moving a course means nothing, so Mate is told the heading isn't known
+  and gets true bearings instead.
+
+Mate sends each photo to the document model you chose, so every photo costs a
+little. The preview goes when it's sorted, and the larger picture goes again if
+you ask for a title. Photos leave the boat to OpenRouter only when Mate is set
+up, and switching Mate off stops it. Photos that arrived while it was off are
+sorted the next time a photo arrives or Helmcentral restarts with Mate on.
+
+If Mate can't do something, the Inbox says so and doesn't quietly do something else:
+
+- A photo Mate couldn't sort: It waits in **Unsorted** with the reason beside it,
+  such as an account out of credit. Mate tries twice, and a photo that failed isn't
+  tried again by itself.
+- A title Mate couldn't write: The row stays empty with the reason beside it. It
+  isn't replaced with a place name, so you know it needs you.
+- Nearby places that couldn't be fetched: The row says so, instead of going on
+  without them.
+- A slow answer: Titles that haven't arrived after about 30 seconds are left empty
+  for you to type.
+
+Mate sees only the nearest named islands and bays. A headland or a point shows up
+only where it's mapped as one of those, and in a crowded archipelago the list can
+miss one.
 
 ## Sending to Documents
 
@@ -218,6 +295,9 @@ is being filed".
   other way has none.
 - Anyone who can make changes can share, and an item doesn't say who sent it.
 - Helmcentral doesn't guess which equipment item or job a photo is of. You pick it.
+  Mate says only that a photo looks like equipment.
+- Mate can be wrong about what a photo is, or what it shows. It's a suggestion and
+  you read every title before you confirm.
 - Sharing from the share sheet is for Android with the installed app only. An
   iPhone uses the upload page.
 - The upload doesn't carry on in the background. Close the app mid-way and the

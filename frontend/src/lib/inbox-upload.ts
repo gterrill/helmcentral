@@ -1,6 +1,6 @@
 import { documentIsImage } from '@/lib/document-display'
 import { errorMessage } from '@/lib/errors'
-import { readExifGps } from '@/lib/exif-gps'
+import { readExifGps, type ExifGps } from '@/lib/exif-gps'
 import { captureUnix, readExifCapture, type ExifCapture } from '@/lib/exif-time'
 import { photoFilename } from '@/lib/image-downscale'
 import type { InboxUploadMeta, InboxUploadResult } from '@/lib/inbox-api'
@@ -91,7 +91,7 @@ export async function prepareFile(file: File, sourceSha256: string, deps: Prepar
     warnings.push(`Could not read when the photo was taken: ${errorMessage(err)}`)
   }
 
-  let gps = { lat: null as number | null, lon: null as number | null, bearingDeg: null as number | null }
+  let gps: ExifGps = { lat: null, lon: null, bearingDeg: null, bearingRef: null }
   try {
     gps = readExifGps(head)
   } catch (err) {
@@ -104,7 +104,7 @@ export async function prepareFile(file: File, sourceSha256: string, deps: Prepar
     blob,
     thumb,
     filename: photoFilename(file.name),
-    meta: { captureMs, bearingDeg: gps.bearingDeg, phoneLat: gps.lat, phoneLon: gps.lon, fingerprint, sharpness, sourceSha256 },
+    meta: { captureMs, bearingDeg: gps.bearingDeg, bearingRef: gps.bearingRef, phoneLat: gps.lat, phoneLon: gps.lon, fingerprint, sharpness, sourceSha256 },
     warnings,
   }
 }

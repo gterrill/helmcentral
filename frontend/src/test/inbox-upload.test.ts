@@ -33,6 +33,7 @@ describe('prepareFile', () => {
     expect(got.meta).toEqual<InboxUploadMeta>({
       captureMs: Date.UTC(2026, 9, 22, 1, 30, 15),
       bearingDeg: 90,
+      bearingRef: 'T',
       phoneLat: -20.25,
       phoneLon: 149.5,
       fingerprint: '00ff00ff00ff00ff',

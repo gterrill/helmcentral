@@ -22,11 +22,13 @@ const photo = (id: string, kind: InboxItem['group']['kind'], capture: number | n
   fingerprint: '', sharpness: 0, created_ms: 0, content_url: `/${id}`, thumb_url: `/${id}/thumb`, group: { kind }, gps_mismatch: false,
 })
 
+const noTitles = { titles: {}, errors: {} }
+
 beforeEach(() => vi.clearAllMocks())
 
 describe('InboxAssignDialog', () => {
   it('offers a photo between passages the nearest passage start or end, and the others to choose', async () => {
-    api.suggestedTitles.mockResolvedValue({})
+    api.suggestedTitles.mockResolvedValue(noTitles)
     render(<InboxAssignDialog items={[photo('a', 'off_passage', T0 + 130 * min), photo('b', 'off_passage', T0 + 590 * min)]} passages={passages} onClose={vi.fn()} />)
     const a = screen.getByLabelText('Where a.jpg goes') as HTMLSelectElement
     const b = screen.getByLabelText('Where b.jpg goes') as HTMLSelectElement
@@ -40,7 +42,7 @@ describe('InboxAssignDialog', () => {
   })
 
   it('shows the photo itself when it has no thumbnail', async () => {
-    api.suggestedTitles.mockResolvedValue({})
+    api.suggestedTitles.mockResolvedValue(noTitles)
     const { container } = render(
       <InboxAssignDialog items={[{ ...photo('a', 'passage', T0 + min), thumb_url: undefined }]} passages={passages} onClose={vi.fn()} />,
     )
@@ -49,7 +51,7 @@ describe('InboxAssignDialog', () => {
   })
 
   it('makes a photo with no time pick a place', async () => {
-    api.suggestedTitles.mockResolvedValue({})
+    api.suggestedTitles.mockResolvedValue(noTitles)
     render(<InboxAssignDialog items={[photo('n', 'no_time', null)]} passages={passages} onClose={vi.fn()} />)
     expect((screen.getByLabelText('Where n.jpg goes') as HTMLSelectElement).value).toBe('')
     fireEvent.change(screen.getByLabelText('Title for n.jpg'), { target: { value: 'Dock' } })
@@ -59,7 +61,7 @@ describe('InboxAssignDialog', () => {
   })
 
   it('puts a late suggestion on its own photo after a partial failure has dropped a row', async () => {
-    let answer: (v: Record<string, string>) => void = () => {}
+    let answer: (v: { titles: Record<string, string>; errors: Record<string, string> }) => void = () => {}
     api.suggestedTitles.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     api.fileToPassage.mockResolvedValue([{ id: 'a', ok: true }, { id: 'b', ok: false, error: 'nope' }])
     render(<InboxAssignDialog items={[photo('a', 'passage', T0 + min), photo('b', 'passage', T0 + 2 * min)]} passages={passages} onClose={vi.fn()} />)
@@ -68,13 +70,13 @@ describe('InboxAssignDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add 2 signs' }))
     await waitFor(() => expect(screen.queryByLabelText('Title for a.jpg')).toBeNull())
     fireEvent.change(screen.getByLabelText('Title for b.jpg'), { target: { value: '' } })
-    answer({ a: 'Place A', b: 'Place B' })
+    answer({ titles: { a: 'Place A', b: 'Place B' }, errors: {} })
     await waitFor(() => expect(screen.queryByText('Looking up place names…')).toBeNull())
     expect((screen.getByLabelText('Title for b.jpg') as HTMLInputElement).value).toBe('Place B')
   })
 
   it('keeps only the unsent photos, with the reason, when a later request fails', async () => {
-    api.suggestedTitles.mockResolvedValue({})
+    api.suggestedTitles.mockResolvedValue(noTitles)
     api.fileToPassage.mockRejectedValue(new InboxFilingError(new Error('network dropped'), [{ id: 'a', ok: true }]))
     render(<InboxAssignDialog items={[photo('a', 'passage', T0 + min), photo('b', 'passage', T0 + 2 * min)]} passages={passages} onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Title for a.jpg'), { target: { value: 'A' } })
@@ -86,13 +88,27 @@ describe('InboxAssignDialog', () => {
   })
 
   it('stops saying it is looking up names once the server answers with blanks, and keeps what was typed', async () => {
-    let answer: (v: Record<string, string>) => void = () => {}
+    let answer: (v: { titles: Record<string, string>; errors: Record<string, string> }) => void = () => {}
     api.suggestedTitles.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     render(<InboxAssignDialog items={[photo('a', 'passage', T0 + min)]} passages={passages} onClose={vi.fn()} />)
     expect(screen.getByText('Looking up place names…')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Title for a.jpg'), { target: { value: 'Typed' } })
-    answer({ a: '' })
+    answer({ titles: { a: '' }, errors: {} })
     await waitFor(() => expect(screen.queryByText('Looking up place names…')).toBeNull())
     expect((screen.getByLabelText('Title for a.jpg') as HTMLInputElement).value).toBe('Typed')
+  })
+
+  it('says Mate is writing the titles when it is, and shows the reason a title could not be suggested', async () => {
+    let answer: (v: { titles: Record<string, string>; errors: Record<string, string> }) => void = () => {}
+    api.suggestedTitles.mockReturnValue(new Promise((resolve) => { answer = resolve }))
+    render(
+      <InboxAssignDialog mateTitles items={[photo('a', 'passage', T0 + min), photo('b', 'passage', T0 + 2 * min)]} passages={passages} onClose={vi.fn()} />,
+    )
+    expect(screen.getByText('Mate is writing titles…')).toBeInTheDocument()
+    answer({ titles: { a: 'Dolphins off the bow' }, errors: { b: 'Mate could not suggest a title: 429' } })
+    await waitFor(() => expect(screen.queryByText('Mate is writing titles…')).toBeNull())
+    expect((screen.getByLabelText('Title for a.jpg') as HTMLInputElement).value).toBe('Dolphins off the bow')
+    expect((screen.getByLabelText('Title for b.jpg') as HTMLInputElement).value).toBe('')
+    expect(screen.getByText('Mate could not suggest a title: 429')).toBeInTheDocument()
   })
 })

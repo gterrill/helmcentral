@@ -120,8 +120,13 @@ describe('inboxApi', () => {
     expect(sizes((i: { json: { items: unknown[] } }) => i.json.items.length)).toEqual([500, 100, 500, 100])
 
     net.apiRequest.mockReset()
-    net.apiRequest.mockImplementation(async (path: string) => ({ titles: Object.fromEntries(path.split('ids=')[1].split(',').map((id) => [id, `T${id}`])) }))
-    expect(Object.keys(await inboxApi.suggestedTitles(ids))).toHaveLength(600)
+    net.apiRequest.mockImplementation(async (path: string) => {
+      const asked = path.split('ids=')[1].split(',')
+      return { titles: Object.fromEntries(asked.map((id) => [id, `T${id}`])), errors: { [asked[0]]: 'no' } }
+    })
+    const got = await inboxApi.suggestedTitles(ids)
+    expect(Object.keys(got.titles)).toHaveLength(600)
+    expect(Object.keys(got.errors)).toEqual(['id0', 'id500'])
     expect(net.apiRequest.mock.calls.map(([p]) => (p as string).split('ids=')[1].split(',').length)).toEqual([500, 100])
   })
 

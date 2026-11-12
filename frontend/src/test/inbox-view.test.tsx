@@ -6,7 +6,7 @@ import { InboxView } from '@/components/passages/inbox-view'
 import { InboxFilingError, type InboxItem } from '@/lib/inbox-api'
 import type { PassageSummary } from '@/lib/passages'
 
-const env = vi.hoisted(() => ({ items: [] as InboxItem[], folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
+const env = vi.hoisted(() => ({ items: [] as InboxItem[], mateSorting: false, folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
 
 vi.mock('@/lib/api-query', async (orig) => ({
   ...(await orig<typeof import('@/lib/api-query')>()),
@@ -14,7 +14,7 @@ vi.mock('@/lib/api-query', async (orig) => ({
 }))
 
 vi.mock('@/hooks/use-inbox', () => ({
-  useInbox: () => ({ items: env.items, loading: false, error: null, refresh: vi.fn() }),
+  useInbox: () => ({ items: env.items, mateSorting: env.mateSorting, loading: false, error: null, refresh: vi.fn() }),
 }))
 vi.mock('@/hooks/use-vessel-state', () => ({
   useVesselStateSelector: (select: (state: { timeZone: string | null }) => unknown) => select({ timeZone: 'Australia/Brisbane' }),
@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   n = 0
   env.items = []
+  env.mateSorting = false
   env.keys = []
   env.folders = [{ id: 'folder-1' }]
   window.localStorage.clear()
@@ -69,6 +70,38 @@ describe('InboxView', () => {
     expect(screen.getByRole('region', { name: /Out to Hook/ })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'No time' })).toBeInTheDocument()
     expect(screen.getByText(/recorded once it ends/)).toBeInTheDocument()
+  })
+
+  it('groups by what Mate made of each item, and says what it is doing with the rest', () => {
+    env.mateSorting = true
+    env.items = [
+      item({ suggested_kind: 'scenery' }),
+      item({ suggested_kind: 'document', filename: 'receipt.jpg' }),
+      item({ suggested_kind: 'equipment', filename: 'pump.jpg' }),
+      item({ suggested_kind: null, group: { kind: 'off_passage' }, filename: 'waiting.jpg' }),
+      item({ suggested_kind: null, classify_error: 'out of credit', group: { kind: 'no_time' }, capture_ms: null, filename: 'failed.jpg' }),
+    ]
+    view()
+    expect(within(screen.getByRole('region', { name: 'Documents' })).getByRole('button', { name: /receipt\.jpg/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Equipment' })).getByRole('button', { name: /pump\.jpg/ })).toBeInTheDocument()
+    const unsorted = screen.getByRole('region', { name: 'Unsorted' })
+    expect(within(unsorted).getByText('Mate has not looked at this yet')).toBeInTheDocument()
+    expect(within(unsorted).getByText('Mate could not sort this: out of credit')).toBeInTheDocument()
+  })
+
+  it('says nothing about Mate when it is not set up', () => {
+    env.items = [item({ suggested_kind: null, group: { kind: 'off_passage' } })]
+    view()
+    expect(screen.getByRole('region', { name: 'Not on a passage' })).toBeInTheDocument()
+    expect(screen.queryByText(/Mate/)).toBeNull()
+  })
+
+  it('still lets a photo Mate called a document be added to a passage', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: 'document' })]
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /IMG_1/ }))
+    expect(screen.getByRole('button', { name: 'Add to passage' })).toBeEnabled()
   })
 
   it('marks pictures by tapping and keeps Add to passage off for photos taken underway', () => {
