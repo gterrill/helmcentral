@@ -81,6 +81,12 @@ ui:
   # from the same place - Apple WeatherKit makes a good surface forecast and
   # carries no pressure levels at all.
   upper_air_provider: open-meteo-upper
+  # Optional, like upper_air_provider: leave it out and ukmo-lightning is used
+  # when that plugin is installed. With no lightning plugin installed the
+  # forecast page simply shows no lightning probability. Naming a provider that
+  # is not installed is an error, not a quiet fallback. ukmo-lightning reads
+  # the Met Office's free blended forecast and needs no key.
+  # lightning_provider: ukmo-lightning
 
 # Optional: long-term history from a SignalK InfluxDB v2 setup.
 influxdb:

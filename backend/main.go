@@ -195,6 +195,11 @@ func main() {
 	// levels) and still get a 500mb outlook (ADR 0071).
 	loadWasmUpperAirProviders(pluginsUpperAirDir())
 
+	// Lightning probability is its own category too (ADR 0284): WASM-plugin
+	// only, and with no plugin installed the forecast page simply has no
+	// lightning.
+	loadWasmLightningProviders(pluginsLightningDir())
+
 	// Forecast warnings providers - WASM-plugin-only (no native built-in),
 	// same reasoning as weather/wave above; registry stays empty
 	// (forecastWarningsHandler correctly 502s) until

@@ -48,6 +48,38 @@ func explicitForecastPoint(c echo.Context) (lat, lon float64, present bool, err 
 	return lat, lon, true, nil
 }
 
+// ownShipState reads the boat's SignalK vessel state and gates its position:
+// SignalK's -1,-1 and 0,0 placeholders are not a position. On failure it
+// returns the HTTP status and message to answer with (status 0 means success).
+// checkSignalKURL adds the "SignalK URL is not configured" guard.
+func ownShipState(settingsPath string, checkSignalKURL bool) (vesselStateData, int, string) {
+	var settings map[string]any
+	if checkSignalKURL {
+		// A settings file that cannot be read leaves the SignalK defaults.
+		settings, _ = readSettings(settingsPath)
+	}
+	return ownShipStateFromSettings(settings, checkSignalKURL)
+}
+
+// ownShipStateFromSettings is ownShipState for a caller that has already read
+// the settings.
+func ownShipStateFromSettings(settings map[string]any, checkSignalKURL bool) (vesselStateData, int, string) {
+	if checkSignalKURL {
+		address, port := signalKAddressFromSettings(settings)
+		if buildSignalKURL(address, port) == "" {
+			return vesselStateData{}, http.StatusBadGateway, "SignalK URL is not configured"
+		}
+	}
+	vesselState, vesselErr := fetchSignalKVesselState()
+	if vesselErr != nil {
+		return vesselStateData{}, http.StatusBadGateway, fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)
+	}
+	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
+		return vesselStateData{}, http.StatusBadGateway, "invalid vessel coordinates from SignalK"
+	}
+	return vesselState, 0, ""
+}
+
 // resolveForecastPoint picks the point for a forecast handler. On failure it
 // returns the HTTP status and message to answer with. checkSignalKURL keeps
 // the own-ship "SignalK URL is not configured" guard for the handlers that
@@ -65,23 +97,9 @@ func resolveForecastPoint(c echo.Context, settingsPath string, checkSignalKURL b
 		return forecastPoint{Lat: lat, Lon: lon, Zone: zone, Reference: time.Now().UTC(), Explicit: true}, 0, ""
 	}
 
-	if checkSignalKURL {
-		address, port, loadErr := loadSignalKSettings(settingsPath)
-		if loadErr != nil {
-			address = defaultSignalKAddress
-			port = defaultSignalKPort
-		}
-		if buildSignalKURL(address, port) == "" {
-			return forecastPoint{}, http.StatusBadGateway, "SignalK URL is not configured"
-		}
-	}
-
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return forecastPoint{}, http.StatusBadGateway, fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return forecastPoint{}, http.StatusBadGateway, "invalid vessel coordinates from SignalK"
+	vesselState, status, msg := ownShipState(settingsPath, checkSignalKURL)
+	if status != 0 {
+		return forecastPoint{}, status, msg
 	}
 	// A critical GNSS alert leaves the state at the last trusted fix, so its
 	// zone is the remembered one and the forecast is still for that place.

@@ -683,9 +683,20 @@ func TestGetPluginInfoHandler_UnknownIDForEachValidType(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 	withCleanPOIProviderRegistry(t)
 	withCleanUpperAirProviderRegistry(t)
+	withCleanLightningProviderRegistry(t)
 	withCleanForecastWarningsProviderRegistry(t)
 
-	for _, providerType := range []string{"tide", "weather", "wave", "poi", "upper-air", "forecast-warnings"} {
+	wantTypes := []string{"tide", "weather", "wave", "forecast-warnings", "upper-air", "poi", "lightning"}
+	if len(pluginProviderRegistries) != len(wantTypes) {
+		t.Fatalf("pluginProviderRegistries has %d types, want exactly %v", len(pluginProviderRegistries), wantTypes)
+	}
+	for _, providerType := range wantTypes {
+		if _, ok := pluginProviderRegistries[providerType]; !ok {
+			t.Fatalf("pluginProviderRegistries is missing %q", providerType)
+		}
+	}
+
+	for providerType := range pluginProviderRegistries {
 		c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/"+providerType+"/missing", "", providerType, "missing")
 		if err := getPluginInfoHandler(c); err != nil {
 			t.Fatalf("[%s] handler returned error: %v", providerType, err)

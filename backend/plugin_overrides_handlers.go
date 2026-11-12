@@ -15,7 +15,7 @@ import (
 // handlers need generically. Every concrete provider type across all six
 // domains already implements ID()/Name()/Description() (see wasm_plugin.go
 // and each *_providers.go interface), so no per-type switch is needed to
-// read those three fields - only providerByTypeAndID's registry dispatch is
+// read those three fields - only the pluginProviderRegistries table is
 // type-specific.
 type namedProvider interface {
 	ID() string
@@ -83,58 +83,44 @@ type pluginConfigFieldResponse struct {
 	Value       string `json:"value"`
 }
 
-// providerByTypeAndID dispatches providerType to the matching registry and
-// looks up id. validType=false means providerType itself isn't one of
-// tide/weather/wave/poi/upper-air/forecast-warnings; found=false (with
-// validType=true) means the type is valid but no such id is registered
-// under it.
-// The "upper-air" case was missing from this switch until this change even
-// though upper_air_providers.go, the per-feature route tables and the Settings
-// provider machinery all treat it as a real domain - GET/POST/DELETE
-// /api/plugins/upper-air/:id simply 400'd as an unknown type. Added here
-// alongside "poi" rather than as a separate change since both are the same
-// one-line fix to the same switch.
+// namedProviderLookup finds a provider by id in one domain's registry.
+type namedProviderLookup func(id string) (namedProvider, bool)
+
+// registryLookup adapts a domain's typed getXProvider to a namedProviderLookup.
+// A miss returns a nil interface, never a typed nil.
+func registryLookup[T namedProvider](get func(string) (T, bool)) namedProviderLookup {
+	return func(id string) (namedProvider, bool) {
+		p, ok := get(id)
+		if !ok {
+			return nil, false
+		}
+		return p, true
+	}
+}
+
+// pluginProviderRegistries maps every plugin type string to its registry
+// lookup. A new plugin kind adds one line here.
+var pluginProviderRegistries = map[string]namedProviderLookup{
+	"tide":              registryLookup(getTideProvider),
+	"weather":           registryLookup(getWeatherProvider),
+	"wave":              registryLookup(getWaveProvider),
+	"poi":               registryLookup(getPOIProvider),
+	"upper-air":         registryLookup(getUpperAirProvider),
+	"lightning":         registryLookup(getLightningProvider),
+	"forecast-warnings": registryLookup(getForecastWarningsProvider),
+}
+
+// providerByTypeAndID looks providerType up in pluginProviderRegistries and
+// then id in that registry. validType=false means providerType isn't a key of
+// the table; found=false (with validType=true) means the type is valid but no
+// such id is registered under it.
 func providerByTypeAndID(providerType, id string) (provider namedProvider, validType, found bool) {
-	switch providerType {
-	case "tide":
-		p, ok := getTideProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	case "weather":
-		p, ok := getWeatherProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	case "wave":
-		p, ok := getWaveProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	case "poi":
-		p, ok := getPOIProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	case "upper-air":
-		p, ok := getUpperAirProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	case "forecast-warnings":
-		p, ok := getForecastWarningsProvider(id)
-		if !ok {
-			return nil, true, false
-		}
-		return p, true, true
-	default:
+	lookup, ok := pluginProviderRegistries[providerType]
+	if !ok {
 		return nil, false, false
 	}
+	provider, found = lookup(id)
+	return provider, true, found
 }
 
 // buildPluginInfoResponse builds the pluginInfoResponse for an already
