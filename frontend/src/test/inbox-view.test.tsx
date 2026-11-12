@@ -6,7 +6,7 @@ import { InboxView } from '@/components/passages/inbox-view'
 import { InboxFilingError, type InboxItem } from '@/lib/inbox-api'
 import type { PassageSummary } from '@/lib/passages'
 
-const env = vi.hoisted(() => ({ items: [] as InboxItem[], folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
+const env = vi.hoisted(() => ({ items: [] as InboxItem[], mateSorting: false, mateError: null as string | null, folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
 
 vi.mock('@/lib/api-query', async (orig) => ({
   ...(await orig<typeof import('@/lib/api-query')>()),
@@ -14,12 +14,12 @@ vi.mock('@/lib/api-query', async (orig) => ({
 }))
 
 vi.mock('@/hooks/use-inbox', () => ({
-  useInbox: () => ({ items: env.items, loading: false, error: null, refresh: vi.fn() }),
+  useInbox: () => ({ items: env.items, mateSorting: env.mateSorting, mateError: env.mateError, loading: false, error: null, refresh: vi.fn() }),
 }))
 vi.mock('@/hooks/use-vessel-state', () => ({
   useVesselStateSelector: (select: (state: { timeZone: string | null }) => unknown) => select({ timeZone: 'Australia/Brisbane' }),
 }))
-const api = vi.hoisted(() => ({ bin: vi.fn(), fileToPassage: vi.fn(), fileToDocuments: vi.fn(), suggestedTitles: vi.fn() }))
+const api = vi.hoisted(() => ({ bin: vi.fn(), fileToPassage: vi.fn(), fileToDocuments: vi.fn(), suggestedTitles: vi.fn(), sortAgain: vi.fn() }))
 vi.mock('@/lib/inbox-api', async (orig) => ({ ...(await orig<typeof import('@/lib/inbox-api')>()), inboxApi: api }))
 // The folder picker reads the library; this test is about the Inbox.
 vi.mock('@/components/documents/folder-picker-dialog', () => ({
@@ -51,6 +51,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   n = 0
   env.items = []
+  env.mateSorting = false
+  env.mateError = null
   env.keys = []
   env.folders = [{ id: 'folder-1' }]
   window.localStorage.clear()
@@ -69,6 +71,134 @@ describe('InboxView', () => {
     expect(screen.getByRole('region', { name: /Out to Hook/ })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'No time' })).toBeInTheDocument()
     expect(screen.getByText(/recorded once it ends/)).toBeInTheDocument()
+  })
+
+  it('groups by what Mate made of each item, and says what it is doing with the rest', () => {
+    env.mateSorting = true
+    env.items = [
+      item({ suggested_kind: 'scenery' }),
+      item({ suggested_kind: 'document', filename: 'receipt.jpg' }),
+      item({ suggested_kind: 'equipment', filename: 'pump.jpg' }),
+      item({ suggested_kind: null, group: { kind: 'off_passage' }, filename: 'waiting.jpg' }),
+      item({ suggested_kind: null, classify_error: "Mate couldn't sort this yet. Trying again at 3.40 PM", next_try_ms: Date.now() + 60 * min, group: { kind: 'no_time' }, capture_ms: null, filename: 'failed.jpg' }),
+    ]
+    view()
+    expect(within(screen.getByRole('region', { name: 'Documents' })).getByRole('button', { name: /receipt\.jpg/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Equipment' })).getByRole('button', { name: /pump\.jpg/ })).toBeInTheDocument()
+    const unsorted = screen.getByRole('region', { name: 'Unsorted' })
+    expect(within(unsorted).getByText('Mate has not looked at this yet')).toBeInTheDocument()
+    expect(within(unsorted).getByText("Mate couldn't sort this yet. Trying again at 3.40 PM")).toBeInTheDocument()
+  })
+
+  it('says in one line that sorting is paused when Mate\'s settings could not be read, and groups by time', () => {
+    env.mateError = "Mate's settings couldn't be read; sorting is paused"
+    env.items = [item({ suggested_kind: null, group: { kind: 'off_passage' } })]
+    view()
+    expect(screen.getByTestId('inbox-mate-error')).toHaveTextContent("Mate's settings couldn't be read; sorting is paused")
+    expect(screen.getByRole('region', { name: 'Not on a passage' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Unsorted' })).toBeNull()
+  })
+
+  it('offers Sort again for items Mate failed on, and asks the box to requeue them', async () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: null, classify_error: 'no preview to sort from', group: { kind: 'no_time' }, capture_ms: null })]
+    api.sortAgain.mockResolvedValue(1)
+    view()
+    fireEvent.click(screen.getByRole('button', { name: 'Sort again' }))
+    await waitFor(() => expect(api.sortAgain).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+  })
+
+  it('says why Sort again failed', async () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: null, classify_error: 'x', group: { kind: 'no_time' }, capture_ms: null })]
+    api.sortAgain.mockRejectedValue(new Error('the Inbox is not running'))
+    view()
+    fireEvent.click(screen.getByRole('button', { name: 'Sort again' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Could not ask Mate to sort again', { description: 'the Inbox is not running' }))
+  })
+
+  it('offers no Sort again when nothing failed, or to someone who cannot write', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: null, group: { kind: 'no_time' }, capture_ms: null })]
+    view()
+    expect(screen.queryByRole('button', { name: 'Sort again' })).toBeNull()
+    env.items = [item({ suggested_kind: null, classify_error: 'x', group: { kind: 'no_time' }, capture_ms: null })]
+    view(false)
+    expect(screen.queryByRole('button', { name: 'Sort again' })).toBeNull()
+  })
+
+  it('shows a failed sort as the one plain line the box sent, in the calm colour, with nothing added', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: null, classify_error: "Mate couldn't sort this yet. Trying again at 3.40 PM", next_try_ms: Date.now() + 60 * min, group: { kind: 'no_time' }, capture_ms: null })]
+    view()
+    const line = screen.getByText("Mate couldn't sort this yet. Trying again at 3.40 PM")
+    expect(line).not.toHaveClass('text-destructive')
+    expect(screen.queryByText(/Mate could not sort this/)).toBeNull()
+  })
+
+  it('does not promise a try at a time that has passed', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: null, classify_error: "Mate couldn't sort this yet. Trying again at 3.40 PM", next_try_ms: Date.now() - 5 * min, group: { kind: 'no_time' }, capture_ms: null })]
+    view()
+    expect(screen.getByText("Mate couldn't sort this yet. Trying again shortly")).toBeInTheDocument()
+    expect(screen.queryByText(/3\.40 PM/)).toBeNull()
+  })
+
+  it('says Mate is off, with no promised try, when Mate is switched off', () => {
+    env.mateSorting = false
+    env.items = [item({ suggested_kind: null, classify_error: "Mate couldn't sort this yet. Trying again at 3.40 PM", next_try_ms: Date.now() + 60 * min, group: { kind: 'no_time' }, capture_ms: null })]
+    view()
+    expect(screen.getByText("Mate couldn't sort this. Mate is off")).toBeInTheDocument()
+    expect(screen.queryByText(/Trying again/)).toBeNull()
+  })
+
+  it('does not say Mate is off when its settings could not be read', () => {
+    env.mateSorting = false
+    env.mateError = "Mate's settings couldn't be read; sorting is paused"
+    env.items = [item({ suggested_kind: null, classify_error: "Mate couldn't sort this yet. Trying again at 3.40 PM", next_try_ms: Date.now() + 60 * min, group: { kind: 'no_time' }, capture_ms: null })]
+    view()
+    expect(screen.queryByText(/Mate is off/)).toBeNull()
+  })
+
+  it('does not offer a passage in the hint for underway photos Mate moved into Documents or Equipment', () => {
+    env.mateSorting = true
+    env.items = [
+      item({ suggested_kind: 'document', group: { kind: 'underway' }, filename: 'receipt.jpg' }),
+      item({ suggested_kind: 'equipment', group: { kind: 'underway' }, filename: 'pump.jpg' }),
+    ]
+    view()
+    const documents = screen.getByRole('region', { name: 'Documents' })
+    expect(within(documents).queryByText(/add any of them to a passage/)).toBeNull()
+    expect(within(documents).getByText(/taken underway.*once the passage is recorded/)).toBeInTheDocument()
+    const equipment = screen.getByRole('region', { name: 'Equipment' })
+    expect(within(equipment).queryByText(/or to a passage/)).toBeNull()
+    expect(within(equipment).getByText(/taken underway.*once the passage is recorded/)).toBeInTheDocument()
+  })
+
+  it('offers a passage in the hint when the photos can go on one, and names the ones that cannot yet', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: 'document', filename: 'a.jpg' })]
+    view()
+    expect(within(screen.getByRole('region', { name: 'Documents' })).getByText(/add any of them to a passage/)).toBeInTheDocument()
+    env.items = [item({ suggested_kind: 'document', filename: 'b.jpg' }), item({ suggested_kind: 'document', group: { kind: 'underway' }, filename: 'c.jpg' })]
+    const { container } = view()
+    expect(container.textContent).toMatch(/not the ones taken underway/)
+  })
+
+  it('says nothing about Mate when it is not set up', () => {
+    env.items = [item({ suggested_kind: null, group: { kind: 'off_passage' } })]
+    view()
+    expect(screen.getByRole('region', { name: 'Not on a passage' })).toBeInTheDocument()
+    expect(screen.queryByText(/Mate/)).toBeNull()
+  })
+
+  it('still lets a photo Mate called a document be added to a passage', () => {
+    env.mateSorting = true
+    env.items = [item({ suggested_kind: 'document' })]
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /IMG_1/ }))
+    expect(screen.getByRole('button', { name: 'Add to passage' })).toBeEnabled()
   })
 
   it('marks pictures by tapping and keeps Add to passage off for photos taken underway', () => {

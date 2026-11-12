@@ -16,6 +16,20 @@ export const INBOX_COUNT_PATH = '/api/inbox/count'
 
 export type InboxGroupKind = 'passage' | 'underway' | 'off_passage' | 'no_time'
 
+/** What Mate made of an item: where it most likely belongs. */
+export type InboxKind = 'scenery' | 'document' | 'equipment'
+
+/**
+ * The Inbox as the box lists it. `mate_sorting` says Mate is set up, so an item
+ * with no kind yet is waiting for it; it is null, with `mate_error`, when Mate's
+ * settings could not be read.
+ */
+export interface InboxList {
+  items?: InboxItem[]
+  mate_sorting?: boolean | null
+  mate_error?: string
+}
+
 export interface InboxItem {
   id: string
   filename: string
@@ -34,6 +48,12 @@ export interface InboxItem {
   /** A small preview, absent for an item with none (a PDF). */
   thumb_url?: string
   group: { kind: InboxGroupKind; passage_id?: string }
+  /** Mate's view of the item, or null until it has looked and for good when Mate is not set up. */
+  suggested_kind?: InboxKind | null
+  /** The one plain line to show when Mate tried and failed to sort the item, with when it tries again. The cause is in the box's log. */
+  classify_error?: string
+  /** Unix ms of Mate's next try at a failed item; every failure is tried again by itself. */
+  next_try_ms?: number
   /** The phone's own position was over a nautical mile from the track: the clock or zone is off. */
   gps_mismatch: boolean
 }
@@ -66,6 +86,13 @@ export interface InboxUploadMeta {
 export type InboxUploadResult =
   | { status: 'stored'; item: InboxItem }
   | { status: 'already_uploaded'; where: 'inbox' | 'documents' | 'filed' }
+
+export interface SuggestedTitles {
+  titles: Record<string, string>
+  errors: Record<string, string>
+  /** Set when Mate's settings could not be read, so the titles are place names. */
+  mateError?: string
+}
 
 /** The outcome for one item of a filing call. */
 export interface InboxFilingResult {
@@ -181,6 +208,15 @@ export const inboxApi = {
     const { known } = await apiRequest<{ known: string[] }>('/api/inbox/known', { method: 'POST', json: { hashes } })
     return known
   },
+  /** Clears every failure Mate recorded and has it look at those items again; says how many it requeued. */
+  sortAgain: async (): Promise<number> => {
+    try {
+      const { requeued } = await apiRequest<{ requeued: number }>('/api/inbox/sort-again', { method: 'POST' })
+      return requeued
+    } finally {
+      await inboxChanged()
+    }
+  },
   /** Re-reads the list and the count, once a batch of uploads is done. */
   refresh: (): Promise<void> => inboxChanged(),
   /** Re-reads the count alone, for the badge while a long batch goes on. */
@@ -218,13 +254,21 @@ export const inboxApi = {
       openJobRecordApplied()
       invalidateDocumentLists({ counts: true })
     }),
-  /** The nearest named place to the boat when each photo was taken, by id; blank where there is none. */
-  suggestedTitles: async (ids: readonly string[]): Promise<Record<string, string>> => {
-    const titles: Record<string, string> = {}
+  /**
+   * A suggested title for each photo, by id: Mate's when it is set up, else the
+   * nearest named place to the boat when the photo was taken (or the feature in
+   * the direction it faced). Blank where there is none. `errors` gives the
+   * reason a title could not be made, by id. A POST, because with Mate set up
+   * it makes paid calls and keeps the titles it makes.
+   */
+  suggestedTitles: async (ids: readonly string[]): Promise<SuggestedTitles> => {
+    const out: SuggestedTitles = { titles: {}, errors: {} }
     for (const chunk of inChunks(ids)) {
-      const res = await apiRequest<{ titles: Record<string, string> }>(`/api/inbox/suggested-titles?ids=${chunk.map(encodeURIComponent).join(',')}`)
-      Object.assign(titles, res.titles)
+      const res = await apiRequest<Partial<SuggestedTitles> & { mate_error?: string }>('/api/inbox/suggested-titles', { method: 'POST', json: { ids: chunk } })
+      Object.assign(out.titles, res.titles)
+      Object.assign(out.errors, res.errors)
+      if (res.mate_error) out.mateError = res.mate_error
     }
-    return titles
+    return out
   },
 }

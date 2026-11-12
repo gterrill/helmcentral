@@ -463,6 +463,13 @@ func updateSettingsHandler(c echo.Context) error {
 	// save, which has already succeeded.
 	sweepDocumentsInBackground()
 
+	// The Inbox's classifier depends on the assistant switch and the document
+	// model: the photos waiting for Mate, and the sorts that failed, are tried
+	// again only when one of them changed.
+	if current.Assistant.Enabled != normalized.Assistant.Enabled || current.Assistant.DocumentModel != normalized.Assistant.DocumentModel {
+		inboxMateSettingsChanged()
+	}
+
 	return c.JSON(http.StatusOK, normalized)
 }
 

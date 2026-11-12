@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -87,12 +86,24 @@ type inboxItemJSON struct {
 	// ThumbURL is the small preview, absent for an item with none (a PDF).
 	ThumbURL string         `json:"thumb_url,omitempty"`
 	Group    inboxGroupJSON `json:"group"`
+	// SuggestedKind is what Mate made of the item (scenery, document or
+	// equipment), null until it has looked and for good when Mate is not set up.
+	SuggestedKind *string `json:"suggested_kind"`
+	// ClassifyError is the one plain line the tile shows when Mate tried and
+	// failed to sort the item, with the time of the next try on the boat's clock.
+	ClassifyError string `json:"classify_error,omitempty"`
+	// NextTryMs is when Mate tries again, Unix ms, so the page can look again
+	// then; absent when no try is scheduled.
+	NextTryMs int64 `json:"next_try_ms,omitempty"`
 	// GPSMismatch says the phone's own position was more than a nautical mile
 	// from the boat's track at the capture time: the clock or zone is wrong.
 	GPSMismatch bool `json:"gps_mismatch"`
 }
 
-func toInboxItemJSON(it inboxItem, group inboxGroupJSON, mismatch bool) inboxItemJSON {
+// inboxNow is the clock the list judges a retry time against. A var for tests.
+var inboxNow = time.Now
+
+func toInboxItemJSON(it inboxItem, group inboxGroupJSON, mismatch bool, boat boatTime, mateOn bool) inboxItemJSON {
 	out := inboxItemJSON{
 		ID: it.ID, Filename: it.Filename, MIME: it.MIME, SizeBytes: it.SizeBytes, CaptureMs: it.CaptureMs,
 		BearingDeg: it.BearingDeg, Fingerprint: it.Fingerprint, Sharpness: it.Sharpness, CreatedMs: it.CreatedMs,
@@ -100,6 +111,14 @@ func toInboxItemJSON(it inboxItem, group inboxGroupJSON, mismatch bool) inboxIte
 	}
 	if it.HasThumb {
 		out.ThumbURL = "/api/inbox/" + it.ID + "/thumb"
+	}
+	if it.SuggestedKind != "" {
+		kind := it.SuggestedKind
+		out.SuggestedKind = &kind
+	}
+	out.ClassifyError = inboxSortFailedLine(it, boat, mateOn, inboxNow())
+	if it.ClassifyError != "" && it.NextTryMs > 0 && mateOn {
+		out.NextTryMs = it.NextTryMs
 	}
 	return out
 }
@@ -426,9 +445,11 @@ func uploadInboxHandler(c echo.Context) error {
 	case where != inboxWhereNone:
 		return c.JSON(http.StatusOK, map[string]any{"status": "already_uploaded", "where": where})
 	}
+	// Mate sorts the item after this answer, not inside the request.
+	inboxClassifierWake()
 	return c.JSON(http.StatusCreated, map[string]any{
 		"status": "stored",
-		"item":   toInboxItemJSON(item, inboxGroupJSON{Kind: inboxGroupNoTime}, false),
+		"item":   toInboxItemJSON(item, inboxGroupJSON{Kind: inboxGroupNoTime}, false, boatTime{placeZone: utcZone}, true), // new, so no failure to time
 	})
 }
 
@@ -503,7 +524,20 @@ func listInboxHandler(c echo.Context) error {
 	if err != nil {
 		return inboxRespond(c, err)
 	}
+	// Mate's settings not being readable must not take the list down: the answer
+	// is "unknown" with a notice, and the operator can still cull and file.
+	var mateSorting *bool
+	mateError := ""
+	if on, err := inboxMateOn(); err != nil {
+		log.Printf("inbox: %v", err)
+		mateError = "Mate's settings couldn't be read; sorting is paused"
+	} else {
+		mateSorting = &on
+	}
 	out := make([]inboxItemJSON, 0, len(items))
+	waiting := false // an item Mate has not looked at yet
+	var boat boatTime
+	haveBoat := false
 	for _, it := range items {
 		group := inboxGroupJSON{Kind: inboxGroupNoTime}
 		mismatch := false
@@ -530,9 +564,46 @@ func listInboxHandler(c echo.Context) error {
 				mismatch = haversineMeters(*it.PhoneLat, *it.PhoneLon, pt.Lat, pt.Lon) > allowance
 			}
 		}
-		out = append(out, toInboxItemJSON(it, group, mismatch))
+		if it.ClassifyError != "" && !haveBoat {
+			// The next try is told on the boat's clock (the last-fix rule), looked up
+			// only when some item has failed.
+			boat, haveBoat = boatTimeAt(0, 0, false), true
+		}
+		out = append(out, toInboxItemJSON(it, group, mismatch, boat, mateSorting == nil || *mateSorting)) // unknown is not "off"
+		if it.SuggestedKind == "" && it.ClassifyError == "" {
+			waiting = true
+		}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"items": out})
+	// Items stored while Mate was off, or before a restart, are waiting with
+	// nobody to sort them: reading the list with Mate on starts the classifier,
+	// which does nothing if it is already running.
+	if mateSorting != nil && *mateSorting && waiting {
+		inboxClassifierWake()
+	}
+	// mate_sorting says Mate is set up, so an item with no kind yet is waiting
+	// for it rather than never going to get one. It is null, with mate_error,
+	// when the settings could not be read.
+	body := map[string]any{"items": out, "mate_sorting": mateSorting}
+	if mateError != "" {
+		body["mate_error"] = mateError
+	}
+	return c.JSON(http.StatusOK, body)
+}
+
+// inboxSortAgainHandler is POST /api/inbox/sort-again, the manual nudge: it
+// clears every failure Mate recorded, with its back-off, and wakes the
+// classifier so the items are looked at again now.
+func inboxSortAgainHandler(c echo.Context) error {
+	store, ok := inboxStoreOrError(c)
+	if !ok {
+		return nil
+	}
+	n, err := store.RequeueFailed()
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	inboxClassifierWake()
+	return c.JSON(http.StatusOK, map[string]int{"requeued": n})
 }
 
 // inboxCountHandler is GET /api/inbox/count, cheap enough for a badge.
@@ -836,11 +907,7 @@ func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string, link f
 			}
 			if err := link(inserted.ID); err != nil {
 				// Still under the content lock: nothing else can hold these bytes.
-				if _, delErr := globalDocumentStore.Delete(inserted.ID); delErr != nil {
-					log.Printf("inbox: undo library copy %s: %v", inserted.ID, delErr)
-				} else if rmErr := os.Remove(filepath.Join(dir, inserted.SHA256)); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-					log.Printf("inbox: undo library copy file %s: %v", inserted.ID, rmErr)
-				}
+				removeLibraryCopy(inserted)
 				return err
 			}
 			return nil
@@ -853,11 +920,11 @@ func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string, link f
 	return doc, created, nil
 }
 
-// inboxDiscardDocument undoes copy for a document it just made.
-func inboxDiscardDocument(docs *documentStore, doc document) {
-	unlock := lockDocumentSHA(doc.SHA256)
-	defer unlock()
-	if _, err := docs.Delete(doc.ID); err != nil {
+// removeLibraryCopy deletes a document copy just made and its file. The caller
+// holds the content lock, which is what makes it safe: nothing else can have
+// linked to these bytes since the copy.
+func removeLibraryCopy(doc document) {
+	if _, err := globalDocumentStore.Delete(doc.ID); err != nil {
 		log.Printf("inbox: undo library copy %s: %v", doc.ID, err)
 		return
 	}
@@ -904,7 +971,7 @@ type inboxPassageRequest struct {
 	TMs *int64 `json:"t_ms"`
 }
 
-func fileInboxItemToPassage(store *inboxStore, ps *passageStore, docs *documentStore, lib *inboxLibrary, req inboxPassageRequest) (inboxResult, error) {
+func fileInboxItemToPassage(store *inboxStore, ps *passageStore, lib *inboxLibrary, req inboxPassageRequest) (inboxResult, error) {
 	return withClaimedInboxItem(store, req.ID, func(it inboxItem) (inboxResult, error) {
 		title := strings.TrimSpace(req.Title)
 		if n := utf8.RuneCountInString(title); n == 0 || n > signTitleMax {
@@ -931,33 +998,36 @@ func fileInboxItemToPassage(store *inboxStore, ps *passageStore, docs *documentS
 		if err != nil {
 			return inboxResult{}, err
 		}
-		doc, created, err := lib.copy(it, &folder, "", nil)
-		if err != nil {
-			return inboxResult{}, err
-		}
-		if !created {
+		// The sign is made in the copy's link step, under the content lock, so a
+		// sign that fails undoes only a document this request just made, and one
+		// another request linked to meanwhile cannot be deleted from under it.
+		var sign replaySign
+		alreadySigned := false
+		doc, _, err := lib.copy(it, &folder, "", func(documentID string) error {
 			// The library already held this photo. If a sign shows it, an earlier
 			// filing got as far as the sign and failed to clear the item: finish
 			// that, rather than make a second sign.
-			n, err := ps.SignCountForDocument(doc.ID)
+			n, err := ps.SignCountForDocument(documentID)
 			if err != nil {
-				return inboxResult{}, err
+				return err
 			}
 			if n > 0 {
-				if err := finishFiled(store, it, "a sign already uses this photo, but it could not be cleared from the Inbox; delete it there"); err != nil {
-					return inboxResult{}, err
-				}
-				// Cleared, which is what the operator asked for.
-				return inboxResult{ID: it.ID, OK: true, DocumentID: doc.ID}, nil
+				alreadySigned = true
+				return nil
 			}
-		}
-		moment := true
-		sign, err := inboxCreateSign(ps, replaySign{TMs: tMs, Title: title, DocumentID: &doc.ID, Visibility: signPassing, ShowS: signShowDef, PhotoMoment: &moment})
+			moment := true
+			sign, err = inboxCreateSign(ps, replaySign{TMs: tMs, Title: title, DocumentID: &documentID, Visibility: signPassing, ShowS: signShowDef, PhotoMoment: &moment})
+			return err
+		})
 		if err != nil {
-			if created {
-				inboxDiscardDocument(docs, doc)
-			}
 			return inboxResult{}, err
+		}
+		if alreadySigned {
+			if err := finishFiled(store, it, "a sign already uses this photo, but it could not be cleared from the Inbox; delete it there"); err != nil {
+				return inboxResult{}, err
+			}
+			// Cleared, which is what the operator asked for.
+			return inboxResult{ID: it.ID, OK: true, DocumentID: doc.ID}, nil
 		}
 		if err := finishFiled(store, it, "the sign was made, but the item could not be cleared from the Inbox; delete it there"); err != nil {
 			return inboxResult{}, err
@@ -989,7 +1059,7 @@ func fileInboxToPassageHandler(c echo.Context) error {
 		func(*body) (func(inboxPassageRequest) (inboxResult, error), error) {
 			lib := newInboxLibrary(docs)
 			return func(req inboxPassageRequest) (inboxResult, error) {
-				return fileInboxItemToPassage(store, ps, docs, lib, req)
+				return fileInboxItemToPassage(store, ps, lib, req)
 			}, nil
 		})
 }
@@ -1122,11 +1192,11 @@ func openJobDestination(docs *documentStore) photoDestination {
 		field: "job_id",
 		where: "a job",
 		check: func(id string) error {
-			job, err := docs.GetOpenJob(id)
+			status, err := docs.OpenJobStatus(id)
 			if err != nil {
 				return err
 			}
-			return requireJobOpen(job)
+			return requireJobOpen(status)
 		},
 		link:    docs.AddOpenJobPhoto,
 		linked:  docs.OpenJobPhotoIDBySHA,
@@ -1259,20 +1329,17 @@ var (
 		func(b *inboxJobBody) (string, []inboxPhotoRequest) { return b.JobID, b.Items })
 )
 
-// ── GET /api/inbox/suggested-titles ──────────────────────────────────────
+// ── POST /api/inbox/suggested-titles ─────────────────────────────────────
 
-// inboxPlaceCell is a position rounded to about 100 m, so a burst of shots in
-// one spot makes one place lookup.
-type inboxPlaceCell struct{ lat, lon int64 }
-
-type inboxPlaceAsk struct {
-	lat, lon float64 // the first item's own position in the cell
-	ids      []string
-}
-
-// inboxSuggestedTitlesHandler answers ?ids=a,b with the nearest named place
-// to the boat at each item's capture time, or "" when the item has no time,
-// the track has nothing near it, or nothing is named there.
+// inboxSuggestedTitlesHandler answers {"ids": [...]} with a suggested title for
+// each item (see inboxTitleBuilder for how it is made), or "" when the item has
+// no time, the track has nothing near it, or nothing is named there. A title
+// that could not be made is in "errors", keyed by item, with the reason. It is a
+// POST at write tier because, with Mate set up, it makes paid calls and keeps
+// the titles it makes.
+//
+// When Mate's settings cannot be read the titles are the place or sector ones,
+// and "mate_error" says so; the operator is told, nothing is swapped quietly.
 func inboxSuggestedTitlesHandler(c echo.Context) error {
 	store, ok := inboxStoreOrError(c)
 	if !ok {
@@ -1282,9 +1349,15 @@ func inboxSuggestedTitlesHandler(c echo.Context) error {
 	if !ok {
 		return nil
 	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
+		return err
+	}
 	titles := map[string]string{}
 	var ids []string
-	for _, id := range strings.Split(c.QueryParam("ids"), ",") {
+	for _, id := range body.IDs {
 		if id = strings.TrimSpace(id); id == "" {
 			continue
 		}
@@ -1311,96 +1384,69 @@ func inboxSuggestedTitlesHandler(c echo.Context) error {
 	if err != nil {
 		return inboxRespond(c, err)
 	}
-	cells := map[inboxPlaceCell]*inboxPlaceAsk{}
-	var asks []*inboxPlaceAsk
+	// Settings that cannot be read must not fail every title: the rows fall back
+	// to the no-Mate path and the operator is told once.
+	mateError := ""
+	var mate *inboxMateSession
+	if sess, mateOn, err := globalInboxMate.session(); err != nil {
+		log.Printf("inbox: %v", err)
+		mateError = "Mate's settings couldn't be read; these are place-name titles"
+	} else if mateOn {
+		mate = &sess
+	}
+
+	builder := newInboxTitleBuilder(mate, inboxFeatures, store)
 	for _, it := range found {
 		if it.CaptureMs == nil {
 			continue
 		}
-		pt := track.at(*it.CaptureMs)
-		if pt == nil {
-			continue
+		if pt := track.at(*it.CaptureMs); pt != nil {
+			builder.add(it, pt)
 		}
-		cell := inboxPlaceCell{int64(math.Round(pt.Lat * 1000)), int64(math.Round(pt.Lon * 1000))}
-		ask, seen := cells[cell]
-		if !seen {
-			ask = &inboxPlaceAsk{lat: pt.Lat, lon: pt.Lon}
-			cells[cell] = ask
-			asks = append(asks, ask)
-		}
-		ask.ids = append(ask.ids, it.ID)
 	}
 
-	// The place lookups can be slow (a public Overpass server may time out), so
-	// run a few at once and stop waiting at the deadline. A title still
-	// outstanding then is left blank for the operator to type; the request does
-	// not fail. A lookup cannot be cancelled, so one that outlives the handler
-	// finds the result closed and writes nothing.
-	lookupPlace, deadline := inboxPlaceLookup, inboxTitleDeadline
-	ctx, cancel := context.WithTimeout(c.Request().Context(), deadline)
-	defer cancel()
-	var mu sync.Mutex
-	closed := false
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-		sem := make(chan struct{}, inboxTitleWorkers)
-		var wg sync.WaitGroup
-		defer wg.Wait()
-		for _, ask := range asks {
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				name := joinTitle(lookupPlace(ask.lat, ask.lon))
-				mu.Lock()
-				defer mu.Unlock()
-				if closed {
-					return
-				}
-				for _, id := range ask.ids {
-					titles[id] = name
-				}
-			}()
-		}
-	}()
-	select {
-	case <-finished:
-	case <-ctx.Done():
-		log.Printf("inbox: place names not all found within %s; the rest are left blank", deadline)
+	made, failures := runInboxTitleTasks(c.Request().Context(), builder.tasks)
+	maps.Copy(titles, made)
+	out := map[string]any{"titles": titles, "errors": failures}
+	if mateError != "" {
+		out["mate_error"] = mateError
 	}
-	mu.Lock()
-	closed = true
-	out := maps.Clone(titles)
-	mu.Unlock()
-	return c.JSON(http.StatusOK, map[string]any{"titles": out})
+	return c.JSON(http.StatusOK, out)
 }
 
-const inboxTitleWorkers = 4
-
-// inboxTitleDeadline is how long the title request waits for place names. A var for tests.
-var inboxTitleDeadline = 8 * time.Second
+// passagePhotosFolderHandler is POST /api/passage-photos-folder: the "Passage
+// photos" folder every photo sign is kept in, found or made. The Inbox and the
+// Replay sign editor both go through it, so the folder has one rule (ADR 0283).
+func passagePhotosFolderHandler(c echo.Context) error {
+	docs, err := requireDocumentStore("passage photos folder")
+	if err != nil {
+		return inboxError(c, http.StatusServiceUnavailable, err.Error())
+	}
+	folder, err := docs.FindOrCreateRootFolder(passagePhotosFolderName)
+	if err != nil {
+		return inboxRespond(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"id": folder.ID, "name": folder.Name})
+}
 
 // inboxRoutes returns the /api routes for the Inbox, each with its auth tier.
 func inboxRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/inbox", tierRead, listInboxHandler},
 		{http.MethodGet, "/api/inbox/count", tierRead, inboxCountHandler},
-		{http.MethodGet, "/api/inbox/suggested-titles", tierRead, inboxSuggestedTitlesHandler},
 		{http.MethodGet, "/api/inbox/:id/content", tierRead, inboxContentHandler},
 		{http.MethodGet, "/api/inbox/:id/thumb", tierRead, inboxThumbHandler},
 		// A POST that only reads: the hashes are too many for a query string.
 		{http.MethodPost, "/api/inbox/known", tierRead, inboxKnownHandler},
+		// Write tier: with Mate set up it makes paid calls and keeps the titles.
+		{http.MethodPost, "/api/inbox/suggested-titles", tierWrite, inboxSuggestedTitlesHandler},
 		{http.MethodPost, "/api/inbox", tierWrite, uploadInboxHandler},
 		{http.MethodPost, "/api/inbox/bin", tierWrite, binInboxHandler},
+		{http.MethodPost, "/api/inbox/sort-again", tierWrite, inboxSortAgainHandler},
 		{http.MethodPost, "/api/inbox/file-to-passage", tierWrite, fileInboxToPassageHandler},
 		{http.MethodPost, "/api/inbox/file-to-documents", tierWrite, fileInboxToDocumentsHandler},
 		{http.MethodPost, "/api/inbox/file-to-equipment", tierWrite, fileInboxToEquipmentHandler},
 		{http.MethodPost, "/api/inbox/file-to-open-job", tierWrite, fileInboxToOpenJobHandler},
+		{http.MethodPost, "/api/passage-photos-folder", tierWrite, passagePhotosFolderHandler},
 	}
 }

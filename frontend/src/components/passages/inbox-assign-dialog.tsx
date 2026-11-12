@@ -15,17 +15,23 @@ import { SIGN_TITLE_MAX } from '@/lib/replay-signs'
 export interface InboxAssignDialogProps {
   items: InboxItem[]
   passages: PassageSummary[]
+  /** Mate is set up, so the suggested titles are its own and take longer. */
+  mateTitles?: boolean
   onClose: () => void
 }
 
 // "Add to passage": an editable list of titles, one per photo, before any sign
-// is made. Titles start as the nearest named place to the boat when the photo
-// was taken, or blank. A photo that is not on a passage is pinned to the start
+// is made. Titles start as Mate's when it is set up, else the nearest named
+// place to the boat when the photo was taken, or blank. A title that could not
+// be made says why beside its row. A photo that is not on a passage is pinned to the start
 // or end of a passage the operator picks (the nearest one to begin with).
 // Mounted only while open, so each opening starts from the photos then selected.
-export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialogProps) {
+export function InboxAssignDialog({ items, passages, mateTitles = false, onClose }: InboxAssignDialogProps) {
   const [rows, setRows] = useState<AssignRow[]>(() => initialAssignRows(items, {}, passages))
   const [titlesState, setTitlesState] = useState<'loading' | 'ready' | string>('loading')
+  const [titleErrors, setTitleErrors] = useState<Readonly<Record<string, string>>>({})
+  // Set when Mate's settings could not be read, so the titles below are place names.
+  const [mateNotice, setMateNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [failures, setFailures] = useState<Record<string, string>>({})
   const options = useMemo(() => placementOptions(passages), [passages])
@@ -33,8 +39,10 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
   useEffect(() => {
     let cancelled = false
     inboxApi.suggestedTitles(items.map((i) => i.id)).then(
-      (titles) => {
+      ({ titles, errors, mateError }) => {
         if (cancelled) return
+        setTitleErrors(errors)
+        setMateNotice(mateError ?? null)
         // Only blank titles take a suggestion, so nothing the operator has typed is lost.
         const suggested = initialAssignRows(items, titles, passages)
         // By id: rows may have shrunk since the lookup began.
@@ -92,10 +100,15 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
             Each photo becomes a sign at the moment it was taken, shown full frame in the replay. Check the titles; each needs one.
           </DialogDescription>
         </DialogHeader>
-        {titlesState === 'loading' && <p role="status" className="text-xs text-muted-foreground">Looking up place names…</p>}
-        {titlesState !== 'loading' && titlesState !== 'ready' && (
-          <p role="alert" className="text-xs text-destructive">Could not look up place names: {titlesState}. Type the titles yourself.</p>
+        {titlesState === 'loading' && (
+          <p role="status" className="text-xs text-muted-foreground">{mateTitles ? 'Mate is writing titles…' : 'Looking up place names…'}</p>
         )}
+        {titlesState !== 'loading' && titlesState !== 'ready' && (
+          <p role="alert" className="text-xs text-destructive">
+            Could not {mateTitles ? 'get titles from Mate' : 'look up place names'}: {titlesState}. Type the titles yourself.
+          </p>
+        )}
+        {mateNotice && <p className="text-xs text-muted-foreground" data-testid="inbox-titles-mate-error">{mateNotice}</p>}
         <ul className="flex flex-col gap-3">
           {rows.map((row, i) => {
             const problem = problems[i]
@@ -131,6 +144,8 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
                   )}
                   {error ? (
                     <p role="alert" className="text-xs text-destructive">{error}</p>
+                  ) : titleErrors[row.item.id] && row.title === '' ? (
+                    <p className="text-xs text-destructive">{titleErrors[row.item.id]}</p>
                   ) : problem && row.title !== '' ? (
                     <p className="text-xs text-muted-foreground">{problem}</p>
                   ) : null}

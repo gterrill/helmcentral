@@ -40,6 +40,15 @@ func updateSecretsSettingsHandler(c echo.Context) error {
 		}
 	}
 
+	// The Inbox's Mate sorting depends on this key; a save that leaves it as it
+	// was does not restart the failed sorts. A key that cannot be read counts as
+	// changed.
+	keyChanged := false
+	if value, sent := req["OPENROUTER_API_KEY"]; sent {
+		before, _, err := globalSecretsStore.Get("OPENROUTER_API_KEY")
+		keyChanged = err != nil || before != value
+	}
+
 	for key, value := range req {
 		if err := globalSecretsStore.Set(key, value); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save secret"})
@@ -59,6 +68,9 @@ func updateSecretsSettingsHandler(c echo.Context) error {
 	// after either save means whichever lands last finds Mate ready. In the
 	// background for the same reason updateSettingsHandler's call is.
 	sweepDocumentsInBackground()
+	if keyChanged {
+		inboxMateSettingsChanged()
+	}
 	return c.JSON(http.StatusOK, state)
 }
 

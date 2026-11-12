@@ -71,6 +71,20 @@ type inboxItem struct {
 	SourceSHA256 string
 	// HasThumb says a small preview is stored beside the file.
 	HasThumb bool
+	// SuggestedKind is what Mate made of the photo: scenery, document or
+	// equipment. Empty until Mate has looked, and for good when it is not set up.
+	SuggestedKind string
+	// ClassifyError is the plain line recorded when Mate could not tell; the
+	// cause is in the log. Every failure is tried again by itself (NextTryMs).
+	ClassifyError string
+	// ClassifyAttempts counts the failures since Mate last answered.
+	ClassifyAttempts int
+	// NextTryMs is when a failed sort is tried again, Unix ms; 0 for an item
+	// that has not failed.
+	NextTryMs int64
+	// SuggestedTitle is the title Mate made for the photo, kept so it is not
+	// paid for twice. Empty until Mate has made one.
+	SuggestedTitle string
 }
 
 type inboxStore struct {
@@ -110,8 +124,24 @@ func createInboxSchema(db *sql.DB) error {
 		created_ms INTEGER NOT NULL,
 		source_sha256 TEXT NOT NULL DEFAULT '',
 		has_thumb INTEGER NOT NULL DEFAULT 0,
-		filing_ms INTEGER
+		filing_ms INTEGER,
+		suggested_kind TEXT,
+		classify_error TEXT NOT NULL DEFAULT '',
+		classify_attempts INTEGER NOT NULL DEFAULT 0,
+		next_try_ms INTEGER NOT NULL DEFAULT 0,
+		suggested_title TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
+		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	if err := addInboxMateColumns(db); err != nil {
+		return err
+	}
+	// The classifier reads only the items Mate has not sorted; this keeps that
+	// read short however many sorted items the Inbox holds.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_inbox_items_pending`); err != nil {
+		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_inbox_items_unsorted ON inbox_items(created_ms, id) WHERE suggested_kind IS NULL`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_inbox_items_capture ON inbox_items(capture_ms)`); err != nil {
@@ -125,6 +155,46 @@ func createInboxSchema(db *sql.DB) error {
 		source_sha256 TEXT PRIMARY KEY
 	)`); err != nil {
 		return fmt.Errorf("create inbox schema: %w", err)
+	}
+	return nil
+}
+
+// addInboxMateColumns upgrades an inbox_items table made before Mate sorting
+// (ADR 0283). It is a no-op on a table that already has them.
+func addInboxMateColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(inbox_items)`)
+	if err != nil {
+		return fmt.Errorf("inspect inbox_items: %w", err)
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect inbox_items: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspect inbox_items: %w", err)
+	}
+	rows.Close()
+	for _, col := range []struct{ name, ddl string }{
+		{"suggested_kind", `suggested_kind TEXT`},
+		{"classify_error", `classify_error TEXT NOT NULL DEFAULT ''`},
+		{"classify_attempts", `classify_attempts INTEGER NOT NULL DEFAULT 0`},
+		{"next_try_ms", `next_try_ms INTEGER NOT NULL DEFAULT 0`},
+		{"suggested_title", `suggested_title TEXT NOT NULL DEFAULT ''`},
+	} {
+		if have[col.name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE inbox_items ADD COLUMN ` + col.ddl); err != nil {
+			return fmt.Errorf("add inbox_items.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }
@@ -230,17 +300,19 @@ func (s *inboxStore) Release(id string, token int64) error {
 	return nil
 }
 
-const inboxColumns = `id, sha256, filename, mime, size_bytes, capture_ms, bearing_deg, phone_lat, phone_lon, fingerprint, sharpness, created_ms, source_sha256, has_thumb`
+const inboxColumns = `id, sha256, filename, mime, size_bytes, capture_ms, bearing_deg, phone_lat, phone_lon, fingerprint, sharpness, created_ms, source_sha256, has_thumb, suggested_kind, classify_error, classify_attempts, next_try_ms, suggested_title`
 
 func scanInboxItem(row interface{ Scan(...any) error }) (inboxItem, error) {
 	var it inboxItem
 	var capture sql.NullInt64
 	var bearing, lat, lon sql.NullFloat64
+	var kind sql.NullString
 	var thumb int
 	if err := row.Scan(&it.ID, &it.SHA256, &it.Filename, &it.MIME, &it.SizeBytes, &capture, &bearing, &lat, &lon,
-		&it.Fingerprint, &it.Sharpness, &it.CreatedMs, &it.SourceSHA256, &thumb); err != nil {
+		&it.Fingerprint, &it.Sharpness, &it.CreatedMs, &it.SourceSHA256, &thumb, &kind, &it.ClassifyError, &it.ClassifyAttempts, &it.NextTryMs, &it.SuggestedTitle); err != nil {
 		return it, err
 	}
+	it.SuggestedKind = kind.String
 	if capture.Valid {
 		v := capture.Int64
 		it.CaptureMs = &v
@@ -259,7 +331,7 @@ func (s *inboxStore) Insert(it inboxItem) (inboxItem, error) {
 		return existing, errInboxDuplicate
 	}
 	it.ID, it.CreatedMs = uuid.NewString(), time.Now().UnixMilli()
-	_, err := s.db.Exec(`INSERT INTO inbox_items (`+inboxColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO inbox_items (`+inboxColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'',0,0,'')`,
 		it.ID, it.SHA256, it.Filename, it.MIME, it.SizeBytes, nullInt64(it.CaptureMs),
 		nullFloat(it.BearingDeg), nullFloat(it.PhoneLat), nullFloat(it.PhoneLon), it.Fingerprint, it.Sharpness, it.CreatedMs,
 		it.SourceSHA256, boolToInt(it.HasThumb))
@@ -332,6 +404,90 @@ func (s *inboxStore) List() ([]inboxItem, error) {
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// inboxCursor is a place in arrival order: the next page starts after it, so a
+// pass always moves on whatever happened to the items it has been through.
+type inboxCursor struct {
+	createdMs int64
+	id        string
+}
+
+// Unclassified returns the first page of items Mate should look at now.
+func (s *inboxStore) Unclassified() ([]inboxItem, error) {
+	return s.UnclassifiedAfter(time.Now(), inboxCursor{})
+}
+
+// UnclassifiedAfter returns one page of inboxClassifyPage items that come after
+// the cursor in arrival order and that Mate should look at at now: no kind yet,
+// and either no recorded failure or one whose retry has come due.
+func (s *inboxStore) UnclassifiedAfter(now time.Time, after inboxCursor) ([]inboxItem, error) {
+	rows, err := s.db.Query(`SELECT `+inboxColumns+` FROM inbox_items
+		WHERE suggested_kind IS NULL
+		  AND (classify_error = '' OR next_try_ms <= ?)
+		  AND (created_ms > ? OR (created_ms = ? AND id > ?))
+		ORDER BY created_ms, id LIMIT ?`,
+		now.UnixMilli(), after.createdMs, after.createdMs, after.id, inboxClassifyPage)
+	if err != nil {
+		return nil, fmt.Errorf("list unclassified inbox items: %w", err)
+	}
+	defer rows.Close()
+	var out []inboxItem
+	for rows.Next() {
+		it, err := scanInboxItem(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan inbox item: %w", err)
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// SetSuggestedKind records what Mate made of an item and clears any earlier
+// failure. An item gone since (filed or deleted) is left alone, not an error.
+func (s *inboxStore) SetSuggestedKind(id, kind string) error {
+	if _, err := s.db.Exec(`UPDATE inbox_items SET suggested_kind = ?, classify_error = '', classify_attempts = 0, next_try_ms = 0 WHERE id = ?`, kind, id); err != nil {
+		return fmt.Errorf("record suggested kind: %w", err)
+	}
+	return nil
+}
+
+// SetClassifyRetry records a failed sort: the notice to show, how many times the
+// item has failed, and when to try it again.
+func (s *inboxStore) SetClassifyRetry(id, msg string, attempts int, nextTryMs int64) error {
+	if _, err := s.db.Exec(`UPDATE inbox_items SET classify_error = ?, classify_attempts = ?, next_try_ms = ? WHERE id = ?`, msg, attempts, nextTryMs, id); err != nil {
+		return fmt.Errorf("record classify retry: %w", err)
+	}
+	return nil
+}
+
+// NextRetryMs is the earliest time a failed sort comes due, or 0 when no item is
+// waiting to be retried.
+func (s *inboxStore) NextRetryMs() (int64, error) {
+	var next sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MIN(next_try_ms) FROM inbox_items WHERE suggested_kind IS NULL AND next_try_ms > 0`).Scan(&next); err != nil {
+		return 0, fmt.Errorf("find the next Mate retry: %w", err)
+	}
+	return next.Int64, nil
+}
+
+// RequeueFailed clears every recorded sorting failure and its back-off, so Mate
+// looks at those items again now, and says how many there were.
+func (s *inboxStore) RequeueFailed() (int, error) {
+	res, err := s.db.Exec(`UPDATE inbox_items SET classify_error = '', classify_attempts = 0, next_try_ms = 0 WHERE suggested_kind IS NULL AND classify_error != ''`)
+	if err != nil {
+		return 0, fmt.Errorf("requeue failed inbox items: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// SetSuggestedTitle keeps the title Mate made for an item.
+func (s *inboxStore) SetSuggestedTitle(id, title string) error {
+	if _, err := s.db.Exec(`UPDATE inbox_items SET suggested_title = ? WHERE id = ?`, title, id); err != nil {
+		return fmt.Errorf("record suggested title: %w", err)
+	}
+	return nil
 }
 
 func (s *inboxStore) Count() (int, error) {

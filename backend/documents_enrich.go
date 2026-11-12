@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -312,7 +311,7 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document, ex
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	resp, err := openRouterChatCompletionOnce(callCtx, idx.doer, apiKey, req)
+	resp, message, err := openRouterFirstChoice(callCtx, idx.doer, apiKey, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			// The outer context is what ended, not idx.ocrTimeout/
@@ -325,10 +324,6 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document, ex
 		}
 		return idx.failDoc(doc.ID, err.Error())
 	}
-	if len(resp.Choices) == 0 {
-		return idx.failDoc(doc.ID, "openrouter returned no choices")
-	}
-	message := resp.Choices[0].Message
 
 	// Record the cost and the model as soon as the response comes back -
 	// before anything that can still fail (the JSON parse, the OCR switch,
@@ -359,7 +354,7 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document, ex
 
 	var reply documentEnrichReply
 	raw := string(message.Content)
-	if err := json.Unmarshal([]byte(stripDocumentEnrichJSONFence(raw)), &reply); err != nil {
+	if err := decodeModelJSON(raw, &reply); err != nil {
 		return idx.failDoc(doc.ID, "invalid JSON reply: "+truncateRunes(raw, 200))
 	}
 
@@ -463,11 +458,5 @@ func (idx *documentIndexer) buildImageRequest(doc document) ([]openRouterContent
 	if err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("read document file for OCR: %w", err)
 	}
-	dataURL := "data:" + doc.MIME + ";base64," + base64.StdEncoding.EncodeToString(raw)
-
-	blocks := []openRouterContentBlock{
-		{Type: "text", Text: documentEnrichImagePrompt},
-		{Type: "image_url", ImageURL: &openRouterImageURLBlock{URL: dataURL}},
-	}
-	return blocks, nil, idx.enrichTimeout, enrichKindImageOCR, nil
+	return openRouterImageBlocks(documentEnrichImagePrompt, doc.MIME, raw), nil, idx.enrichTimeout, enrichKindImageOCR, nil
 }

@@ -73,7 +73,45 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   stays in the Inbox, and if you marked both, Helmcentral says how many files
   stayed.
 
+- **Mate sorts the Inbox and writes the titles.** If Mate is set up, it looks at
+  each photo as it arrives and suggests whether it's scenery, a document or
+  equipment. The Inbox then gathers them into **Documents**, **Equipment** and
+  **Unsorted** groups, beside the passages. Nothing is filed for you, and every
+  button still works on every group. When you tap **Add to passage**, Mate also
+  writes each title from the photo, the boat's course over ground and the five
+  nearest named islands and bays. It names a place only if the photo shows it,
+  and a title it has written is kept, even across a restart. If Mate can't sort a
+  photo or write a title, or runs out of time on one photo, the Inbox says why
+  instead of quietly doing something else. When Mate can't sort a photo, for any
+  reason, the photo says "Mate couldn't sort this yet" and the time Mate will try
+  again. It tries after 1 minute, then 5, then 30, then every hour. If Mate is
+  switched off, the photo says so instead of promising a try. Changing the
+  assistant switch, the document model or the OpenRouter key sends every failed
+  photo back for another try at once, and a **Sort again** button does the same
+  whenever you like. Switching Mate off, or changing its model or key, also takes
+  effect part-way through a batch that is being sorted. If Mate's settings can't be
+  read when you ask for titles, you still get place-name titles, with a line
+  saying so. When Mate writes a title, the island or bay the photo faced is
+  always among the places it's shown. Photos that were waiting while Mate was off are
+  sorted as soon as you turn it on. Mate writes titles for up to 20 photos at a
+  time. Each photo is sent to your document model, so it costs a little, and only
+  when Mate is set up. If it isn't, nothing changes.
+
+- **Photos that carry a direction get a better title without Mate.** When the
+  phone recorded which way it faced, the suggested title is now the nearest named
+  island or bay within 25 degrees of that direction, out to 10 nautical miles. If
+  there's none, it's the nearest named place, as before. In a crowded
+  archipelago, where the list of places can be cut short, the row says so and is
+  left empty instead of guessing.
+
 ### Changed
+
+- **Uploading a photo in the Replay sign editor shrinks big ones, and takes HEIC.**
+  A photo longer than 2560 pixels or larger than about 4 MB is shrunk on your
+  device, as in the Inbox, and sent as a JPEG. A smaller PNG, GIF, JPEG or WebP
+  goes as it is. An iPhone's HEIC or HEIF photos now work too. The editor turns away a
+  file that isn't a photo. The time the photo was taken is still read from the
+  original. Photos you pick from Documents are used as they are.
 
 - **Equipment search now matches each word you type, and also looks in the zone.**
   Typing "Volvo Penta D2-40" or "engine room" finds the item, because every

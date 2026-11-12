@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { INBOX_MAX_DIMENSION, INBOX_THUMB_DIMENSION, processInboxImage } from '@/lib/inbox-image'
+import { UPLOAD_MAX_DIMENSION } from '@/lib/image-downscale'
+import { INBOX_THUMB_DIMENSION, processInboxImage } from '@/lib/inbox-image'
 
 // createImageBitmap and canvas are not in jsdom, so they are stubbed: this pins
 // how many times the photo is decoded and what is drawn from that one decode.
@@ -27,7 +28,7 @@ describe('processInboxImage', () => {
 
     expect(createImageBitmap).toHaveBeenCalledTimes(1)
     expect(close).toHaveBeenCalledTimes(1)
-    expect(INBOX_MAX_DIMENSION).toBe(2560)
+    expect(UPLOAD_MAX_DIMENSION).toBe(2560)
     expect(INBOX_THUMB_DIMENSION).toBe(400)
     expect(draws).toContainEqual([2560, 1920])
     expect(draws).toContainEqual([400, 300])

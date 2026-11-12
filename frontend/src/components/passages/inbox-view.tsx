@@ -13,7 +13,7 @@ import { useLocalStorageId } from '@/hooks/use-local-storage-id'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { errorMessage } from '@/lib/errors'
 import { filingOutcome, inboxApi, inboxPreviewUrl, isPhotoItem, plural, type InboxFilingResult, type InboxItem } from '@/lib/inbox-api'
-import { findBlurry, findDuplicates, groupInbox } from '@/lib/inbox-groups'
+import { findBlurry, findDuplicates, groupInbox, isUnsortedByMate, itemCanAssign, type InboxGroup } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { cn } from '@/lib/utils'
 import { formatTimeOrDayTime, selectTimeZone } from '@/lib/vessel-time'
@@ -53,6 +53,41 @@ const photoDestinations: Record<PhotoDestinationKind, PhotoDestination> = {
   },
 }
 
+// What a group Mate fills says it is for. The group sets where the photos go by
+// default; every button still works on them.
+// Photos taken underway cannot go on a passage until it is recorded, wherever
+// Mate has put them, so the hint offers a passage only for the items that can.
+const GROUP_HINTS: Partial<Record<InboxGroup['kind'], { lead: string; passage: string }>> = {
+  documents: { lead: 'Mate took these for receipts and paperwork. Send them to Documents', passage: 'add any of them to a passage' },
+  equipment: { lead: 'Mate took these for pictures of gear. Add them to an equipment item or a job', passage: 'to a passage' },
+}
+
+const UNDERWAY_WAIT = 'once the passage is recorded'
+
+function groupHint(group: InboxGroup): string | null {
+  if (group.kind === 'unsorted') return 'Mate has not sorted these, and they were not taken on a passage. Mark them and send them where they go.'
+  const hint = GROUP_HINTS[group.kind]
+  if (!hint) return null
+  const ready = group.items.filter(itemCanAssign).length
+  if (ready === group.items.length) return `${hint.lead}, or ${hint.passage}.`
+  if (ready === 0) return `${hint.lead}. Photos taken underway can be added to a passage ${UNDERWAY_WAIT}.`
+  return `${hint.lead}, or ${hint.passage} (not the ones taken underway, which wait until the passage is recorded).`
+}
+
+/**
+ * What to say beside an item Mate has not sorted: that it has not looked, or the line the box sent for a failure, which says when Mate tries again.
+ * That line was true when the box wrote it, so it is checked against now: a try time that has passed becomes "shortly", and a Mate that has been switched off since promises nothing.
+ * Mate's settings being unreadable is not the same as off, so the box's line stands then.
+ */
+function mateNote(item: InboxItem, mateSorting: boolean, mateUnknown: boolean, nowMs: number): string | null {
+  if (item.classify_error) {
+    if (!mateSorting && !mateUnknown) return "Mate couldn't sort this. Mate is off"
+    if (item.next_try_ms && item.next_try_ms <= nowMs) return "Mate couldn't sort this yet. Trying again shortly"
+    return item.classify_error
+  }
+  return isUnsortedByMate(item, mateSorting) ? 'Mate has not looked at this yet' : null
+}
+
 const MISMATCH_TEXT =
   "The phone's own position was more than a nautical mile from the boat's track when this was taken. The phone's clock or time zone may be wrong, so the time may not match the track."
 
@@ -85,10 +120,9 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
   const { folders, loading: foldersLoading } = useDocumentFolderTree()
   const rememberedFolder = lastFolder !== null && folders.some((f) => f.id === lastFolder) ? lastFolder : null
 
-  const groups = useMemo(() => groupInbox(inbox.items, passages), [inbox.items, passages])
+  const groups = useMemo(() => groupInbox(inbox.items, passages, inbox.mateSorting), [inbox.items, passages, inbox.mateSorting])
   const duplicates = useMemo(() => findDuplicates(inbox.items), [inbox.items])
   const blurry = useMemo(() => findBlurry(inbox.items), [inbox.items])
-  const groupOf = useMemo(() => new Map(groups.flatMap((g) => g.items.map((i) => [i.id, g] as const))), [groups])
 
   // Marks only count for items still here: a filed or deleted one has gone.
   const selected = useMemo(() => inbox.items.filter((i) => marked.has(i.id)), [inbox.items, marked])
@@ -115,7 +149,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
   const cannotAssign =
     selected.length === 0 ? 'Mark some photos first'
     : selected.some((i) => !i.mime.startsWith('image/')) ? 'Only photos can be signs'
-    : selected.some((i) => groupOf.get(i.id)?.canAssign === false) ? 'Photos taken underway can be added once the passage is recorded'
+    : selected.some((i) => !itemCanAssign(i)) ? 'Photos taken underway can be added once the passage is recorded'
     : passages.length === 0 ? 'There is no recorded passage to add them to'
     : null
 
@@ -212,6 +246,19 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
     }
   }
 
+  // Clears what Mate failed on and has it look again; the list refreshes as it works.
+  const sortAgain = async () => {
+    setBusy(true)
+    try {
+      const n = await inboxApi.sortAgain()
+      toast.success(n === 0 ? 'Nothing was waiting to be sorted again' : `Mate is looking at ${plural(n, 'photo')} again`)
+    } catch (err) {
+      toast.error('Could not ask Mate to sort again', { description: errorMessage(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const toolbar = canWrite && inbox.items.length > 0 && (
     <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Inbox actions">
       <span className="text-sm tabular-nums text-muted-foreground" role="status">
@@ -265,6 +312,13 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
           action={canWrite ? <Button type="button" variant="outline" onClick={onOpenUpload}>Share photos</Button> : undefined}
         />
       )}
+      {inbox.mateError && <p className="text-sm text-muted-foreground" data-testid="inbox-mate-error">{inbox.mateError}</p>}
+      {canWrite && inbox.items.some((i) => i.classify_error) && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          Mate could not sort some of these.
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void sortAgain()}>Sort again</Button>
+        </div>
+      )}
       {toolbar}
       <div className="flex flex-col gap-6">
         {groups.map((group) => (
@@ -284,12 +338,14 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
                 The passage is recorded once it ends. You can delete from this group now, and add the rest to the passage afterwards.
               </p>
             )}
+            {groupHint(group) && <p className="text-xs text-muted-foreground">{groupHint(group)}</p>}
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2">
               {group.items.map((item) => {
                 const isMarked = marked.has(item.id)
                 const dup = duplicates.get(item.id)
                 const soft = blurry.has(item.id)
                 const when = item.capture_ms !== null ? formatTimeOrDayTime(item.capture_ms, timeZone) : null
+                const note = mateNote(item, inbox.mateSorting, inbox.mateError !== null, Date.now())
                 return (
                   <li key={item.id} className="min-w-0">
                     <button
@@ -341,6 +397,9 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
                         </span>
                       )}
                     </button>
+                    {note && (
+                      <p className="mt-1 line-clamp-3 break-words text-xs text-muted-foreground">{note}</p>
+                    )}
                     {reasons[item.id] && <p className="mt-1 line-clamp-3 break-words text-xs text-destructive">{reasons[item.id]}</p>}
                   </li>
                 )
@@ -350,7 +409,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         ))}
       </div>
 
-      {dialog === 'passage' && <InboxAssignDialog items={selected} passages={passages} onClose={() => setDialog(null)} />}
+      {dialog === 'passage' && <InboxAssignDialog items={selected} passages={passages} mateTitles={inbox.mateSorting} onClose={() => setDialog(null)} />}
       <FolderPickerDialog
         open={dialog === 'documents' && !foldersLoading}
         onOpenChange={(open) => { if (!open) setDialog(null) }}

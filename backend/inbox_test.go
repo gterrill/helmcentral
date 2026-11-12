@@ -694,7 +694,7 @@ func TestInboxSuggestedTitlesNameTheNearestPlaceAtCaptureTime(t *testing.T) {
 	noTrack := uploadForFiling(t, 111, map[string]string{"capture_ms": ms(passageEpoch.Add(-48 * time.Hour))})
 	noTime := uploadForFiling(t, 112, nil)
 
-	code, body := getJSON(t, inboxSuggestedTitlesHandler, "/api/inbox/suggested-titles?ids="+withTrack+","+noTrack+","+noTime, "")
+	code, body := send(t, inboxSuggestedTitlesHandler, http.MethodPost, `{"ids":["`+withTrack+`","`+noTrack+`","`+noTime+`"]}`)
 	if code != 200 {
 		t.Fatal(code, body)
 	}
@@ -715,7 +715,7 @@ func TestInboxSuggestedTitleIsCutToTheSignLimit(t *testing.T) {
 	inboxPlaceLookup = func(float64, float64) string { return strings.Repeat("a", 200) }
 	t.Cleanup(func() { inboxPlaceLookup = prev })
 	id := uploadForFiling(t, 113, map[string]string{"capture_ms": ms(at)})
-	_, body := getJSON(t, inboxSuggestedTitlesHandler, "/api/inbox/suggested-titles?ids="+id, "")
+	_, body := send(t, inboxSuggestedTitlesHandler, http.MethodPost, `{"ids":["`+id+`"]}`)
 	if got := body["titles"].(map[string]any)[id].(string); len(got) != signTitleMax {
 		t.Errorf("len %d", len(got))
 	}
@@ -725,18 +725,21 @@ func TestInboxSuggestedTitleIsCutToTheSignLimit(t *testing.T) {
 
 func TestInboxRoutesAreAuthTiered(t *testing.T) {
 	want := map[string]apiTier{
-		"GET /api/inbox":                    tierRead,
-		"GET /api/inbox/count":              tierRead,
-		"GET /api/inbox/suggested-titles":   tierRead,
-		"GET /api/inbox/:id/content":        tierRead,
-		"GET /api/inbox/:id/thumb":          tierRead,
-		"POST /api/inbox/known":             tierRead,
+		"GET /api/inbox":             tierRead,
+		"GET /api/inbox/count":       tierRead,
+		"GET /api/inbox/:id/content": tierRead,
+		"GET /api/inbox/:id/thumb":   tierRead,
+		"POST /api/inbox/known":      tierRead,
+		// A POST at write tier: with Mate set up it makes paid calls and keeps the titles.
+		"POST /api/inbox/suggested-titles":  tierWrite,
 		"POST /api/inbox":                   tierWrite,
 		"POST /api/inbox/bin":               tierWrite,
+		"POST /api/inbox/sort-again":        tierWrite,
 		"POST /api/inbox/file-to-passage":   tierWrite,
 		"POST /api/inbox/file-to-documents": tierWrite,
 		"POST /api/inbox/file-to-equipment": tierWrite,
 		"POST /api/inbox/file-to-open-job":  tierWrite,
+		"POST /api/passage-photos-folder":   tierWrite,
 	}
 	e := echo.New()
 	for _, r := range inboxRoutes() {

@@ -139,8 +139,8 @@ func TestInboxTitlesLookUpOncePerPlace(t *testing.T) {
 	for i, off := range []time.Duration{0, 10 * time.Second, 20 * time.Second, time.Hour} {
 		ids = append(ids, uploadForFiling(t, uint8(160+i), map[string]string{"capture_ms": ms(at.Add(off))}))
 	}
-	q := "/x?ids=" + ids[0] + "," + ids[1] + "," + ids[2] + "," + ids[3] + "," + ids[0]
-	code, body := getJSON(t, inboxSuggestedTitlesHandler, q, "")
+	q := `{"ids":["` + ids[0] + `","` + ids[1] + `","` + ids[2] + `","` + ids[3] + `","` + ids[0] + `"]}`
+	code, body := send(t, inboxSuggestedTitlesHandler, http.MethodPost, q)
 	if code != http.StatusOK {
 		t.Fatal(code, body)
 	}

@@ -297,6 +297,22 @@ func (s *documentStore) GetOpenJob(id string) (openJob, error) {
 	return openJobByID(s.db, id)
 }
 
+// OpenJobStatus reads only a job's status, for a caller that needs to know
+// whether it is still open and not its photos.
+func (s *documentStore) OpenJobStatus(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var status string
+	err := s.db.QueryRow(`SELECT status FROM open_jobs WHERE id = ?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errOpenJobNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get open job status: %w", err)
+	}
+	return status, nil
+}
+
 func (s *documentStore) ListOpenJobs(f openJobFilter) ([]openJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,15 +341,15 @@ func openJobForClose(tx *sql.Tx, id string) (openJob, error) {
 	if err != nil {
 		return openJob{}, err
 	}
-	if err := requireJobOpen(job); err != nil {
+	if err := requireJobOpen(job.Status); err != nil {
 		return openJob{}, err
 	}
 	return job, nil
 }
 
 // requireJobOpen is the one rule that a job must still be open.
-func requireJobOpen(job openJob) error {
-	if job.Status != openJobOpen {
+func requireJobOpen(status string) error {
+	if status != openJobOpen {
 		return errOpenJobClosed
 	}
 	return nil

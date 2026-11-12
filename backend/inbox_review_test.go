@@ -92,13 +92,13 @@ func TestInboxTitlesGiveUpAtTheDeadlineAndLeaveBlanks(t *testing.T) {
 	at := passageEpoch.Add(time.Hour)
 	addTrack(t, w.passages, at, -20, 149, 4)
 	release := make(chan struct{})
-	prevL, prevD := inboxPlaceLookup, inboxTitleDeadline
+	prevL, prevD := inboxPlaceLookup, inboxPlaceTitleTimeout
 	inboxPlaceLookup = func(float64, float64) string { <-release; return "Late" }
-	inboxTitleDeadline = 50 * time.Millisecond
-	t.Cleanup(func() { close(release); inboxPlaceLookup, inboxTitleDeadline = prevL, prevD })
+	inboxPlaceTitleTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { close(release); inboxPlaceLookup, inboxPlaceTitleTimeout = prevL, prevD })
 	id := uploadForFiling(t, 123, map[string]string{"capture_ms": ms(at)})
 	start := time.Now()
-	code, body := getJSON(t, inboxSuggestedTitlesHandler, "/x?ids="+id, "")
+	code, body := send(t, inboxSuggestedTitlesHandler, http.MethodPost, `{"ids":["`+id+`"]}`)
 	if code != 200 || body["titles"].(map[string]any)[id] != "" || time.Since(start) > 2*time.Second {
 		t.Fatal(code, body, time.Since(start))
 	}

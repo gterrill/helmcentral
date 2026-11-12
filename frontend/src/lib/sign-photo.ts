@@ -1,56 +1,84 @@
 import { apiBaseUrl } from '@/config/api'
-import { apiRequest, ApiError } from '@/lib/api-query'
+import { apiRequest } from '@/lib/api-query'
 import { uploadDocument } from '@/lib/document-upload'
 import { readExifCapture, type ExifCapture } from '@/lib/exif-time'
+import { downscaleForUpload, probeJpeg, UPLOAD_MAX_DIMENSION } from '@/lib/image-downscale'
 
-// Photos for signs live in one Documents folder at the root. It is looked up
-// by name and made on first use; two uploads at once share one lookup so the
-// folder is never made twice.
+// Photos for signs live in one Documents folder at the root. The box finds or
+// makes it, so the Inbox and this editor share one rule (ADR 0283); the browser
+// no longer reads the folder tree or creates folders of its own.
 
 export const PASSAGE_PHOTOS_FOLDER = 'Passage photos'
 
-/** Accepts the picture types the documents API takes. */
+/** The picture types a photo already in the library can have and still be a sign. */
 export const SIGN_PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 export const isSignPhotoType = (mime: string) => (SIGN_PHOTO_TYPES as readonly string[]).includes(mime)
 
-interface FolderList { folders?: { id: string; name: string; parent_id?: string | null }[] }
+/**
+ * What the file picker offers: the types above and HEIC/HEIF, which the phone
+ * shrinks to JPEG before anything is sent. Phones often give a HEIC file no
+ * type, so the picker is told the extensions too.
+ */
+export const SIGN_UPLOAD_ACCEPT = [...SIGN_PHOTO_TYPES, 'image/heic', 'image/heif', '.heic', '.heif'].join(',')
 
-// The folder tree (folders only), matched by name at the root without regard
-// to capitals: the server refuses a second folder whose name matches in lower
-// case, so "Passage Photos" is the same folder.
-async function findFolder(): Promise<string | null> {
-  const { folders } = await apiRequest<FolderList>('/api/document-folders/tree')
-  const want = PASSAGE_PHOTOS_FOLDER.toLowerCase()
-  return (folders ?? []).find((f) => f.name.toLowerCase() === want && !f.parent_id)?.id ?? null
+const isHeic = (file: Pick<File, 'type' | 'name'>) => /^image\/hei[cf]$/.test(file.type) || /\.hei[cf]$/i.test(file.name)
+
+/** Whether a picked file is a picture the editor takes, by its type or, failing that, its name. */
+export const isSignUploadFile = (file: Pick<File, 'type' | 'name'>): boolean => isSignPhotoType(file.type) || isHeic(file)
+
+/** The id of the Passage photos folder, made by the box if it does not exist. */
+export async function ensurePassagePhotosFolder(): Promise<string> {
+  const { id } = await apiRequest<{ id: string }>('/api/passage-photos-folder', { method: 'POST' })
+  return id
 }
 
-let pending: Promise<string> | null = null
+/** A picture over this many bytes is shrunk even when its edges are within the limit. */
+export const SIGN_PHOTO_MAX_BYTES = 4 * 1024 * 1024
 
-export function ensurePassagePhotosFolder(): Promise<string> {
-  if (pending) return pending
-  const run = async (): Promise<string> => {
-    const found = await findFolder()
-    if (found) return found
-    try {
-      const created = await apiRequest<{ id: string }>('/api/document-folders', { method: 'POST', json: { name: PASSAGE_PHOTOS_FOLDER } })
-      return created.id
-    } catch (err) {
-      // Someone else made it between the look and the create: use theirs.
-      if (err instanceof ApiError && err.status === 409) {
-        const theirs = await findFolder()
-        if (theirs) return theirs
-      }
-      throw err
+/** The pixel size of a JPEG, PNG, GIF or WebP, read from its header; null when it cannot be told. */
+export async function probePictureSize(file: Blob): Promise<{ width: number; height: number } | null> {
+  const b = new Uint8Array(await file.slice(0, 64).arrayBuffer())
+  const text = (from: number, to: number) => String.fromCharCode(...b.slice(from, to))
+  const v = new DataView(b.buffer)
+  if (b.length >= 24 && b[0] === 0x89 && text(1, 4) === 'PNG') return { width: v.getUint32(16), height: v.getUint32(20) }
+  if (b.length >= 10 && text(0, 3) === 'GIF') return { width: v.getUint16(6, true), height: v.getUint16(8, true) }
+  if (b.length >= 30 && text(0, 4) === 'RIFF' && text(8, 12) === 'WEBP') {
+    const kind = text(12, 16)
+    if (kind === 'VP8 ') return { width: v.getUint16(26, true) & 0x3fff, height: v.getUint16(28, true) & 0x3fff }
+    if (kind === 'VP8L' && b[20] === 0x2f) {
+      return { width: 1 + (b[21] | ((b[22] & 0x3f) << 8)), height: 1 + ((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10)) }
     }
+    if (kind === 'VP8X') return { width: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), height: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) }
+    return null
   }
-  pending = run().finally(() => { pending = null })
-  return pending
+  return probeJpeg(file)
 }
 
-/** Uploads the picture into the Passage photos folder; the document id comes back. */
-export async function uploadSignPhoto(file: File): Promise<string> {
+/**
+ * Whether a picture needs shrinking before it is sent: HEIC and HEIF (which
+ * become JPEG), anything over SIGN_PHOTO_MAX_BYTES, anything longer than
+ * UPLOAD_MAX_DIMENSION px on its long edge, and anything whose size cannot be
+ * read. The rest goes as it is, so a transparent PNG or an animated GIF keeps
+ * what a JPEG would lose.
+ */
+async function needsShrinking(file: File): Promise<boolean> {
+  if (isHeic(file) || file.size > SIGN_PHOTO_MAX_BYTES) return true
+  const size = await probePictureSize(file)
+  return size === null || Math.max(size.width, size.height) > UPLOAD_MAX_DIMENSION
+}
+
+/**
+ * Uploads a sign's photo into the Passage photos folder; the document id comes
+ * back. A picture that needs shrinking (needsShrinking) is shrunk on the device
+ * first (downscaleForUpload: 2560 px on the long edge, JPEG); one that cannot be
+ * shrunk is an error: the original is never sent in its place. The capture time
+ * is read from the original by `captureOfFile`, before this runs. `downscale` is
+ * a seam for tests, as jsdom has no canvas.
+ */
+export async function uploadSignPhoto(file: File, downscale: (file: File) => Promise<File> = downscaleForUpload): Promise<string> {
+  const ready = (await needsShrinking(file)) ? await downscale(file) : file
   const folder = await ensurePassagePhotosFolder()
-  const { id } = await uploadDocument(file, file.name, undefined, folder)
+  const { id } = await uploadDocument(ready, ready.name, undefined, folder)
   return id
 }
 

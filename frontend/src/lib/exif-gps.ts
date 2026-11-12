@@ -10,7 +10,11 @@ export interface ExifGps {
   /** Degrees north, or null when the photo carries no real latitude and longitude. */
   lat: number | null
   lon: number | null
-  /** Degrees clockwise from north (true or magnetic) the phone faced, or null. */
+  /**
+   * Degrees clockwise from north the phone faced, or null. The photo says true
+   * or magnetic; a magnetic bearing is kept as it is and read as true, until
+   * something on the boat supplies the variation (ADR 0283).
+   */
   bearingDeg: number | null
 }
 
