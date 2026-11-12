@@ -314,7 +314,7 @@ func looksLikeJPEG(b []byte) bool {
 // the Inbox before), "documents", or "" when they are new.
 func inboxDuplicateWhere(store *inboxStore, docs *documentStore, sourceSHA, sha string) (string, error) {
 	if sourceSHA != "" {
-		if where, err := store.SourceWhere(sourceSHA); err != nil || where != inboxWhereNone {
+		if where, err := store.SourceWhere(sourceSHA, docs.HasSHA); err != nil || where != inboxWhereNone {
 			return where, err
 		}
 	}
@@ -476,7 +476,11 @@ func inboxKnownHandler(c echo.Context) error {
 			return inboxError(c, http.StatusBadRequest, "every hash must be 64 lowercase hex characters")
 		}
 	}
-	known, err := store.KnownSources(body.Hashes)
+	docs, err := requireDocumentStore("inbox known")
+	if err != nil {
+		return inboxError(c, http.StatusServiceUnavailable, err.Error())
+	}
+	known, err := store.KnownSources(body.Hashes, docs.HasSHA)
 	if err != nil {
 		return inboxRespond(c, err)
 	}
@@ -673,12 +677,13 @@ func inboxThumbHandler(c echo.Context) error {
 
 // removeInboxFiles deletes an item's stored file and its preview.
 func removeInboxFiles(it inboxItem) error {
+	var errs []error
 	for _, p := range []string{inboxFilePath(it.SHA256), inboxThumbPath(it.SHA256)} {
 		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove inbox file: %w", err)
+			errs = append(errs, fmt.Errorf("remove inbox file: %w", err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // removeInboxItem deletes the row, then the files, under the content's lock.
@@ -751,9 +756,10 @@ func binInboxHandler(c echo.Context) error {
 			}
 			continue
 		}
+		// The row is already gone, so a file that will not go is logged and the
+		// rest are still removed; the answer matches what left the Inbox.
 		if err := removeInboxFiles(it); err != nil {
 			log.Printf("inbox: bin %s: %v", it.ID, err)
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "could not remove every item", "deleted": len(removed)})
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"deleted": len(removed), "busy": busy})
@@ -822,7 +828,7 @@ func withClaimedInboxItem(store *inboxStore, id string, file func(it inboxItem) 
 // it is shared again; clear the item; wake the indexer. A failed clear comes
 // back as a refusal saying clearFailed.
 func finishFiled(store *inboxStore, it inboxItem, clearFailed string) error {
-	if err := store.MarkFiled(it.SourceSHA256); err != nil {
+	if err := store.MarkFiled(it.SourceSHA256, it.SHA256); err != nil {
 		log.Printf("inbox: %v", err)
 	}
 	if err := inboxRemoveItem(store, it); err != nil {

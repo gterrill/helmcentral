@@ -318,7 +318,7 @@ func TestStaticHandler_ShareWithoutWorkerReadsTheBody(t *testing.T) {
 	e := echo.New()
 	registerStaticHandlerFS(e, testDistFS())
 
-	const size = 5 << 20
+	const size = shareDrainMaxBytes
 	body := &countingReader{r: io.LimitReader(zeroReader{}, size)}
 	req := httptest.NewRequest(http.MethodPost, "/share-target", body)
 	rec := httptest.NewRecorder()
@@ -332,6 +332,30 @@ func TestStaticHandler_ShareWithoutWorkerReadsTheBody(t *testing.T) {
 	}
 	if got := rec.Header().Get("Connection"); got == "close" {
 		t.Errorf("Connection = close, want the connection kept open")
+	}
+}
+
+// The route has no auth, so what it reads for a stranger is bounded: past the
+// cap the box stops reading, still sends the redirect, and closes the
+// connection.
+func TestStaticHandler_ShareWithoutWorkerStopsReadingAtTheCap(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	const size = 50 << 20
+	body := &countingReader{r: io.LimitReader(zeroReader{}, size)}
+	req := httptest.NewRequest(http.MethodPost, "/share-target", body)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /share-target = %d, want 303", rec.Code)
+	}
+	if body.n > shareDrainMaxBytes+1 {
+		t.Errorf("read %d body bytes, want at most the %d cap", body.n, shareDrainMaxBytes)
+	}
+	if got := rec.Header().Get("Connection"); got != "close" {
+		t.Errorf("Connection = %q, want close once the body is over the cap", got)
 	}
 }
 

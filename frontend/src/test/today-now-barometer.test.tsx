@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { BarometerRow, TodayNowTile, changeSpanLabel } from '@/components/today-now-tile'
 import { BarometerSparkline } from '@/components/barometer-sparkline'
@@ -21,10 +21,11 @@ function trend(pa: number[], changePa: number | null, changeSpanS: number | null
     currentPa: pa.length ? pa[pa.length - 1] : null,
     changePa,
     changeSpanS,
+    failed: false,
   }
 }
 
-const NONE: BarometerTrendData = { points: [], currentPa: null, changePa: null, changeSpanS: null }
+const NONE: BarometerTrendData = { points: [], currentPa: null, changePa: null, changeSpanS: null, failed: false }
 
 function renderTile(barometer: BarometerTrendData) {
   return render(
@@ -63,6 +64,16 @@ describe('Today & Now barometer', () => {
     expect(within(row).queryByText(/[▲▼]/)).toBeNull()
     expect(within(row).queryByText(/steady/i)).toBeNull()
     expect(within(row).queryByText('3h')).toBeNull()
+  })
+
+  it('says the barometer is unavailable when the request failed, which a boat with no barometer never does', () => {
+    renderTile({ ...NONE, failed: true })
+    const row = screen.getByTestId('today-barometer')
+    expect(within(row).getByText('Barometer unavailable')).toBeTruthy()
+    expect(row.querySelector('svg')).toBeNull()
+    cleanup()
+    renderTile(NONE)
+    expect(screen.queryByText('Barometer unavailable')).toBeNull()
   })
 
   it('shows the reading but no change until three hours of history can give one, keeping the change column so the chart does not change width', () => {

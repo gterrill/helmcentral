@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -112,12 +113,20 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 	//
 	// The body is read and discarded first. Redirecting with a large upload
 	// unread makes Go close the connection mid-upload, and the phone then
-	// shows a network error instead of following the redirect. The cap is
-	// 200 MB (the inbox has no upload limit of its own to reuse); past it the
-	// error is logged and the redirect still goes out.
+	// shows a network error instead of following the redirect. The route
+	// has no auth, so the read is capped at 4 MB, enough for a small share.
+	// Past the cap the box stops reading, logs it, and sends the redirect
+	// with Connection: close; a large share may then show the phone a
+	// network error, which is the price of not reading for strangers.
 	e.POST(shareTargetRoute, func(c echo.Context) error {
 		if _, err := io.Copy(io.Discard, http.MaxBytesReader(c.Response(), c.Request().Body, shareDrainMaxBytes)); err != nil {
-			log.Printf("static: draining the unhandled share body: %v", err)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				log.Printf("static: share body over the %d byte cap, closing the connection", shareDrainMaxBytes)
+				c.Response().Header().Set("Connection", "close")
+			} else {
+				log.Printf("static: reading the unhandled share body: %v", err)
+			}
 		}
 		return c.Redirect(http.StatusSeeOther, shareWithoutWorkerLocation)
 	})
@@ -129,7 +138,7 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 const (
 	shareTargetRoute           = "/share-target"
 	shareWithoutWorkerLocation = "/inbox/upload?share_error=no-worker"
-	shareDrainMaxBytes         = 200 << 20
+	shareDrainMaxBytes         = 4 << 20
 
 	staticRootRoute     = "/"
 	staticCatchAllRoute = "/*"

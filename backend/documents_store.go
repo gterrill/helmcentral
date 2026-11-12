@@ -1516,6 +1516,17 @@ func (s *documentStore) Get(id string) (document, error) {
 	return doc, nil
 }
 
+// HasSHA says whether a document with this content hash exists.
+func (s *documentStore) HasSHA(sha256 string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok, err := rowExists(s.db, `SELECT 1 FROM documents WHERE sha256 = ? LIMIT 1`, sha256)
+	if err != nil {
+		return false, fmt.Errorf("check document by sha256: %w", err)
+	}
+	return ok, nil
+}
+
 // GetBySHA looks up a single document by its sha256. ok is false, with a
 // nil error, when no document has that hash - the normal "no such upload
 // yet" case a duplicate check makes on every upload, not a database

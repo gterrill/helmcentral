@@ -124,7 +124,8 @@ shows up as a foul current that isn't there.
 
 A barometer adds the pressure tendency and the heavy-weather alarm rules that
 watch how fast the pressure is falling. It also fills the barometer row at the
-bottom of the Today & Now tile. Without one, that row reads `—`. The history
+bottom of the Today & Now tile. Without one, that row reads `—`. If Helmcentral can't load the reading, the
+row says "Barometer unavailable" instead. The history
 behind them is kept in memory, so it starts again whenever Helmcentral
 restarts. The trend shows after half an hour, and the three-hour tendency after
 about three hours. The rules that look back twelve and twenty-four hours stay
