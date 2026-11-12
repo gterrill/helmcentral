@@ -10,7 +10,7 @@ import (
 )
 
 // Filing to a passage makes the sign inside the library copy's link step, under
-// the content lock, as filing to equipment and jobs does (ADR 0282). Made
+// the content lock, as filing to equipment and jobs does (ADR 0283). Made
 // afterwards, a failed sign could only be undone by deleting the document, which
 // by then another request's link to the same bytes might also depend on.
 

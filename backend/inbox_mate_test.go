@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// Mate on the Inbox (ADR 0282): sorting on arrival and titles from the vision
+// Mate on the Inbox (ADR 0283): sorting on arrival and titles from the vision
 // model. Nothing here reaches the network: the OpenRouter client and the
 // place-name provider are fakes.
 

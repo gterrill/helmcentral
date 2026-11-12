@@ -356,7 +356,7 @@ func main() {
 	)
 	documentIndexerWake = docIndexer.Wake
 
-	// Mate on the Inbox (ADR 0282): when Mate is set up, each item that arrives
+	// Mate on the Inbox (ADR 0283): when Mate is set up, each item that arrives
 	// is sorted by the document vision model, off the upload request, and the
 	// pass at boot catches anything that arrived while it was off. The readiness
 	// check reads the settings fresh each time, so switching Mate on or off

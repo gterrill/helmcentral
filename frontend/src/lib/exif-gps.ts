@@ -13,7 +13,7 @@ export interface ExifGps {
   /**
    * Degrees clockwise from north the phone faced, or null. The photo says true
    * or magnetic; a magnetic bearing is kept as it is and read as true, until
-   * something on the boat supplies the variation (ADR 0282).
+   * something on the boat supplies the variation (ADR 0283).
    */
   bearingDeg: number | null
 }

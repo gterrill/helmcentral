@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Review fixes for Mate on the Inbox (ADR 0282).
+// Review fixes for Mate on the Inbox (ADR 0283).
 
 // ── turning Mate on sorts what was waiting ───────────────────────────────
 

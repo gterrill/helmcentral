@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Final review fixes for Mate on the Inbox (ADR 0282).
+// Final review fixes for Mate on the Inbox (ADR 0283).
 
 // withSwitchableMate wires a Mate whose settings the test can change, the way a
 // settings save does: change the value, then drop the remembered reading.

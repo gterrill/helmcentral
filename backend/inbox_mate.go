@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Mate on the Inbox (ADR 0282). When Mate is set up, each photo that arrives is
+// Mate on the Inbox (ADR 0283). When Mate is set up, each photo that arrives is
 // sorted by the document vision model, and a photo going onto a passage is
 // titled by it. When Mate is not set up none of this runs and the Inbox works
 // as it did.

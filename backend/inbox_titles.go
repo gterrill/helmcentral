@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// The ways a photo's suggested title is made (ADR 0282): the nearest named
+// The ways a photo's suggested title is made (ADR 0283): the nearest named
 // place to the boat; the nearest named island or bay in the direction the
 // camera pointed, without Mate; or five of the nearest features handed to the
 // vision model, with Mate.

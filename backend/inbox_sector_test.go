@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// The bearing sector (ADR 0282): the nearest named land feature within +/-25
+// The bearing sector (ADR 0283): the nearest named land feature within +/-25
 // degrees of the way the camera pointed, out to 10 nautical miles.
 
 func TestInSectorWrapsAroundNorth(t *testing.T) {

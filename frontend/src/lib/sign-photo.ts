@@ -5,7 +5,7 @@ import { readExifCapture, type ExifCapture } from '@/lib/exif-time'
 import { downscaleForUpload, probeJpeg, UPLOAD_MAX_DIMENSION } from '@/lib/image-downscale'
 
 // Photos for signs live in one Documents folder at the root. The box finds or
-// makes it, so the Inbox and this editor share one rule (ADR 0282); the browser
+// makes it, so the Inbox and this editor share one rule (ADR 0283); the browser
 // no longer reads the folder tree or creates folders of its own.
 
 export const PASSAGE_PHOTOS_FOLDER = 'Passage photos'

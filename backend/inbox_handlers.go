@@ -1416,7 +1416,7 @@ func inboxSuggestedTitlesHandler(c echo.Context) error {
 
 // passagePhotosFolderHandler is POST /api/passage-photos-folder: the "Passage
 // photos" folder every photo sign is kept in, found or made. The Inbox and the
-// Replay sign editor both go through it, so the folder has one rule (ADR 0282).
+// Replay sign editor both go through it, so the folder has one rule (ADR 0283).
 func passagePhotosFolderHandler(c echo.Context) error {
 	docs, err := requireDocumentStore("passage photos folder")
 	if err != nil {

@@ -160,7 +160,7 @@ func createInboxSchema(db *sql.DB) error {
 }
 
 // addInboxMateColumns upgrades an inbox_items table made before Mate sorting
-// (ADR 0282). It is a no-op on a table that already has them.
+// (ADR 0283). It is a no-op on a table that already has them.
 func addInboxMateColumns(db *sql.DB) error {
 	rows, err := db.Query(`PRAGMA table_info(inbox_items)`)
 	if err != nil {

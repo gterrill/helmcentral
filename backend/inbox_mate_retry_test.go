@@ -17,7 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Retry, "Sort again" and the title deadline for Mate on the Inbox (ADR 0282).
+// Retry, "Sort again" and the title deadline for Mate on the Inbox (ADR 0283).
 
 func statusDoer(status int, calls *atomic.Int32) openRouterDoer {
 	return doerFunc(func(*http.Request) (*http.Response, error) {
@@ -99,7 +99,7 @@ func TestInboxClassifierRetriesAFailureAfterBackoff(t *testing.T) {
 	}
 }
 
-// BEHAVIOUR (operator decision, ADR 0282): every sort failure is tried again on
+// BEHAVIOUR (operator decision, ADR 0283): every sort failure is tried again on
 // the back-off, 1 minute, 5, 30, then hourly. A bad key, a reply that is not
 // JSON, an unknown kind and a dial error are no different.
 func TestInboxClassifierRetriesEverySortFailureOnTheBackoff(t *testing.T) {

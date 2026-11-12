@@ -1,4 +1,4 @@
-# ADR 0282: Mate sorts and titles Inbox photos
+# ADR 0283: Mate sorts and titles Inbox photos
 
 ## Status
 

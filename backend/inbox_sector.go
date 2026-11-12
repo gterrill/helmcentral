@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// The bearing sector and the nearby named land features (ADR 0282). A photo
+// The bearing sector and the nearby named land features (ADR 0283). A photo
 // that carries the direction the phone faced is titled from the nearest named
 // island or bay within +/-25 degrees of it, out to 10 nautical miles. The same
 // features, five of them with distance and side of the bow, go to the vision
