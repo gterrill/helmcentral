@@ -91,7 +91,7 @@ export async function prepareFile(file: File, sourceSha256: string, deps: Prepar
     warnings.push(`Could not read when the photo was taken: ${errorMessage(err)}`)
   }
 
-  let gps: ExifGps = { lat: null, lon: null, bearingDeg: null, bearingRef: null }
+  let gps: ExifGps = { lat: null, lon: null, bearingDeg: null }
   try {
     gps = readExifGps(head)
   } catch (err) {
@@ -104,7 +104,7 @@ export async function prepareFile(file: File, sourceSha256: string, deps: Prepar
     blob,
     thumb,
     filename: photoFilename(file.name),
-    meta: { captureMs, bearingDeg: gps.bearingDeg, bearingRef: gps.bearingRef, phoneLat: gps.lat, phoneLon: gps.lon, fingerprint, sharpness, sourceSha256 },
+    meta: { captureMs, bearingDeg: gps.bearingDeg, phoneLat: gps.lat, phoneLon: gps.lon, fingerprint, sharpness, sourceSha256 },
     warnings,
   }
 }

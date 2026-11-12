@@ -30,6 +30,8 @@ export function InboxAssignDialog({ items, passages, mateTitles = false, onClose
   const [rows, setRows] = useState<AssignRow[]>(() => initialAssignRows(items, {}, passages))
   const [titlesState, setTitlesState] = useState<'loading' | 'ready' | string>('loading')
   const [titleErrors, setTitleErrors] = useState<Readonly<Record<string, string>>>({})
+  // Set when Mate's settings could not be read, so the titles below are place names.
+  const [mateNotice, setMateNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [failures, setFailures] = useState<Record<string, string>>({})
   const options = useMemo(() => placementOptions(passages), [passages])
@@ -37,9 +39,10 @@ export function InboxAssignDialog({ items, passages, mateTitles = false, onClose
   useEffect(() => {
     let cancelled = false
     inboxApi.suggestedTitles(items.map((i) => i.id)).then(
-      ({ titles, errors }) => {
+      ({ titles, errors, mateError }) => {
         if (cancelled) return
         setTitleErrors(errors)
+        setMateNotice(mateError ?? null)
         // Only blank titles take a suggestion, so nothing the operator has typed is lost.
         const suggested = initialAssignRows(items, titles, passages)
         // By id: rows may have shrunk since the lookup began.
@@ -105,6 +108,7 @@ export function InboxAssignDialog({ items, passages, mateTitles = false, onClose
             Could not {mateTitles ? 'get titles from Mate' : 'look up place names'}: {titlesState}. Type the titles yourself.
           </p>
         )}
+        {mateNotice && <p className="text-xs text-muted-foreground" data-testid="inbox-titles-mate-error">{mateNotice}</p>}
         <ul className="flex flex-col gap-3">
           {rows.map((row, i) => {
             const problem = problems[i]

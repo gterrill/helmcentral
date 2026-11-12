@@ -2,8 +2,7 @@ import { apiBaseUrl } from '@/config/api'
 import { apiRequest } from '@/lib/api-query'
 import { uploadDocument } from '@/lib/document-upload'
 import { readExifCapture, type ExifCapture } from '@/lib/exif-time'
-import { downscaleImage, photoFilename } from '@/lib/image-downscale'
-import { INBOX_MAX_DIMENSION } from '@/lib/inbox-image'
+import { downscaleForUpload, probeJpeg, UPLOAD_MAX_DIMENSION } from '@/lib/image-downscale'
 
 // Photos for signs live in one Documents folder at the root. The box finds or
 // makes it, so the Inbox and this editor share one rule (ADR 0282); the browser
@@ -22,9 +21,10 @@ export const isSignPhotoType = (mime: string) => (SIGN_PHOTO_TYPES as readonly s
  */
 export const SIGN_UPLOAD_ACCEPT = [...SIGN_PHOTO_TYPES, 'image/heic', 'image/heif', '.heic', '.heif'].join(',')
 
+const isHeic = (file: Pick<File, 'type' | 'name'>) => /^image\/hei[cf]$/.test(file.type) || /\.hei[cf]$/i.test(file.name)
+
 /** Whether a picked file is a picture the editor takes, by its type or, failing that, its name. */
-export const isSignUploadFile = (file: Pick<File, 'type' | 'name'>): boolean =>
-  isSignPhotoType(file.type) || /^image\/hei[cf]$/.test(file.type) || /\.hei[cf]$/i.test(file.name)
+export const isSignUploadFile = (file: Pick<File, 'type' | 'name'>): boolean => isSignPhotoType(file.type) || isHeic(file)
 
 /** The id of the Passage photos folder, made by the box if it does not exist. */
 export async function ensurePassagePhotosFolder(): Promise<string> {
@@ -32,19 +32,53 @@ export async function ensurePassagePhotosFolder(): Promise<string> {
   return id
 }
 
+/** A picture over this many bytes is shrunk even when its edges are within the limit. */
+export const SIGN_PHOTO_MAX_BYTES = 4 * 1024 * 1024
+
+/** The pixel size of a JPEG, PNG, GIF or WebP, read from its header; null when it cannot be told. */
+export async function probePictureSize(file: Blob): Promise<{ width: number; height: number } | null> {
+  const b = new Uint8Array(await file.slice(0, 64).arrayBuffer())
+  const text = (from: number, to: number) => String.fromCharCode(...b.slice(from, to))
+  const v = new DataView(b.buffer)
+  if (b.length >= 24 && b[0] === 0x89 && text(1, 4) === 'PNG') return { width: v.getUint32(16), height: v.getUint32(20) }
+  if (b.length >= 10 && text(0, 3) === 'GIF') return { width: v.getUint16(6, true), height: v.getUint16(8, true) }
+  if (b.length >= 30 && text(0, 4) === 'RIFF' && text(8, 12) === 'WEBP') {
+    const kind = text(12, 16)
+    if (kind === 'VP8 ') return { width: v.getUint16(26, true) & 0x3fff, height: v.getUint16(28, true) & 0x3fff }
+    if (kind === 'VP8L' && b[20] === 0x2f) {
+      return { width: 1 + (b[21] | ((b[22] & 0x3f) << 8)), height: 1 + ((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10)) }
+    }
+    if (kind === 'VP8X') return { width: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), height: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) }
+    return null
+  }
+  return probeJpeg(file)
+}
+
 /**
- * Shrinks the picture on the device to the Inbox's size (2560 px on the long
- * edge, JPEG at the same quality; HEIC becomes JPEG), then uploads that copy
- * into the Passage photos folder; the document id comes back. A picture that
- * cannot be shrunk is an error: the original is never sent in its place. The
- * capture time is read from the original by `captureOfFile`, before this runs.
- * `downscale` is a seam for tests, as jsdom has no canvas.
+ * Whether a picture needs shrinking before it is sent: HEIC and HEIF (which
+ * become JPEG), anything over SIGN_PHOTO_MAX_BYTES, anything longer than
+ * UPLOAD_MAX_DIMENSION px on its long edge, and anything whose size cannot be
+ * read. The rest goes as it is, so a transparent PNG or an animated GIF keeps
+ * what a JPEG would lose.
  */
-export async function uploadSignPhoto(file: File, downscale: typeof downscaleImage = downscaleImage): Promise<string> {
-  const shrunk = await downscale(file, INBOX_MAX_DIMENSION, { reduceDecode: true, opaque: true })
-  const name = photoFilename(file.name)
+async function needsShrinking(file: File): Promise<boolean> {
+  if (isHeic(file) || file.size > SIGN_PHOTO_MAX_BYTES) return true
+  const size = await probePictureSize(file)
+  return size === null || Math.max(size.width, size.height) > UPLOAD_MAX_DIMENSION
+}
+
+/**
+ * Uploads a sign's photo into the Passage photos folder; the document id comes
+ * back. A picture that needs shrinking (needsShrinking) is shrunk on the device
+ * first (downscaleForUpload: 2560 px on the long edge, JPEG); one that cannot be
+ * shrunk is an error: the original is never sent in its place. The capture time
+ * is read from the original by `captureOfFile`, before this runs. `downscale` is
+ * a seam for tests, as jsdom has no canvas.
+ */
+export async function uploadSignPhoto(file: File, downscale: (file: File) => Promise<File> = downscaleForUpload): Promise<string> {
+  const ready = (await needsShrinking(file)) ? await downscale(file) : file
   const folder = await ensurePassagePhotosFolder()
-  const { id } = await uploadDocument(new File([shrunk], name, { type: 'image/jpeg' }), name, undefined, folder)
+  const { id } = await uploadDocument(ready, ready.name, undefined, folder)
   return id
 }
 

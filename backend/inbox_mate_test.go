@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -22,9 +24,11 @@ import (
 // ── fakes ────────────────────────────────────────────────────────────────
 
 type fakeMateDoer struct {
-	mu          sync.Mutex
-	bodies      []string
-	delay       time.Duration
+	mu     sync.Mutex
+	bodies []string
+	delay  time.Duration
+	// delayFor, when set, is the delay for one request, chosen from its body.
+	delayFor    func(body string) time.Duration
 	inflight    int
 	maxInflight int
 	// reply answers one request; nil replies {"kind":"scenery"}.
@@ -46,9 +50,13 @@ func (d *fakeMateDoer) Do(req *http.Request) (*http.Response, error) {
 		d.inflight--
 		d.mu.Unlock()
 	}()
-	if d.delay > 0 {
+	delay := d.delay
+	if d.delayFor != nil {
+		delay = d.delayFor(string(raw))
+	}
+	if delay > 0 {
 		select {
-		case <-time.After(d.delay):
+		case <-time.After(delay):
 		case <-req.Context().Done():
 			return nil, req.Context().Err()
 		}
@@ -113,9 +121,19 @@ func withMateOff(t *testing.T) {
 
 func withFeatures(t *testing.T, fn func(lat, lon float64) ([]poiFeatureRaw, error)) {
 	t.Helper()
-	prev := inboxFeaturesNear
+	withFetched(t, func(lat, lon float64) (inboxFetched, error) {
+		features, err := fn(lat, lon)
+		return inboxFetched{Features: features}, err
+	})
+}
+
+// withFetched stands in for the provider including its truncation flag.
+func withFetched(t *testing.T, fn func(lat, lon float64) (inboxFetched, error)) {
+	t.Helper()
+	prev, prevCache := inboxFeaturesNear, inboxFeatures
 	inboxFeaturesNear = fn
-	t.Cleanup(func() { inboxFeaturesNear = prev })
+	inboxFeatures = newInboxFeatureCache(inboxFeatureTTL) // nothing left over from another test
+	t.Cleanup(func() { inboxFeaturesNear, inboxFeatures = prev, prevCache })
 }
 
 func withPlaceLookup(t *testing.T, fn func(lat, lon float64) string) {
@@ -150,6 +168,12 @@ func uploadWithThumb(t *testing.T, shade uint8, thumb []byte, fields map[string]
 		t.Fatal(rec.Code, out)
 	}
 	return out["item"].(map[string]any)["id"].(string)
+}
+
+// uploadSortable stores a photo with a thumbnail, which is what Mate sorts from.
+func uploadSortable(t *testing.T, shade uint8) string {
+	t.Helper()
+	return uploadWithThumb(t, shade, inboxTestJPEG(t, 3), nil)
 }
 
 func itemJSON(t *testing.T, id string) map[string]any {
@@ -232,7 +256,7 @@ func TestInboxClassifierRetriesOnceThenSucceeds(t *testing.T) {
 		return "```json\n{\"kind\":\"scenery\"}\n```", nil
 	}}
 	withInboxMate(t, doer)
-	id := uploadForFiling(t, 132, nil)
+	id := uploadSortable(t, 132)
 	if err := classifierFor(w).RunPending(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -246,9 +270,11 @@ func TestInboxClassifierRetriesOnceThenSucceeds(t *testing.T) {
 
 func TestInboxClassifierRecordsTheErrorAfterTheRetryAndShowsIt(t *testing.T) {
 	w := newInboxWorld(t)
-	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return "", errors.New("openrouter request failed: 402 out of credit") }}
+	doer := &fakeMateDoer{reply: func(int, string) (string, error) {
+		return "", errors.New("openrouter request failed: 402 out of credit")
+	}}
 	withInboxMate(t, doer)
-	id := uploadForFiling(t, 133, nil)
+	id := uploadSortable(t, 133)
 
 	if err := classifierFor(w).RunPending(context.Background()); err != nil {
 		t.Fatal(err)
@@ -258,12 +284,12 @@ func TestInboxClassifierRecordsTheErrorAfterTheRetryAndShowsIt(t *testing.T) {
 	}
 	got := itemJSON(t, id)
 	msg, _ := got["classify_error"].(string)
-	if got["suggested_kind"] != nil || !strings.Contains(msg, "out of credit") {
-		t.Errorf("the failure must be visible, not a silent unsorted: %v", got)
+	if got["suggested_kind"] != nil || !strings.HasPrefix(msg, "Mate couldn't sort this yet. Trying again at ") {
+		t.Errorf("the failure must be visible, in plain words, not a silent unsorted: %v", got)
 	}
-	// A recorded failure is not tried again by the next pass.
+	// It waits for its back-off: the next pass does not try it again.
 	if err := classifierFor(w).RunPending(context.Background()); err != nil || doer.calls() != 2 {
-		t.Errorf("a failed item was retried: %d calls, %v", doer.calls(), err)
+		t.Errorf("a failed item was retried before its back-off: %d calls, %v", doer.calls(), err)
 	}
 }
 
@@ -271,7 +297,7 @@ func TestInboxClassifierRefusesAnAnswerThatIsNotAKind(t *testing.T) {
 	w := newInboxWorld(t)
 	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"kind":"receipt"}`, nil }}
 	withInboxMate(t, doer)
-	id := uploadForFiling(t, 134, nil)
+	id := uploadSortable(t, 134)
 	if err := classifierFor(w).RunPending(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +312,7 @@ func TestInboxClassifierRunsAtMostTwoCallsAtOnce(t *testing.T) {
 	doer := &fakeMateDoer{delay: 40 * time.Millisecond}
 	withInboxMate(t, doer)
 	for i := 0; i < 6; i++ {
-		uploadForFiling(t, uint8(140+i), nil)
+		uploadSortable(t, uint8(140+i))
 	}
 	if err := classifierFor(w).RunPending(context.Background()); err != nil {
 		t.Fatal(err)
@@ -329,20 +355,6 @@ func TestInboxListSaysWhetherMateIsSorting(t *testing.T) {
 	}
 }
 
-// ── the bearing reference is kept ────────────────────────────────────────
-
-func TestInboxUploadKeepsTheBearingReference(t *testing.T) {
-	w := newInboxWorld(t)
-	id := uploadForFiling(t, 151, map[string]string{"bearing_deg": "80", "bearing_ref": "M"})
-	it, _ := w.inbox.Get(id)
-	if it.BearingRef != "M" {
-		t.Errorf("ref %q", it.BearingRef)
-	}
-	if code, _ := inboxUpload(t, inboxTestJPEG(t, 152), "x.jpg", map[string]string{"bearing_deg": "80", "bearing_ref": "X"}); code != 400 {
-		t.Errorf("a reference that is neither T nor M: %d", code)
-	}
-}
-
 // ── titles ───────────────────────────────────────────────────────────────
 
 // titleWorld puts a boat under way heading 090 at -20.25, 149.5 and returns the
@@ -359,13 +371,22 @@ func titleWorld(t *testing.T, sog float64) (inboxWorld, time.Time) {
 
 func titlesFor(t *testing.T, ids ...string) (titles, errs map[string]any) {
 	t.Helper()
-	code, body := getJSON(t, inboxSuggestedTitlesHandler, "/api/inbox/suggested-titles?ids="+strings.Join(ids, ","), "")
+	titles, errs, _ = titlesBody(t, ids...)
+	return titles, errs
+}
+
+// titlesBody is POST /api/inbox/suggested-titles; it also returns the whole
+// answer for the fields beside titles and errors.
+func titlesBody(t *testing.T, ids ...string) (titles, errs, body map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string][]string{"ids": ids})
+	code, body := send(t, inboxSuggestedTitlesHandler, http.MethodPost, string(raw))
 	if code != 200 {
 		t.Fatal(code, body)
 	}
 	titles, _ = body["titles"].(map[string]any)
 	errs, _ = body["errors"].(map[string]any)
-	return titles, errs
+	return titles, errs, body
 }
 
 // featuresNorthOf places named features around -20.25, 149.5 by bearing and
@@ -395,7 +416,7 @@ func TestInboxMateTitleGetsThePhotoHeadingAndFiveFeaturesWithSides(t *testing.T)
 	withPlaceLookup(t, func(float64, float64) string { t.Error("the nearest-place lookup ran beside Mate"); return "" })
 
 	// Camera pointing 80 true: Fourth Rock (100) and Cape Capricorn (50 is 30 off) - Rock is in the sector.
-	id := uploadWithThumb(t, 160, inboxTestJPEG(t, 5), map[string]string{"capture_ms": ms(at), "bearing_deg": "80", "bearing_ref": "T"})
+	id := uploadWithThumb(t, 160, inboxTestJPEG(t, 5), map[string]string{"capture_ms": ms(at), "bearing_deg": "80"})
 	titles, errs := titlesFor(t, id)
 	if titles[id] != "Dolphins off the bow" || len(errs) != 0 {
 		t.Fatalf("%v %v", titles, errs)
@@ -406,7 +427,7 @@ func TestInboxMateTitleGetsThePhotoHeadingAndFiveFeaturesWithSides(t *testing.T)
 	body := doer.body(0)
 	for _, want := range []string{
 		testDocumentModel,
-		"heading 090",
+		"course over ground 090° true",
 		"Cape Capricorn, 3.1 nm, 40° to port",
 		"Hummocky Island, 4.0 nm, 50° to starboard",
 		"Aft Bay, 5.0 nm, dead astern",
@@ -471,7 +492,7 @@ func TestInboxMateTitleWithoutABearingMentionsNoCameraDirection(t *testing.T) {
 	}
 }
 
-func TestInboxMateTitleSaysWhenTheHeadingIsNotKnown(t *testing.T) {
+func TestInboxMateTitleSaysWhenTheCourseIsNotKnown(t *testing.T) {
 	_, at := titleWorld(t, 0.1) // at rest: a course over ground means nothing
 	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"title":"Anchorage"}`, nil }}
 	withInboxMate(t, doer)
@@ -481,7 +502,7 @@ func TestInboxMateTitleSaysWhenTheHeadingIsNotKnown(t *testing.T) {
 	id := uploadForFiling(t, 163, map[string]string{"capture_ms": ms(at)})
 	titlesFor(t, id)
 	body := doer.body(0)
-	if !strings.Contains(body, "heading is not known") || !strings.Contains(body, "bearing 100° true") {
+	if !strings.Contains(body, "course over ground is not known") || !strings.Contains(body, "bearing 100° true") {
 		t.Errorf("%s", body)
 	}
 }
@@ -503,13 +524,16 @@ func TestInboxMateTitleFailureIsShownNotReplacedByAPlaceName(t *testing.T) {
 	_, at := titleWorld(t, 5)
 	withInboxMate(t, &fakeMateDoer{reply: func(int, string) (string, error) { return "", errors.New("openrouter request failed: 429") }})
 	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
-	withPlaceLookup(t, func(float64, float64) string { t.Error("a failed Mate call was replaced by the nearest place"); return "Hook Island" })
+	withPlaceLookup(t, func(float64, float64) string {
+		t.Error("a failed Mate call was replaced by the nearest place")
+		return "Hook Island"
+	})
 	id := uploadForFiling(t, 165, map[string]string{"capture_ms": ms(at)})
 	titles, errs := titlesFor(t, id)
 	if titles[id] != "" {
 		t.Errorf("title %q", titles[id])
 	}
-	if msg, _ := errs[id].(string); !strings.Contains(msg, "429") {
+	if msg, _ := errs[id].(string); msg != "Mate couldn't reach the model, so no title was suggested." {
 		t.Errorf("errors %v", errs)
 	}
 }
@@ -521,7 +545,7 @@ func TestInboxMateTitleStopsWhenTheFeaturesCannotBeFetched(t *testing.T) {
 	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, errors.New("overpass is down") })
 	id := uploadForFiling(t, 166, map[string]string{"capture_ms": ms(at)})
 	titles, errs := titlesFor(t, id)
-	if msg, _ := errs[id].(string); !strings.Contains(msg, "overpass is down") || titles[id] != "" {
+	if msg, _ := errs[id].(string); msg != "The place-name server didn't answer, so no title was suggested." || titles[id] != "" {
 		t.Errorf("%v %v", titles, errs)
 	}
 	if doer.calls() != 0 {
@@ -562,18 +586,235 @@ func TestInboxMateTitlesSkipPDFsAndPhotosWithNoPosition(t *testing.T) {
 	}
 }
 
-func TestInboxMateTitlesGiveUpAtTheDeadlineAndLeaveBlanks(t *testing.T) {
+func withMateTitleTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := inboxMateTitleTimeout
+	inboxMateTitleTimeout = d
+	t.Cleanup(func() { inboxMateTitleTimeout = prev })
+}
+
+// BEHAVIOUR: each photo has its own time to be titled, and one that runs out is
+// reported against that photo; the others are not held to its clock.
+func TestInboxMateTitleTimesOutPerPhotoWithAnErrorWhileTheOthersSucceed(t *testing.T) {
 	_, at := titleWorld(t, 5)
-	withInboxMate(t, &fakeMateDoer{delay: 2 * time.Second})
+	slowPhoto := inboxTestJPEG(t, 177)
+	doer := &fakeMateDoer{
+		reply: func(int, string) (string, error) { return `{"title":"Quick one"}`, nil },
+		delayFor: func(body string) time.Duration {
+			if strings.Contains(body, base64.StdEncoding.EncodeToString(slowPhoto)) {
+				return 2 * time.Second
+			}
+			return 0
+		},
+	}
+	withInboxMate(t, doer)
 	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
-	prev := inboxMateTitleDeadline
-	inboxMateTitleDeadline = 100 * time.Millisecond
-	t.Cleanup(func() { inboxMateTitleDeadline = prev })
-	id := uploadForFiling(t, 177, map[string]string{"capture_ms": ms(at)})
+	withMateTitleTimeout(t, 150*time.Millisecond)
+	slow := uploadForFiling(t, 177, map[string]string{"capture_ms": ms(at)})
+	fastA := uploadForFiling(t, 178, map[string]string{"capture_ms": ms(at.Add(time.Second))})
+	fastB := uploadForFiling(t, 179, map[string]string{"capture_ms": ms(at.Add(2 * time.Second))})
+
 	start := time.Now()
+	titles, errs := titlesFor(t, slow, fastA, fastB)
+	if time.Since(start) > time.Second {
+		t.Errorf("waited %v for the slow photo", time.Since(start))
+	}
+	if msg, _ := errs[slow].(string); !strings.Contains(msg, "Mate didn't answer in time") || titles[slow] != "" {
+		t.Errorf("the slow photo needs an error and no title: %v %v", titles, errs)
+	}
+	if titles[fastA] != "Quick one" || titles[fastB] != "Quick one" || errs[fastA] != nil || errs[fastB] != nil {
+		t.Errorf("the quick photos should be titled: %v %v", titles, errs)
+	}
+}
+
+// BEHAVIOUR: a title already made is not paid for again when the dialog reopens.
+func TestInboxMateTitleIsRememberedSoAReopenedDialogMakesNoCall(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"title":"Remembered"}`, nil }}
+	withInboxMate(t, doer)
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
+	id := uploadForFiling(t, 184, map[string]string{"capture_ms": ms(at)})
+	first, _ := titlesFor(t, id)
+	second, errs := titlesFor(t, id)
+	if first[id] != "Remembered" || second[id] != "Remembered" || len(errs) != 0 {
+		t.Fatalf("%v %v %v", first, second, errs)
+	}
+	if doer.calls() != 1 {
+		t.Errorf("model calls: %d, want 1 (the second request is answered from memory)", doer.calls())
+	}
+}
+
+// BEHAVIOUR: a failed title is not remembered, so the next try asks again.
+func TestInboxMateTitleFailureIsNotRemembered(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	doer := &fakeMateDoer{reply: func(call int, _ string) (string, error) {
+		if call == 1 {
+			return "", errors.New("openrouter request failed: 429")
+		}
+		return `{"title":"Second time lucky"}`, nil
+	}}
+	withInboxMate(t, doer)
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
+	id := uploadForFiling(t, 185, map[string]string{"capture_ms": ms(at)})
+	titlesFor(t, id)
+	if titles, errs := titlesFor(t, id); titles[id] != "Second time lucky" || len(errs) != 0 {
+		t.Errorf("%v %v", titles, errs)
+	}
+}
+
+// BEHAVIOUR: Mate is told when the nearby list was cut short.
+func TestInboxMateTitleSaysWhenTheFeatureListMayBeIncomplete(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"title":"x"}`, nil }}
+	withInboxMate(t, doer)
+	withFetched(t, func(float64, float64) (inboxFetched, error) {
+		return inboxFetched{Features: []poiFeatureRaw{featureAt("Some Island", "island", 100, 2)}, Truncated: true}, nil
+	})
+	id := uploadForFiling(t, 186, map[string]string{"capture_ms": ms(at)})
+	titlesFor(t, id)
+	if !strings.Contains(doer.body(0), "may be incomplete") {
+		t.Errorf("the list was cut short and the prompt does not say so:\n%s", doer.body(0))
+	}
+}
+
+func TestInboxMateTitleDoesNotCallACompleteListIncomplete(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"title":"x"}`, nil }}
+	withInboxMate(t, doer)
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) {
+		return []poiFeatureRaw{featureAt("Some Island", "island", 100, 2)}, nil
+	})
+	id := uploadForFiling(t, 187, map[string]string{"capture_ms": ms(at)})
+	titlesFor(t, id)
+	if strings.Contains(doer.body(0), "may be incomplete") {
+		t.Errorf("a complete list should not be called incomplete:\n%s", doer.body(0))
+	}
+}
+
+// BEHAVIOUR: without Mate a cut-short list cannot name the nearest feature in
+// the sector reliably, so the photo gets an error and no title.
+func TestInboxSectorTitleFailsVisiblyWhenTheFeatureListWasCutShort(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	withMateOff(t)
+	withFetched(t, func(float64, float64) (inboxFetched, error) {
+		return inboxFetched{Features: []poiFeatureRaw{featureAt("Ahead Island", "island", 92, 4)}, Truncated: true}, nil
+	})
+	withPlaceLookup(t, func(float64, float64) string {
+		t.Error("masked the cut-short list with the nearest place")
+		return "Hook Island"
+	})
+	id := uploadForFiling(t, 188, map[string]string{"capture_ms": ms(at), "bearing_deg": "90"})
 	titles, errs := titlesFor(t, id)
-	if time.Since(start) > time.Second || titles[id] != "" || len(errs) != 0 {
-		t.Errorf("took %v, titles %v errs %v", time.Since(start), titles, errs)
+	if msg, _ := errs[id].(string); !strings.Contains(msg, "too many named places nearby to pick one reliably") || titles[id] != "" {
+		t.Errorf("%v %v", titles, errs)
+	}
+}
+
+// With no named feature in range the thumbnail is enough to caption; with one
+// to check against, the 2560 px copy is sent.
+func TestInboxMateTitleSendsTheThumbnailWhenNoNamedFeatureIsInRange(t *testing.T) {
+	_, at := titleWorld(t, 5)
+	doer := &fakeMateDoer{reply: func(int, string) (string, error) { return `{"title":"Open water"}`, nil }}
+	withInboxMate(t, doer)
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
+	thumb := inboxTestJPEG(t, 9)
+	id := uploadWithThumb(t, 189, thumb, map[string]string{"capture_ms": ms(at)})
+	titlesFor(t, id)
+	body := doer.body(0)
+	if !strings.Contains(body, base64.StdEncoding.EncodeToString(thumb)) || strings.Contains(body, base64.StdEncoding.EncodeToString(inboxTestJPEG(t, 189))) {
+		t.Errorf("the thumbnail, and not the full copy, should be what was sent")
+	}
+}
+
+// BEHAVIOUR: one limit of three on Mate calls, shared by sorting and titles.
+func TestInboxSortingAndTitlesTogetherNeverExceedThreeMateCalls(t *testing.T) {
+	w := newInboxWorld(t)
+	at := passageEpoch.Add(time.Hour)
+	if err := w.passages.AppendTrackPoint(recordedTrackPoint{At: at.Add(-time.Minute), Lat: -20.25, Lon: 149.5, SOGKts: pfloat(5), COGDeg: pfloat(90)}); err != nil {
+		t.Fatal(err)
+	}
+	doer := &fakeMateDoer{delay: 80 * time.Millisecond, reply: func(_ int, body string) (string, error) {
+		if strings.Contains(body, "passage replay") {
+			return `{"title":"T"}`, nil
+		}
+		return `{"kind":"scenery"}`, nil
+	}}
+	withInboxMate(t, doer)
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, nil })
+	var ids []string
+	for i := 0; i < 6; i++ {
+		ids = append(ids, uploadWithThumb(t, uint8(190+i), inboxTestJPEG(t, 3), map[string]string{"capture_ms": ms(at.Add(time.Duration(i) * time.Second))}))
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := classifierFor(w).RunPending(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	titlesFor(t, ids[:4]...)
+	wg.Wait()
+	if doer.calls() < 10 {
+		t.Fatalf("expected 6 sorts and 4 titles, got %d calls", doer.calls())
+	}
+	if doer.maxInflight != 3 {
+		t.Errorf("most Mate calls at once: %d, want exactly 3", doer.maxInflight)
+	}
+}
+
+// BEHAVIOUR: an image with no thumbnail is not sent full size to be sorted.
+func TestInboxClassifierDoesNotSendAFullSizePhotoWithNoThumbnail(t *testing.T) {
+	w := newInboxWorld(t)
+	doer := &fakeMateDoer{}
+	withInboxMate(t, doer)
+	id := uploadForFiling(t, 196, nil) // no thumb
+	if err := classifierFor(w).RunPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if doer.calls() != 0 {
+		t.Errorf("the full photo was sent: %d calls", doer.calls())
+	}
+	got := itemJSON(t, id)
+	if msg, _ := got["classify_error"].(string); got["suggested_kind"] != nil || !strings.HasPrefix(msg, "Mate couldn't sort this yet. Trying again at ") || strings.Contains(msg, "preview") {
+		t.Errorf("%v", got)
+	}
+}
+
+// BEHAVIOUR: when Mate's settings cannot be read, Run backs off and tries
+// again by itself instead of waiting for the next upload.
+func TestInboxClassifierRunBacksOffAfterAnErrorAndRetriesWithoutAWake(t *testing.T) {
+	w := newInboxWorld(t)
+	id := uploadSortable(t, 197)
+	var reads atomic.Int32
+	prev := globalInboxMate
+	globalInboxMate = &inboxMate{
+		readiness: func() (assistantReadiness, string, error) {
+			if reads.Add(1) <= 2 {
+				return assistantReadiness{}, "", errors.New("settings unreadable")
+			}
+			return assistantReadiness{Enabled: true, Configured: true, Model: "chat/model", DocumentModel: testDocumentModel}, "test-key", nil
+		},
+		doer: &fakeMateDoer{},
+	}
+	t.Cleanup(func() { globalInboxMate = prev })
+
+	c := classifierFor(w)
+	c.errorBackoff = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if it, err := w.inbox.Get(id); err == nil && it.SuggestedKind != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if it, _ := w.inbox.Get(id); it.SuggestedKind != "scenery" {
+		t.Errorf("Run stalled after the error: kind %q after %d readiness reads", it.SuggestedKind, reads.Load())
 	}
 }
 
@@ -590,8 +831,11 @@ func TestInboxTitleWithABearingNamesTheNearestFeatureInTheSector(t *testing.T) {
 			featureAt("Further Ahead Rock", "island", 92, 8),
 		}, nil
 	})
-	withPlaceLookup(t, func(float64, float64) string { t.Error("nearest-place used although a feature is in the sector"); return "Wrong" })
-	id := uploadForFiling(t, 180, map[string]string{"capture_ms": ms(at), "bearing_deg": "90", "bearing_ref": "T"})
+	withPlaceLookup(t, func(float64, float64) string {
+		t.Error("nearest-place used although a feature is in the sector")
+		return "Wrong"
+	})
+	id := uploadForFiling(t, 180, map[string]string{"capture_ms": ms(at), "bearing_deg": "90"})
 	titles, errs := titlesFor(t, id)
 	if titles[id] != "Ahead Island" || len(errs) != 0 {
 		t.Fatalf("%v %v", titles, errs)
@@ -615,7 +859,10 @@ func TestInboxTitleWithABearingFallsBackToTheNearestPlaceWhenNothingIsInTheSecto
 func TestInboxTitleWithoutABearingNeverFetchesFeatures(t *testing.T) {
 	_, at := titleWorld(t, 5)
 	withMateOff(t)
-	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { t.Error("features fetched for a photo with no bearing"); return nil, nil })
+	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) {
+		t.Error("features fetched for a photo with no bearing")
+		return nil, nil
+	})
 	withPlaceLookup(t, func(float64, float64) string { return "Hook Island" })
 	id := uploadForFiling(t, 182, map[string]string{"capture_ms": ms(at)})
 	if titles, _ := titlesFor(t, id); titles[id] != "Hook Island" {
@@ -627,11 +874,122 @@ func TestInboxTitleWithABearingShowsAFeatureFetchFailure(t *testing.T) {
 	_, at := titleWorld(t, 5)
 	withMateOff(t)
 	withFeatures(t, func(float64, float64) ([]poiFeatureRaw, error) { return nil, errors.New("overpass is down") })
-	withPlaceLookup(t, func(float64, float64) string { t.Error("masked the failure with the nearest place"); return "Hook Island" })
+	withPlaceLookup(t, func(float64, float64) string {
+		t.Error("masked the failure with the nearest place")
+		return "Hook Island"
+	})
 	id := uploadForFiling(t, 183, map[string]string{"capture_ms": ms(at), "bearing_deg": "90"})
 	titles, errs := titlesFor(t, id)
-	if msg, _ := errs[id].(string); !strings.Contains(msg, "overpass is down") || titles[id] != "" {
+	if msg, _ := errs[id].(string); msg != "The place-name server didn't answer, so no title was suggested." || titles[id] != "" {
 		t.Errorf("%v %v", titles, errs)
+	}
+}
+
+// ── the pieces on their own ──────────────────────────────────────────────
+
+func TestInboxTitleBuilderChoosesTheWayOnceAndSharesAPlaceLookupPerCell(t *testing.T) {
+	bearing := 90.0
+	at := &trackFix{Lat: -20.25, Lon: 149.5}
+	nearby := &trackFix{Lat: -20.25004, Lon: 149.50004} // the same 100 m cell
+	elsewhere := &trackFix{Lat: -20.5, Lon: 149.5}
+
+	// Without Mate: a photo with a bearing has its own sector task; the others
+	// share a place task per cell.
+	b := newInboxTitleBuilder(nil, newInboxFeatureCache(inboxFeatureTTL), nil)
+	b.add(inboxItem{ID: "a", MIME: "image/jpeg"}, at)
+	b.add(inboxItem{ID: "b", MIME: "image/jpeg"}, nearby)
+	b.add(inboxItem{ID: "c", MIME: "image/jpeg"}, elsewhere)
+	b.add(inboxItem{ID: "d", MIME: "image/jpeg", BearingDeg: &bearing}, at)
+	if len(b.tasks) != 3 || strings.Join(b.tasks[0].ids, ",") != "a,b" || b.tasks[2].ids[0] != "d" {
+		t.Fatalf("without Mate: %d tasks, first for %v", len(b.tasks), b.tasks[0].ids)
+	}
+	if b.tasks[0].timeout != inboxPlaceTitleTimeout {
+		t.Errorf("a place lookup gets the place timeout, got %v", b.tasks[0].timeout)
+	}
+
+	// With Mate: one task per image and a PDF has none. The task has no overall
+	// timeout: the call times itself once it holds a slot.
+	m := newInboxTitleBuilder(&inboxMateSession{}, newInboxFeatureCache(inboxFeatureTTL), nil)
+	m.add(inboxItem{ID: "a", MIME: "image/jpeg"}, at)
+	m.add(inboxItem{ID: "b", MIME: "image/jpeg"}, nearby)
+	m.add(inboxItem{ID: "p", MIME: "application/pdf"}, at)
+	if len(m.tasks) != 2 || m.tasks[0].timeout != 0 || m.tasks[0].timeoutMsg != "Mate didn't answer in time" {
+		t.Errorf("with Mate: %d tasks, %+v", len(m.tasks), m.tasks[0])
+	}
+}
+
+func TestInboxFeatureCacheFetchesOncePerCellUntilItExpiresAndKeepsNoFailure(t *testing.T) {
+	var fetches atomic.Int32
+	failing := true
+	withFetched(t, func(float64, float64) (inboxFetched, error) {
+		fetches.Add(1)
+		if failing {
+			return inboxFetched{}, errors.New("overpass is down")
+		}
+		return inboxFetched{Truncated: true}, nil
+	})
+	fc := newInboxFeatureCache(time.Hour)
+	if _, err := fc.get(-20.25, 149.5); err == nil {
+		t.Fatal("the failure was hidden")
+	}
+	failing = false
+	got, err := fc.get(-20.25, 149.5) // asked again, because a failure is not kept
+	if err != nil || !got.Truncated || fetches.Load() != 2 {
+		t.Fatalf("%v %v after %d fetches", got, err, fetches.Load())
+	}
+	fc.get(-20.2501, 149.5001) // the same 0.02 degree cell
+	if fetches.Load() != 2 {
+		t.Errorf("a second photo in the cell fetched again: %d", fetches.Load())
+	}
+
+	short := newInboxFeatureCache(time.Millisecond)
+	short.get(-20.25, 149.5)
+	time.Sleep(5 * time.Millisecond)
+	short.get(-20.25, 149.5)
+	if fetches.Load() != 4 {
+		t.Errorf("an expired cell was not fetched again: %d", fetches.Load())
+	}
+}
+
+func TestInboxMateSettingsAreReadOnceInAWhileAndAnErrorIsNotRemembered(t *testing.T) {
+	var reads atomic.Int32
+	failNext := true
+	m := &inboxMate{readiness: func() (assistantReadiness, string, error) {
+		reads.Add(1)
+		if failNext {
+			failNext = false
+			return assistantReadiness{}, "", errors.New("unreadable")
+		}
+		return assistantReadiness{Enabled: true, Configured: true, Model: "chat/model", DocumentModel: testDocumentModel}, "key", nil
+	}}
+	if _, _, err := m.session(); err == nil {
+		t.Fatal("the failure was hidden")
+	}
+	for i := 0; i < 3; i++ {
+		if _, ok, err := m.session(); err != nil || !ok {
+			t.Fatalf("%v %v", ok, err)
+		}
+	}
+	if reads.Load() != 2 {
+		t.Errorf("settings read %d times, want 2 (the failure, then once for three asks)", reads.Load())
+	}
+}
+
+func TestInboxClassifierReadsPagesUntilNothingIsWaiting(t *testing.T) {
+	w := newInboxWorld(t)
+	withInboxMate(t, &fakeMateDoer{})
+	total := inboxClassifyPage + 5
+	for i := 0; i < total; i++ {
+		// No thumbnail, so each is recorded as unsortable without a call.
+		if _, err := w.inbox.Insert(inboxItem{SHA256: fmt.Sprintf("%064d", i), Filename: "x.jpg", MIME: "image/jpeg", SizeBytes: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := classifierFor(w).RunPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := w.inbox.Unclassified(); err != nil || len(left) != 0 {
+		t.Errorf("%d still waiting after a pass: %v", len(left), err)
 	}
 }
 
@@ -645,10 +1003,15 @@ func TestInboxTitlePromptPinsItsKeyInstructions(t *testing.T) {
 		"one title",
 		"No note",
 		`{"title"`,
+		"course over ground",
 	} {
 		if !strings.Contains(inboxTitlePrompt, want) {
 			t.Errorf("the title prompt no longer says %q", want)
 		}
+	}
+	// A track fix gives a course over ground, which is not the way the bow points.
+	if strings.Contains(inboxTitlePrompt, "heading") || strings.Contains(inboxTitleMessage(inboxTitleInput{}), "heading") {
+		t.Errorf("the title prompt calls the course over ground a heading")
 	}
 	// The sector note is added only for a photo that carries a bearing.
 	if !strings.Contains(inboxTitleSectorNote, "in the direction the camera pointed") || strings.Contains(inboxTitlePrompt, "in the direction the camera pointed") {

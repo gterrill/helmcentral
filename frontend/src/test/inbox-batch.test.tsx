@@ -120,14 +120,14 @@ describe('inboxApi', () => {
     expect(sizes((i: { json: { items: unknown[] } }) => i.json.items.length)).toEqual([500, 100, 500, 100])
 
     net.apiRequest.mockReset()
-    net.apiRequest.mockImplementation(async (path: string) => {
-      const asked = path.split('ids=')[1].split(',')
+    net.apiRequest.mockImplementation(async (_p: string, init: { json: { ids: string[] } }) => {
+      const asked = init.json.ids
       return { titles: Object.fromEntries(asked.map((id) => [id, `T${id}`])), errors: { [asked[0]]: 'no' } }
     })
     const got = await inboxApi.suggestedTitles(ids)
     expect(Object.keys(got.titles)).toHaveLength(600)
     expect(Object.keys(got.errors)).toEqual(['id0', 'id500'])
-    expect(net.apiRequest.mock.calls.map(([p]) => (p as string).split('ids=')[1].split(',').length)).toEqual([500, 100])
+    expect(sizes((i: { json: { ids: string[] } }) => i.json.ids.length)).toEqual([500, 100])
   })
 
   it('refreshes the folder tree and tags as well as the listings after filing to Documents', async () => {

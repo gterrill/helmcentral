@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // An Inbox table made before Mate sorting gains its new columns when the store
@@ -46,7 +47,7 @@ func TestInboxStoreUpgradesAnOlderTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if it.SuggestedKind != "" || it.ClassifyError != "" || it.BearingRef != "" {
+	if it.SuggestedKind != "" || it.ClassifyError != "" {
 		t.Errorf("%+v", it)
 	}
 
@@ -60,7 +61,7 @@ func TestInboxStoreUpgradesAnOlderTable(t *testing.T) {
 	if err := store.SetSuggestedKind("old1", "document"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetClassifyError("old1", "boom"); err != nil {
+	if err := store.SetClassifyRetry("old1", "boom", 1, time.Now().Add(time.Hour).UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	it, _ = store.Get("old1")

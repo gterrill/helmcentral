@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { isSubmitEnter } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
-import { isSignPhotoType, SIGN_UPLOAD_ACCEPT } from '@/lib/sign-photo'
+import { isSignPhotoType, isSignUploadFile, SIGN_UPLOAD_ACCEPT } from '@/lib/sign-photo'
 import {
   photoMomentOn,
   SIGN_NOTE_MAX,
@@ -208,10 +208,19 @@ export function SignEditor({
   const [thumbFailed, setThumbFailed] = useState(false)
   const thumb = sign ? signPhotoSrc(sign) : null
   useEffect(() => { setThumbFailed(false) }, [thumb])
+  // The picker's accept list is a hint, not a check: a file from "All files" or a
+  // drag can be anything, so what is picked is checked here.
+  const [pickError, setPickError] = useState<string | null>(null)
   const take = (e: React.ChangeEvent<HTMLInputElement>, then: (file: File) => void) => {
     const file = e.target.files?.[0]
     e.target.value = ''
-    if (file) then(file)
+    if (!file) return
+    if (!isSignUploadFile(file)) {
+      setPickError('Pick a photo (JPEG, PNG, GIF, WebP or HEIC)')
+      return
+    }
+    setPickError(null)
+    then(file)
   }
   const hasPhoto = sign?.document_id != null
   const fields = useRef<HTMLDivElement>(null)
@@ -379,6 +388,7 @@ export function SignEditor({
       {/* Below the fields, so it coming and going never moves a control the operator is pressing. */}
       {notice && <p role="status" className="text-xs text-muted-foreground" data-testid="sign-notice">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {pickError && <p role="alert" className="text-xs text-destructive">{pickError}</p>}
       <DocumentLinkPicker
         open={picking !== null}
         onOpenChange={(open) => { if (!open) setPicking(null) }}

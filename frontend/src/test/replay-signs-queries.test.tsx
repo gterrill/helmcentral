@@ -1,9 +1,9 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { resetQueryStore } from '@/lib/api-query'
-import { INBOX_MAX_DIMENSION } from '@/lib/inbox-image'
+import { downscaleForUpload, photoFilename, UPLOAD_MAX_DIMENSION } from '@/lib/image-downscale'
 import { replaySignsApi } from '@/lib/replay-signs-api'
 import { captureOfDocument, ensurePassagePhotosFolder, isSignPhotoType, isSignUploadFile, PASSAGE_PHOTOS_FOLDER, SIGN_UPLOAD_ACCEPT, uploadSignPhoto } from '@/lib/sign-photo'
 import { jsonResponse, stubApi, type StubRequest } from './helpers/stub-api'
@@ -66,13 +66,11 @@ describe('Passage photos folder', () => {
       'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER },
       'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
     })
-    const shrink = vi.fn(async () => new Blob(['small'], { type: 'image/jpeg' }))
+    const shrink = vi.fn(async (file: File) => new File(['small'], photoFilename(file.name), { type: 'image/jpeg' }))
     const original = new File([new Uint8Array([1])], 'wave.HEIC', { type: 'image/heic' })
     const id = await uploadSignPhoto(original, shrink)
     expect(id).toBe('doc1')
-    // The same size and quality as the Inbox's: its long edge and the encoder's default.
-    expect(shrink).toHaveBeenCalledWith(original, INBOX_MAX_DIMENSION, expect.objectContaining({ reduceDecode: true }))
-    expect(INBOX_MAX_DIMENSION).toBe(2560)
+    expect(shrink).toHaveBeenCalledWith(original)
     const upload = mock.mock.calls.find(([u]) => String(u).endsWith('/api/documents'))!
     const fields = upload[1]!.body as FormData
     expect(fields.get('folder_id')).toBe('pp')
@@ -82,11 +80,99 @@ describe('Passage photos folder', () => {
     expect(await sent.text()).toBe('small')
   })
 
+  describe('a picture the browser would flatten', () => {
+    const png = (w: number, h: number, size = 33) => {
+      const bytes = new Uint8Array(Math.max(size, 33))
+      bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+      new DataView(bytes.buffer).setUint32(16, w)
+      new DataView(bytes.buffer).setUint32(20, h)
+      return new File([bytes], 'badge.png', { type: 'image/png' })
+    }
+    const gif = (w: number, h: number) => {
+      const bytes = new Uint8Array(13)
+      bytes.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+      new DataView(bytes.buffer).setUint16(6, w, true)
+      new DataView(bytes.buffer).setUint16(8, h, true)
+      return new File([bytes], 'wave.gif', { type: 'image/gif' })
+    }
+    const setup = () => {
+      const mock = stubApi({
+        'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER },
+        'POST /api/documents': () => jsonResponse({ document: { id: 'doc1' }, duplicate: false }, 201),
+      })
+      const shrink = vi.fn(async (file: File) => new File(['small'], photoFilename(file.name), { type: 'image/jpeg' }))
+      const sent = () => (mock.mock.calls.find(([u]) => String(u).endsWith('/api/documents'))![1]!.body as FormData).get('file') as File
+      return { shrink, sent }
+    }
+
+    it('sends a transparent PNG within the limits as it is, not flattened to a JPEG', async () => {
+      const { shrink, sent } = setup()
+      const original = png(800, 600)
+      await uploadSignPhoto(original, shrink)
+      expect(shrink).not.toHaveBeenCalled()
+      expect(sent().type).toBe('image/png')
+      expect(sent().name).toBe('badge.png')
+    })
+
+    it('sends an animated GIF within the limits as it is', async () => {
+      const { shrink, sent } = setup()
+      await uploadSignPhoto(gif(320, 240), shrink)
+      expect(shrink).not.toHaveBeenCalled()
+      expect(sent().type).toBe('image/gif')
+    })
+
+    it('still shrinks a picture over the long-edge limit', async () => {
+      const { shrink } = setup()
+      await uploadSignPhoto(png(4000, 3000), shrink)
+      expect(shrink).toHaveBeenCalledTimes(1)
+    })
+
+    it('still shrinks a picture over about 4 MB', async () => {
+      const { shrink } = setup()
+      await uploadSignPhoto(png(800, 600, 4 * 1024 * 1024 + 1), shrink)
+      expect(shrink).toHaveBeenCalledTimes(1)
+    })
+
+    it('shrinks one whose size cannot be read, rather than send what it cannot check', async () => {
+      const { shrink } = setup()
+      await uploadSignPhoto(new File([new Uint8Array([1, 2, 3])], 'odd.png', { type: 'image/png' }), shrink)
+      expect(shrink).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('uploads nothing when the photo cannot be shrunk, rather than sending the original', async () => {
     const mock = stubApi({ 'POST /api/passage-photos-folder': { id: 'pp', name: PASSAGE_PHOTOS_FOLDER } })
     const shrink = vi.fn(async () => { throw new Error('could not decode the photo') })
     await expect(uploadSignPhoto(new File([new Uint8Array([1])], 'x.jpg', { type: 'image/jpeg' }), shrink)).rejects.toThrow('could not decode the photo')
     expect(mock.mock.calls.some(([u]) => String(u).endsWith('/api/documents'))).toBe(false)
+  })
+})
+
+describe('downscaleForUpload', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('shrinks to the upload size and hands back a JPEG named by photoFilename', async () => {
+    const close = vi.fn()
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 3200, height: 2400, close }))
+    const draws: number[][] = []
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() => ({
+      fillRect: () => {},
+      drawImage: (_s: unknown, _x: number, _y: number, w: number, h: number) => { draws.push([w, h]) },
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (cb: BlobCallback) {
+      cb(new Blob(['small'], { type: 'image/jpeg' }))
+    })
+
+    const got = await downscaleForUpload(new File([new Uint8Array([1])], 'wave.HEIC', { type: 'image/heic' }))
+
+    expect(UPLOAD_MAX_DIMENSION).toBe(2560)
+    expect(draws).toEqual([[2560, 1920]])
+    expect(got.name).toBe('wave.jpg')
+    expect(got.type).toBe('image/jpeg')
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })
 

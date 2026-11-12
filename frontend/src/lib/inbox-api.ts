@@ -19,10 +19,15 @@ export type InboxGroupKind = 'passage' | 'underway' | 'off_passage' | 'no_time'
 /** What Mate made of an item: where it most likely belongs. */
 export type InboxKind = 'scenery' | 'document' | 'equipment'
 
-/** The Inbox as the box lists it. `mate_sorting` says Mate is set up, so an item with no kind yet is waiting for it. */
+/**
+ * The Inbox as the box lists it. `mate_sorting` says Mate is set up, so an item
+ * with no kind yet is waiting for it; it is null, with `mate_error`, when Mate's
+ * settings could not be read.
+ */
 export interface InboxList {
   items?: InboxItem[]
-  mate_sorting?: boolean
+  mate_sorting?: boolean | null
+  mate_error?: string
 }
 
 export interface InboxItem {
@@ -45,8 +50,10 @@ export interface InboxItem {
   group: { kind: InboxGroupKind; passage_id?: string }
   /** Mate's view of the item, or null until it has looked and for good when Mate is not set up. */
   suggested_kind?: InboxKind | null
-  /** Why Mate could not sort the item, when it tried and failed. */
+  /** The one plain line to show when Mate tried and failed to sort the item, with when it tries again. The cause is in the box's log. */
   classify_error?: string
+  /** Unix ms of Mate's next try at a failed item; every failure is tried again by itself. */
+  next_try_ms?: number
   /** The phone's own position was over a nautical mile from the track: the clock or zone is off. */
   gps_mismatch: boolean
 }
@@ -68,8 +75,6 @@ export const isPhotoItem = (item: Pick<InboxItem, 'mime'>): boolean => PHOTO_MIM
 export interface InboxUploadMeta {
   captureMs: number | null
   bearingDeg: number | null
-  /** Which north the bearing is measured from, T true or M magnetic; left out when the phone did not say. */
-  bearingRef?: 'T' | 'M' | null
   phoneLat: number | null
   phoneLon: number | null
   fingerprint: string
@@ -85,6 +90,8 @@ export type InboxUploadResult =
 export interface SuggestedTitles {
   titles: Record<string, string>
   errors: Record<string, string>
+  /** Set when Mate's settings could not be read, so the titles are place names. */
+  mateError?: string
 }
 
 /** The outcome for one item of a filing call. */
@@ -183,10 +190,7 @@ export const inboxApi = {
   upload: async (file: Blob, filename: string, meta: InboxUploadMeta, thumb: Blob | null = null): Promise<InboxUploadResult> => {
     const form = new FormData()
     if (meta.captureMs !== null) form.append('capture_ms', String(meta.captureMs))
-    if (meta.bearingDeg !== null) {
-      form.append('bearing_deg', String(meta.bearingDeg))
-      if (meta.bearingRef) form.append('bearing_ref', meta.bearingRef)
-    }
+    if (meta.bearingDeg !== null) form.append('bearing_deg', String(meta.bearingDeg))
     if (meta.phoneLat !== null && meta.phoneLon !== null) {
       form.append('phone_lat', String(meta.phoneLat))
       form.append('phone_lon', String(meta.phoneLon))
@@ -203,6 +207,15 @@ export const inboxApi = {
   known: async (hashes: readonly string[]): Promise<string[]> => {
     const { known } = await apiRequest<{ known: string[] }>('/api/inbox/known', { method: 'POST', json: { hashes } })
     return known
+  },
+  /** Clears every failure Mate recorded and has it look at those items again; says how many it requeued. */
+  sortAgain: async (): Promise<number> => {
+    try {
+      const { requeued } = await apiRequest<{ requeued: number }>('/api/inbox/sort-again', { method: 'POST' })
+      return requeued
+    } finally {
+      await inboxChanged()
+    }
   },
   /** Re-reads the list and the count, once a batch of uploads is done. */
   refresh: (): Promise<void> => inboxChanged(),
@@ -245,14 +258,16 @@ export const inboxApi = {
    * A suggested title for each photo, by id: Mate's when it is set up, else the
    * nearest named place to the boat when the photo was taken (or the feature in
    * the direction it faced). Blank where there is none. `errors` gives the
-   * reason a title could not be made, by id.
+   * reason a title could not be made, by id. A POST, because with Mate set up
+   * it makes paid calls and keeps the titles it makes.
    */
   suggestedTitles: async (ids: readonly string[]): Promise<SuggestedTitles> => {
     const out: SuggestedTitles = { titles: {}, errors: {} }
     for (const chunk of inChunks(ids)) {
-      const res = await apiRequest<Partial<SuggestedTitles>>(`/api/inbox/suggested-titles?ids=${chunk.map(encodeURIComponent).join(',')}`)
+      const res = await apiRequest<Partial<SuggestedTitles> & { mate_error?: string }>('/api/inbox/suggested-titles', { method: 'POST', json: { ids: chunk } })
       Object.assign(out.titles, res.titles)
       Object.assign(out.errors, res.errors)
+      if (res.mate_error) out.mateError = res.mate_error
     }
     return out
   },

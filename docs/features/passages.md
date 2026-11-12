@@ -272,14 +272,17 @@ that is made the first time, or chosen from a photo already in Documents. To
 make signs from a whole roll of photos shared from your phone, use the Inbox
 instead. See [Inbox](inbox.md).
 
-- **Uploading shrinks the photo first:** The photo is shrunk on your device to
-  2560 pixels on its longest side and sent as a JPEG, the same as the Inbox does,
-  so a full-size camera photo doesn't choke a weak connection. The time it was
-  taken is read from the original before it's shrunk, so it's still used to place
-  the sign.
+- **Big photos are shrunk first:** A photo longer than 2560 pixels on its longest
+  side, or larger than about 4 MB, is shrunk on your device and sent as a JPEG,
+  the same as the Inbox does, so a full-size camera photo doesn't choke a weak
+  connection. A smaller PNG, GIF or JPEG goes as it is, so a transparent PNG
+  stays transparent and an animated GIF keeps moving. The time the photo was
+  taken is read from the original, so it's still used to place the sign.
 - **HEIC and HEIF:** The editor accepts the iPhone's HEIC photos and turns them
   into JPEG as part of the shrinking. If your browser can't read a photo, the
   editor says so and sends nothing.
+- **Only photos:** If you pick a file that isn't a photo, such as a PDF, the editor
+  says "Pick a photo (JPEG, PNG, GIF, WebP or HEIC)" and sends nothing.
 - **One folder:** The **Passage photos** folder is the same one the Inbox uses.
   Helmcentral finds it or makes it, whichever device you upload from.
 - **From Documents:** A photo you pick from the library is used as it is. It has

@@ -134,6 +134,21 @@ export async function downscaleImage(file: Blob, maxDimension: number = MAX_DIME
   }
 }
 
+/** The long edge, in px, of a photo shrunk to be kept as a library photo, a sign photo or an Inbox photo: they may become a document, so they keep more detail than an equipment photo. */
+export const UPLOAD_MAX_DIMENSION = 2560
+
+/**
+ * Shrinks a picture to UPLOAD_MAX_DIMENSION on the device and re-encodes it as
+ * JPEG (HEIC included), named by photoFilename. Throws when the browser cannot
+ * decode or draw it: the original is never sent in its place. The Inbox does
+ * not use this, since it makes its preview and fingerprint from the same decode
+ * (inbox-image.ts), but it shrinks to the same size.
+ */
+export async function downscaleForUpload(file: File): Promise<File> {
+  const blob = await downscaleImage(file, UPLOAD_MAX_DIMENSION, { reduceDecode: true, opaque: true })
+  return new File([blob], photoFilename(file.name), { type: 'image/jpeg' })
+}
+
 /** JPEG/PNG re-encoding always renames to .jpg (downscaleImage's own output
  * format) - a camera capture's filename is often meaningless anyway
  * ("image.heic", "blob"), and giving every upload a real extension that

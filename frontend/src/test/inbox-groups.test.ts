@@ -47,7 +47,7 @@ describe('groupInbox', () => {
       item({ id: 'd', group: { kind: 'underway' } }),
       item({ id: 'e', group: { kind: 'passage', passage_id: 'p2' }, capture_ms: p2.start ? Date.parse(p2.start) + min : 0 }),
     ]
-    const groups = groupInbox(items, [p1, p2])
+    const groups = groupInbox(items, [p1, p2], false)
     expect(groups.map((g) => g.key)).toEqual(['underway', 'passage:p2', 'passage:p1', 'off_passage', 'no_time'])
     expect(groups.map((g) => g.label)).toEqual(['Underway now', expect.stringContaining('Whitehaven'), expect.stringContaining('Airlie'), 'Not on a passage', 'No time'])
   })
@@ -59,7 +59,7 @@ describe('groupInbox', () => {
       item({ id: 'n2', group: { kind: 'no_time' }, capture_ms: null, created_ms: 20 }),
       item({ id: 'n1', group: { kind: 'no_time' }, capture_ms: null, created_ms: 10 }),
     ]
-    const groups = groupInbox(items, [p1])
+    const groups = groupInbox(items, [p1], false)
     expect(groups[0].items.map((i) => i.id)).toEqual(['early', 'late'])
     expect(groups[1].items.map((i) => i.id)).toEqual(['n1', 'n2'])
   })
@@ -71,18 +71,18 @@ describe('groupInbox', () => {
       item({ group: { kind: 'off_passage' } }),
       item({ group: { kind: 'no_time' }, capture_ms: null }),
     ]
-    const can = Object.fromEntries(groupInbox(items, [p1]).map((g) => [g.key, g.canAssign]))
+    const can = Object.fromEntries(groupInbox(items, [p1], false).map((g) => [g.key, g.canAssign]))
     expect(can).toEqual({ underway: false, 'passage:p1': true, off_passage: true, no_time: true })
   })
 
   it('has no empty groups and no groups for no items', () => {
-    expect(groupInbox([], [p1])).toEqual([])
+    expect(groupInbox([], [p1], false)).toEqual([])
   })
 
   it('leaves out the end of a passage that has no name, and shows just the date when neither has one', () => {
     const date = formatLocalDate(p1.start, 'Australia/Brisbane')
     const labelOf = (p: PassageSummary) =>
-      groupInbox([item({ group: { kind: 'passage', passage_id: p.id } })], [p])[0].label
+      groupInbox([item({ group: { kind: 'passage', passage_id: p.id } })], [p], false)[0].label
     expect(labelOf({ ...p1, id: 'p1', from_name: '', to_name: 'Barubbra Island' })).toBe(`Barubbra Island · ${date}`)
     expect(labelOf({ ...p1, id: 'p1', from_name: 'Great Keppel Island', to_name: '' })).toBe(`Great Keppel Island · ${date}`)
     expect(labelOf({ ...p1, id: 'p1', from_name: '', to_name: '' })).toBe(date)
@@ -90,7 +90,7 @@ describe('groupInbox', () => {
   })
 
   it('names a passage the list no longer holds rather than dropping its photos', () => {
-    const groups = groupInbox([item({ group: { kind: 'passage', passage_id: 'gone' } })], [p1])
+    const groups = groupInbox([item({ group: { kind: 'passage', passage_id: 'gone' } })], [p1], false)
     expect(groups).toHaveLength(1)
     expect(groups[0].label).toMatch(/passage/i)
   })
@@ -149,7 +149,6 @@ describe('groupInbox with Mate sorting', () => {
       item({ id: 'c', suggested_kind: null, group: { kind: 'passage', passage_id: 'p1' } }),
     ]
     expect(groupInbox(items, [p1], false).map((g) => g.key)).toEqual(['passage:p1', 'off_passage', 'no_time'])
-    expect(groupInbox(items, [p1]).map((g) => g.key)).toEqual(['passage:p1', 'off_passage', 'no_time'])
   })
 
   it('lets a document taken underway be sent on, since the group only sets the default', () => {

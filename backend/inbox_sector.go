@@ -45,7 +45,9 @@ type inboxFeature struct {
 	InSector bool
 }
 
-// angleDiffDeg is the smaller angle between two bearings, 0 to 180.
+// angleDiffDeg is the smaller angle between two bearings, 0 to 180. It stays a
+// float because relativeAngleDeg (assistant_geometry.go) rounds to whole
+// degrees, which would let 25.4 degrees pass the inclusive 25.0 edge.
 func angleDiffDeg(a, b float64) float64 {
 	d := math.Mod(math.Abs(a-b), 360)
 	if d > 180 {
@@ -60,30 +62,13 @@ func inSector(cameraTrueDeg, featureDeg float64) bool {
 	return angleDiffDeg(cameraTrueDeg, featureDeg) <= inboxSectorHalfWidthDeg
 }
 
-// cameraBearingTrue turns the direction the phone recorded into degrees true.
-// The reference is "T" or "M" (empty is true). A magnetic bearing needs the
-// magnetic variation, east positive, to become true.
-//
-// Nothing in the box records variation yet: the track keeps position, speed
-// and course over ground only, and Helmcentral reads no variation from
-// SignalK. So the handlers pass nil, and a magnetic bearing is read as if it
-// were true, an error of the local variation (a few degrees on this coast)
-// that sits well inside the 25 degree half-width. The parameter is here so a
-// variation source can be wired in without touching the maths (ADR 0282).
-func cameraBearingTrue(bearingDeg float64, ref string, variationDeg *float64) float64 {
-	if ref != "M" || variationDeg == nil {
-		return bearingDeg
-	}
-	return math.Mod(math.Mod(bearingDeg+*variationDeg, 360)+360, 360)
-}
-
 // nearbyFeatures names, ranks and measures what a provider returned from the
 // boat's position: named features within 10 nm, nearest first. It reuses the
 // Nearby tile's decoration, so distance, bearing and de-duplication agree.
 func nearbyFeatures(raw []poiFeatureRaw, lat, lon float64) []inboxFeature {
 	named := make([]poiFeatureRaw, 0, len(raw))
 	for _, f := range raw {
-		if strings.TrimSpace(f.Name) != "" {
+		if f.Name = strings.TrimSpace(f.Name); f.Name != "" {
 			named = append(named, f)
 		}
 	}
@@ -91,26 +76,22 @@ func nearbyFeatures(raw []poiFeatureRaw, lat, lon float64) []inboxFeature {
 	out := make([]inboxFeature, 0, len(ranked))
 	for _, f := range ranked {
 		out = append(out, inboxFeature{
-			Name: strings.TrimSpace(f.Name), Category: f.Category,
+			Name: f.Name, Category: f.Category,
 			DistanceNm: f.DistanceM / metersPerNauticalMile, BearingDeg: f.BearingDeg,
 		})
 	}
 	return out
 }
 
-// nearestInSector is the nearest feature that lies where the camera pointed.
-func nearestInSector(features []inboxFeature, cameraTrueDeg float64) (inboxFeature, bool) {
-	var best inboxFeature
-	found := false
-	for _, f := range features {
-		if f.DistanceNm > inboxFeatureRangeNm || !inSector(cameraTrueDeg, f.BearingDeg) {
-			continue
-		}
-		if !found || f.DistanceNm < best.DistanceNm {
-			best, found = f, true
+// nearestInSector is the nearest feature that lies where the camera pointed:
+// the first one in the sector of a list ranked nearest first (nearbyFeatures).
+func nearestInSector(ranked []inboxFeature, cameraTrueDeg float64) (inboxFeature, bool) {
+	for _, f := range ranked {
+		if inSector(cameraTrueDeg, f.BearingDeg) {
+			return f, true
 		}
 	}
-	return best, found
+	return inboxFeature{}, false
 }
 
 // markSector returns the features with InSector set for the camera's bearing.
@@ -123,15 +104,21 @@ func markSector(features []inboxFeature, cameraTrueDeg float64) []inboxFeature {
 	return out
 }
 
-// describe is the line Mate reads: name, distance, and the side of the bow it
-// lies on ("Cape Capricorn, 3.1 nm, 40° to port"). With no heading it can only
-// give the true bearing.
-func (f inboxFeature) describe(headingDeg *float64) string {
+// bearingText is a bearing as the prompt gives it: whole degrees from 000 to
+// 359, so -10 reads 350° and 359.6 reads 000°.
+func bearingText(deg float64) string {
+	return fmt.Sprintf("%03d°", int(math.Round(normalizeDegrees(deg)))%360)
+}
+
+// describe is the line Mate reads: name, distance, and the side of the course
+// it lies on ("Cape Capricorn, 3.1 nm, 40° to port"). With no course it can
+// only give the true bearing.
+func (f inboxFeature) describe(courseDeg *float64) string {
 	head := fmt.Sprintf("%s, %.1f nm", f.Name, f.DistanceNm)
-	if headingDeg == nil {
-		return fmt.Sprintf("%s, bearing %03d° true", head, int(math.Round(f.BearingDeg))%360)
+	if courseDeg == nil {
+		return fmt.Sprintf("%s, bearing %s true", head, bearingText(f.BearingDeg))
 	}
-	rel := relativeBearingDeg(*headingDeg, f.BearingDeg)
+	rel := relativeBearingDeg(*courseDeg, f.BearingDeg)
 	switch {
 	case rel == 0:
 		return head + ", dead ahead"
@@ -144,31 +131,38 @@ func (f inboxFeature) describe(headingDeg *float64) string {
 	}
 }
 
+// inboxFetched is what the provider returned around a position. Truncated says
+// it cut a category short, so the list may lack the very nearest feature.
+type inboxFetched struct {
+	Features  []poiFeatureRaw
+	Truncated bool
+}
+
 // inboxFeaturesNear lists the named islands and bays around a position from the
 // configured place-names provider: the same plugin that names places, asked for
 // its island and bay categories out to 10 nm plus a margin. A var so tests can
 // stand in. It fails rather than answering from nothing when the provider is
 // missing or cannot list features.
-var inboxFeaturesNear = func(lat, lon float64) ([]poiFeatureRaw, error) {
+var inboxFeaturesNear = func(lat, lon float64) (inboxFetched, error) {
 	pn, id, err := placeNameProviderResolve()
 	if err != nil {
-		return nil, fmt.Errorf("place-names provider: %w", err)
+		return inboxFetched{}, fmt.Errorf("place-names provider: %w", err)
 	}
 	poi, ok := pn.(poiProvider)
 	if !ok {
-		return nil, fmt.Errorf("place-names provider %q cannot list nearby features", id)
+		return inboxFetched{}, fmt.Errorf("place-names provider %q cannot list nearby features", id)
 	}
 	radiusM := int(math.Round((inboxFeatureRangeNm + inboxFeatureFetchPadNm) * metersPerNauticalMile))
 	res, err := poi.FetchPOI(lat, lon, radiusM, inboxFeatureCategories, inboxFeatureLimit)
 	if err != nil {
-		return nil, fmt.Errorf("place-names provider %q: %w", id, firstLineErr(err))
+		return inboxFetched{}, fmt.Errorf("place-names provider %q: %w", id, firstLineErr(err))
 	}
 	if len(res.Truncated) > 0 {
 		// The provider caps each category, so in a crowded archipelago the very
 		// nearest feature may be missing from the list.
 		log.Printf("inbox: nearby features near %.3f,%.3f cut short by %q for %v", lat, lon, id, res.Truncated)
 	}
-	return res.Features, nil
+	return inboxFetched{Features: res.Features, Truncated: len(res.Truncated) > 0}, nil
 }
 
 // firstLineErr trims a provider error to its first line for the operator.

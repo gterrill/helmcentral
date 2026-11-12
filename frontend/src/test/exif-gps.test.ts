@@ -27,20 +27,13 @@ describe('readExifGps', () => {
     expect(read(gpsJpeg({ dirRef: 'M', dir: [90, 1] })).bearingDeg).toBe(90)
   })
 
-  it('keeps which north the direction is measured from', () => {
-    expect(read(gpsJpeg({ dirRef: 'T', dir: [90, 1] })).bearingRef).toBe('T')
-    expect(read(gpsJpeg({ dirRef: 'M', dir: [90, 1] })).bearingRef).toBe('M')
-    // No direction, no reference to report.
-    expect(read(gpsJpeg({ latRef: 'S', lat: dms(20, 0, 0), lonRef: 'E', lon: dms(149, 0, 0) })).bearingRef).toBeNull()
-  })
-
   it('a bearing of due north is real when the block says which north', () => {
     expect(read(gpsJpeg({ dirRef: 'T', dir: [0, 1] })).bearingDeg).toBe(0)
   })
 
   it('a zeroed block, the phone hiding its location, is missing and never due north', () => {
     const zeroed = gpsJpeg({ latRef: '', lat: dms(0, 0, 0), lonRef: '', lon: dms(0, 0, 0), dirRef: '', dir: [0, 1] })
-    expect(read(zeroed)).toEqual({ lat: null, lon: null, bearingDeg: null, bearingRef: null })
+    expect(read(zeroed)).toEqual({ lat: null, lon: null, bearingDeg: null })
   })
 
   it('zero over zero is missing, not an error', () => {
@@ -50,7 +43,7 @@ describe('readExifGps', () => {
   })
 
   it('a position at 0, 0 is no position', () => {
-    expect(read(gpsJpeg({ latRef: 'N', lat: dms(0, 0, 0), lonRef: 'E', lon: dms(0, 0, 0) }))).toEqual({ lat: null, lon: null, bearingDeg: null, bearingRef: null })
+    expect(read(gpsJpeg({ latRef: 'N', lat: dms(0, 0, 0), lonRef: 'E', lon: dms(0, 0, 0) }))).toEqual({ lat: null, lon: null, bearingDeg: null })
   })
 
   it('a latitude without a longitude is not half used', () => {
@@ -65,7 +58,7 @@ describe('readExifGps', () => {
   })
 
   it('is empty when the photo has no GPS block, no Exif or is not a JPEG', () => {
-    const none = { lat: null, lon: null, bearingDeg: null, bearingRef: null }
+    const none = { lat: null, lon: null, bearingDeg: null }
     expect(read(gpsJpeg({ noGpsIfd: true }))).toEqual(none)
     expect(read(exifJpeg({ dt: '2026:10:22 11:30:15' }))).toEqual(none)
     expect(read(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]))).toEqual(none)

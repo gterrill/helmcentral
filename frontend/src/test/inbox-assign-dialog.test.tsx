@@ -41,6 +41,13 @@ describe('InboxAssignDialog', () => {
     await waitFor(() => expect(screen.queryByText('Looking up place names…')).toBeNull())
   })
 
+  it('says in one line that the titles are place names when Mate\'s settings could not be read', async () => {
+    api.suggestedTitles.mockResolvedValue({ titles: { a: 'Hook Island' }, errors: {}, mateError: "Mate's settings couldn't be read; these are place-name titles" })
+    render(<InboxAssignDialog items={[photo('a', 'passage', T0 + min)]} passages={passages} mateTitles onClose={vi.fn()} />)
+    expect(await screen.findByText("Mate's settings couldn't be read; these are place-name titles")).toBeInTheDocument()
+    expect((screen.getByLabelText('Title for a.jpg') as HTMLInputElement).value).toBe('Hook Island')
+  })
+
   it('shows the photo itself when it has no thumbnail', async () => {
     api.suggestedTitles.mockResolvedValue(noTitles)
     const { container } = render(

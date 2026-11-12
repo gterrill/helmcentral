@@ -694,7 +694,9 @@ func openRouterNonSuccessError(resp *http.Response) error {
 // status. Nothing is generated for such a request, so nothing is charged:
 // a watch review's cost (ADR 0227) counts it as free, and any other failure of a
 // request as possibly charged.
-type openRouterStatusError struct{ text string }
+type openRouterStatusError struct {
+	text string
+}
 
 func (e *openRouterStatusError) Error() string { return e.text }
 

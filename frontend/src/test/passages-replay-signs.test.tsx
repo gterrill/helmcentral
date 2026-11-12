@@ -17,7 +17,7 @@ vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
 // placed by the photo's time proves the time was read from the original.
 vi.mock('@/lib/image-downscale', async (orig) => ({
   ...(await orig<typeof import('@/lib/image-downscale')>()),
-  downscaleImage: vi.fn(async () => new Blob(['shrunk'], { type: 'image/jpeg' })),
+  downscaleForUpload: vi.fn(async (file: File) => new File(['shrunk'], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })),
 }))
 vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, longitude, latitude }: { children: ReactNode; longitude: number; latitude: number }) => (
@@ -934,9 +934,23 @@ describe('ReplayPanel signs: the photo upload', () => {
     expect(sent.get('folder_id')).toBe('pp')
   })
 
+  it('refuses a file that is not a photo, for a new sign and for a replacement', async () => {
+    signs = [sign('s1', 250)]
+    stub({ 'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' } })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'receipt.pdf', { type: 'application/pdf' })
+    for (const label of ['Photo file for a new sign', 'Photo file for this sign']) {
+      fireEvent.change(screen.getByLabelText(label), { target: { files: [pdf] } })
+      expect(await screen.findByText('Pick a photo (JPEG, PNG, GIF, WebP or HEIC)')).toBeInTheDocument()
+    }
+    expect(writes).toHaveLength(0)
+    expect((globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit][] } }).mock.calls.some(([, init]) => init?.body instanceof FormData)).toBe(false)
+  })
+
   it('does not send the original when it cannot be shrunk', async () => {
-    const { downscaleImage } = await import('@/lib/image-downscale')
-    vi.mocked(downscaleImage).mockRejectedValueOnce(new Error('could not decode the photo'))
+    const { downscaleForUpload } = await import('@/lib/image-downscale')
+    vi.mocked(downscaleForUpload).mockRejectedValueOnce(new Error('could not decode the photo'))
     stub({ 'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' } })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Signs' }))

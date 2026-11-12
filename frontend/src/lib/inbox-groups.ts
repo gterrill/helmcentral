@@ -1,4 +1,4 @@
-import type { InboxGroupKind, InboxItem } from '@/lib/inbox-api'
+import type { InboxGroupKind, InboxItem, InboxKind } from '@/lib/inbox-api'
 import { hammingHex } from '@/lib/image-fingerprint'
 import { formatLocalDate, passageRoute, type PassageSummary } from '@/lib/passages'
 
@@ -21,6 +21,9 @@ export interface InboxGroup {
   canAssign: boolean
 }
 
+/** Whether one item can be made a sign now: photos taken underway wait for the passage to be recorded, wherever Mate has put them. */
+export const itemCanAssign = (item: Pick<InboxItem, 'group'>): boolean => item.group.kind !== 'underway'
+
 /**
  * A passage as the Inbox names it: its title, else "From → To" with whichever
  * end has a name, then the date. With no title and no names, just the date.
@@ -38,8 +41,12 @@ const byCapture = (a: InboxItem, b: InboxItem) =>
  * Whether Mate is set up and has not yet sorted the item, because it has not
  * looked yet or looked and failed. The item waits for the operator's say.
  */
-export const isUnsortedByMate = (item: Pick<InboxItem, 'suggested_kind' | 'classify_error'>, mateSorting: boolean): boolean =>
+export const isUnsortedByMate = (item: Pick<InboxItem, 'suggested_kind'>, mateSorting: boolean): boolean =>
   mateSorting && !item.suggested_kind
+
+const MATE_GROUP_LABELS: Record<InboxMateGroupKind, string> = { documents: 'Documents', equipment: 'Equipment', unsorted: 'Unsorted' }
+/** The group Mate's kind sends an item to; scenery has none and keeps the time rule. */
+const GROUP_OF_KIND: Partial<Record<InboxKind, InboxMateGroupKind>> = { document: 'documents', equipment: 'equipment' }
 
 /**
  * Groups in the order the operator works through them: what is happening now,
@@ -53,7 +60,7 @@ export const isUnsortedByMate = (item: Pick<InboxItem, 'suggested_kind' | 'class
  * unsorted goes to Unsorted. With Mate off every item takes the time rule. The
  * group sets the default only: each item can still be sent anywhere.
  */
-export function groupInbox(items: readonly InboxItem[], passages: readonly PassageSummary[], mateSorting = false): InboxGroup[] {
+export function groupInbox(items: readonly InboxItem[], passages: readonly PassageSummary[], mateSorting: boolean): InboxGroup[] {
   const byPassage = new Map(passages.map((p) => [p.id, p]))
   const buckets = new Map<string, InboxGroup>()
   const add = (key: string, make: () => Omit<InboxGroup, 'key' | 'items'>, item: InboxItem) => {
@@ -67,12 +74,10 @@ export function groupInbox(items: readonly InboxItem[], passages: readonly Passa
   for (const item of items) {
     const { kind, passage_id: passageId } = item.group
     // Mate's view only counts while it is set up: a kind left from before it was switched off is not acted on.
-    if (mateSorting && item.suggested_kind === 'document') {
-      add('documents', () => ({ kind: 'documents', passageId: null, canAssign: true, label: 'Documents' }), item)
-    } else if (mateSorting && item.suggested_kind === 'equipment') {
-      add('equipment', () => ({ kind: 'equipment', passageId: null, canAssign: true, label: 'Equipment' }), item)
-    } else if (isUnsortedByMate(item, mateSorting) && (kind === 'off_passage' || kind === 'no_time')) {
-      add('unsorted', () => ({ kind: 'unsorted', passageId: null, canAssign: true, label: 'Unsorted' }), item)
+    const mateGroup = mateSorting && item.suggested_kind ? GROUP_OF_KIND[item.suggested_kind] : undefined
+    const mateKind = mateGroup ?? (isUnsortedByMate(item, mateSorting) && (kind === 'off_passage' || kind === 'no_time') ? 'unsorted' : undefined)
+    if (mateKind) {
+      add(mateKind, () => ({ kind: mateKind, passageId: null, canAssign: true, label: MATE_GROUP_LABELS[mateKind] }), item)
     } else if (kind === 'passage' && passageId) {
       const p = byPassage.get(passageId)
       add(`passage:${passageId}`, () => ({

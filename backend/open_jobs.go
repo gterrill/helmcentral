@@ -341,15 +341,15 @@ func openJobForClose(tx *sql.Tx, id string) (openJob, error) {
 	if err != nil {
 		return openJob{}, err
 	}
-	if err := requireJobOpen(job); err != nil {
+	if err := requireJobOpen(job.Status); err != nil {
 		return openJob{}, err
 	}
 	return job, nil
 }
 
 // requireJobOpen is the one rule that a job must still be open.
-func requireJobOpen(job openJob) error {
-	if job.Status != openJobOpen {
+func requireJobOpen(status string) error {
+	if status != openJobOpen {
 		return errOpenJobClosed
 	}
 	return nil

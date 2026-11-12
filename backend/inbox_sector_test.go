@@ -39,30 +39,6 @@ func TestInSectorEdgesAreInclusive(t *testing.T) {
 	}
 }
 
-func TestCameraBearingTrueUsesTheReference(t *testing.T) {
-	ten := 10.0
-	west := -12.0
-	cases := []struct {
-		name string
-		deg  float64
-		ref  string
-		vari *float64
-		want float64
-	}{
-		{"true stays", 100, "T", &ten, 100},
-		{"no reference is read as true", 100, "", &ten, 100},
-		{"magnetic plus east variation", 100, "M", &ten, 110},
-		{"magnetic wraps past 360", 355, "M", &ten, 5},
-		{"west variation subtracts and wraps below 0", 5, "M", &west, 353},
-		{"magnetic with no variation known is read as true", 100, "M", nil, 100},
-	}
-	for _, c := range cases {
-		if got := cameraBearingTrue(c.deg, c.ref, c.vari); got != c.want {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
-		}
-	}
-}
-
 func TestNearbyFeaturesStopAtTenMilesAndSortByDistance(t *testing.T) {
 	// One degree of latitude in the metres haversineMeters uses, to place
 	// features just inside and just outside 10 nm due north of the boat.
