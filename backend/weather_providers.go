@@ -1190,7 +1190,7 @@ func weatherForecast(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
-// forecastProviderRoutes returns the /api routes for weather, wave, tide, POI, upper-air and forecast-warning endpoints and their providers.
+// forecastProviderRoutes returns the /api routes for weather, wave, tide, POI, upper-air, lightning and forecast-warning endpoints and their providers.
 // Each row carries its own auth tier (docs/adr/0177).
 func forecastProviderRoutes() []apiRoute {
 	return []apiRoute{
@@ -1203,6 +1203,8 @@ func forecastProviderRoutes() []apiRoute {
 		{http.MethodGet, "/api/poi-providers", tierRead, poiProvidersHandler},
 		{http.MethodGet, "/api/upper-air", tierRead, upperAirForecast},
 		{http.MethodGet, "/api/upper-air-providers", tierRead, upperAirProvidersHandler},
+		{http.MethodGet, "/api/lightning", tierRead, lightningForecast},
+		{http.MethodGet, "/api/lightning-providers", tierRead, lightningProvidersHandler},
 		{http.MethodGet, "/api/forecast-warnings", tierRead, forecastWarningsHandler},
 		{http.MethodGet, "/api/forecast-warnings-providers", tierRead, forecastWarningsProvidersHandler},
 		{http.MethodGet, "/api/tide-today", tierRead, tideToday},

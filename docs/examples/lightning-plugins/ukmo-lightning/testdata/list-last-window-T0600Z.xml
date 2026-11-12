@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>met-office-global-gridded-probabilities</Name><Prefix>global-gridded-probabilities/2026/11/12/T0600Z/20261126T1800Z-B20261112T0600Z-lightning_flash_accumulation-PT03H</Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>

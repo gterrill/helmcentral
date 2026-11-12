@@ -4,11 +4,12 @@ This is the plugin authoring reference: the sandbox, the contracts, and the
 build. For what a plugin is from an operator's chair (categories, installing
 one, the settings it exposes), see [Provider plugins](../reference/plugins.md).
 
-Tide, weather, wave, points-of-interest, forecast-warning and upper-air
-providers are sandboxed WASM modules loaded from disk at startup. The six
-registries (`backend/tide_providers.go`, `backend/weather_providers.go`,
+Tide, weather, wave, points-of-interest, forecast-warning, upper-air and
+lightning providers are sandboxed WASM modules loaded from disk at startup.
+The seven registries (`backend/tide_providers.go`, `backend/weather_providers.go`,
 `backend/wave_providers.go`, `backend/poi_providers.go`,
-`backend/forecast_warnings_providers.go`, and `backend/upper_air_providers.go`)
+`backend/forecast_warnings_providers.go`, `backend/upper_air_providers.go`, and
+`backend/lightning_providers.go`)
 share a single WASM host layer in `backend/wasm_plugin.go`.
 
 ## The sandbox
@@ -50,6 +51,7 @@ function for its category:
 | Points of interest | `fetch_poi(lat, lon, radius_m, categories, limit)` | Raw features per category (id, name, position, optional detail/source URL), plus which categories were truncated or unsupported |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 | Upper air | `fetch_upper_air` | Hourly 500mb and 1000mb geopotential height, 500mb wind and temperature |
+| Lightning | `fetch_lightning(lat, lon, from, to, run?)` | The run it read (`run`) and, for the grid cell holding the position, the probability (0 to 1) of at least one flash in each 3-hour window ending in `(from, to]`. The optional input `run` (RFC 3339) names the run to read, so the plugin need not look for the newest; the host leaves it out on the first span of a refresh and passes the returned run to the rest. A window missing from a complete run is left out; any other failure is an error. The host asks in spans of 24 hours (eight windows) under a 60 s background budget (`backend/lightning_schedule.go`) |
 
 The reference plugins under `docs/examples/` define the exact JSON shape for
 each export. Refer to the example for your category alongside this table
@@ -294,6 +296,7 @@ Available example directories:
 - `docs/examples/poi-plugins/osm-overpass`, `docs/examples/poi-plugins/google-places`
 - `docs/examples/forecast-warnings-plugins/bom`, `docs/examples/forecast-warnings-plugins/nws`
 - `docs/examples/upper-air-plugins/open-meteo-upper`
+- `docs/examples/lightning-plugins/ukmo-lightning`
 
 Each directory contains a README with installation instructions.
 [docs/examples/weather-plugins/weatherkit/README.md](../examples/weather-plugins/weatherkit/README.md)

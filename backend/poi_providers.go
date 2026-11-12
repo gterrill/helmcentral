@@ -314,12 +314,9 @@ func poiNearby(c echo.Context) error {
 		}
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
+	vesselState, status, msg := ownShipState("", false)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": msg})
 	}
 
 	radiusM := int(math.Round(radiusNm * metersPerNauticalMile))

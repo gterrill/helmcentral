@@ -1,7 +1,7 @@
 # Provider plugins
 
-Tides, weather, waves, points of interest (Nearby), forecast warnings and the
-upper-air outlook each come from a small provider plugin. They aren't built
+Tides, weather, waves, points of interest (Nearby), forecast warnings, the
+upper-air outlook and lightning probability each come from a small provider plugin. They aren't built
 into Helmcentral itself. So you can add a provider for another region's
 government data source, or swap one out, without a Helmcentral upgrade. Drop
 the plugin into the right folder and restart.
@@ -14,8 +14,13 @@ the plugin into the right folder and restart.
 | Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**, mirror set from the plugin's own settings, see below), `google-places` (needs a key, partial category coverage) |
 | Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
 | Upper air | `plugins/upper-air/` | `PLUGINS_UPPER_AIR_DIR` | `open-meteo-upper` (worldwide, keyless) |
+| Lightning | `plugins/lightning/` | `PLUGINS_LIGHTNING_DIR` | `ukmo-lightning` (worldwide, keyless, Met Office forecast) |
 
-Pick the active provider for each category in Settings.
+Pick the active provider for each category in Settings. Lightning has no
+picker there. You choose its provider by adding `lightning_provider` under `ui`
+in `settings.yaml`, such as `lightning_provider: ukmo-lightning`. If you leave
+it out, Helmcentral uses `ukmo-lightning` when that plugin is installed.
+Naming a provider that isn't installed is an error.
 
 The [Offline coastline](../features/offline-coastline.md) downloads through
 the `osm-overpass` place-names plugin, and it needs a version of that plugin

@@ -1694,10 +1694,16 @@ func loadSignalKSettings(settingsPath string) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
+	address, port := signalKAddressFromSettings(settings)
+	return address, port, nil
+}
 
+// signalKAddressFromSettings picks the SignalK address and port out of
+// settings already read, with the defaults for what is missing.
+func signalKAddressFromSettings(settings map[string]any) (string, int) {
 	signalkMap, ok := settings["signalk"].(map[string]any)
 	if !ok {
-		return defaultSignalKAddress, defaultSignalKPort, nil
+		return defaultSignalKAddress, defaultSignalKPort
 	}
 
 	address, _ := signalkMap["address"].(string)
@@ -1710,7 +1716,7 @@ func loadSignalKSettings(settingsPath string) (string, int, error) {
 		port = defaultSignalKPort
 	}
 
-	return address, port, nil
+	return address, port
 }
 
 func normalizeDegrees(value float64) float64 {
