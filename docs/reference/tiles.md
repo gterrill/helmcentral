@@ -39,7 +39,10 @@ strip. Nothing stops you placing them on an ordinary page too.
   40m, until a full 3h of readings are in. A change under 1 mb reads as steady.
   A gap in the readings shows as a gap in the chart. The row reads `—` with no
   chart when the boat has no barometer or it has stopped reporting, and the
-  change reads `—` until about half an hour of readings are in. See [Sensor needs](sensor-needs.md#level-3-wind-a-speed-log-and-a-barometer).
+  change reads `—` until about half an hour of readings are in. If Helmcentral
+  can't load the reading, the row says "Barometer unavailable" where the chart
+  would be, so you can tell a broken feed from a boat without a barometer. See
+  [Sensor needs](sensor-needs.md#level-3-wind-a-speed-log-and-a-barometer).
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its
