@@ -38,7 +38,7 @@ describe('useBarometerTrend', () => {
     }))
     const { result } = renderHook(() => useBarometerTrend(0))
     await new Promise((r) => setTimeout(r, 20))
-    expect(result.current).toEqual({ points: [], currentPa: null, changePa: null, changeSpanS: null })
+    expect(result.current).toEqual({ points: [], currentPa: null, changePa: null, changeSpanS: null, failed: false })
   })
 
   it('drops a change that arrives without its span, so the two are never half-present', async () => {
@@ -57,11 +57,17 @@ describe('useBarometerTrend', () => {
     expect(result.current.changeSpanS).toBeNull()
   })
 
-  it('reads a failed request as no data', async () => {
+  it('reports a failed request as failed, not as a boat with no barometer', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }))
     const { result } = renderHook(() => useBarometerTrend(0))
-    await new Promise((r) => setTimeout(r, 20))
-    expect(result.current).toEqual({ points: [], currentPa: null, changePa: null, changeSpanS: null })
+    await waitFor(() => expect(result.current.failed).toBe(true))
+    expect(result.current).toEqual({ points: [], currentPa: null, changePa: null, changeSpanS: null, failed: true })
+  })
+
+  it('reports an answer without a points list as failed, not as a boat with no barometer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { result } = renderHook(() => useBarometerTrend(0))
+    await waitFor(() => expect(result.current.failed).toBe(true))
   })
 
   it('drops the last good reading when a later request fails, rather than present it as current', async () => {
@@ -82,5 +88,6 @@ describe('useBarometerTrend', () => {
     await act(async () => { await invalidateQueries(['/api/barometer-trend']) })
     await waitFor(() => expect(result.current.currentPa).toBeNull())
     expect(result.current.points).toEqual([])
+    expect(result.current.failed).toBe(true)
   })
 })
