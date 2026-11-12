@@ -340,8 +340,9 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
     >
       {/* pt-4 leaves room for the tile title, which sits across the tile's top
           border and would otherwise be cut off by the frame's overflow clamp. It
-          hangs 12px above the card, about 14px once HERO_SCALE enlarges it. */}
-      <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl pt-4">
+          hangs 12px above the card, about 14px once HERO_SCALE enlarges it. The
+          frame is contained for the same reason as the grid tiles below. */}
+      <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl pt-4 contain-size contain-layout">
         <div className="bento-hero-scale *:h-full">
           <TileErrorBoundary key={heroWidget.id} widget={heroWidget}>
             {renderWidget(heroWidget)}
@@ -449,7 +450,14 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
               <div aria-hidden="true" className="h-full w-full" />
             ) : (
               <>
-                <div className="h-full pt-2 *:h-full">
+                {/* Size and layout containment make this wrapper a relayout
+                    boundary, so a value change inside one tile re-lays-out that
+                    tile and not the whole board, which the wall kiosk's slow
+                    WPE WebKit feels. Layout alone is not a boundary in WebKit.
+                    Size is safe because the grid item fixes the height. No paint
+                    containment: the tile title and its pills hang about 12px
+                    above the card, past this wrapper's pt-2, and would be cut. */}
+                <div className="h-full pt-2 contain-size contain-layout *:h-full">
                   <TileHeightScope id={w.id} onReport={reportNeededHeight}>
                     <TileErrorBoundary key={w.id} widget={w}>
                       {renderWidget(w)}
