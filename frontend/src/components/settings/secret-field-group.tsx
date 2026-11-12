@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import type { SecretKey } from '@/hooks/use-secrets-status'
+import { secretInputProps } from '@/lib/identifier-input'
 
 export interface SecretFieldSpec {
   key: SecretKey
@@ -108,6 +109,7 @@ function SecretField({ field, value, isSet, isTouched, onChange, onClear }: Secr
         <Input
           id={field.key}
           type="password"
+          {...secretInputProps}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={isSet ? '•••• (set)' : 'not set'}

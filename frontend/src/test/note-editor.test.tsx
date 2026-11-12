@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { NoteEditor } from '@/components/note-editor'
 import { uploadDocument } from '@/lib/document-upload'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 // ImageButton's Take photo/Add from library path (2026-09-27) runs every
 // picked file through lib/image-downscale.ts before it ever reaches the
@@ -134,6 +135,15 @@ describe('TestNoteEditor_LinkButtonRefusesAnUnsafeScheme', () => {
     expect(screen.getByLabelText('Link URL')).toHaveValue('javascript:alert(1)')
   })
 
+  it('keeps the phone keyboard from correcting the address', async () => {
+    render(<NoteEditor value={'Seacocks\n'} onSave={vi.fn()} />)
+    await screen.findByText('Seacocks')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+    const field = await screen.findByLabelText('Link URL')
+    expectIdentifierInput(field)
+  })
+
   it('accepts an hc-note: reference and an https: URL', async () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'Seacocks\n'} onSave={onSave} />)
@@ -179,6 +189,15 @@ describe('TestNoteEditor_ImageButtonPastesADocumentId', () => {
       expect.stringContaining(`/api/documents/${UUID}/content`),
     )
     expect(mockedUploadDocument).not.toHaveBeenCalled()
+  })
+
+  it('keeps the phone keyboard from correcting the id', async () => {
+    render(<NoteEditor value={'Engine bay\n'} onSave={vi.fn()} />)
+    await screen.findByText('Engine bay')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Image' }))
+    const field = await screen.findByLabelText('Document id')
+    expectIdentifierInput(field)
   })
 
   it('refuses a non-UUID id with a visible reason and inserts nothing', async () => {

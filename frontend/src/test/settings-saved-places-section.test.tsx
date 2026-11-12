@@ -117,9 +117,65 @@ describe('Saved places section', () => {
   it('will not save a position it cannot read', async () => {
     const dialog = await openEdit()
     fireEvent.change(within(dialog).getByLabelText('Longitude'), { target: { value: 'east of here' } })
+    fireEvent.blur(within(dialog).getByLabelText('Longitude'))
     expect(within(dialog).getByText(/Not a longitude/)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     expect(hook.change).not.toHaveBeenCalled()
+  })
+
+  it('waits until the position box is left before saying it is wrong, then clears as it is fixed', async () => {
+    const dialog = await openEdit()
+    const lat = within(dialog).getByLabelText('Latitude')
+    fireEvent.change(lat, { target: { value: '20°32.676\' S 1' } })
+    expect(within(dialog).queryByText(/Not a latitude/)).not.toBeInTheDocument()
+    expect(lat).toHaveAttribute('aria-invalid', 'false')
+    fireEvent.blur(lat)
+    expect(within(dialog).getByText(/Not a latitude/)).toBeInTheDocument()
+    expect(lat).toHaveAttribute('aria-invalid', 'true')
+    expect(lat.getAttribute('aria-describedby')).toBe('saved-place-lat-error')
+    fireEvent.change(lat, { target: { value: "020º33.000' S" } })
+    expect(within(dialog).queryByText(/Not a latitude/)).not.toBeInTheDocument()
+    expect(lat).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('says what is wrong when Save or Enter is tried while still in a bad box', async () => {
+    const dialog = await openEdit()
+    const lat = within(dialog).getByLabelText('Latitude')
+    fireEvent.change(lat, { target: { value: 'north-ish' } })
+    expect(within(dialog).queryByText(/Not a latitude/)).not.toBeInTheDocument()
+    // Enter submits the form; tapping Save does the same. Neither blurs the box first.
+    fireEvent.submit(lat.closest('form') as HTMLFormElement)
+    expect(within(dialog).getByText(/Not a latitude/)).toBeInTheDocument()
+    expect(lat).toHaveAttribute('aria-invalid', 'true')
+    expect(hook.change).not.toHaveBeenCalled()
+
+    fireEvent.change(lat, { target: { value: "20°32.676' S" } })
+    fireEvent.change(within(dialog).getByLabelText(/Depth at chart datum/), { target: { value: 'deep' } })
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(within(dialog).getByText(/Not a depth/)).toBeInTheDocument()
+    expect(hook.change).not.toHaveBeenCalled()
+  })
+
+  it('moves focus to the first wrong box when a submit is refused', async () => {
+    const dialog = await openEdit()
+    const lat = within(dialog).getByLabelText('Latitude')
+    const lon = within(dialog).getByLabelText('Longitude')
+    const depth = within(dialog).getByLabelText(/Depth at chart datum/)
+    fireEvent.change(depth, { target: { value: 'deep' } })
+    fireEvent.change(lon, { target: { value: 'east-ish' } })
+    fireEvent.change(lat, { target: { value: 'north-ish' } })
+    fireEvent.submit(lat.closest('form') as HTMLFormElement)
+    expect(document.activeElement).toBe(lat)
+
+    fireEvent.change(lat, { target: { value: "20°32.676' S" } })
+    fireEvent.submit(lat.closest('form') as HTMLFormElement)
+    expect(document.activeElement).toBe(lon)
+
+    fireEvent.change(lon, { target: { value: "149°07.136' E" } })
+    fireEvent.submit(lat.closest('form') as HTMLFormElement)
+    expect(document.activeElement).toBe(depth)
   })
 
   it("keeps the dialog open and shows the server's reason when a save is refused", async () => {
@@ -270,8 +326,11 @@ describe('Saved places section', () => {
       const box = within(dialog).getByLabelText(/Depth at chart datum/)
       for (const bad of ['deep', '5000', '-50']) {
         fireEvent.change(box, { target: { value: bad } })
+        fireEvent.blur(box)
         expect(within(dialog).getByText(/Not a depth/)).toBeInTheDocument()
-        expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+        expect(box.getAttribute('aria-describedby')).toBe('saved-place-depth-help saved-place-depth-error')
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+        expect(hook.change).not.toHaveBeenCalled()
       }
       fireEvent.change(box, { target: { value: '-0.8' } })
       expect(within(dialog).queryByText(/Not a depth/)).not.toBeInTheDocument()

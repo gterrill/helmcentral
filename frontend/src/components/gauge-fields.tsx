@@ -8,6 +8,7 @@ import type { SignalKPath } from '@/hooks/use-signalk-paths'
 import type { EngineProfileGauge } from '@/lib/engine-profiles'
 import { GAUGE_TREND_WINDOWS, type GaugeDisplay, type GaugeWidgetConfig, type GaugeZone } from '@/lib/dashboard-widgets'
 import { effectiveScale } from '@/lib/equipment-tiles'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { inferredQuantityForSIUnit, QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
 
 /**
@@ -255,6 +256,7 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment, varia
         <Input
           id={`${idPrefix}-path`}
           list={listId}
+          {...identifierInputProps}
           value={value.path}
           onChange={(e) => choosePath(e.target.value)}
           placeholder="propulsion.port.oilPressure"

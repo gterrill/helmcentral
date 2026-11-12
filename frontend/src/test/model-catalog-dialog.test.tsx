@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 
 import { ModelCatalogDialog, type ModelCapability } from '@/components/settings/sections/model-picker'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 import { jsonResponse, stubApi } from '@/test/helpers/stub-api'
 
 // The previous rows (and page count) stay up only while paging, sorting or
@@ -26,6 +27,27 @@ function dialog(open: boolean, capability: ModelCapability) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('ModelCatalogDialog model ID box', () => {
+  it('is an identifier box', async () => {
+    stubApi({
+      'GET /api/assistant/models?capability=tools&sort=popular&order=desc&page=1&page_size=10': { models: models(1), page: { total_pages: 1 } },
+    })
+    render(
+      <ModelCatalogDialog
+        open
+        onOpenChange={() => {}}
+        capability="tools"
+        title="Choose a model"
+        description="d"
+        onUseModelID={() => {}}
+        renderActions={() => null}
+      />,
+    )
+    await screen.findByText('Model 1-0')
+    expectIdentifierInput(screen.getByLabelText('Model ID'))
+  })
 })
 
 describe('ModelCatalogDialog stale rows', () => {

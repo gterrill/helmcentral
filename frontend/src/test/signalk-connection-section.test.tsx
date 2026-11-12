@@ -5,6 +5,7 @@ import { SignalKConnectionSection } from '@/components/settings/sections/signalk
 import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 // The button used to be "Connect", and it persisted the address as a side
 // effect of checking it — a second write path competing with the pinned "Save
@@ -45,6 +46,13 @@ const secretsResponse = { ok: true, json: async () => ({ SIGNALK_USERNAME: false
 describe('SignalKConnectionSection', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('keeps the phone keyboard from correcting the address', () => {
+    stubFetch(() => secretsResponse)
+    renderSection()
+    const field = screen.getByLabelText('SignalK address')
+    expectIdentifierInput(field)
   })
 
   it('probes the typed address via the test endpoint and never posts to the settings save endpoint', async () => {

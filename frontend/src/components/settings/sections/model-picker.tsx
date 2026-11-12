@@ -10,6 +10,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useApiQuery } from '@/lib/api-query'
+import { identifierInputProps } from '@/lib/identifier-input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 // Which models the catalog lists: Mate answers through tool calls, document
@@ -224,6 +225,7 @@ export function ModelCatalogDialog({
               <Input
                 id={customModelInputID}
                 aria-label="Model ID"
+                {...identifierInputProps}
                 placeholder="provider/model, e.g. typesafe/jev-router"
                 value={customModelID}
                 onChange={(e) => {

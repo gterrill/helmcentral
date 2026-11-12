@@ -1,5 +1,5 @@
 import { errorMessage } from '@/lib/errors'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -45,6 +45,13 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
   const [depth, setDepth] = useState(savedDepth)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A field is only called wrong once the operator has left it holding something;
+  // after that the message follows the value, so fixing it clears it as they type.
+  const [touched, setTouched] = useState({ lat: false, lon: false, depth: false })
+  const touch = (field: keyof typeof touched) => setTouched((previous) => ({ ...previous, [field]: true }))
+  const latRef = useRef<HTMLInputElement>(null)
+  const lonRef = useRef<HTMLInputElement>(null)
+  const depthRef = useRef<HTMLInputElement>(null)
 
   const latValue = parseCoordinate(lat, 'lat')
   const lonValue = parseCoordinate(lon, 'lon')
@@ -64,12 +71,27 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
   const hadDepth = place !== null && place.depth_m !== null
   const replacing = hadDepth && typeof typedDepth === 'number'
   const clearing = hadDepth && typedDepth === null
-  // A new place starts with empty boxes; do not shout about them before the operator types.
-  const latBad = latValue === null && lat.trim() !== ''
-  const lonBad = lonValue === null && lon.trim() !== ''
+  // Shown, unlike `invalid` above which gates Save, only after the box has been left.
+  const latBad = latValue === null && lat.trim() !== '' && touched.lat
+  const lonBad = lonValue === null && lon.trim() !== '' && touched.lon
+  // An empty depth reads as "no depth" (ok), so it is never bad.
+  const depthShownBad = depthBad && touched.depth
+
+  // Save stays enabled while a box holds text that is wrong, so pressing it (or
+  // Enter, which a disabled Save would swallow) can say what is wrong. It is
+  // disabled while a required box is empty, or while the missing time zone
+  // already says why, since there is nothing to point at.
+  const saveBlocked = name.trim() === '' || lat.trim() === '' || lon.trim() === '' || dateMissing
 
   const submit = async () => {
-    if (invalid || latValue === null || lonValue === null || !depthValue.ok) return
+    if (invalid || latValue === null || lonValue === null || !depthValue.ok) {
+      setTouched({ lat: true, lon: true, depth: true })
+      // Focus the first wrong box so a screen reader reads its message.
+      if (lat.trim() !== '' && latValue === null) latRef.current?.focus()
+      else if (lon.trim() !== '' && lonValue === null) lonRef.current?.focus()
+      else if (depthBad) depthRef.current?.focus()
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -112,13 +134,13 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
       <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(0,1fr))] gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="saved-place-lat" className="text-xs font-medium text-muted-foreground">Latitude</label>
-          <Input id="saved-place-lat" value={lat} placeholder="020°32.676' S" aria-invalid={latBad} onChange={(e) => setLat(e.target.value)} className="tabular-nums" />
-          {latBad && <p className="text-xs text-destructive">Not a latitude. Try 20°32.676&apos; S.</p>}
+          <Input id="saved-place-lat" ref={latRef} value={lat} placeholder="020°32.676' S" aria-invalid={latBad} aria-describedby={latBad ? 'saved-place-lat-error' : undefined} onChange={(e) => setLat(e.target.value)} onBlur={() => touch('lat')} className="tabular-nums" />
+          {latBad && <p id="saved-place-lat-error" className="text-xs text-destructive">Not a latitude. Try 20°32.676&apos; S.</p>}
         </div>
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="saved-place-lon" className="text-xs font-medium text-muted-foreground">Longitude</label>
-          <Input id="saved-place-lon" value={lon} placeholder="149°07.136' E" aria-invalid={lonBad} onChange={(e) => setLon(e.target.value)} className="tabular-nums" />
-          {lonBad && <p className="text-xs text-destructive">Not a longitude. Try 149°07.136&apos; E.</p>}
+          <Input id="saved-place-lon" ref={lonRef} value={lon} placeholder="149°07.136' E" aria-invalid={lonBad} aria-describedby={lonBad ? 'saved-place-lon-error' : undefined} onChange={(e) => setLon(e.target.value)} onBlur={() => touch('lon')} className="tabular-nums" />
+          {lonBad && <p id="saved-place-lon-error" className="text-xs text-destructive">Not a longitude. Try 149°07.136&apos; E.</p>}
         </div>
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -127,8 +149,8 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
         <label htmlFor="saved-place-depth" className="text-xs font-medium text-muted-foreground">Depth at chart datum ({depthUnitLabel(units)}), optional</label>
-        <Input id="saved-place-depth" inputMode="decimal" value={depth} aria-invalid={depthBad} aria-describedby="saved-place-depth-help" onChange={(e) => setDepth(e.target.value)} className="tabular-nums" />
-        {depthBad && <p className="text-xs text-destructive">Not a depth. Type a number in {units === 'imperial' ? 'feet' : 'metres'}; a drying height is negative.</p>}
+        <Input id="saved-place-depth" ref={depthRef} inputMode="decimal" value={depth} aria-invalid={depthShownBad} aria-describedby={depthShownBad ? 'saved-place-depth-help saved-place-depth-error' : 'saved-place-depth-help'} onChange={(e) => setDepth(e.target.value)} onBlur={() => touch('depth')} className="tabular-nums" />
+        {depthShownBad && <p id="saved-place-depth-error" className="text-xs text-destructive">Not a depth. Type a number in {units === 'imperial' ? 'feet' : 'metres'}; a drying height is negative.</p>}
         <p id="saved-place-depth-help" className="text-xs text-muted-foreground">
           What a chart or someone local gives for the water here. Mate uses it for the swing and clearance checks. Saved as charted, dated today.
         </p>
@@ -152,7 +174,7 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button type="submit" disabled={invalid || saving}>{saving ? 'Saving…' : 'Save'}</Button>
+        <Button type="submit" disabled={saveBlocked || saving}>{saving ? 'Saving…' : 'Save'}</Button>
       </DialogFooter>
     </form>
   )

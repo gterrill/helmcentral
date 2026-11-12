@@ -4,6 +4,7 @@ import { ArrowUpRight, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { InventoryBin } from '@/hooks/use-inventory'
+import { identifierInputProps } from '@/lib/identifier-input'
 
 // One bin inside a location's page: a <li> for the ResourceList frame, with
 // the bin's code and name editable in place. Lifted out of the old
@@ -98,6 +99,7 @@ export function BinRow({ bin, canWrite, onRename, onDelete, onOpen }: BinRowProp
         </Button>
         <Input
           value={code}
+          {...identifierInputProps}
           aria-label="Bin code"
           className="h-9 w-28 font-mono"
           disabled={!canWrite}
