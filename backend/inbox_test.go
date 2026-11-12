@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -383,6 +385,54 @@ func TestInboxBinRemovesRowsAndFiles(t *testing.T) {
 	}
 	if code, _ := send(t, binInboxHandler, http.MethodPost, `{"ids":[]}`); code != 400 {
 		t.Errorf("empty bin: %d", code)
+	}
+}
+
+func TestInboxBinKeepsRemovingFilesAfterOneFails(t *testing.T) {
+	w := newInboxWorld(t)
+	var items []inboxItem
+	for shade := uint8(90); shade < 93; shade++ {
+		_, body := inboxUpload(t, inboxTestJPEG(t, shade), "a.jpg", nil)
+		it, err := w.inbox.Get(body["item"].(map[string]any)["id"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		items = append(items, it)
+	}
+	// The bin removes files in sha order, so break the first one: a non-empty
+	// directory in place of the file makes os.Remove fail.
+	sort.Slice(items, func(i, j int) bool { return items[i].SHA256 < items[j].SHA256 })
+	broken := inboxFilePath(items[0].SHA256)
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(broken, "keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if err := os.WriteFile(inboxThumbPath(it.SHA256), []byte("thumb"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body := send(t, binInboxHandler, http.MethodPost,
+		`{"ids":["`+items[0].ID+`","`+items[1].ID+`","`+items[2].ID+`"]}`)
+	if code != 200 || body["deleted"] != float64(3) {
+		t.Fatal(code, body)
+	}
+	if n, _ := w.inbox.Count(); n != 0 {
+		t.Errorf("count %d", n)
+	}
+	// The broken item's preview goes even though its file would not.
+	for _, it := range items {
+		paths := []string{inboxThumbPath(it.SHA256)}
+		if it.ID != items[0].ID {
+			paths = append(paths, inboxFilePath(it.SHA256))
+		}
+		for _, p := range paths {
+			if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("%s should be gone: %v", p, err)
+			}
+		}
 	}
 }
 
