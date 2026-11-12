@@ -83,10 +83,25 @@ decide it. The content hash of the stored bytes is compared with items and with
 Documents. The hash of the original file as the phone held it, `source_sha256`
 (a small SHA-256 written in the page's own code and fed in chunks, because Web Crypto is missing on a plain http address such as the boat's LAN one), is
 compared with waiting items and with `inbox_filed`, a table of originals already
-sent to a passage or Documents. The second check is what recognises a photo
-shrunk twice by different browsers, or one already filed whose copy has left the
-Inbox. The upload holds the lock of both hashes, in sorted order, so two shrinks
-of one original cannot both be stored. A deleted photo is not remembered, so sharing it again brings it back. The
+sent to a passage, Documents, equipment or a job. The second check is what
+recognises a photo shrunk twice by different browsers, or one already filed whose
+copy has left the Inbox. The upload holds the lock of both hashes, in sorted order, so two shrinks
+of one original cannot both be stored. A deleted photo is not remembered, so sharing it again brings it back.
+
+An original filed out of the Inbox is remembered only while its copy exists. Filing
+stores the Inbox file as a Document unchanged, so the Document's hash is the
+Inbox item's hash, not the original's. `inbox_filed` records that hash beside the
+original's (`copy_sha256`), and both checks, the upload's and `POST
+/api/inbox/known`, count the original as filed only while a Document with that hash
+is still there. Deleting a sign or unlinking an equipment photo leaves the
+Document in the library, so the original stays filed; delete the Document and sharing the original again
+stores it as new. A row written before the column
+existed records no copy and stays remembered for good, the side that errs toward
+skipping a photo rather than filing a second one. Filing the original again
+replaces the recorded copy. The lookup, not a cleanup on delete, does the
+forgetting, so no delete path has to know about the Inbox.
+
+The
 phone sends the files that remain in order, counts each answer, and shows "12
 uploaded, 3 already in Helmcentral". It refreshes the Inbox list once the batch
 ends, and the count every ten stored files, rather than after every file. A file

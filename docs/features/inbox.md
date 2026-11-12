@@ -34,13 +34,17 @@ shows as "Checking" and takes a little while on a big roll. Then it sends the
 rest one at a time and keeps count while it works. When it's done it tells you
 how many arrived and how many it left out. It reads like this: "12 uploaded, 3
 already in Helmcentral". A photo is left out in three cases. The Inbox already
-holds it. You've already put it on a passage or sent it to Documents. Or
-Documents holds exactly the same file. Helmcentral recognises the photo itself,
+holds it. You've already put it on a passage, sent it to Documents or added it
+to equipment or a job, and its photo is still in Documents. Or Documents holds exactly
+the same file. Helmcentral recognises the photo itself,
 not the shrunk copy, so picking the same photos twice does no harm. A photo the
 Inbox holds, or that you've already filed from it, is skipped before it's
 shrunk, so a second go at the same roll is quick. A file Documents holds is
 turned away by the boat after it arrives, so it costs the shrinking and the
-send. A photo you deleted from the Inbox is new again if you share it again.
+send. A photo you deleted from the Inbox is new again if you share it again, and so is
+one whose filed copy you later deleted from Documents. Deleting a sign or taking a
+photo off an item doesn't count: the photo stays in Documents until you delete it
+there.
 
 If the boat can't be reached for that check, nothing is sent and the page tells
 you why. Try again once the connection is back.

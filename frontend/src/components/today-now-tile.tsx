@@ -39,7 +39,8 @@ export function changeSpanLabel(seconds: number): string {
  * The boat's barometer: the reading, its change over the last three hours and a sparkline.
  * With no barometer the row stays, reading "—" with no chart, so the tile
  * does not change height when a reading arrives and never shows a value the
- * boat did not measure.
+ * boat did not measure. A failed request says "Barometer unavailable" in the
+ * chart's place, so a broken feed isn't mistaken for a boat without one.
  */
 export function BarometerRow({ barometer }: { barometer: BarometerTrendData }) {
   const current = formatQuantity(barometer.currentPa, 'pressure', BAROMETER_UNIT)
@@ -68,7 +69,11 @@ export function BarometerRow({ barometer }: { barometer: BarometerTrendData }) {
         </p>
       </div>
       <div className="min-w-0 flex-1">
-        <BarometerSparkline points={barometer.points} />
+        {barometer.failed ? (
+          <p data-testid="barometer-error" className="text-xs text-muted-foreground">Barometer unavailable</p>
+        ) : (
+          <BarometerSparkline points={barometer.points} />
+        )}
       </div>
       <div data-testid="barometer-change" className="w-16 shrink-0 text-right">
         <p className={`text-xs font-medium ${changeClass}`}>{changeText}</p>

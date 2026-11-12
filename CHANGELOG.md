@@ -26,8 +26,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   change says how much time it covers, such as 40m, until a full 3h of readings
   are in. A change under 1 mb reads as steady. A gap in the readings shows as
   a gap in the chart. If the boat has no barometer, or it has stopped
-  reporting, the row reads `—` with no chart. The tile is now at least five
-  rows tall, so a page that had it four rows tall shows it one row taller.
+  reporting, the row reads `—` with no chart. If Helmcentral can't load the
+  reading, the row says "Barometer unavailable" where the chart would be. The
+  tile is now at least five rows tall, so a page that had it four rows tall
+  shows it one row taller.
 
 - **Share photos and PDFs from your phone to a new Inbox, then sort them on
   the laptop.** Open **Inbox** in the sidebar, then tap **Share photos**, or put
