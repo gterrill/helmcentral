@@ -14,6 +14,7 @@ import {
   useApiQuery,
   useApiQuerySelector,
 } from '@/lib/api-query'
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 import { jsonResponse, stubApi } from './helpers/stub-api'
 
 afterEach(() => {
@@ -231,6 +232,21 @@ describe('query store', () => {
     expect(result.current.isLoading).toBe(false)
     expect(result.current.isFetching).toBe(false)
     expect(result.current.error).toBeNull()
+  })
+
+  it('on a resting wall page keeps its data until the page is active, while the entry still loads', async () => {
+    stubApi({ 'GET /api/items': [1, 2] })
+    let active = false
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      createElement(WallPageActiveContext.Provider, { value: active }, children)
+    const { result, rerender } = renderHook(() => useApiQuery<number[]>(opts()), { wrapper })
+    // The first read happened, so a value exists to show; the answer is not pushed.
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    expect(result.current.data).toBeUndefined()
+    expect(getQueryData(['items'])).toEqual([1, 2])
+    active = true
+    rerender()
+    expect(result.current.data).toEqual([1, 2])
   })
 
   it('applies select to the data', async () => {

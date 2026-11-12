@@ -32,6 +32,14 @@ strip. Nothing stops you placing them on an ordinary page too.
   helping or hindering your progress along the course. It reads only while
   motoring or sailing. It sits in Navigation in **Add Tile**, and it isn't on
   any page until you add it. See [Current](../features/dashboard.md#current).
+- **Today & Now**: the weather now, today's high and low, the wind and the
+  sea temperature from the forecast. Along the bottom, the barometer row shows
+  your own barometer in millibars, how far it has moved, and a small chart of
+  the last three hours. The change is labelled with the time it covers, such as
+  40m, until a full 3h of readings are in. A change under 1 mb reads as steady.
+  A gap in the readings shows as a gap in the chart. The row reads `—` with no
+  chart when the boat has no barometer or it has stopped reporting, and the
+  change reads `—` until about half an hour of readings are in. See [Sensor needs](sensor-needs.md#level-3-wind-a-speed-log-and-a-barometer).
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its

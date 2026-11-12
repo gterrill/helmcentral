@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect } from 'react'
 
 import { useSelection } from '@/lib/selection'
 import { onTelemetryTestReset } from '@/lib/test-reset'
@@ -11,7 +11,7 @@ import { onTelemetryTestReset } from '@/lib/test-reset'
  * rotation, and a reader that comes back asks only for what is new.
  *
  * The poller is also a store, like lib/telemetry-store.ts: it holds a
- * snapshot, and a reader gets it through `useSyncExternalStore`. A poll
+ * snapshot, and a reader gets it through `useSelection`. A poll
  * publishes with `publish(next)`; a `next` that is the snapshot already held
  * (same reference) changes nothing and wakes nobody, so a poll that brought
  * nothing new does not re-render a map. The poll decides what "nothing new"
@@ -126,7 +126,7 @@ export function createSharedPoller<S>(
 
   function useSnapshot(intervalMs: number, enabled = true): S {
     useEffect(() => (enabled ? acquire(intervalMs) : undefined), [intervalMs, enabled])
-    return useSyncExternalStore(subscribe, getSnapshot)
+    return useSelection({ subscribe, getSnapshot })
   }
 
   function useSlice<T>(select: (snapshot: S) => T, intervalMs: number, enabled = true, isEqual: (a: T, b: T) => boolean = Object.is): T {

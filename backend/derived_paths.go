@@ -714,13 +714,12 @@ func addWeatherTrendValues(values map[string]*float64, ages map[string]float64, 
 		ages[pressureRatePath] = pressureAge
 	}
 
-	// Gated on rateOK -- pressureRate's own trendMinimumSpan -- rather than
-	// tendencyOverWindow's much stricter window-minus-slack gate below: three
-	// hours has nothing shorter to fall back on while the buffer fills, and a
-	// short-span change under-reports a monotonic fall, which is the safe
+	// Gated on pressureChange -- pressureRate's own trendMinimumSpan -- rather
+	// than tendencyOverWindow's much stricter window-minus-slack gate below:
+	// three hours has nothing shorter to fall back on while the buffer fills,
+	// and a short-span change under-reports a monotonic fall, which is the safe
 	// direction to be wrong in.
-	change3h, change3hOK := changeOverWindow(pressure)
-	change3hOK = change3hOK && rateOK
+	change3h, _, change3hOK := pressureChange(pressure)
 	if change3hOK {
 		values[pressureChange3hPath] = &change3h
 		ages[pressureChange3hPath] = pressureAge

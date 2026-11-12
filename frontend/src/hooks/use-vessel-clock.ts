@@ -1,7 +1,8 @@
-import { useMemo, useSyncExternalStore } from 'react'
+import { useMemo } from 'react'
 
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { readServerClock, subscribeServerClock } from '@/lib/server-clock'
+import { useSelection } from '@/lib/selection'
 import { formatClock, formatDate, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
 
 /**
@@ -18,7 +19,7 @@ import { formatClock, formatDate, selectTimeZone, selectTimeZoneSource, unknownZ
 export function useVesselClock() {
   const timeZone = useVesselStateSelector(selectTimeZone)
   const timeZoneSource = useVesselStateSelector(selectTimeZoneSource)
-  const now = useSyncExternalStore(subscribeServerClock, readServerClock)
+  const now = useSelection({ subscribe: subscribeServerClock, getSnapshot: readServerClock })
 
   // A zone this browser's ICU does not know is shown as an error where the
   // time goes (the header sits outside any tile boundary), never as a throw

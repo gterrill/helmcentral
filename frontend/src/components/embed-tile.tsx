@@ -12,7 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 
 import { DisplayTransformContext } from '@/components/display-shell'
-import { WallPageActiveContext } from '@/components/wall-page-stack'
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 import { Button } from '@/components/ui/button'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { useInView } from '@/hooks/use-in-view'

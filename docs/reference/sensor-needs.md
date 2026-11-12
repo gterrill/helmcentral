@@ -123,13 +123,14 @@ the [Current tile](../features/dashboard.md#current). A log that reads high
 shows up as a foul current that isn't there.
 
 A barometer adds the pressure tendency and the heavy-weather alarm rules that
-watch how fast the pressure is falling. The history behind them is kept in
-memory, so it starts again whenever Helmcentral restarts. The trend shows
-after half an hour, and the three-hour tendency after about three hours. The
-rules that look back twelve and twenty-four hours stay quiet for most of a
-day. The outside temperature on Current Conditions comes from
-the forecast, not from a sensor, so an air temperature sensor only shows on a
-Gauge tile.
+watch how fast the pressure is falling. It also fills the barometer row at the
+bottom of the Today & Now tile. Without one, that row reads `—`. The history
+behind them is kept in memory, so it starts again whenever Helmcentral
+restarts. The trend shows after half an hour, and the three-hour tendency after
+about three hours. The rules that look back twelve and twenty-four hours stay
+quiet for most of a day. The outside temperature on Current Conditions comes
+from the forecast, not from a sensor, so an air temperature sensor only shows
+on a Gauge tile.
 
 ## Level 4: an AIS receiver
 

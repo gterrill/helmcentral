@@ -12,6 +12,7 @@
  * current payload to a late reader as the boat's stream does (ADR 0218).
  */
 import { render, renderHook, screen } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
@@ -50,6 +51,19 @@ describe('alarms store', () => {
 
     const second = renderHook(() => useAlarmList())
     expect(second.result.current).toHaveLength(1)
+  })
+
+  it('shows a new anchor drag alarm on a resting wall page, so the klaxon is never held back', async () => {
+    const { useAnchorDragAlarm } = await import('@/hooks/use-alarms')
+    const { WallPageActiveContext } = await import('@/lib/wall-page-active')
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(WallPageActiveContext.Provider, { value: false }, children)
+    const { result } = renderHook(() => useAnchorDragAlarm(), { wrapper })
+    expect(result.current).toBeNull()
+
+    const drag = { ...houseBankLow, rule_id: 'helmcentral:anchor-drag', label: 'Anchor drag', path: 'navigation.anchor' }
+    emit('alarms', { alarms: [drag], worst: 'alarm' })
+    expect(result.current?.rule_id).toBe('helmcentral:anchor-drag')
   })
 
   it('does not report the worst state as normal before the first alarms event', async () => {

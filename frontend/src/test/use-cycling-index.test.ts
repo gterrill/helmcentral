@@ -1,7 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useCyclingIndex } from '@/hooks/use-cycling-index'
+import { WallPageActiveContext } from '@/lib/wall-page-active'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -131,6 +133,27 @@ describe('useCyclingIndex', () => {
     unmount()
 
     expect(clearIntervalSpy).toHaveBeenCalled()
+  })
+
+  it('holds its index while its wall page rests, then carries on from it when the page wakes', () => {
+    vi.useFakeTimers()
+    let active = true
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(WallPageActiveContext.Provider, { value: active }, children)
+    const { result, rerender } = renderHook(() => useCyclingIndex(3, 5, 'a|b|c'), { wrapper })
+
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(result.current).toBe(1)
+
+    active = false
+    rerender()
+    act(() => { vi.advanceTimersByTime(10000) })
+    expect(result.current).toBe(1)
+
+    active = true
+    rerender()
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(result.current).toBe(2)
   })
 
   it('picks up a new interval length without losing the current index', () => {

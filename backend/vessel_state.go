@@ -360,5 +360,6 @@ func vesselStateRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/vessel-state", tierRead, vesselState},
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
+		{http.MethodGet, "/api/barometer-trend", tierRead, barometerTrend},
 	}
 }

@@ -1,6 +1,7 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect } from 'react'
 
 import { apiRequest } from '@/lib/api-query'
+import { useSelection } from '@/lib/selection'
 import { createTelemetryStore, type TelemetryUpdate } from '@/lib/telemetry-store'
 import { onTelemetryTestReset } from '@/lib/test-reset'
 
@@ -232,7 +233,10 @@ const clearDodge = () => send('dodge-clear', '/api/autopilot/dodge', 'DELETE')
  */
 export function useAutopilot() {
   const state = useAutopilotState()
-  const { pending, error, availableModes, capabilityError } = useSyncExternalStore(subscribeControls, getControls, getControls)
+  const { pending, error, availableModes, capabilityError } = useSelection({
+    subscribe: subscribeControls,
+    getSnapshot: getControls,
+  })
   const present = store.useSelector(selectPresent)
   useEffect(() => {
     consumers += 1
