@@ -1154,7 +1154,10 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"answer must include a Passage section, even when the question is mainly about the anchorage. For a " +
 		"passage leaving from the boat's position within the forecast range: call estimate_passage with the " +
 		"destination's lat and lon from find_places and the planned speed, and report the distance_nm it " +
-		"returns, with time, fuel burn and fuel margin. If estimate_passage returns an error (a coastline square is not " +
+		"returns, with time, fuel burn and fuel margin. If it moved an end to the water, pass on its route_note. If it says a " +
+		"destination or a given start is on land and that end is a town or another place inland, look up that place's " +
+		"marina, harbour or anchorage, call it again with that, and say which you used; never put a place in for the " +
+		"boat's own position. If estimate_passage still returns an error (a coastline square is not " +
 		"downloaded, an end point is on land, no water route was found), tell the operator you cannot give " +
 		"a passage distance and say why in the tool's words, then offer to carry on without one; do not " +
 		"substitute an estimate or a distance from your own knowledge unless the " +

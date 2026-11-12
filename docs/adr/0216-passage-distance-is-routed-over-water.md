@@ -83,9 +83,23 @@ result would leave the operator and Mate to notice it, so the tool fails.
 ### Ends on the shore
 
 A town, jetty or marina is charted a few metres behind the shoreline, so its
-position reads as land. An end within 0.5 nm inland is moved to the water in
+position reads as land. An end within 1.5 nm inland is moved to the water in
 front of it, one clearance off the shore. The tool result says so and says how
 far. Further inland than that is an error.
+
+The limit began at 0.5 nm and failed on the boat's own places. OpenStreetMap
+closes the Burnett River near its mouth, so Bundaberg Port Marina sits 0.7 nm
+behind the coastline, Bundaberg Port 1.1 nm and Burnett Heads 0.6 nm. Great
+Keppel Island's marked point sits 0.57 nm inside the island. The side test
+judged all four correctly, and Mate's passage calls for them failed eleven
+times for the marina alone. Raising the limit to 1.5 nm covers all four with
+margin and keeps Bundaberg town, 6.8 nm inland, an error. The prompt now tells
+Mate to route to such a town's marina, harbour or anchorage instead, and say
+which it used, but never to put a place in for the boat's own position. With
+the wider limit the stretch skipped matters, so the note gives where the run
+was measured from and says that stretch is in none of the figures. The moved end also takes its clearance from the shoreline
+actually beside it, not the nominal one clearance, because at a river-mouth
+corner the moved point can sit closer than that and the search must know.
 
 ### Failing fast
 
@@ -96,7 +110,7 @@ Nothing masks a missing input. The router returns an error, and the tool says
 - A square the corridor touches is not downloaded or its download failed. The
   error names it, as "21°S 148°E (not downloaded)". An all-land square holds no
   coastline by definition and is not required.
-- The start or destination is on land beyond 0.5 nm, or in an inland square.
+- The start or destination is on land beyond 1.5 nm, or in an inland square.
 - No water connects the two inside the widest margin.
 - The run is longer than 300 nm, or the corridor holds more than 3000 corners.
   The tool asks for shorter legs. ([ADR 0223](0223-water-routing-bounds-the-queue-not-the-corners.md)

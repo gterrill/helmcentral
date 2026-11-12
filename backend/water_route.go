@@ -51,9 +51,13 @@ const (
 	// waterRouteSnapMaxNm is how far inland a start or destination may sit
 	// and still be moved to the water. A town, a jetty or a marina is charted
 	// as a point a few metres behind the shoreline; the route starts or ends
-	// at the water in front of it and says how far it moved. Further inland
-	// than this is an error, not a guess.
-	waterRouteSnapMaxNm = 0.5
+	// at the water in front of it and says how far it moved. 1.5 nm covers
+	// the real cases: a marina or port up a river sits behind the line where
+	// OpenStreetMap closes the river mouth (Bundaberg Port Marina is 0.7 nm
+	// behind it, Bundaberg Port 1.1), and an island's marked point sits in its
+	// middle (Great Keppel, 0.6). The move is always reported. A town 6.8 nm
+	// inland (Bundaberg) is still an error, not a guess.
+	waterRouteSnapMaxNm = 1.5
 
 	// waterRouteMaxStraightNm bounds a request so a typo cannot ask the
 	// search to load half an ocean.
@@ -564,15 +568,16 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 		}
 		if found && onLand {
 			if d > waterRouteSnapMaxNm {
-				return waterRoute{}, fmt.Errorf("the %s (%.4f, %.4f) is on land, %.1f nm inside the charted shoreline", e.name, e.in.Lat, e.in.Lon, d)
+				return waterRoute{}, fmt.Errorf("the %s (%.4f, %.4f) is on land, %.2f nm inside the charted shoreline, more than the %.1f nm an end point is moved to the water", e.name, e.in.Lat, e.in.Lon, d, waterRouteSnapMaxNm)
 			}
 			moved := wrAdd(q, wrScale(water, waterRouteClearanceNm))
-			if _, _, _, still, _ := nearestShore(moved, allSegs); still {
+			movedNear, _, _, still, _ := nearestShore(moved, allSegs)
+			if still {
 				return waterRoute{}, fmt.Errorf("the %s (%.4f, %.4f) is on land and the water in front of it could not be found", e.name, e.in.Lat, e.in.Lon)
 			}
 			e.movd = wrDist(e.pt, moved)
 			e.pt = moved
-			e.near = waterRouteClearanceNm
+			e.near = movedNear
 		}
 	}
 	start, end := ends[0].pt, ends[1].pt

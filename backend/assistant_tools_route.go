@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // ── routed passage distance (ADR 0216) ────────────────────────────────────
@@ -25,6 +26,9 @@ var mateToolRouteDistance = mateTool{
 			"crosses an island. Give to_lat and to_lon (from find_places); the run starts at the vessel's " +
 			"position unless you give from_lat and from_lon. Returns distance_nm, straight_line_nm (for " +
 			"comparison only, never a passage distance), course_deg (the course of the longest leg, for wind angle and tide), the legs with their own bearings, and the waypoints. If it " +
+			"says a destination or a given start is on land and that end is a town or another place inland, look up that " +
+			"place's marina, harbour or anchorage, call it again with that, and say which you used; never put a place in " +
+			"for the boat's own position. If it still " +
 			"returns an error (a coastline square is not downloaded, an end point is on land, no water route), " +
 			"tell the operator you cannot give a distance and why, in the tool's words; never substitute a " +
 			"straight line. For time and fuel use estimate_passage, which routes the same way.",
@@ -92,6 +96,25 @@ type assistantRouteLeg struct {
 	DistanceNm float64 `json:"distance_nm"`
 }
 
+// routeMovedNote says which ends of a route were charted behind the
+// shoreline, how far, and where the run was measured from instead. A marina
+// up a river or an island's marked point can sit up to waterRouteSnapMaxNm
+// behind it, and that stretch is in none of the figures.
+func routeMovedNote(r waterRoute) string {
+	var parts []string
+	say := func(name string, moved float64, p shorelinePoint) {
+		if moved > 0 {
+			parts = append(parts, fmt.Sprintf("The %s is %.2f nm behind the charted shoreline (up a river or inland); the run is measured from the nearest water, at %.5f, %.5f, and that %.2f nm is not in the distance, time or fuel.",
+				name, moved, p.Lat, p.Lon, moved))
+		}
+	}
+	if len(r.Points) > 0 {
+		say("start", r.StartMovedNm, r.Points[0])
+		say("destination", r.EndMovedNm, r.Points[len(r.Points)-1])
+	}
+	return strings.Join(parts, " ")
+}
+
 // routePassage routes a run over water from the given start (the vessel's
 // position when nil) to the destination. Every failure says what is wrong
 // and that there is no passage distance: the caller must not fall back to a
@@ -128,15 +151,7 @@ func (d assistantToolDeps) routePassage(ctx context.Context, tool string, fromLa
 		return assistantRoutedPassage{}, fmt.Errorf("%s: no passage distance: %w", tool, err)
 	}
 
-	note := ""
-	switch {
-	case route.StartMovedNm > 0 && route.EndMovedNm > 0:
-		note = fmt.Sprintf("Both ends are charted on the shore; the run is measured from the water in front of them (%.2f nm and %.2f nm off).", route.StartMovedNm, route.EndMovedNm)
-	case route.StartMovedNm > 0:
-		note = fmt.Sprintf("The start is charted on the shore; the run is measured from the water in front of it (%.2f nm off).", route.StartMovedNm)
-	case route.EndMovedNm > 0:
-		note = fmt.Sprintf("The destination is charted on the shore; the run is measured to the water in front of it (%.2f nm off).", route.EndMovedNm)
-	}
+	note := routeMovedNote(route)
 	waypoints := make([]assistantLatLon, len(route.Points))
 	for i, p := range route.Points {
 		waypoints[i] = assistantLatLon{Lat: roundTo5(p.Lat), Lon: roundTo5(p.Lon)}
