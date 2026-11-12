@@ -335,6 +335,37 @@ how to change them.
 
 The tile lists only the tanks you've given an equipment item.
 
+While a fresh water or fuel tank is being filled, its state word (OK, LOW or
+CRIT) gives way to the time left to full, as in "12 MIN". Until Helmcentral can
+work out the time left, it reads FILLING.
+
+- **How it knows:** The tank sender reports in steps of a couple of percent and
+  holds each one for a minute or two. Helmcentral counts those rising steps and
+  checks again on every update, so nothing stays switched on by itself. A step
+  only counts when it takes the level above where the last step left it. A
+  reading that dips and comes back, or a sender that flickers between two
+  values, isn't taken for a fill. Two steps within seven minutes, with the level
+  at its highest, means a hose or nozzle. Three steps within half an hour, the
+  latest of them recent, means a slow watermaker. Either way the level has to
+  have gained at least two percentage points, so a sender that reports tenths of
+  a percent can't fake a fill with noise.
+- **When it goes away:** A step down in the level ends it at once. After a hose
+  is turned off it clears about seven minutes later. A watermaker's can linger
+  for up to 15 minutes, because its steps come so far apart, but never for more
+  than twice the usual gap between its steps.
+- **Time left:** It's the time to 100% at the rate the tank has been rising.
+  The minutes round to the nearest one under 30 minutes and the nearest five up
+  to two hours, then read as hours and minutes. When the rate is uneven, or the
+  tank is under a minute from full, the tile says just FILLING.
+- **Only while stopped:** The word shows only when the boat's speed over ground
+  is under one knot. If the boat has no speed reading, or the reading is out of
+  date, the tile never shows a fill. The same goes for a tank whose sender has
+  stopped reporting.
+- **What stays the same:** Waste tanks never show a fill. A tank below its warn or
+  alarm level keeps its amber or red bar and percent while it fills, and the
+  alarms don't change. It takes a few minutes of filling before the word
+  appears, and a restart of Helmcentral makes it start counting again.
+
 ## Nearby map
 
 The Nearby map is a map of the area around the vessel. It shows the points of

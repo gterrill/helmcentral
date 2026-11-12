@@ -131,3 +131,30 @@ export function tankKindOfSource(source: string): TankKind | null {
   if (['black', 'grey', 'waste', 'sewage', 'holding'].some((word) => category.includes(word))) return 'waste'
   return 'water'
 }
+
+/**
+ * The word a filling tank shows in place of OK/LOW/CRIT (ADR 0282): the time
+ * to full when the server has one, plain FILLING until it does. Nearest minute
+ * under 30, nearest 5 minutes up to 2 hours, then hours and minutes.
+ */
+export function fillingWord(secondsToFull: number | null): { text: string; spoken: string } {
+  if (secondsToFull === null) return { text: 'FILLING', spoken: 'Filling' }
+  const exact = secondsToFull / 60
+  const total = exact < 30 ? Math.max(1, Math.round(exact)) : Math.round(exact / 5) * 5
+  // Under two hours it stays in minutes (65 MIN); from two hours, hours and minutes.
+  const left = total < 120 ? { hours: 0, minutes: total } : { hours: Math.floor(total / 60), minutes: total % 60 }
+  return { text: shortDuration(left), spoken: `Filling, about ${spokenDuration(left)} to full` }
+}
+
+type HoursMinutes = { hours: number; minutes: number }
+
+/** 12 MIN, 2 H, 3 H 20 MIN. */
+function shortDuration({ hours, minutes }: HoursMinutes): string {
+  return [hours > 0 ? `${hours} H` : '', minutes > 0 ? `${minutes} MIN` : ''].filter(Boolean).join(' ')
+}
+
+/** 1 minute, 12 minutes, 2 hours, 3 hours 20 minutes. */
+function spokenDuration({ hours, minutes }: HoursMinutes): string {
+  const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  return [hours > 0 ? unit(hours, 'hour') : '', minutes > 0 ? unit(minutes, 'minute') : ''].filter(Boolean).join(' ')
+}

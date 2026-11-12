@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The Tanks tile shows the time left while you fill a water or fuel tank.**
+  With the boat stopped, the state word (OK, LOW or CRIT) gives way to the time
+  to full, such as "12 MIN", once the level has stepped up a couple of times.
+  It reads FILLING until the time can be worked out. A step down in the level
+  ends it at once. When a hose is turned off it clears about seven minutes later,
+  and a watermaker's can linger for up to 15 minutes. Waste tanks never say it,
+  and the tank alarms don't change.
+
 - **Share photos and PDFs from your phone to a new Inbox, then sort them on
   the laptop.** Open **Inbox** in the sidebar, then tap **Share photos**, or put
   `/inbox/upload` on your phone's Home Screen. The sidebar shows how many are
