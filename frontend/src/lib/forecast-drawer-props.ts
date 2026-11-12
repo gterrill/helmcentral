@@ -1,5 +1,6 @@
 import type { ForecastDrawerProps } from "@/components/forecast-drawer";
 import type { useForecastWarnings } from "@/hooks/use-forecast-warnings";
+import type { LightningFeed } from "@/lib/lightning-bands";
 import type { useUpperAir } from "@/hooks/use-upper-air";
 import type { useWaveForecast } from "@/hooks/use-wave-forecast";
 import type { useWeatherForecast } from "@/hooks/use-weather-forecast";
@@ -11,6 +12,8 @@ export interface ForecastFeeds {
   weather: ReturnType<typeof useWeatherForecast>;
   waves: ReturnType<typeof useWaveForecast>;
   upperAir: ReturnType<typeof useUpperAir>;
+  /** The boat's lightning, which a stay's feeds carry unchanged: it has no place of its own. */
+  lightning: LightningFeed | undefined;
   warnings: ReturnType<typeof useForecastWarnings>;
   unit: "imperial" | "metric";
 }
@@ -24,6 +27,7 @@ export function buildForecastDrawerProps({
   weather,
   waves,
   upperAir,
+  lightning,
   warnings,
   unit,
 }: ForecastFeeds): ForecastBoatProps {
@@ -46,6 +50,7 @@ export function buildForecastDrawerProps({
     upperAirWindow: upperAir.windowBand,
     upperAirUpdatedAt: upperAir.updatedAt,
     upperAirTtlSeconds: upperAir.ttlSeconds,
+    lightning,
     waveSeaTemperatureF: waves.seaTemperatureF,
     waveLoading: waves.loading,
     waveError: waves.error,

@@ -205,6 +205,69 @@ Open-Meteo for upper air is a supported pairing rather than a contradiction.
 With no upper-air provider selected, the forecast page simply has no upper-air
 section. Nothing else changes.
 
+## Lightning, days ahead
+
+A thin band across the top of two charts shows how likely lightning is at the
+boat. You can see a thundery spell coming and pick your day before it arrives.
+
+- **Where it shows:** The band sits across the top of the Cloud, Temperature &
+  Rain chart for the day you've selected, and across the top of the Upper Air
+  trace. On the trace it lines up with the trough days, so you can see whether
+  a falling 500mb height and a thundery spell arrive together.
+- **What each block means:** Every block is a three-hour window. Its strength
+  is the chance of at least one lightning flash within about 20 kilometres of
+  the boat in that window. Touch or hover a chart and the tooltip adds the
+  chance, such as "Lightning 40%", for the hour you're reading.
+- **Four steps, not a gradient:** Under 10% draws nothing, so a quiet stretch
+  is an empty slot. From 10% to 30% is a pale block, 30% to 60% is stronger, and
+  60% or more is solid. The key under each chart shows the three shades.
+- **Hatched means no data:** The forecast reaches about 14.5 days, and the
+  Upper Air trace runs a day or two longer. Hours the forecast doesn't
+  cover are hatched with thin diagonal lines. That includes the hours before
+  now on today's chart and the days past the end of the run. A hatched
+  stretch means there's no forecast there, and an empty stretch means the
+  forecast says it's quiet. The key shows a "no data" swatch to match.
+- **It's the boat's position only:** Lightning is worked out for the grid
+  square the boat is in, roughly 20 by 30 kilometres. When you switch the page
+  to a [planned stay](#looking-ahead-to-a-planned-stay), the bands aren't drawn
+  and the key says "Lightning is for the boat's position, not the stay."
+
+A probability over a square that size says nothing about the next ten minutes
+or the square next door. It isn't a strike detector, and it doesn't raise an
+alarm.
+
+### Where it comes from
+
+The default source is the Met Office's global blended forecast, which is free
+and needs no key. "Lightning data © Crown copyright, Met Office, CC BY-SA 4.0." The
+credit shows under the charts whenever that source is in use.
+
+It comes from its own plugin, separate from your weather and upper-air
+providers. The plugin bundle includes the Met Office lightning plugin, so a
+fresh install has it. Helmcentral downloads about 60 MB a day for it: the next
+two days are refreshed every six hours, and the rest of the range once a day.
+Only the grid square the boat is in is kept. Swinging at anchor doesn't
+trigger a download, but moving into a new square does.
+
+### When something is wrong
+
+The band is never drawn as if the chance were zero. The hours Helmcentral has
+no data for are hatched, and the key under the chart says what's wrong.
+
+- **Unavailable:** If the Met Office can't be reached and Helmcentral holds
+  nothing, the key reads "Lightning unavailable:" followed by the reason.
+- **Not updated:** If the forecast has been loaded but the latest refresh
+  failed, the key reads "Lightning not updated:" followed by the reason. The
+  windows Helmcentral already holds stay on the chart under that line.
+  Helmcentral asks again after ten minutes.
+- **Stale:** If the forecast stops updating for long enough, the key shows a
+  Stale badge with its age and the band turns grey.
+- **No plugin:** With no lightning plugin installed, the charts show no band,
+  no line and no error about it. Once the plugin has answered, a failed update
+  is shown in the key. Until it has answered since you opened the page, the key
+  stays empty, even if something fails first. If a later answer names no
+  plugin, the band and key go away again.
+
 ## Looking ahead to a planned stay
 
 The week before you move to another marina, you want the weather there for the
@@ -237,6 +300,8 @@ Here's what the stay view shows:
   it as the trend in the upper air over those days, whether heights are falling
   or recovering, and not as a forecast for each day. A stay further out than the
   trace says so.
+- **No lightning bands.** Lightning is only worked out for the boat's position,
+  so the charts show no band for the stay and the key says why.
 - **Tide from the nearest station.** The tide chart uses the station closest to
   the place, names it, and says how far it is from the place. A station more
   than 20 nautical miles away is flagged, because a tide there can differ from

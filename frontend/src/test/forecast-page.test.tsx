@@ -26,6 +26,7 @@ vi.mock("@/components/forecast-drawer", () => ({
         data-forecast={JSON.stringify(props.forecast)}
         data-wave-days={JSON.stringify(props.waveDays)}
         data-warning={JSON.stringify(props.activeForecastWarning)}
+        data-lightning={JSON.stringify(props.lightning ?? null)}
       />
     );
   },
@@ -223,6 +224,28 @@ describe("ForecastPage", () => {
         screen.getByTestId("drawer").getAttribute("data-warning") || "null",
       ),
     ).toMatchObject({ region: "Gold Coast" });
+  });
+
+  // Lightning has no place parameter, so the stay view is handed the boat's
+  // feed and no hook of its own; the drawer draws none of it for a stay.
+  it("hands the stay view the boat's lightning feed rather than fetching one for the place", () => {
+    stayState(STAY);
+    const lightning = { windows: [], provider: "ukmo-lightning" };
+    render(
+      <ForecastPage
+        boat={{ ...boatProps, lightning: lightning as never }}
+        boatTimeZone="Australia/Brisbane"
+        canWrite
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
+    );
+
+    expect(
+      JSON.parse(screen.getByTestId("drawer").getAttribute("data-lightning") || "null"),
+    ).toEqual(lightning);
+    expect(drawerStay()).not.toBeNull();
   });
 
   it("mounts a fresh drawer for each place so the selected day does not carry over", () => {
