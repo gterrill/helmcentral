@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import type { AssistantConversation } from '@/hooks/use-assistant-conversations'
 import { useConversationSearch } from '@/hooks/use-conversation-search'
 import { formatConversationRelativeTime, recentConversations } from '@/lib/assistant-conversation-search'
+import { isComposing } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 
 const RECENT_LIMIT = 8
@@ -74,6 +75,7 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (isComposing(event)) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setHighlightedId(visible[Math.min(highlighted + 1, Math.max(visible.length - 1, 0))]?.id ?? null)

@@ -77,6 +77,7 @@ import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { useManuals } from '@/hooks/use-manuals'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { apiRequest } from '@/lib/api-query'
+import { isComposing, isSubmitEnter } from '@/lib/keyboard'
 import { downloadDocument } from '@/lib/document-download'
 import { documentDisplayName, documentFailureMessage, formatAdded, formatBytes, formatDocumentTime } from '@/lib/document-display'
 import { loadDocumentsSort, orderDocuments, saveDocumentsSort } from '@/lib/index-order'
@@ -530,6 +531,7 @@ export function DocumentsPanel({
     setRecentSearches([])
   }, [])
   const handleSearchInputKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (isComposing(e)) return
     const results = documents.searchResults ?? []
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -1400,7 +1402,7 @@ export function DocumentsPanel({
             id="documents-new-folder-name"
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void submitNewFolder() }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) void submitNewFolder() }}
             autoFocus
           />
           {/* "Creating a folder offers the kind" - only at the root, since
@@ -1442,7 +1444,7 @@ export function DocumentsPanel({
             id="documents-rename-value"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void submitRename() }}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) void submitRename() }}
             autoFocus
           />
           <DialogFooter>

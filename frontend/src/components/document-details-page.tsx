@@ -20,6 +20,7 @@ import { useFollowingDraft } from '@/hooks/use-following-draft'
 import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 import { useDocument, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { errorMessage } from '@/lib/errors'
 
 // ADR 0115: a full-panel page for one document's metadata,
@@ -472,7 +473,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
                   aria-label="Add tag"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
+                  onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); addTag() } }}
                   className="max-w-48"
                 />
                 <Button type="button" variant="outline" size="sm" onClick={addTag}>Add</Button>

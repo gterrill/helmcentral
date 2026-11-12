@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDocuments } from '@/hooks/use-documents'
 import { errorMessage } from '@/lib/errors'
+import { isSubmitEnter } from '@/lib/keyboard'
 
 // The dialog that picks a Documents folder, shared by moving (the Documents
 // listing and a document's Details page: move-to-folder-dialog.tsx) and by the
@@ -120,7 +121,7 @@ function FolderPicker({
           placeholder="New folder name"
           value={newFolderName}
           onChange={(e) => setNewFolderName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitCreate() } }}
+          onKeyDown={(e) => { if (isSubmitEnter(e)) { e.preventDefault(); void submitCreate() } }}
           className="flex-1"
         />
         <Button type="button" variant="outline" disabled={newFolderName.trim() === '' || creating} onClick={() => { void submitCreate() }}>

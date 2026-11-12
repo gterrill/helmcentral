@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent } from '@/components/ui/popover'
+import { isComposing } from '@/lib/keyboard'
 
 // Written once, per the plan: an empty send has to mean *something*, and
 // this is what it means everywhere this component is used - Mate decides
@@ -259,6 +260,7 @@ export function AskMateSelection({ noteId, noteTitle, mateAvailable, onAskMate, 
   }, [selection, question, noteTitle, noteId, onAskMate, dismiss])
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (isComposing(event)) return
     if (event.key === 'Enter') {
       event.preventDefault()
       handleSend()

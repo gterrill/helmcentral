@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { searchPlaces, type PlaceCandidate } from "@/hooks/use-place-search";
+import { isSubmitEnter } from "@/lib/keyboard";
 import { todayISO } from "@/lib/local-date";
 import type { PlannedStay, PlannedStayInput } from "@/lib/stay";
 import { errorMessage } from '@/lib/errors';
@@ -202,7 +203,7 @@ export function ForecastStaySheet({
                 }
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (isSubmitEnter(e)) {
                     e.preventDefault();
                     void runSearch();
                   }

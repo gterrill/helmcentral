@@ -9,6 +9,7 @@ import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { errorMessage } from '@/lib/errors'
+import { isComposing } from '@/lib/keyboard'
 
 // ADR 0121: the one capture sheet, reached only through Documents' New →
 // Note menu (documents-panel.tsx) - no separate global header action or
@@ -188,6 +189,7 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
   }, [type, notes, reset, onOpenChange, onCaptured, dictation])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (isComposing(event)) return
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       void submit()

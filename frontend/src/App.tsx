@@ -160,6 +160,7 @@ import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Table into the entry chunk for the sake of one empty div.
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { cn } from '@/lib/utils'
+import { isComposing } from '@/lib/keyboard'
 
 // The waiting count on the Inbox row. Its own component, so the poll that feeds
 // it re-renders the badge and not the whole shell.
@@ -863,7 +864,7 @@ function AppShell() {
         mateVoicePushToTalk()
         return
       }
-      if (event.key === 'Escape' && mateVoiceListening) {
+      if (event.key === 'Escape' && mateVoiceListening && !isComposing(event)) {
         mateVoiceCancel()
       }
     }

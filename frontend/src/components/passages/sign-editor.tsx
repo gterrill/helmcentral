@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { isSubmitEnter } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
 import { isSignPhotoType, SIGN_PHOTO_TYPES } from '@/lib/sign-photo'
@@ -72,7 +73,7 @@ function TextField({ label, value, max, multiline = false, required = false, onC
           value={shown}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit() }}
+          onKeyDown={(e) => { if (isSubmitEnter(e)) commit() }}
         />
       )}
     </label>
