@@ -72,6 +72,9 @@ export function ForecastPage({
             weather,
             waves,
             upperAir,
+            // Lightning has no place of its own. The stay view carries the
+            // boat's feed only so the drawer can say it isn't drawn here.
+            lightning: boat.lightning,
             warnings,
             unit: boat.unit,
           }),

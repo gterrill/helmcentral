@@ -1,7 +1,10 @@
 # ADR 0284: Lightning Probability as a Plugin Kind
 
 ## Status
-Accepted. The plugin and host landed first; the chart bands follow.
+Accepted. The plugin and host landed first, then the chart bands: a four-step
+violet band on the Cloud, Temperature & Rain chart and the Upper Air trace,
+with the Met Office credit in each chart's key. Both are drawn for the boat
+only; a planned stay shows no band and the key says why.
 
 ## Context
 

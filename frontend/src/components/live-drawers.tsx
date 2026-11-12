@@ -11,6 +11,7 @@ import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useAisTrails } from '@/hooks/use-ais-anchor-tracks'
 import { useAisAnchorEstimates } from '@/hooks/use-ais-anchor-estimates'
 import { useTideToday } from '@/hooks/use-tide-today'
+import { useLightning } from '@/hooks/use-lightning'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { selectTimeZone } from '@/lib/vessel-time'
 import { getVesselStateSnapshot, useVesselFields, useVesselStateSelector } from '@/hooks/use-vessel-state'
@@ -205,10 +206,13 @@ export const LiveForecastPage = memo(function LiveForecastPage({ unit, ...props 
   // Upper air keeps its own cadence: the global models behind it run four
   // times a day, so the surface-forecast interval would fetch the same numbers.
   const upperAir = useUpperAir()
+  // Lightning is the boat's alone, with its own cadence: it follows the
+  // forecast runs and polls fast only while the host is still fetching.
+  const lightning = useLightning()
   const warnings = useForecastWarnings(FORECAST_REFRESH_SECONDS)
   const boat = useMemo(
-    () => buildForecastDrawerProps({ weather, waves, upperAir, warnings, unit }),
-    [weather, waves, upperAir, warnings, unit],
+    () => buildForecastDrawerProps({ weather, waves, upperAir, lightning, warnings, unit }),
+    [weather, waves, upperAir, lightning, warnings, unit],
   )
   return <ForecastPage {...props} boat={boat} boatTimeZone={boatTimeZone} />
 })

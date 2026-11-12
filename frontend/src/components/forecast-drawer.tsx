@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { Area, Bar, CartesianGrid, Cell, ComposedChart, Customized, Line, ReferenceDot, XAxis, YAxis } from 'recharts'
@@ -25,7 +25,31 @@ import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { formatDayMonth, formatStayRange, formatWeekday, isStayDay, pendingStayDays } from '@/lib/stay'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
-import { formatHourMinute, formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
+import { calendarDayLabel, formatDayKey, formatHourMinute, formatTimeOfDay, selectTimeZone, zonedWallInstant } from '@/lib/vessel-time'
+import { LegendSwatch } from '@/components/legend-swatch'
+import { LIGHTNING_BAND_HEIGHT, LightningBand, LightningKey } from '@/components/lightning-band'
+import {
+  lightningLabel,
+  lightningNoDataBand,
+  lightningStatus,
+  lightningTip,
+  placeLightningOnSamples,
+  type LightningFeed,
+  type LightningStatus,
+  type LightningWindow,
+} from '@/lib/lightning-bands'
+
+const NO_LIGHTNING_WINDOWS: LightningWindow[] = []
+
+/** "Mon 15": how the drawer names a day the Upper Air feed has no label for. */
+function shortDayLabel(day: { dayName: string; date: string }): string {
+  return `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`
+}
+
+/** Point `idx` of `count`, spread evenly from `left` across `width`. */
+function evenX(idx: number, count: number, left: number, width: number): number {
+  return count <= 1 ? left : left + (idx / (count - 1)) * width
+}
 
 interface ForecastDay {
   dayKey: string
@@ -95,6 +119,11 @@ export interface ForecastDrawerProps {
   /** When the upper-air provider last answered - drives the panel's own stale badge, independent of the weather and wave feeds. */
   upperAirUpdatedAt?: string | null
   upperAirTtlSeconds?: number | null
+  /**
+   * Lightning probability at the BOAT. Never a place's: when `stay` is set the
+   * bands are not drawn and the key says why.
+   */
+  lightning?: LightningFeed
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
   waveError?: string | null
@@ -296,28 +325,6 @@ function ForecastPanel({
         {children}
       </div>
     </section>
-  )
-}
-
-function LegendSwatch({
-  color,
-  strokeWidth = 2,
-  dasharray,
-  kind = 'line',
-}: {
-  color: string
-  strokeWidth?: number
-  dasharray?: string
-  kind?: 'line' | 'bar'
-}) {
-  return (
-    <svg width="14" height="8" viewBox="0 0 14 8" className="inline-block align-middle" aria-hidden="true">
-      {kind === 'bar' ? (
-        <rect x="2" y="1" width="10" height="6" rx="1" fill={color} />
-      ) : (
-        <line x1="0" y1="4" x2="14" y2="4" stroke={color} strokeWidth={strokeWidth} strokeDasharray={dasharray} strokeLinecap="round" />
-      )}
-    </svg>
   )
 }
 
@@ -592,6 +599,7 @@ export function ForecastDrawer({
   upperAirWindow,
   upperAirUpdatedAt = null,
   upperAirTtlSeconds = null,
+  lightning,
   waveSeaTemperatureF = null,
   waveLoading = false,
   waveError = null,
@@ -751,7 +759,7 @@ export function ForecastDrawer({
     [days],
   )
   const upperAirDayLabels = useMemo(
-    () => new Map(upperAirDays.map((day) => [day.dayKey, `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`])),
+    () => new Map(upperAirDays.map((day) => [day.dayKey, shortDayLabel(day)])),
     [upperAirDays],
   )
 
@@ -774,7 +782,7 @@ export function ForecastDrawer({
     const visibleDayKeys = new Set(days.map((day) => day.dayKey))
     const namedDays = days
       .filter((day) => upperAirFlaggedDayKeys.has(day.dayKey))
-      .map((day) => upperAirDayLabels.get(day.dayKey) ?? `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`)
+      .map((day) => upperAirDayLabels.get(day.dayKey) ?? shortDayLabel(day))
     const hasFlaggedBeyondStrip = [...upperAirFlaggedDayKeys].some((dayKey) => !visibleDayKeys.has(dayKey))
 
     // The window length is whatever the provider returned, not a constant.
@@ -820,7 +828,7 @@ export function ForecastDrawer({
     const summaryDays = days.map((day) => ({
       condition: day.condition,
       dayName: day.dayName,
-      label: upperAirDayLabels.get(day.dayKey) ?? `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`,
+      label: upperAirDayLabels.get(day.dayKey) ?? shortDayLabel(day),
       trough: upperAirFlaggedDayKeys.has(day.dayKey),
     }))
     const summary = buildConditionsSummary(summaryDays)
@@ -918,10 +926,7 @@ export function ForecastDrawer({
     { length: upperAirGustMax / upperAirGustTickStep + 1 },
     (_, i) => i * upperAirGustTickStep,
   )
-  const upperAirXFor = (idx: number) =>
-    upperAirChartData.length <= 1
-      ? hourlyChartLeft
-      : hourlyChartLeft + (idx / (upperAirChartData.length - 1)) * upperAirPlotWidth
+  const upperAirXFor = (idx: number) => evenX(idx, upperAirChartData.length, hourlyChartLeft, upperAirPlotWidth)
 
   // One tick per local day, thinned once the window gets long enough that
   // sixteen labels would collide.
@@ -1313,6 +1318,79 @@ export function ForecastDrawer({
   const precipTooltipEntry = cloudTooltip.activeIndex === null ? null : precipHourly[cloudTooltip.activeIndex] ?? null
   const uvTooltipEntry = cloudTooltip.activeIndex === null ? null : uvHourly[cloudTooltip.activeIndex] ?? null
 
+  // Lightning is the boat's own feed, so a stay never draws it. The key says
+  // why instead, but only on a boat that has lightning to say it about.
+  const lightningState = lightningStatus(lightning, Boolean(stay), forecastZone)
+  const lightningWindows = lightningState.kind === 'ready' && lightning ? lightning.windows : NO_LIGHTNING_WINDOWS
+  const lightningAgeSeconds = ageSecondsFromUpdatedAt(lightning?.updatedAt ?? null, Date.now())
+  const lightningStale = lightningState.kind === 'ready' && isForecastStale(lightningAgeSeconds, lightning?.ttlSeconds)
+  const lightningStaleLabel = lightningStale ? formatDataAge(lightningAgeSeconds) : undefined
+  const lightningProvider = lightning?.provider ?? null
+
+  // Cloud chart: the windows placed on the selected day's own hourly points,
+  // in the day's zone. Ready means the zone is a known one.
+  const cloudLightning = useMemo(() => {
+    // A band is blocks, gaps or both, never blank: with no point to place
+    // windows on, the whole row says there is no data.
+    const none = { sampleMs: new Map<number, number>(), ...lightningNoDataBand(hourlyChartLeft, hourlyChartWidth) }
+    if (lightningState.kind !== 'ready' || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDay.dayKey)) return none
+    // Each hourly point is the instant its wall-clock hour stands for in the
+    // forecast's zone, so a day with 23 or 25 hours places the same as any.
+    // An hour that repeats on a clocks-back day keeps its first point.
+    const [year, month, day] = selectedDay.dayKey.split('-').map(Number)
+    const sampleHours: number[] = []
+    const sampleMs: number[] = []
+    for (const entry of cloudHourly) {
+      if (entry.hourOfDay < 0 || entry.hourOfDay > 23) continue
+      if (sampleHours.length > 0 && entry.hourOfDay <= sampleHours[sampleHours.length - 1]) continue
+      sampleHours.push(entry.hourOfDay)
+      sampleMs.push(zonedWallInstant(Date.UTC(year, month - 1, day, entry.hourOfDay), forecastZone as string).getTime())
+    }
+    if (sampleMs.length === 0) return none
+    const xs = sampleHours.map((hour) => hourlyChartLeft + (hour / 23) * hourlyChartWidth)
+    // A lone point owns the plot's whole width.
+    const span = { left: hourlyChartLeft, right: hourlyChartLeft + hourlyChartWidth }
+    const { blocks, gaps, peak } = placeLightningOnSamples(lightningWindows, sampleMs, xs, span)
+    const label = lightningLabel(peak?.window ?? null, peak ? formatTimeOfDay(peak.atMs, forecastZone) : '', gaps.length > 0)
+    return { sampleMs: new Map(sampleHours.map((hour, idx) => [hour, sampleMs[idx]])), blocks, gaps, label }
+  }, [lightningState.kind, lightningWindows, cloudHourly, selectedDay.dayKey, forecastZone, hourlyChartLeft, hourlyChartWidth])
+  const cloudTooltipMs = cloudTooltipEntry ? cloudLightning.sampleMs.get(cloudTooltipEntry.hourOfDay) : undefined
+  const cloudLightningTip = cloudTooltipMs === undefined ? null : lightningTip(lightningWindows, cloudTooltipMs)
+
+  // Upper Air trace: the same windows against the trace's own sample times.
+  const upperAirSampleMs = useMemo(() => upperAirSeries.map((sample) => Date.parse(sample.time)), [upperAirSeries])
+  const dayLabelFor = useCallback(
+    (dayKey: string) =>
+      upperAirDayLabels.get(dayKey) ??
+      `${calendarDayLabel(dayKey, { weekday: 'short' })} ${calendarDayLabel(dayKey, { day: 'numeric' })}`,
+    [upperAirDayLabels],
+  )
+  const upperAirLightning = useMemo(() => {
+    // The trace itself needs two samples, so this band never draws on fewer;
+    // the hatch keeps it from ever being blank if that changes.
+    const none = { ...lightningNoDataBand(hourlyChartLeft, upperAirPlotWidth), unreadable: false }
+    if (lightningState.kind !== 'ready' || upperAirSampleMs.length < 2) return none
+    // Times that will not read are a data fault, not a forecast that falls short.
+    if (!upperAirSampleMs.every(Number.isFinite)) return { ...none, unreadable: true }
+    const xs = upperAirSampleMs.map((_, idx) => evenX(idx, upperAirSampleMs.length, hourlyChartLeft, upperAirPlotWidth))
+    const { blocks, gaps, peak } = placeLightningOnSamples(lightningWindows, upperAirSampleMs, xs)
+    const label = lightningLabel(
+      peak?.window ?? null,
+      peak ? `${dayLabelFor(formatDayKey(new Date(peak.atMs), forecastZone as string))} ${formatTimeOfDay(peak.atMs, forecastZone)}` : '',
+      gaps.length > 0,
+    )
+    return { blocks, gaps, label, unreadable: false }
+  }, [lightningState.kind, lightningWindows, upperAirSampleMs, hourlyChartLeft, upperAirPlotWidth, forecastZone, dayLabelFor])
+  const upperAirLightningState: LightningStatus =
+    lightningState.kind === 'ready' && upperAirLightning.unreadable
+      ? { kind: 'error', message: 'the upper-air times could not be read.' }
+      : lightningState
+  const upperAirLightningTip = upperAirTooltipEntry
+    ? lightningTip(lightningWindows, upperAirSampleMs[upperAirTooltipEntry.idx])
+    : null
+  const lightningStaleBadge = (testId: string) =>
+    lightningStale ? <ForecastStaleBadge testId={testId} staleLabel={lightningStaleLabel} /> : null
+
   if (loading && !hasForecast) {
     return (
       <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
@@ -1669,7 +1747,14 @@ export function ForecastDrawer({
                       time={cloudTooltipEntry.label}
                       primary={`${Math.round(displayTemp(cloudTooltipEntry.temperatureF))}${tempUnit}`}
                       secondary={`${cloudTooltipEntry.condition}${precipTooltipEntry && precipTooltipEntry.precipIntensityMm > 0 ? ` · ${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr (${precipTooltipEntry.precipChancePct !== null ? `${Math.round(precipTooltipEntry.precipChancePct)}%` : '—'} chance)` : ''}`}
-                      tertiary={uvTooltipEntry ? `UV ${Math.round(uvTooltipEntry.uvIndex)} · ${uvRiskLabel(uvTooltipEntry.uvIndex)}` : undefined}
+                      tertiary={
+                        [
+                          uvTooltipEntry ? `UV ${Math.round(uvTooltipEntry.uvIndex)} · ${uvRiskLabel(uvTooltipEntry.uvIndex)}` : null,
+                          cloudLightningTip,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || undefined
+                      }
                     />
                   )}
                   <div
@@ -1755,6 +1840,22 @@ export function ForecastDrawer({
                       )}
                     </ComposedChart>
 
+                    {lightningState.kind === 'ready' && (
+                      <LightningBand
+                        testId="forecast-cloud-lightning-band"
+                        blockTestId="forecast-cloud-lightning-block"
+                        gapTestId="forecast-cloud-lightning-nodata"
+                        chartWidth={forecastChartWidth}
+                        chartHeight={265}
+                        // Just above the plot, under the condition icons.
+                        y={cloudChartTop - LIGHTNING_BAND_HEIGHT - 6}
+                        blocks={cloudLightning.blocks}
+                        gaps={cloudLightning.gaps}
+                        label={cloudLightning.label}
+                        stale={lightningStale}
+                      />
+                    )}
+
                     <svg
                       ref={cloudTooltip.svgRef}
                       // Horizontal drag scrubs the chart - full screen's
@@ -1829,6 +1930,13 @@ export function ForecastDrawer({
                     </p>
                     {cloudRefreshMeta}
                   </div>
+                  <LightningKey
+                    testId="forecast-cloud-lightning-key"
+                    status={lightningState}
+                    provider={lightningProvider}
+                    held={lightningWindows.length > 0}
+                    staleBadge={lightningStaleBadge('forecast-cloud-lightning-stale-badge')}
+                  />
                 </>
               ) : (
                 <>
@@ -2302,7 +2410,7 @@ export function ForecastDrawer({
                   upperAirTooltipEntry.surfaceGustKts === null
                     ? ''
                     : ` \u00b7 Surface gust ${Math.round(upperAirTooltipEntry.surfaceGustKts)} kts`
-                }`}
+                }${upperAirLightningTip ? ` \u00b7 ${upperAirLightningTip}` : ''}`}
               />
             )}
             <div
@@ -2384,6 +2492,22 @@ export function ForecastDrawer({
                   />
                 </ComposedChart>
               </div>
+
+              {lightningState.kind === 'ready' && !upperAirLightning.unreadable && (
+                <LightningBand
+                  testId="forecast-upper-air-lightning-band"
+                  blockTestId="forecast-upper-air-lightning-block"
+                  gapTestId="forecast-upper-air-lightning-nodata"
+                  chartWidth={upperAirChartWidth}
+                  chartHeight={265}
+                  // Just above the plot, where the trace never reaches.
+                  y={upperAirChartTop - LIGHTNING_BAND_HEIGHT - 1}
+                  blocks={upperAirLightning.blocks}
+                  gaps={upperAirLightning.gaps}
+                  label={upperAirLightning.label}
+                  stale={lightningStale}
+                />
+              )}
 
               <svg
                 ref={upperAirTooltip.svgRef}
@@ -2481,6 +2605,13 @@ export function ForecastDrawer({
               </svg>
             </div>
           </div>
+          <LightningKey
+            testId="forecast-upper-air-lightning-key"
+            status={upperAirLightningState}
+            provider={lightningProvider}
+            held={lightningWindows.length > 0}
+            staleBadge={lightningStaleBadge('forecast-upper-air-lightning-stale-badge')}
+          />
           </div>
         </ForecastPanel>
       )}

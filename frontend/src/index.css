@@ -54,6 +54,7 @@
   --color-gauge-secondary: hsl(var(--gauge-secondary));
   --color-chart-precip: hsl(var(--chart-precip));
   --color-chart-uv: hsl(var(--chart-uv));
+  --color-chart-lightning: hsl(var(--chart-lightning));
   --color-chart-gust: hsl(var(--chart-gust));
   --color-sidebar: hsl(var(--sidebar-background));
   --color-sidebar-foreground: hsl(var(--sidebar-foreground));
@@ -156,6 +157,11 @@
     --chart-grid: 214 20% 39%;
     --chart-precip: 217 91% 60%;
     --chart-uv: 48 96% 53%;
+    /* Lightning band on the forecast charts, in four opacity steps. Violet, so
+       it is neither the alarm red and amber nor the precip blue or UV yellow
+       it sits beside; the hue sits apart from --chart-swell (258) too. The
+       instrument skin inherits this, as it does the other series colours. */
+    --chart-lightning: 285 65% 58%;
     /*
      * Axis-label variants of the four series colours that label an axis.
      *
@@ -446,6 +452,7 @@
     --chart-grid: 214 15% 65%;
     --chart-precip: 217 91% 72%;
     --chart-uv: 48 96% 66%;
+    --chart-lightning: 285 65% 72%;
     /* On this card (0 0% 9.5%) the series colours already run 7.40:1 to
        10.41:1 as text, so the labels take them unchanged. */
     --chart-temp-label: var(--chart-temp);

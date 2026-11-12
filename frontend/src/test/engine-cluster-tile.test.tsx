@@ -590,6 +590,7 @@ describe('instrument skin token coverage', () => {
       ['chart-grid', 'unread on the bento grid'],
       ['chart-precip', 'unread on the bento grid'],
       ['chart-uv', 'unread on the bento grid'],
+      ['chart-lightning', 'unread on the bento grid'],
       ['dial-bezel-overhang', 'set inline per tile by the cluster, not by the skin'],
       ['dial-track-r', "invisible under the skin's --dial-track-w: 0px"],
     ])

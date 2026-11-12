@@ -21,6 +21,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and that the stretch up the river is not in the distance, time or fuel. A
   town well inland, such as Bundaberg itself, is still refused, and Mate then
   looks for that town's marina or harbour and says which one it used.
+### Added
+
+- **The forecast charts show how likely lightning is at the boat.** A thin
+  violet band across the top of the Cloud, Temperature & Rain chart and the
+  Upper Air trace has one block for every three hours. A block is pale from a
+  10% chance, stronger from 30% and solid from 60%, and a window under 10%
+  draws nothing. Hours the forecast doesn't cover, such as the days past its
+  14.5-day reach, are hatched instead of left blank. The key says what the
+  shades mean, and the tooltip gives the chance for the hour you're reading.
+  It's for the boat's position only, so a planned stay shows no band and says
+  so. Once the lightning plugin has answered, a failed update is shown in the
+  key, even beside a band that's still drawn. Until it has answered, the key
+  stays empty, and a boat with no lightning plugin sees nothing about it. The
+  plugin bundle includes the Met Office lightning plugin, which needs no key.
+  It downloads about 60 MB a day, so mind that on a metered connection. The
+  credit "Lightning data © Crown copyright, Met Office, CC BY-SA 4.0." shows under
+  the charts while it's in use.
 
 ## [0.65.0] - 2026-11-12
 
