@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { InboxEquipmentDialog, InboxJobDialog } from '@/components/passages/inbox-target-dialog'
+import { InboxTargetDialog, type InboxTargetKind } from '@/components/passages/inbox-target-dialog'
 
 const env = vi.hoisted(() => ({
   equipment: [] as unknown[],
@@ -22,8 +22,12 @@ vi.mock('@/hooks/use-open-jobs', async (orig) => ({
 
 const gear = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, manufacturer: '', model: '', aliases: [], status: 'deployed', zone_name: '', ...extra })
 const job = (id: string, title: string, equipment_name = '') => ({ id, title, equipment_name, status: 'open' })
+const open = (kind: InboxTargetKind, over: { count?: number; lastId?: string | null; onPick?: () => void } = {}) =>
+  render(<InboxTargetDialog kind={kind} count={over.count ?? 1} lastId={over.lastId ?? null} onPick={over.onPick ?? vi.fn()} onClose={vi.fn()} />)
 
 beforeEach(() => {
+  // jsdom has no Web Animations; the scroll area asks for them after a pause.
+  Element.prototype.getAnimations = () => []
   env.equipment = [gear('e1', 'Bilge pump', { manufacturer: 'Rule' }), gear('e2', 'Anchor windlass', { manufacturer: 'Lewmar' }), gear('e3', 'Spare impeller', { status: 'stored' })]
   env.jobs = [job('j1', 'Leaking hose', 'Port engine'), job('j2', 'Chafe on the main sheet')]
   env.equipmentError = null
@@ -31,10 +35,10 @@ beforeEach(() => {
   env.jobFilters = []
 })
 
-describe('InboxEquipmentDialog', () => {
+describe('InboxTargetDialog for equipment', () => {
   it('lists the equipment and waits for a choice', () => {
     const onPick = vi.fn()
-    render(<InboxEquipmentDialog count={3} lastId={null} onPick={onPick} onClose={vi.fn()} />)
+    open('equipment', { count: 3, onPick })
     expect(screen.getByText('Add 3 photos to equipment')).toBeInTheDocument()
     expect(screen.getAllByRole('radio')).toHaveLength(3)
     const add = screen.getByRole('button', { name: 'Add here' })
@@ -45,52 +49,95 @@ describe('InboxEquipmentDialog', () => {
     expect(onPick).toHaveBeenCalledWith('e2', 'Anchor windlass')
   })
 
-  it('asks for the whole list and narrows it by what is typed', () => {
-    render(<InboxEquipmentDialog count={1} lastId={null} onPick={vi.fn()} onClose={vi.fn()} />)
-    expect(env.equipmentFilters[0]).toEqual({})
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search equipment' }), { target: { value: 'lewmar' } })
-    expect(screen.getAllByRole('radio')).toHaveLength(1)
-    expect(screen.getByRole('radio', { name: /Anchor windlass/ })).toBeInTheDocument()
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search equipment' }), { target: { value: 'zzz' } })
+  it('asks the box to search once typing pauses, so it finds what the Equipment screen finds', async () => {
+    open('equipment')
+    expect(env.equipmentFilters.at(-1)).toEqual({ q: '' })
+    const search = screen.getByRole('searchbox', { name: 'Search equipment' })
+    fireEvent.change(search, { target: { value: 'lew' } })
+    fireEvent.change(search, { target: { value: ' lewmar ' } })
+    expect(env.equipmentFilters.some((f) => (f as { q: string }).q !== '')).toBe(false)
+    await waitFor(() => expect(env.equipmentFilters.at(-1)).toEqual({ q: 'lewmar' }))
+    expect(env.equipmentFilters.some((f) => (f as { q: string }).q === 'lew')).toBe(false)
+  })
+
+  it('is one named group of native radios, so the arrow keys move the choice and Tab enters it once', () => {
+    open('equipment')
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    expect(screen.getByRole('group', { name: 'equipment item' })).toContainElement(radios[0])
+    for (const r of radios) {
+      expect(r.tagName).toBe('INPUT')
+      expect(r.name).toBe(radios[0].name)
+    }
+    expect(radios[0].name).not.toBe('')
+  })
+
+  it('says so when nothing matches', () => {
+    env.equipment = []
+    open('equipment')
     expect(screen.getByText('No equipment matches.')).toBeInTheDocument()
   })
 
-  it('highlights the last item used while it still exists, and ignores one that has gone', () => {
-    const { unmount } = render(<InboxEquipmentDialog count={1} lastId="e1" onPick={vi.fn()} onClose={vi.fn()} />)
+  it('drops the choice when a new search no longer lists it, so Add here never files to a hidden item', () => {
+    const onPick = vi.fn()
+    const { rerender } = open('equipment', { onPick })
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    expect(screen.getByRole('button', { name: 'Add here' })).toBeEnabled()
+    env.equipment = [gear('e2', 'Anchor windlass')]
+    rerender(<InboxTargetDialog kind="equipment" count={1} lastId={null} onPick={onPick} onClose={vi.fn()} />)
+    const add = screen.getByRole('button', { name: 'Add here' })
+    expect(add).toBeDisabled()
+    expect(screen.queryAllByRole('radio', { checked: true })).toHaveLength(0)
+    fireEvent.click(add)
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it('lets long names shrink inside the dialog instead of widening it', () => {
+    env.equipment = [gear('e1', 'A very long equipment name '.repeat(8), { manufacturer: 'Maker '.repeat(20) })]
+    open('equipment')
+    expect(screen.getByText(/A very long equipment name/)).toHaveClass('truncate')
+    expect(screen.getByText(/Maker/)).toHaveClass('truncate')
+    expect(screen.getByRole('group', { name: 'equipment item' })).toHaveClass('min-w-0')
+    const column = screen.getByRole('searchbox').parentElement as HTMLElement
+    expect(column).toHaveClass('min-w-0')
+    expect(column.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-w-0')
+  })
+
+  it('highlights the last item used while it is listed, and ignores one that has gone', () => {
+    const { unmount } = open('equipment', { lastId: 'e1' })
     expect(screen.getByRole('radio', { name: /Bilge pump/ })).toBeChecked()
     expect(screen.getByRole('button', { name: 'Add here' })).toBeEnabled()
     unmount()
-    render(<InboxEquipmentDialog count={1} lastId="deleted" onPick={vi.fn()} onClose={vi.fn()} />)
+    open('equipment', { lastId: 'deleted' })
     expect(screen.queryAllByRole('radio', { checked: true })).toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Add here' })).toBeDisabled()
   })
 
   it('says so when the list cannot be read', () => {
     env.equipmentError = 'boom'
-    render(<InboxEquipmentDialog count={1} lastId={null} onPick={vi.fn()} onClose={vi.fn()} />)
+    open('equipment')
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
   })
 
   it('says one photo in the singular', () => {
-    render(<InboxEquipmentDialog count={1} lastId={null} onPick={vi.fn()} onClose={vi.fn()} />)
+    open('equipment')
     expect(screen.getByText('Add 1 photo to equipment')).toBeInTheDocument()
   })
 })
 
-describe('InboxJobDialog', () => {
-  it('lists only the open jobs, with the equipment each is about', () => {
+describe('InboxTargetDialog for jobs', () => {
+  it('lists every open job, including those on stored equipment, with the equipment each is about', () => {
     const onPick = vi.fn()
-    render(<InboxJobDialog count={2} lastId={null} onPick={onPick} onClose={vi.fn()} />)
-    expect(env.jobFilters[0]).toEqual({})
+    open('job', { count: 2, onPick })
+    expect(env.jobFilters[0]).toEqual({ includeStored: true })
     expect(screen.getByText('Add 2 photos to a job')).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: /Leaking hose/ })).toHaveTextContent('Port engine')
+    expect(screen.getByRole('radio', { name: 'Leaking hose' })).toHaveAccessibleDescription('Port engine')
     fireEvent.click(screen.getByRole('radio', { name: /Chafe on the main sheet/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
     expect(onPick).toHaveBeenCalledWith('j2', 'Chafe on the main sheet')
   })
 
-  it('searches the title and the equipment name', () => {
-    render(<InboxJobDialog count={1} lastId={null} onPick={vi.fn()} onClose={vi.fn()} />)
+  it('searches the title and the equipment name here, as the box has no job search', () => {
+    open('job')
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search jobs' }), { target: { value: 'port eng' } })
     expect(screen.getAllByRole('radio')).toHaveLength(1)
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search jobs' }), { target: { value: 'nothing here' } })
@@ -98,7 +145,7 @@ describe('InboxJobDialog', () => {
   })
 
   it('highlights the last job used while it is still open', () => {
-    render(<InboxJobDialog count={1} lastId="j2" onPick={vi.fn()} onClose={vi.fn()} />)
+    open('job', { lastId: 'j2' })
     expect(screen.getByRole('radio', { name: /Chafe on the main sheet/ })).toBeChecked()
   })
 })

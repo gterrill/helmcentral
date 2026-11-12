@@ -786,7 +786,13 @@ func newInboxLibrary(docs *documentStore) *inboxLibrary {
 // copy makes a Document of an item's file, through the same store-and-dedupe
 // step an upload takes, so the indexer picks it up. created is false when the
 // library already held these bytes, in which case doc is that document.
-func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string) (doc document, created bool, err error) {
+//
+// link, when not nil, attaches the document to something and runs under the
+// content lock, as the photo upload endpoints' link does, so a Documents delete
+// of these bytes cannot come between the copy and the link. If it fails, copy
+// fails with its error and leaves nothing new behind: a document it just made
+// is removed along with its file, and one that was already there is untouched.
+func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string, link func(documentID string) error) (doc document, created bool, err error) {
 	dir := documentsDirPath()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return document{}, false, fmt.Errorf("prepare document storage: %w", err)
@@ -816,11 +822,35 @@ func (l *inboxLibrary) copy(it inboxItem, folderID *string, title string) (doc d
 	up := uploadedFile{tmpPath: tmp.Name(), filename: it.Filename, size: n, sha: it.SHA256, head: head.buf}
 	candidate := document{FolderID: folderID, Filename: it.Filename, Title: title, MIME: it.MIME, SizeBytes: n, Enrich: enrich}
 	err = storeUploadedFile(dir, up, candidate,
-		func(existing document) error { doc, created = existing, false; return nil },
-		func(inserted document) error { doc, created = inserted, true; return nil },
+		func(existing document) error {
+			doc, created = existing, false
+			if link == nil {
+				return nil
+			}
+			return link(existing.ID)
+		},
+		func(inserted document) error {
+			doc, created = inserted, true
+			if link == nil {
+				return nil
+			}
+			if err := link(inserted.ID); err != nil {
+				// Still under the content lock: nothing else can hold these bytes.
+				if _, delErr := globalDocumentStore.Delete(inserted.ID); delErr != nil {
+					log.Printf("inbox: undo library copy %s: %v", inserted.ID, delErr)
+				} else if rmErr := os.Remove(filepath.Join(dir, inserted.SHA256)); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+					log.Printf("inbox: undo library copy file %s: %v", inserted.ID, rmErr)
+				}
+				return err
+			}
+			return nil
+		},
 		func(err error) error { return err },
 	)
-	return doc, created, err
+	if err != nil {
+		return document{}, false, err
+	}
+	return doc, created, nil
 }
 
 // inboxDiscardDocument undoes copy for a document it just made.
@@ -901,7 +931,7 @@ func fileInboxItemToPassage(store *inboxStore, ps *passageStore, docs *documentS
 		if err != nil {
 			return inboxResult{}, err
 		}
-		doc, created, err := lib.copy(it, &folder, "")
+		doc, created, err := lib.copy(it, &folder, "", nil)
 		if err != nil {
 			return inboxResult{}, err
 		}
@@ -971,7 +1001,7 @@ type inboxDocumentRequest struct {
 
 func fileInboxItemToDocuments(store *inboxStore, lib *inboxLibrary, folderID string, req inboxDocumentRequest) (inboxResult, error) {
 	return withClaimedInboxItem(store, req.ID, func(it inboxItem) (inboxResult, error) {
-		doc, created, err := lib.copy(it, &folderID, strings.TrimSpace(req.Title))
+		doc, created, err := lib.copy(it, &folderID, strings.TrimSpace(req.Title), nil)
 		if err != nil {
 			return inboxResult{}, err
 		}
@@ -1025,35 +1055,130 @@ type inboxPhotoRequest struct {
 
 // inboxPhotoRefusal is the refusal for an item that cannot go on where ("equipment"
 // or "a job"), or nil when it can: JPEG and PNG, as the photo endpoints take.
+// The Inbox never holds HEIC (inboxUploadMIME), so GIF and WebP are the photos
+// this refuses.
 func inboxPhotoRefusal(it inboxItem, where string) error {
-	switch it.MIME {
-	case "image/jpeg", "image/png":
+	if isPhotoMIME(it.MIME) {
 		return nil
+	}
+	switch it.MIME {
 	case "application/pdf":
 		return refusedf("only photos can go on %s; this is a PDF", where)
+	case "image/gif":
+		return refusedf("only JPEG or PNG photos can go on %s; this one is a GIF", where)
+	case "image/webp":
+		return refusedf("only JPEG or PNG photos can go on %s; this one is a WebP", where)
 	}
-	return refusedf("only JPEG or PNG photos can go on %s; this is a %s", where, it.MIME)
+	return refusedf("only JPEG or PNG photos can go on %s; this file isn't one", where)
 }
 
-// fileInboxItemAsPhoto is the filing both destinations share. check refuses an
-// unknown or unsuitable target before any file is copied; link attaches the
-// copied document to it.
-func fileInboxItemAsPhoto(store *inboxStore, lib *inboxLibrary, docs *documentStore, id, where string,
-	check func() error, link func(documentID string) error) (inboxResult, error) {
+// photoDestination is where Inbox photos can be filed: an equipment item or an
+// open job. field is the request body's name for the target and where how a
+// refusal names it. check looks the target up (nil when it can take photos);
+// link attaches a copied document to it. refusal turns an error from either
+// into words for the operator, and false when the error is not a plain answer.
+type photoDestination struct {
+	field string
+	where string
+	check func(id string) error
+	link  func(id, documentID string) error
+	// linked returns the id of the target's photo with these bytes, or "" when it has none.
+	linked  func(id, sha string) (string, error)
+	refusal func(err error) (string, bool)
+}
+
+// equipmentDestination is the destination for photos on an equipment item.
+func equipmentDestination(docs *documentStore) photoDestination {
+	return photoDestination{
+		field: "equipment_id",
+		where: "equipment",
+		check: func(id string) error {
+			ok, err := docs.EquipmentExists(id)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errEquipmentNotFound
+			}
+			return nil
+		},
+		link:    docs.AddEquipmentPhoto,
+		linked:  docs.EquipmentPhotoIDBySHA,
+		refusal: equipmentRefusal,
+	}
+}
+
+// equipmentRefusal is the one place an equipment answer becomes words.
+func equipmentRefusal(err error) (string, bool) {
+	if errors.Is(err, errEquipmentNotFound) {
+		return "that equipment item no longer exists", true
+	}
+	return "", false
+}
+
+// openJobDestination is the destination for photos on a job still open.
+func openJobDestination(docs *documentStore) photoDestination {
+	return photoDestination{
+		field: "job_id",
+		where: "a job",
+		check: func(id string) error {
+			job, err := docs.GetOpenJob(id)
+			if err != nil {
+				return err
+			}
+			return requireJobOpen(job)
+		},
+		link:    docs.AddOpenJobPhoto,
+		linked:  docs.OpenJobPhotoIDBySHA,
+		refusal: jobRefusal,
+	}
+}
+
+// jobRefusal is the one place a job answer becomes words; a closed job says
+// what the Documents screens say.
+func jobRefusal(err error) (string, bool) {
+	switch {
+	case errors.Is(err, errOpenJobNotFound):
+		return "that job no longer exists", true
+	case errors.Is(err, errOpenJobClosed):
+		return errOpenJobClosed.Error(), true
+	}
+	return "", false
+}
+
+// clearIfAlreadyOnTarget finishes an item whose photo an earlier filing already
+// linked to the target but failed to clear from the Inbox, as the passage path
+// does for a sign. It is checked before the target is refused or linked again,
+// so the item can leave even if the job has closed since. done is false when
+// the photo is not on the target yet.
+func clearIfAlreadyOnTarget(store *inboxStore, it inboxItem, targetID string, dest photoDestination) (res inboxResult, done bool, err error) {
+	documentID, err := dest.linked(targetID, it.SHA256)
+	if err != nil || documentID == "" {
+		return inboxResult{}, false, err
+	}
+	if err := finishFiled(store, it, "the photo is already on "+dest.where+", but the item could not be cleared from the Inbox; delete it there"); err != nil {
+		return inboxResult{}, false, err
+	}
+	// Cleared, which is what the operator asked for.
+	return inboxResult{ID: it.ID, OK: true, DocumentID: documentID}, true, nil
+}
+
+// fileInboxItemAsPhoto files one item onto the target. The target was checked
+// once for the whole request; link still refuses one deleted or closed since.
+// The link runs inside the copy, under the content lock; a failure there leaves
+// no new document behind (see inboxLibrary.copy).
+func fileInboxItemAsPhoto(store *inboxStore, lib *inboxLibrary, id, targetID string, dest photoDestination) (inboxResult, error) {
 	return withClaimedInboxItem(store, id, func(it inboxItem) (inboxResult, error) {
-		if err := inboxPhotoRefusal(it, where); err != nil {
+		if err := inboxPhotoRefusal(it, dest.where); err != nil {
 			return inboxResult{}, err
 		}
-		if err := check(); err != nil {
-			return inboxResult{}, err
+		if res, done, err := clearIfAlreadyOnTarget(store, it, targetID, dest); done || err != nil {
+			return res, err
 		}
-		doc, created, err := lib.copy(it, nil, "")
+		doc, _, err := lib.copy(it, nil, "", func(documentID string) error { return dest.link(targetID, documentID) })
 		if err != nil {
-			return inboxResult{}, err
-		}
-		if err := link(doc.ID); err != nil {
-			if created {
-				inboxDiscardDocument(docs, doc)
+			if msg, ok := dest.refusal(err); ok {
+				return inboxResult{}, refusedf("%s", msg)
 			}
 			return inboxResult{}, err
 		}
@@ -1064,98 +1189,75 @@ func fileInboxItemAsPhoto(store *inboxStore, lib *inboxLibrary, docs *documentSt
 	})
 }
 
-// fileInboxToEquipmentHandler is POST /api/inbox/file-to-equipment.
-func fileInboxToEquipmentHandler(c echo.Context) error {
-	store, ok := inboxStoreOrError(c)
-	if !ok {
-		return nil
-	}
-	docs, err := requireDocumentStore("inbox filing")
-	if err != nil {
-		return inboxError(c, http.StatusServiceUnavailable, err.Error())
-	}
-	type body struct {
-		EquipmentID string              `json:"equipment_id"`
-		Items       []inboxPhotoRequest `json:"items"`
-	}
-	return runInboxBatch(c,
-		func(b *body) []inboxPhotoRequest { return b.Items },
-		func(r inboxPhotoRequest) string { return r.ID },
-		func(b *body) (func(inboxPhotoRequest) (inboxResult, error), error) {
-			if strings.TrimSpace(b.EquipmentID) == "" {
-				return nil, inboxHTTPError{http.StatusBadRequest, "equipment_id is required"}
-			}
-			lib := newInboxLibrary(docs)
-			return func(req inboxPhotoRequest) (inboxResult, error) {
-				return fileInboxItemAsPhoto(store, lib, docs, req.ID, "equipment",
-					func() error {
-						if _, err := docs.GetEquipment(b.EquipmentID); errors.Is(err, errEquipmentNotFound) {
-							return refusedf("that equipment item no longer exists")
-						} else if err != nil {
-							return err
-						}
-						return nil
-					},
-					func(documentID string) error {
-						if err := docs.AddEquipmentPhoto(b.EquipmentID, documentID); errors.Is(err, errEquipmentNotFound) {
-							return refusedf("that equipment item no longer exists")
-						} else if err != nil {
-							return err
-						}
-						return nil
-					})
-			}, nil
-		})
+// Each destination binds its own body, so the other destination's key is an
+// unknown field and the request is refused as an invalid body.
+type inboxEquipmentBody struct {
+	EquipmentID string              `json:"equipment_id"`
+	Items       []inboxPhotoRequest `json:"items"`
 }
 
-// fileInboxToOpenJobHandler is POST /api/inbox/file-to-open-job.
-func fileInboxToOpenJobHandler(c echo.Context) error {
-	store, ok := inboxStoreOrError(c)
-	if !ok {
-		return nil
-	}
-	docs, err := requireDocumentStore("inbox filing")
-	if err != nil {
-		return inboxError(c, http.StatusServiceUnavailable, err.Error())
-	}
-	type body struct {
-		JobID string              `json:"job_id"`
-		Items []inboxPhotoRequest `json:"items"`
-	}
-	// jobRefusal turns the store's two plain answers into words for the operator.
-	jobRefusal := func(err error) error {
-		switch {
-		case errors.Is(err, errOpenJobNotFound):
-			return refusedf("that job no longer exists")
-		case errors.Is(err, errOpenJobClosed):
-			return refusedf("that job is closed and takes no more photos")
-		}
-		return err
-	}
-	return runInboxBatch(c,
-		func(b *body) []inboxPhotoRequest { return b.Items },
-		func(r inboxPhotoRequest) string { return r.ID },
-		func(b *body) (func(inboxPhotoRequest) (inboxResult, error), error) {
-			if strings.TrimSpace(b.JobID) == "" {
-				return nil, inboxHTTPError{http.StatusBadRequest, "job_id is required"}
-			}
-			lib := newInboxLibrary(docs)
-			return func(req inboxPhotoRequest) (inboxResult, error) {
-				return fileInboxItemAsPhoto(store, lib, docs, req.ID, "a job",
-					func() error {
-						job, err := docs.GetOpenJob(b.JobID)
-						if err != nil {
-							return jobRefusal(err)
-						}
-						if job.Status != openJobOpen {
-							return jobRefusal(errOpenJobClosed)
-						}
-						return nil
-					},
-					func(documentID string) error { return jobRefusal(docs.AddOpenJobPhoto(b.JobID, documentID)) })
-			}, nil
-		})
+type inboxJobBody struct {
+	JobID string              `json:"job_id"`
+	Items []inboxPhotoRequest `json:"items"`
 }
+
+// fileInboxPhotosHandler is POST /api/inbox/file-to-equipment and
+// /api/inbox/file-to-open-job. targetOf reads the body's target id and items.
+// The target is looked up once, before any item is claimed or copied: a missing
+// or closed one refuses every item and nothing is copied.
+func fileInboxPhotosHandler[B any](newDestination func(*documentStore) photoDestination, targetOf func(*B) (string, []inboxPhotoRequest)) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		store, ok := inboxStoreOrError(c)
+		if !ok {
+			return nil
+		}
+		docs, err := requireDocumentStore("inbox filing")
+		if err != nil {
+			return inboxError(c, http.StatusServiceUnavailable, err.Error())
+		}
+		dest := newDestination(docs)
+		return runInboxBatch(c,
+			func(b *B) []inboxPhotoRequest { _, items := targetOf(b); return items },
+			func(r inboxPhotoRequest) string { return r.ID },
+			func(b *B) (func(inboxPhotoRequest) (inboxResult, error), error) {
+				target, _ := targetOf(b)
+				targetID := strings.TrimSpace(target)
+				if targetID == "" {
+					return nil, inboxHTTPError{http.StatusBadRequest, dest.field + " is required"}
+				}
+				if err := dest.check(targetID); err != nil {
+					msg, ok := dest.refusal(err)
+					if !ok {
+						return nil, err
+					}
+					// The target is gone or closed, but an item whose photo an earlier filing
+					// already put on it still clears.
+					return func(req inboxPhotoRequest) (inboxResult, error) {
+						return withClaimedInboxItem(store, req.ID, func(it inboxItem) (inboxResult, error) {
+							// Only a photo can be on it as a photo; the same bytes as a PDF are a plain document.
+							if isPhotoMIME(it.MIME) {
+								if res, done, err := clearIfAlreadyOnTarget(store, it, targetID, dest); done || err != nil {
+									return res, err
+								}
+							}
+							return inboxResult{}, refusedf("%s", msg)
+						})
+					}, nil
+				}
+				lib := newInboxLibrary(docs)
+				return func(req inboxPhotoRequest) (inboxResult, error) {
+					return fileInboxItemAsPhoto(store, lib, req.ID, targetID, dest)
+				}, nil
+			})
+	}
+}
+
+var (
+	fileInboxToEquipmentHandler = fileInboxPhotosHandler(equipmentDestination,
+		func(b *inboxEquipmentBody) (string, []inboxPhotoRequest) { return b.EquipmentID, b.Items })
+	fileInboxToOpenJobHandler = fileInboxPhotosHandler(openJobDestination,
+		func(b *inboxJobBody) (string, []inboxPhotoRequest) { return b.JobID, b.Items })
+)
 
 // ── GET /api/inbox/suggested-titles ──────────────────────────────────────
 

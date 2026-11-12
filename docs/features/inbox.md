@@ -179,9 +179,12 @@ standard folder for receipts, so you choose.
 ## Putting photos on equipment or a job
 
 Mark the photos and tap **Add to equipment** or **Add to a job**. A list opens
-with a search box. Type part of a name, a maker or a model, or for a job part of
-its title or the equipment it's about, then tap the one you mean and tap **Add
-here**. Helmcentral never picks for you.
+with a search box. Type words from what the list shows: for equipment, part of a
+name, a maker, a model or the zone it lives in, and for a job, part of its title or
+the equipment it's about. Each word has to match somewhere, in any order, so "volvo
+d2-40" and "engine room" both work. Then tap the one you mean and tap **Add
+here**. Equipment is searched the way the Equipment screen searches it. Helmcentral
+never picks for you.
 
 - On equipment: The photos join the item's own photos, at the end, and show on its
   page like any photo you added there. Stored items are in the list too.
@@ -190,10 +193,10 @@ here**. Helmcentral never picks for you.
 - The last one you used: The list opens with the item or job you chose last time,
   on that device, already ticked. If it has been deleted or closed since, nothing
   is ticked.
-- PDFs: Only photos can go on equipment or a job. The buttons stay off if every
-  marked item is a PDF. If you marked photos and PDFs together, the photos go and
-  Helmcentral tells you how many PDFs stayed. They stay marked, so **Send to
-  Documents** is one tap away.
+- PDFs and other files: Only JPEG or PNG photos can go on equipment or a job. The
+  buttons stay off if nothing marked is one. If you marked photos and other files
+  together, the photos go and Helmcentral tells you how many files stayed. They
+  stay marked, so **Send to Documents** is one tap away.
 - One photo at a time: If one can't be added, it stays in the Inbox with the
   reason beside it, and the rest still go through. An example is an item that was
   deleted while the list was open.

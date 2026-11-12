@@ -3,7 +3,8 @@ import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InboxView } from '@/components/passages/inbox-view'
-import type { InboxItem } from '@/lib/inbox-api'
+import { InboxFilingError, type InboxItem } from '@/lib/inbox-api'
+import type { PassageSummary } from '@/lib/passages'
 
 const env = vi.hoisted(() => ({ items: [] as InboxItem[] }))
 
@@ -55,11 +56,28 @@ describe('InboxView equipment and job destinations', () => {
     expect(jobBtn).toBeDisabled()
     mark(/scan_2\.pdf/)
     expect(equipment).toBeDisabled()
-    expect(equipment).toHaveAttribute('title', 'Only photos can go on equipment')
-    expect(jobBtn).toHaveAttribute('title', 'Only photos can go on a job')
+    expect(equipment).toHaveAttribute('title', 'Only JPEG or PNG photos can go on equipment')
+    expect(jobBtn).toHaveAttribute('title', 'Only JPEG or PNG photos can go on a job')
     mark(/IMG_1\.jpg/)
     expect(equipment).toBeEnabled()
     expect(jobBtn).toBeEnabled()
+  })
+
+  it('counts a GIF as not a photo, as the box does, before anything is sent', async () => {
+    env.items = [item({ mime: 'image/gif', filename: 'anim.gif' }), item()]
+    api.fileToEquipment.mockResolvedValue([{ id: 'i2', ok: true }])
+    view()
+    mark(/anim\.gif/)
+    const equipment = screen.getByRole('button', { name: /Add to equipment/ })
+    expect(equipment).toBeDisabled()
+    expect(equipment).toHaveAttribute('title', 'Only JPEG or PNG photos can go on equipment')
+    mark(/IMG_2\.jpg/)
+    fireEvent.click(equipment)
+    expect(screen.getByText('Add 1 photo to equipment')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    await waitFor(() => expect(api.fileToEquipment).toHaveBeenCalledWith('e1', [{ id: 'i2' }]))
+    expect(toast.message).toHaveBeenCalledWith('1 file stayed in the Inbox', { description: 'Only JPEG or PNG photos can go on equipment. Send the rest to Documents.' })
   })
 
   it('files the marked photos to the chosen equipment item and says so', async () => {
@@ -85,7 +103,7 @@ describe('InboxView equipment and job destinations', () => {
     expect(screen.getByRole('radio', { name: /Bilge pump/ })).toBeChecked()
   })
 
-  it('files the photos of a mixed selection and says how many PDFs stayed', async () => {
+  it('files the photos of a mixed selection and says how many other files stayed', async () => {
     env.items = [item(), pdf(), pdf()]
     api.fileToOpenJob.mockResolvedValue([{ id: 'i1', ok: true }])
     view()
@@ -97,7 +115,7 @@ describe('InboxView equipment and job destinations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
     await waitFor(() => expect(api.fileToOpenJob).toHaveBeenCalledWith('j1', [{ id: 'i1' }]))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Added 1 photo to Leaking hose'))
-    expect(toast.message).toHaveBeenCalledWith('2 PDFs stayed in the Inbox', expect.anything())
+    expect(toast.message).toHaveBeenCalledWith('2 files stayed in the Inbox', { description: 'Only JPEG or PNG photos can go on a job. Send the rest to Documents.' })
     expect(window.localStorage.getItem('inbox.lastJob')).toBe('j1')
   })
 
@@ -112,6 +130,73 @@ describe('InboxView equipment and job destinations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('1 item stayed in the Inbox', { description: 'that equipment item no longer exists' }))
     expect(toast.success).toHaveBeenCalledWith('Added 1 photo to Bilge pump')
+  })
+
+  it('does not remember an item that refused every photo', async () => {
+    env.items = [item()]
+    api.fileToEquipment.mockResolvedValue([{ id: 'i1', ok: false, error: 'that equipment item no longer exists' }])
+    view()
+    mark(/IMG_1\.jpg/)
+    fireEvent.click(screen.getByRole('button', { name: /Add to equipment/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(window.localStorage.getItem('inbox.lastEquipment')).toBeNull()
+  })
+
+  it('shows each reason beside its picture until the next action', async () => {
+    env.items = [item(), item(), pdf()]
+    api.fileToEquipment.mockResolvedValue([{ id: 'i1', ok: true }, { id: 'i2', ok: false, error: 'that equipment item no longer exists' }])
+    view()
+    mark(/IMG_1\.jpg/)
+    mark(/IMG_2\.jpg/)
+    mark(/scan_3\.pdf/)
+    fireEvent.click(screen.getByRole('button', { name: /Add to equipment/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    const reason = await screen.findByText('that equipment item no longer exists')
+    expect(reason.closest('li')).toContainElement(screen.getByRole('button', { name: /IMG_2\.jpg/ }))
+    expect(screen.getByText('Only JPEG or PNG photos can go on equipment').closest('li')).toContainElement(screen.getByRole('button', { name: /scan_3\.pdf/ }))
+    // The next filing replaces them.
+    api.fileToEquipment.mockResolvedValue([{ id: 'i2', ok: true }])
+    fireEvent.click(screen.getByRole('button', { name: /Add to equipment/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    await waitFor(() => expect(api.fileToEquipment).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByText('that equipment item no longer exists')).not.toBeInTheDocument())
+  })
+
+  it('clears the reasons when the operator starts filing through Add to passage', async () => {
+    env.items = [item(), item()]
+    api.fileToEquipment.mockResolvedValue([{ id: 'i1', ok: true }, { id: 'i2', ok: false, error: 'that equipment item no longer exists' }])
+    const passage = { id: 'p1', start: '2026-10-14T00:00:00Z', end: '2026-10-14T02:00:00Z', title: 'Out to Hook', from_name: '', to_name: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', timezone: 'Australia/Brisbane', stats: {} } as unknown as PassageSummary
+    api.suggestedTitles.mockResolvedValue({})
+    render(<InboxView canWrite passages={[passage]} onOpenUpload={vi.fn()} />)
+    mark(/IMG_1\.jpg/)
+    mark(/IMG_2\.jpg/)
+    fireEvent.click(screen.getByRole('button', { name: /Add to equipment/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    await screen.findByText('that equipment item no longer exists')
+    fireEvent.click(screen.getByRole('button', { name: /Add to passage/ }))
+    expect(screen.queryByText('that equipment item no longer exists')).not.toBeInTheDocument()
+    await waitFor(() => expect(api.suggestedTitles).toHaveBeenCalled())
+  })
+
+  it('reports what was filed and keeps the rest marked when a later request fails', async () => {
+    env.items = [item(), item(), item()]
+    api.fileToEquipment.mockRejectedValue(new InboxFilingError(new Error('network dropped'), [{ id: 'i1', ok: true }]))
+    view()
+    mark(/IMG_1\.jpg/)
+    mark(/IMG_2\.jpg/)
+    mark(/IMG_3\.jpg/)
+    fireEvent.click(screen.getByRole('button', { name: /Add to equipment/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Bilge pump/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add here' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Added 1 photo to Bilge pump; the rest could not be sent', { description: 'network dropped' }))
+    expect(window.localStorage.getItem('inbox.lastEquipment')).toBe('e1')
+    expect(screen.getAllByText('network dropped')).toHaveLength(2)
+    expect(screen.getByRole('status')).toHaveTextContent('2 marked')
   })
 
   it('shows the server message when the call itself fails', async () => {

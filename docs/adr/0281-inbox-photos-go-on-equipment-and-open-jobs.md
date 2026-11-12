@@ -31,32 +31,52 @@ Inbox file is copied into the library with the step Documents filing already tak
 (`inboxLibrary.copy`), which stores the bytes by hash and reuses a Document that
 already holds them. Then `AddEquipmentPhoto` or `AddOpenJobPhoto` links it at the
 end of the item's strip, the same call the upload endpoints make. The two filings
-differ only in the target check and the link, so both run through one function,
-`fileInboxItemAsPhoto`, inside the same durable claim, original-hash memory and
-batch loop as the other destinations. The thumbnail goes with the item.
+differ only in the target check, the link and the words for a refusal, so both run
+through one handler and one function, `fileInboxItemAsPhoto`, inside the same
+durable claim, original-hash memory and batch loop as the other destinations. The
+thumbnail goes with the item.
 
-**The target is checked before any file is copied.** An unknown equipment item, or
-a job that is gone or closed, refuses that item in plain words and copies nothing.
-If the link fails after a copy, the Document the copy made is deleted again, as the
-passage filing does when its sign fails.
+**The target is checked once, before any item is claimed or copied.** An unknown
+equipment item, or a job that is gone or closed, refuses every item in the request
+in plain words and copies nothing. If the target goes missing or closes mid-batch,
+the link refuses the item still in hand. One case is not refused: an item whose
+photo an earlier filing already linked to the target, but which failed to clear
+from the Inbox. It is looked up by its bytes before either refusal, so filing it
+again clears it as filed, even if the target has closed since, as the passage path
+does for a sign that already shows the photo.
+
+**The link happens under the content lock, inside the copy.** Documents holds a
+lock per file hash for every step that stores, links or deletes a Document, and
+the photo endpoints link while holding it. `inboxLibrary.copy` takes a link
+callback and runs it in the store step's created and already-there branches, under
+that same lock. Linking afterwards would leave a gap in which a Documents delete of
+the same bytes could remove the Document before the link landed, or a failed link
+would need an undo that has to guess whether anyone else had begun to use the
+copy. Under the lock neither can happen. If the link fails, the copy removes the
+Document it just made, and its file, before it releases the lock, so nothing new
+is left behind. A Document that was already in the library is never touched.
 
 **Photos only, as the photo endpoints take them.** JPEG and PNG go through. A PDF
 is refused with "only photos can go on equipment" (or "on a job") and stays in the
 Inbox. The Inbox also accepts GIF and WebP for passage signs, but the photo
 endpoints do not, so those two are refused with their own message instead of being
-admitted to a strip the Equipment screen would not accept.
+admitted to a strip the Equipment screen would not accept. The Inbox never holds
+HEIC, so that case does not arise here. The phone applies the same rule before it
+sends, so a GIF or WebP counts as not a photo there too.
 
-**The operator searches and picks.** Both pickers read the list the Equipment and
-Open jobs screens already read and narrow it as the operator types. The equipment
-picker offers stored items too, since a spare is as likely to be photographed. The
-job picker offers open jobs only, because a closed job takes no more photos. Each
-remembers the last choice in the device's local storage, as a starting highlight
-only, and drops it if the item or job has gone.
+**The operator searches and picks.** One dialog serves both pickers. The equipment
+picker asks the box to search, so it finds what the Equipment screen finds (every
+word must hit the name, make, model, an alias or the zone name), and
+offers stored items too, since a spare is as likely to be photographed. The job
+picker reads the open jobs and narrows them as the operator types, because the box
+has no job search; it offers open jobs only, because a closed job takes no more
+photos. Each remembers the last choice in the device's local storage, as a starting
+highlight only, and drops it if the item or job has gone.
 
-**A mixed selection files its photos and keeps its PDFs.** The buttons stay off
-when every marked item is a PDF. Otherwise the client sends the photos alone, says
-how many PDFs stayed, and leaves them marked so that Send to Documents is one tap
-away.
+**A mixed selection files its photos and keeps the rest.** The buttons stay off
+when no marked item is a JPEG or PNG. Otherwise the client sends the photos alone,
+says how many files stayed, and leaves them marked so that Send to Documents is one
+tap away.
 
 ## Consequences
 

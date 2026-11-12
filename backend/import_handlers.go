@@ -191,9 +191,9 @@ func uploadImportFileHandler(c echo.Context) error {
 
 	mimeType := detectDocumentMIME(up.head, up.filename)
 	if file.Kind == stagedFileKindPhoto {
-		switch mimeType {
-		case "image/jpeg", "image/png":
-		case "image/heic":
+		switch {
+		case isPhotoMIME(mimeType):
+		case mimeType == "image/heic":
 			os.Remove(up.tmpPath)
 			return importError(c, http.StatusBadRequest, documentHEICRejectionMessage)
 		default:

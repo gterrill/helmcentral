@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetInboxQueue } from '@/hooks/use-inbox-queue'
 import { InboxUploadPage } from '@/components/passages/inbox-upload-page'
-import { inboxApi, type InboxUploadMeta } from '@/lib/inbox-api'
+import { filingOutcome, inboxApi, InboxFilingError, type InboxUploadMeta } from '@/lib/inbox-api'
 import { uploadFiles, type PreparedFile } from '@/lib/inbox-upload'
 import { FakeIdbFactory } from './helpers/fake-idb'
 
@@ -126,7 +126,7 @@ describe('inboxApi', () => {
   })
 
   it('refreshes the folder tree and tags as well as the listings after filing to Documents', async () => {
-    net.apiRequest.mockResolvedValue({ results: [] })
+    net.apiRequest.mockResolvedValue({ results: [{ id: 'a', ok: true }] })
     await inboxApi.fileToDocuments('f1', [{ id: 'a' }])
     expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/document-folders/tree'])
     expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/documents/tags'])
@@ -153,6 +153,60 @@ describe('inboxApi', () => {
     expect(net.apiRequest.mock.calls.map(([p, init]) => [p, (init as { json: { job_id: string } }).json.job_id])).toEqual([['/api/inbox/file-to-open-job', 'j1'], ['/api/inbox/file-to-open-job', 'j1']])
     expect(net.invalidateQueries).toHaveBeenCalledWith(['/api/inventory/open-jobs'])
     expect(net.invalidateQueries).toHaveBeenCalledWith(['inbox'])
+  })
+
+  it('refreshes the Inbox but not equipment, jobs or documents when every item stayed', async () => {
+    net.apiRequest.mockImplementation(async (_p: string, init: { json: { items: { id: string }[] } }) => ({ results: init.json.items.map((i) => ({ id: i.id, ok: false, error: 'no' })) }))
+    await inboxApi.fileToEquipment('e1', [{ id: 'a' }])
+    await inboxApi.fileToOpenJob('j1', [{ id: 'a' }])
+    await inboxApi.fileToDocuments('f1', [{ id: 'a' }])
+    const keys = net.invalidateQueries.mock.calls.map(([k]) => (k as string[])[0])
+    expect(keys).toContain('inbox')
+    expect(keys).toContain('inbox-count')
+    expect(keys).not.toContain('/api/inventory/equipment')
+    expect(keys).not.toContain('/api/inventory/equipment/e1')
+    expect(keys).not.toContain('/api/inventory/open-jobs')
+    expect(keys).not.toContain('/api/document-folders/tree')
+  })
+
+  it('still refreshes what shows the photos when a request was sent and its answer was lost', async () => {
+    const items = Array.from({ length: 600 }, (_, i) => ({ id: `id${i}` }))
+    net.apiRequest.mockRejectedValue(new Error('network dropped'))
+    await expect(inboxApi.fileToEquipment('e1', items)).rejects.toThrow('network dropped')
+    const keys = net.invalidateQueries.mock.calls.map(([k]) => (k as string[])[0])
+    expect(keys).toContain('inbox')
+    expect(keys).toContain('/api/inventory/equipment')
+    expect(keys).toContain('/api/document-folders/tree')
+    net.invalidateQueries.mockClear()
+    await expect(inboxApi.fileToOpenJob('j1', items)).rejects.toThrow('network dropped')
+    expect(net.invalidateQueries.mock.calls.map(([k]) => (k as string[])[0])).toContain('/api/inventory/open-jobs')
+  })
+
+  it('keeps what the first request filed when a later one fails', async () => {
+    const items = Array.from({ length: 600 }, (_, i) => ({ id: `id${i}` }))
+    let calls = 0
+    net.apiRequest.mockImplementation(async (_p: string, init: { json: { items: { id: string }[] } }) => {
+      calls += 1
+      if (calls === 2) throw new Error('network dropped')
+      return { results: init.json.items.map((i) => ({ id: i.id, ok: true })) }
+    })
+    const err = await inboxApi.fileToEquipment('e1', items).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(InboxFilingError)
+    expect((err as InboxFilingError).message).toBe('network dropped')
+    expect((err as InboxFilingError).results).toHaveLength(500)
+    await expect(filingOutcome(Promise.reject(err))).resolves.toMatchObject({ error: 'network dropped', results: expect.arrayContaining([{ id: 'id0', ok: true }]) })
+    await expect(filingOutcome(Promise.reject(new Error('plain')))).resolves.toEqual({ results: [], error: 'plain' })
+    await expect(filingOutcome(Promise.resolve([{ id: 'a', ok: true }]))).resolves.toEqual({ results: [{ id: 'a', ok: true }], error: null })
+  })
+
+  it('shows the request error, not a failed refresh, when both fail', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    net.apiRequest.mockRejectedValue(new Error('request failed'))
+    net.invalidateQueries.mockImplementation(async (key: string[]) => { if (key[0] === 'inbox') throw new Error('refresh failed') })
+    await expect(inboxApi.fileToEquipment('e1', [{ id: 'a' }])).rejects.toThrow('request failed')
+    expect(errorLog).toHaveBeenCalled()
+    errorLog.mockRestore()
+    net.invalidateQueries.mockReset()
   })
 
   it('asks which original hashes are known', async () => {

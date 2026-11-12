@@ -603,7 +603,8 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
 }
 
 /** Photos reached an item without going through uploadEquipmentPhoto (the Inbox
- * filed them): the lists and the item's own page re-read. */
+ * filed them): the item's own page re-reads, and so do the lists, because a bin
+ * page's cards show an item's photos. The Equipment index shows none. */
 export function equipmentPhotosAdded(equipmentId: string): void {
   equipmentListsChanged()
   invalidateQueries([itemPath(equipmentId)])

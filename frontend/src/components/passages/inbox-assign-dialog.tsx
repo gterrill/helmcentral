@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { inboxApi, inboxPreviewUrl, type InboxItem } from '@/lib/inbox-api'
+import { filingOutcome, inboxApi, inboxPreviewUrl, plural, type InboxItem } from '@/lib/inbox-api'
 import { assignRequest, initialAssignRows, rowProblem, type AssignRow } from '@/lib/inbox-assign'
 import { placementOptions } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
@@ -57,18 +57,27 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
   const confirm = async () => {
     setBusy(true)
     try {
-      const results = await inboxApi.fileToPassage(assignRequest(rows))
+      // A request that failed part-way still hands back what the earlier ones filed.
+      const { results, error } = await filingOutcome(inboxApi.fileToPassage(assignRequest(rows)))
       const failed = results.filter((r) => !r.ok)
       const made = results.length - failed.length
-      if (made > 0) toast.success(made === 1 ? 'Added 1 sign' : `Added ${made} signs`)
-      if (failed.length === 0) {
+      if (error !== null) {
+        toast.error(made > 0 ? `Added ${plural(made, 'sign')}; the rest could not be sent` : 'Could not add to the passage', { description: error })
+        // Nothing was answered: the rows stay as they were, so the operator can try again.
+        if (results.length === 0) return
+      } else if (made > 0) {
+        toast.success(`Added ${plural(made, 'sign')}`)
+      }
+      if (failed.length === 0 && error === null) {
         onClose()
         return
       }
-      setFailures(Object.fromEntries(failed.map((f) => [f.id, f.error ?? 'It was not added'])))
-      setRows((prev) => prev.filter((r) => failed.some((f) => f.id === r.item.id)))
-    } catch (err) {
-      toast.error('Could not add to the passage', { description: errorMessage(err) })
+      const answered = new Set(results.map((r) => r.id))
+      setFailures({
+        ...(error === null ? {} : Object.fromEntries(rows.filter((r) => !answered.has(r.item.id)).map((r) => [r.item.id, error]))),
+        ...Object.fromEntries(failed.map((f) => [f.id, f.error ?? 'It was not added'])),
+      })
+      setRows((prev) => prev.filter((r) => failed.some((f) => f.id === r.item.id) || (error !== null && !answered.has(r.item.id))))
     } finally {
       setBusy(false)
     }
@@ -78,7 +87,7 @@ export function InboxAssignDialog({ items, passages, onClose }: InboxAssignDialo
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
       <DialogContent className="max-h-[90svh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add {rows.length === 1 ? '1 photo' : `${rows.length} photos`} to a passage</DialogTitle>
+          <DialogTitle>Add {plural(rows.length, 'photo')} to a passage</DialogTitle>
           <DialogDescription>
             Each photo becomes a sign at the moment it was taken, shown full frame in the replay. Check the titles; each needs one.
           </DialogDescription>

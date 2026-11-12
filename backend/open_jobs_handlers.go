@@ -149,9 +149,9 @@ func uploadOpenJobPhotoHandler(c echo.Context) error {
 		return err
 	}
 	mimeType := detectDocumentMIME(up.head, up.filename)
-	switch mimeType {
-	case "image/jpeg", "image/png":
-	case "image/heic":
+	switch {
+	case isPhotoMIME(mimeType):
+	case mimeType == "image/heic":
 		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": documentHEICRejectionMessage})
 	default:

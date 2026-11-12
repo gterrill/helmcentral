@@ -1325,10 +1325,10 @@ func uploadMaintenanceLogPhotoHandler(c echo.Context) error {
 	}
 
 	mimeType := detectDocumentMIME(up.head, up.filename)
-	switch mimeType {
-	case "image/jpeg", "image/png":
+	switch {
+	case isPhotoMIME(mimeType):
 		// accepted
-	case "image/heic":
+	case mimeType == "image/heic":
 		os.Remove(up.tmpPath)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": documentHEICRejectionMessage})
 	default:

@@ -2,14 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-// Filing Inbox photos onto an equipment item or an open job (ADR 0279, PR 3).
+// Filing Inbox photos onto an equipment item or an open job (ADR 0281, PR 3).
 
 func fileToEquipment(t *testing.T, equipmentID string, ids ...string) (int, []map[string]any) {
 	t.Helper()
@@ -142,6 +145,38 @@ func TestInboxFileToEquipmentUnknownTargetKeepsTheItem(t *testing.T) {
 	}
 }
 
+func TestInboxPhotoRefusalWording(t *testing.T) {
+	if err := inboxPhotoRefusal(inboxItem{MIME: "image/png"}, "equipment"); err != nil {
+		t.Errorf("png: %v", err)
+	}
+	if err := inboxPhotoRefusal(inboxItem{MIME: "application/pdf"}, "a job"); err == nil || err.Error() != "only photos can go on a job; this is a PDF" {
+		t.Errorf("pdf: %v", err)
+	}
+}
+
+// The target is looked up once, before any item is claimed: a missing item
+// refuses all of them with the same words, whatever each file is.
+func TestInboxFileToMissingEquipmentRefusesEveryItemAndCopiesNothing(t *testing.T) {
+	w := newInboxWorld(t)
+	ids := []string{uploadPDFForFiling(t), uploadForFiling(t, 70, nil), uploadForFiling(t, 71, nil)}
+
+	code, results := fileToEquipment(t, "nope", ids...)
+	if code != 200 || len(results) != 3 {
+		t.Fatal(code, results)
+	}
+	for i, r := range results {
+		if msg, _ := r["error"].(string); r["ok"] == true || msg != "that equipment item no longer exists" {
+			t.Errorf("item %d: %v", i, r)
+		}
+	}
+	if docs, _ := w.docs.List(nil, false, "", 50, 0); len(docs) != 0 {
+		t.Errorf("a document was made: %+v", docs)
+	}
+	if n, _ := w.inbox.Count(); n != 3 {
+		t.Errorf("count %d", n)
+	}
+}
+
 func TestInboxConcurrentFilingToEquipmentMakesOnePhoto(t *testing.T) {
 	w := newInboxWorld(t)
 	pump, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
@@ -256,5 +291,205 @@ func TestInboxConcurrentFilingToOpenJobMakesOnePhoto(t *testing.T) {
 	got, _ := w.docs.GetOpenJob(job.ID)
 	if n != 1 || len(got.PhotoIDs) != 1 {
 		t.Fatalf("ok=%d photos=%d", n, len(got.PhotoIDs))
+	}
+}
+
+// The link runs under the content lock, as the photo upload endpoints' does:
+// a Documents delete of these bytes cannot slip in between the copy and the link.
+func TestInboxPhotoLinkRunsUnderTheContentLock(t *testing.T) {
+	w := newInboxWorld(t)
+	a, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	id := uploadForFiling(t, 80, nil)
+	it, _ := w.inbox.Get(id)
+	dest := equipmentDestination(w.docs)
+	real := dest.link
+	dest.link = func(target, documentID string) error {
+		acquired := make(chan struct{})
+		go func() {
+			unlock := lockDocumentSHA(it.SHA256)
+			close(acquired)
+			unlock()
+		}()
+		select {
+		case <-acquired:
+			t.Error("the link ran without the content lock")
+		case <-time.After(200 * time.Millisecond):
+		}
+		return real(target, documentID)
+	}
+	res, err := fileInboxItemAsPhoto(w.inbox, newInboxLibrary(w.docs), id, a.ID, dest)
+	if err != nil || !res.OK {
+		t.Fatal(res, err)
+	}
+}
+
+// A link that fails (the job closed since the check) leaves no new document,
+// no file for it, and the item in the Inbox.
+func TestInboxFailedLinkLeavesNoNewDocument(t *testing.T) {
+	w := newInboxWorld(t)
+	job := mustOpenJob(t, w.docs, "2026-11-07", openJobReq("Leaking hose"))
+	id := uploadForFiling(t, 81, nil)
+	it, _ := w.inbox.Get(id)
+	if _, err := w.docs.DropOpenJobCmd(mustParseDate(t, "2026-11-08"), job.ID, "not needed"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := fileInboxItemAsPhoto(w.inbox, newInboxLibrary(w.docs), id, job.ID, openJobDestination(w.docs))
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("expected the closed refusal, got %v", err)
+	}
+	if docs, _ := w.docs.List(nil, false, "", 50, 0); len(docs) != 0 {
+		t.Errorf("a document was left behind: %+v", docs)
+	}
+	if _, err := os.Stat(filepath.Join(documentsDirPath(), it.SHA256)); !os.IsNotExist(err) {
+		t.Errorf("the copied file is still there: %v", err)
+	}
+	if _, err := w.inbox.Get(id); err != nil {
+		t.Errorf("the item should stay: %v", err)
+	}
+}
+
+// A photo that was linked but failed to clear from the Inbox can be cleared by
+// filing it again, even though the job has closed since: the photo is already
+// on the job, which is what the operator asked for.
+func TestInboxRefilingALinkedPhotoClearsItEvenAfterTheJobClosed(t *testing.T) {
+	w := newInboxWorld(t)
+	job := mustOpenJob(t, w.docs, "2026-11-07", openJobReq("Leaking hose"))
+	id := uploadForFiling(t, 84, nil)
+
+	prev := inboxRemoveItem
+	inboxRemoveItem = func(*inboxStore, inboxItem) error { return errors.New("disk gone") }
+	code, results := fileToJob(t, job.ID, id)
+	inboxRemoveItem = prev
+	if code != 200 || results[0]["ok"] != false || !strings.Contains(results[0]["error"].(string), "could not be cleared") {
+		t.Fatal(code, results)
+	}
+	if _, err := w.docs.DropOpenJobCmd(mustParseDate(t, "2026-11-08"), job.ID, "not needed"); err != nil {
+		t.Fatal(err)
+	}
+
+	code, results = fileToJob(t, job.ID, id)
+	if code != 200 || results[0]["ok"] != true || results[0]["document_id"] == "" {
+		t.Fatalf("expected the item to clear, got %d %v", code, results)
+	}
+	if _, err := w.inbox.Get(id); err == nil {
+		t.Error("the item should be gone from the Inbox")
+	}
+}
+
+// The bytes are already in Documents: the photo links to that document, and a
+// link that fails leaves it exactly as it was.
+func TestInboxPhotoLinksAnExistingDocumentAndAFailureKeepsIt(t *testing.T) {
+	w := newInboxWorld(t)
+	a, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	id := uploadForFiling(t, 82, nil)
+	it, _ := w.inbox.Get(id)
+	existing, created, err := newInboxLibrary(w.docs).copy(it, nil, "", nil)
+	if err != nil || !created {
+		t.Fatal(created, err)
+	}
+
+	dest := equipmentDestination(w.docs)
+	real := dest.link
+	dest.link = func(_, _ string) error { return errors.New("link failed") }
+	if _, err := fileInboxItemAsPhoto(w.inbox, newInboxLibrary(w.docs), id, a.ID, dest); err == nil {
+		t.Fatal("expected the link failure")
+	}
+	if _, err := w.docs.Get(existing.ID); err != nil {
+		t.Fatalf("the existing document was touched: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(documentsDirPath(), it.SHA256)); err != nil {
+		t.Errorf("its file went: %v", err)
+	}
+
+	dest.link = real
+	res, err := fileInboxItemAsPhoto(w.inbox, newInboxLibrary(w.docs), id, a.ID, dest)
+	if err != nil || res.DocumentID != existing.ID {
+		t.Fatal(res, err)
+	}
+	got, _ := w.docs.GetEquipment(a.ID)
+	if len(got.PhotoIDs) != 1 || got.PhotoIDs[0] != existing.ID {
+		t.Fatalf("photo ids %v", got.PhotoIDs)
+	}
+}
+
+// A Documents delete of the same bytes starts just before the link: it waits
+// for the content lock, so the link lands first and the delete then removes
+// document and link together. Linked outside the lock, the delete wins and the
+// link fails.
+func TestInboxConcurrentDocumentsDeleteCannotLeaveADanglingLink(t *testing.T) {
+	w := newInboxWorld(t)
+	a, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	id := uploadForFiling(t, 83, nil)
+	it, _ := w.inbox.Get(id)
+	dest := equipmentDestination(w.docs)
+	real := dest.link
+	deleted := make(chan error, 1)
+	dest.link = func(target, documentID string) error {
+		go func() {
+			unlock := lockDocumentSHA(it.SHA256)
+			defer unlock()
+			_, err := w.docs.Delete(documentID)
+			deleted <- err
+		}()
+		time.Sleep(200 * time.Millisecond)
+		return real(target, documentID)
+	}
+	res, err := fileInboxItemAsPhoto(w.inbox, newInboxLibrary(w.docs), id, a.ID, dest)
+	if err != nil || !res.OK {
+		t.Fatal(res, err)
+	}
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
+	got, _ := w.docs.GetEquipment(a.ID)
+	if len(got.PhotoIDs) != 0 {
+		t.Errorf("a link to a deleted document: %v", got.PhotoIDs)
+	}
+}
+
+func TestInboxPhotoRefusalNamesGIFAndWebP(t *testing.T) {
+	for mime, want := range map[string]string{
+		"image/gif":  "only JPEG or PNG photos can go on equipment; this one is a GIF",
+		"image/webp": "only JPEG or PNG photos can go on equipment; this one is a WebP",
+		"image/tiff": "only JPEG or PNG photos can go on equipment; this file isn't one",
+	} {
+		err := inboxPhotoRefusal(inboxItem{MIME: mime}, "equipment")
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", mime, err, want)
+		}
+	}
+}
+
+func TestInboxEquipmentExists(t *testing.T) {
+	w := newInboxWorld(t)
+	pump, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	if ok, err := w.docs.EquipmentExists(pump.ID); err != nil || !ok {
+		t.Errorf("existing: %v %v", ok, err)
+	}
+	if ok, err := w.docs.EquipmentExists("nope"); err != nil || ok {
+		t.Errorf("missing: %v %v", ok, err)
+	}
+}
+
+func TestInboxPhotoBodyRejectsUnknownKeysAndWrongTypes(t *testing.T) {
+	w := newInboxWorld(t)
+	pump, _ := w.docs.CreateEquipment(equipmentItem{Name: "Bilge pump", Category: "general"})
+	id := uploadForFiling(t, 82, nil)
+	items := `"items":[{"id":"` + id + `"}]`
+	for name, body := range map[string]string{
+		"misspelt key":   `{"equpiment_id":"` + pump.ID + `",` + items + `}`,
+		"other target":   `{"equipment_id":"` + pump.ID + `","job_id":"x",` + items + `}`,
+		"wrong type":     `{"equipment_id":5,` + items + `}`,
+		"items not list": `{"equipment_id":"` + pump.ID + `","items":"x"}`,
+		"unknown item key": `{"equipment_id":"` + pump.ID + `","items":[{"id":"` + id + `","idd":"x"}]}`,
+	} {
+		code, resp := send(t, fileInboxToEquipmentHandler, http.MethodPost, body)
+		if code != 400 || resp["error"] != "invalid body" {
+			t.Errorf("%s: %d %v", name, code, resp)
+		}
+	}
+	code, resp := send(t, fileInboxToOpenJobHandler, http.MethodPost, `{"equipment_id":"x","job_id":"y","items":[{"id":"`+id+`"}]}`)
+	if code != 400 || resp["error"] != "invalid body" {
+		t.Errorf("job endpoint with equipment_id: %d %v", code, resp)
 	}
 }

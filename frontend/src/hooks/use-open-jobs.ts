@@ -56,6 +56,8 @@ export interface OpenJobFilter {
   system?: string
   /** 'any' lists the closed jobs with the open ones. Default: open only. */
   status?: 'any'
+  /** Lists the jobs on equipment in storage too; hidden by default. */
+  includeStored?: boolean
 }
 
 const JOBS = '/api/inventory/open-jobs'
@@ -73,10 +75,11 @@ export function useOpenJobs(filter: OpenJobFilter | null) {
   if (filter?.equipment) params.set('equipment', filter.equipment)
   if (filter?.system) params.set('system', filter.system)
   if (filter?.status) params.set('status', filter.status)
+  if (filter?.includeStored) params.set('include_stored', 'true')
   const qs = params.toString()
 
   const { data, error, isLoading, refetch } = useApiQuery<OpenJob[]>({
-    queryKey: [JOBS, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', status: filter?.status ?? '' }],
+    queryKey: [JOBS, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', status: filter?.status ?? '', stored: filter?.includeStored ?? false }],
     path: `${JOBS}${qs ? `?${qs}` : ''}`,
     enabled: filter !== null,
     select: (raw: { jobs?: OpenJob[] }) => raw.jobs ?? NO_JOBS,
@@ -145,12 +148,7 @@ export async function deleteOpenJobPhoto(id: string, documentId: string, deleteP
   return data.job
 }
 
-/** Photos reached a job without going through uploadOpenJobPhoto (the Inbox filed them). */
-export function openJobPhotosAdded(): void {
-  invalidateQueries([JOBS])
-}
-
-/** Mate's Apply added a job. */
+/** A job changed outside this screen: Mate's Apply added one, or the Inbox filed photos on one. */
 export function openJobRecordApplied(): void {
   invalidateQueries([JOBS])
 }

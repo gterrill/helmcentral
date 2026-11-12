@@ -53,10 +53,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the Inbox and tap **Add to equipment** or **Add to a job**, then search for the
   item or job and tap **Add here**. The photos join that item's or job's own
   photos, and leave the Inbox. You pick the item yourself, and the list opens on
-  the one you used last. Only photos go: a PDF stays in the Inbox, and if you
-  marked both, Helmcentral says how many PDFs stayed.
+  the one you used last. Only JPEG or PNG photos go: a PDF or any other file
+  stays in the Inbox, and if you marked both, Helmcentral says how many files
+  stayed.
 
 ### Changed
+
+- **Equipment search now matches each word you type, and also looks in the zone.**
+  Typing "Volvo Penta D2-40" or "engine room" finds the item, because every
+  word only has to appear somewhere in its name, maker, model, aliases or zone,
+  in any order. This applies on the Equipment screen and in the Inbox picker.
 
 - **The Anchor Watch tide panel is easier to read.** The high and the low each
   get their own line, with the sooner one first, and the clearance under the keel
