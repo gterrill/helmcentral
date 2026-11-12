@@ -325,10 +325,18 @@ func openJobForClose(tx *sql.Tx, id string) (openJob, error) {
 	if err != nil {
 		return openJob{}, err
 	}
-	if job.Status != openJobOpen {
-		return openJob{}, errOpenJobClosed
+	if err := requireJobOpen(job); err != nil {
+		return openJob{}, err
 	}
 	return job, nil
+}
+
+// requireJobOpen is the one rule that a job must still be open.
+func requireJobOpen(job openJob) error {
+	if job.Status != openJobOpen {
+		return errOpenJobClosed
+	}
+	return nil
 }
 
 // cmdCreateOpenJob opens a job on today's date (the operator's, never the
@@ -495,6 +503,25 @@ func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryReq
 // ── photos ──────────────────────────────────────────────────────────────
 // Mirrors the service log's photos (maintenance_store.go): an append-ordered
 // strip, unlink only here, deleting the document itself is the handler's call.
+
+// OpenJobPhotoIDBySHA returns the id of the job's photo with these bytes, or
+// "" if the job has none. It answers for a closed job too: its photos stay.
+func (s *documentStore) OpenJobPhotoIDBySHA(jobID, sha string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var id string
+	err := s.db.QueryRow(`
+		SELECT d.id FROM open_job_photos ojp
+		JOIN documents d ON d.id = ojp.document_id
+		WHERE ojp.job_id = ? AND d.sha256 = ?`, jobID, sha).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("open job photo by sha256: %w", err)
+	}
+	return id, nil
+}
 
 // AddOpenJobPhoto links documentID to the job at the end of its photo order.
 // Only a job that is still open takes photos; once closed, its photos are the

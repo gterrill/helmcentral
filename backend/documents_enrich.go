@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,6 +58,13 @@ const documentsOCRPDFMaxBytes = 40 << 20 // 40 MB
 // outright rather than storing it unreadable. One constant, not two copies
 // of the same string that could drift.
 const documentHEICRejectionMessage = "image/heic is not supported for reading; convert to JPEG"
+
+// photoMIMEs is the one list of file types that count as a photo on an
+// equipment item, a job or a log entry (ADR 0127): JPEG and PNG.
+var photoMIMEs = []string{"image/jpeg", "image/png"}
+
+// isPhotoMIME says whether a file of this MIME type can be a photo.
+func isPhotoMIME(mime string) bool { return slices.Contains(photoMIMEs, mime) }
 
 // documentSuggestedTagsCap bounds how many of Mate's suggested tags
 // SetSuggested records. Real captures (backend/testdata/openrouter_document_*.json)

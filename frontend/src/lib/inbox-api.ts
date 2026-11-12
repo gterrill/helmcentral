@@ -1,5 +1,8 @@
 import { invalidateDocumentLists } from '@/hooks/use-documents'
+import { equipmentPhotosAdded } from '@/hooks/use-inventory'
+import { openJobRecordApplied } from '@/hooks/use-open-jobs'
 import { apiRequest, invalidateQueries } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 import { REPLAY_SIGNS_KEY } from '@/lib/replay-signs-api'
 
 // The Inbox over apiRequest (ADR 0173): reads go through useApiQuery in
@@ -40,6 +43,14 @@ export function inboxPreviewUrl(item: Pick<InboxItem, 'mime' | 'thumb_url' | 'co
   return item.thumb_url ?? (item.mime.startsWith('image/') ? item.content_url : undefined)
 }
 
+// The file types the box takes as a photo on equipment or a job (ADR 0127).
+// Keep this in step with photoMIMEs in backend/documents_enrich.go, the one
+// list the box checks against.
+const PHOTO_MIMES: readonly string[] = ['image/jpeg', 'image/png']
+
+/** Whether the box takes this item as a photo for equipment or a job. */
+export const isPhotoItem = (item: Pick<InboxItem, 'mime'>): boolean => PHOTO_MIMES.includes(item.mime)
+
 /** What the phone knew about a file, sent beside it. A missing field is left out. */
 export interface InboxUploadMeta {
   captureMs: number | null
@@ -65,8 +76,8 @@ export interface InboxFilingResult {
   error?: string
 }
 
-async function inboxChanged(also: readonly (readonly unknown[])[] = []): Promise<void> {
-  await Promise.all([invalidateQueries(INBOX_KEY), invalidateQueries(INBOX_COUNT_KEY), ...also.map((k) => invalidateQueries(k))])
+async function inboxChanged(): Promise<void> {
+  await Promise.all([invalidateQueries(INBOX_KEY), invalidateQueries(INBOX_COUNT_KEY)])
 }
 
 /** The most items the box takes in one request. */
@@ -74,6 +85,73 @@ const MAX_BATCH = 500
 
 function* inChunks<T>(all: readonly T[]): Generator<readonly T[]> {
   for (let i = 0; i < all.length; i += MAX_BATCH) yield all.slice(i, i + MAX_BATCH)
+}
+
+/** "1 photo", "3 photos". */
+export const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`
+
+/**
+ * Files items in requests of at most MAX_BATCH. The Inbox and its count
+ * refresh whatever happened; afterChange (the destination's lists) runs if at
+ * least one item was filed, or if a request failed after it was sent (the box
+ * may have committed it and lost the answer). A total refusal re-reads nothing
+ * else.
+ */
+async function fileInChunks(
+  path: string,
+  extraBody: Record<string, unknown>,
+  items: readonly object[],
+  afterChange: () => void,
+): Promise<InboxFilingResult[]> {
+  const results: InboxFilingResult[] = []
+  let requestFailed = false
+  try {
+    for (const chunk of inChunks(items)) {
+      try {
+        const res = await apiRequest<{ results: InboxFilingResult[] }>(path, { method: 'POST', json: { ...extraBody, items: chunk } })
+        results.push(...res.results)
+      } catch (err) {
+        requestFailed = true
+        // Earlier requests may already have filed items: hand their answers back with the error.
+        throw results.length > 0 ? new InboxFilingError(err, results) : err
+      }
+    }
+  } finally {
+    // A failed refresh must not replace the error that got us here (or fail a filing that worked): log it.
+    try {
+      await inboxChanged()
+    } catch (refreshErr) {
+      console.error('Could not refresh the Inbox after filing', refreshErr)
+    }
+    try {
+      if (requestFailed || results.some((r) => r.ok)) afterChange()
+    } catch (refreshErr) {
+      console.error('Could not refresh the destination after filing', refreshErr)
+    }
+  }
+  return results
+}
+
+/** A later request failed after earlier ones went through: `results` holds what those filed. */
+export class InboxFilingError extends Error {
+  readonly results: InboxFilingResult[]
+  constructor(cause: unknown, results: InboxFilingResult[]) {
+    super(errorMessage(cause))
+    this.name = 'InboxFilingError'
+    this.results = results
+  }
+}
+
+/**
+ * Awaits a filing call and returns what was filed together with the error, if
+ * any, so a caller can report both: results is empty when nothing was filed.
+ */
+export async function filingOutcome(call: Promise<InboxFilingResult[]>): Promise<{ results: InboxFilingResult[]; error: string | null }> {
+  try {
+    return { results: await call, error: null }
+  } catch (err) {
+    return { results: err instanceof InboxFilingError ? err.results : [], error: errorMessage(err) }
+  }
 }
 
 export const inboxApi = {
@@ -121,35 +199,25 @@ export const inboxApi = {
     }
     return out
   },
-  fileToPassage: async (items: readonly { id: string; title: string; t_ms?: number }[]): Promise<InboxFilingResult[]> => {
-    const results: InboxFilingResult[] = []
-    try {
-      for (const chunk of inChunks(items)) {
-        const res = await apiRequest<{ results: InboxFilingResult[] }>('/api/inbox/file-to-passage', { method: 'POST', json: { items: chunk } })
-        results.push(...res.results)
-      }
-    } finally {
-      await inboxChanged([REPLAY_SIGNS_KEY])
+  fileToPassage: (items: readonly { id: string; title: string; t_ms?: number }[]): Promise<InboxFilingResult[]> =>
+    fileInChunks('/api/inbox/file-to-passage', {}, items, () => {
+      void invalidateQueries(REPLAY_SIGNS_KEY)
       invalidateDocumentLists({ counts: true })
-    }
-    return results
-  },
-  fileToDocuments: async (folderId: string, items: readonly { id: string; title?: string }[]): Promise<InboxFilingResult[]> => {
-    const results: InboxFilingResult[] = []
-    try {
-      for (const chunk of inChunks(items)) {
-        const res = await apiRequest<{ results: InboxFilingResult[] }>('/api/inbox/file-to-documents', {
-          method: 'POST',
-          json: { folder_id: folderId, items: chunk },
-        })
-        results.push(...res.results)
-      }
-    } finally {
-      await inboxChanged()
+    }),
+  fileToDocuments: (folderId: string, items: readonly { id: string; title?: string }[]): Promise<InboxFilingResult[]> =>
+    fileInChunks('/api/inbox/file-to-documents', { folder_id: folderId }, items, () => invalidateDocumentLists({ counts: true })),
+  /** Photos only: a PDF comes back as an item that stayed, with the reason. */
+  fileToEquipment: (equipmentId: string, items: readonly { id: string }[]): Promise<InboxFilingResult[]> =>
+    fileInChunks('/api/inbox/file-to-equipment', { equipment_id: equipmentId }, items, () => {
+      equipmentPhotosAdded(equipmentId)
       invalidateDocumentLists({ counts: true })
-    }
-    return results
-  },
+    }),
+  /** Photos only, onto a job that is still open. */
+  fileToOpenJob: (jobId: string, items: readonly { id: string }[]): Promise<InboxFilingResult[]> =>
+    fileInChunks('/api/inbox/file-to-open-job', { job_id: jobId }, items, () => {
+      openJobRecordApplied()
+      invalidateDocumentLists({ counts: true })
+    }),
   /** The nearest named place to the boat when each photo was taken, by id; blank where there is none. */
   suggestedTitles: async (ids: readonly string[]): Promise<Record<string, string>> => {
     const titles: Record<string, string> = {}

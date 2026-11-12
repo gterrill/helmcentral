@@ -9,7 +9,8 @@ which keeps files in hash-named storage. It follows the staged-review habit of
 [ADR 0150](0150-imports-are-staged-reviewed-and-remember-their-source.md). This is the first of four
 steps: the store, the upload page, the Inbox view and its two destinations. The
 share target on the phone is [ADR 0280](0280-sharing-to-helmcentral-from-an-android-phone.md);
-the equipment and job destinations, and Mate's part, come later.
+the equipment and job destinations are [ADR 0281](0281-inbox-photos-go-on-equipment-and-open-jobs.md);
+Mate's part comes later.
 
 ## Context
 

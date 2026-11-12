@@ -3,7 +3,8 @@
 The Inbox is where photos and PDFs from your phone wait until you've looked
 through them. You share a whole camera roll in one go and throw away the shots
 you don't want. Later, on the laptop or tablet where it's easier to see what
-you're doing, you put the rest on a passage or into Documents.
+you're doing, you put the rest on a passage, on an equipment item or a job, or
+into Documents.
 
 - Share from the phone: Pick as many photos and PDFs as you like on the upload
   page. Each photo is shrunk on the phone first, so a roll of photos doesn't
@@ -175,6 +176,34 @@ device, and you can make a new folder from it. The files become documents in tha
 folder and Mate reads them the way it reads any other upload. There's no
 standard folder for receipts, so you choose.
 
+## Putting photos on equipment or a job
+
+Mark the photos and tap **Add to equipment** or **Add to a job**. A list opens
+with a search box. Type words from what the list shows: for equipment, part of a
+name, a maker, a model or the zone it lives in, and for a job, part of its title or
+the equipment it's about. Each word has to match somewhere, in any order, so "volvo
+d2-40" and "engine room" both work. Then tap the one you mean and tap **Add
+here**. Equipment is searched the way the Equipment screen searches it. Helmcentral
+never picks for you.
+
+- On equipment: The photos join the item's own photos, at the end, and show on its
+  page like any photo you added there. Stored items are in the list too.
+- On a job: The list shows open jobs only, because a closed job takes no more
+  photos. The photos join the job's photos.
+- The last one you used: The list opens with the item or job you chose last time,
+  on that device, already ticked. If it has been deleted or closed since, nothing
+  is ticked.
+- PDFs and other files: Only JPEG or PNG photos can go on equipment or a job. The
+  buttons stay off if nothing marked is one. If you marked photos and other files
+  together, the photos go and Helmcentral tells you how many files stayed. They
+  stay marked, so **Send to Documents** is one tap away.
+- One photo at a time: If one can't be added, it stays in the Inbox with the
+  reason beside it, and the rest still go through. An example is an item that was
+  deleted while the list was open.
+
+Each photo leaves the Inbox once it's on the item or job. It's also kept in
+Documents, as every equipment photo is.
+
 ## Deleting
 
 **Delete** asks you to confirm and then removes the marked items from the boat
@@ -188,7 +217,7 @@ is being filed".
 - The previews are only made on the phone, so a photo that reaches the Inbox some
   other way has none.
 - Anyone who can make changes can share, and an item doesn't say who sent it.
-- Photos can't yet be sent to a piece of equipment or an open job from the Inbox.
+- Helmcentral doesn't guess which equipment item or job a photo is of. You pick it.
 - Sharing from the share sheet is for Android with the installed app only. An
   iPhone uses the upload page.
 - The upload doesn't carry on in the background. Close the app mid-way and the

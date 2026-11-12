@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InboxAssignDialog } from '@/components/passages/inbox-assign-dialog'
-import type { InboxItem } from '@/lib/inbox-api'
+import { InboxFilingError, type InboxItem } from '@/lib/inbox-api'
 import type { PassageSummary } from '@/lib/passages'
 
 const api = vi.hoisted(() => ({ suggestedTitles: vi.fn(), fileToPassage: vi.fn() }))
@@ -71,6 +71,18 @@ describe('InboxAssignDialog', () => {
     answer({ a: 'Place A', b: 'Place B' })
     await waitFor(() => expect(screen.queryByText('Looking up place names…')).toBeNull())
     expect((screen.getByLabelText('Title for b.jpg') as HTMLInputElement).value).toBe('Place B')
+  })
+
+  it('keeps only the unsent photos, with the reason, when a later request fails', async () => {
+    api.suggestedTitles.mockResolvedValue({})
+    api.fileToPassage.mockRejectedValue(new InboxFilingError(new Error('network dropped'), [{ id: 'a', ok: true }]))
+    render(<InboxAssignDialog items={[photo('a', 'passage', T0 + min), photo('b', 'passage', T0 + 2 * min)]} passages={passages} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Title for a.jpg'), { target: { value: 'A' } })
+    fireEvent.change(screen.getByLabelText('Title for b.jpg'), { target: { value: 'B' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add 2 signs' }))
+    await waitFor(() => expect(screen.queryByLabelText('Title for a.jpg')).toBeNull())
+    expect(screen.getByLabelText('Title for b.jpg')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('network dropped')
   })
 
   it('stops saying it is looking up names once the server answers with blanks, and keeps what was typed', async () => {

@@ -1,9 +1,10 @@
-import { AlertTriangle, Compass, Copy, FileText, FolderInput, ImagePlus, Route, Trash2 } from 'lucide-react'
+import { AlertTriangle, Compass, Copy, FileText, FolderInput, ImagePlus, ListChecks, Route, Trash2, Wrench } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { FolderPickerDialog } from '@/components/documents/folder-picker-dialog'
 import { InboxAssignDialog } from '@/components/passages/inbox-assign-dialog'
+import { InboxTargetDialog } from '@/components/passages/inbox-target-dialog'
 import { ConfirmDelete, EmptyState, Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
@@ -11,7 +12,7 @@ import { useInbox } from '@/hooks/use-inbox'
 import { useLocalStorageId } from '@/hooks/use-local-storage-id'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { errorMessage } from '@/lib/errors'
-import { inboxApi, inboxPreviewUrl, type InboxItem } from '@/lib/inbox-api'
+import { filingOutcome, inboxApi, inboxPreviewUrl, isPhotoItem, plural, type InboxFilingResult, type InboxItem } from '@/lib/inbox-api'
 import { findBlurry, findDuplicates, groupInbox } from '@/lib/inbox-groups'
 import type { PassageSummary } from '@/lib/passages'
 import { cn } from '@/lib/utils'
@@ -23,20 +24,59 @@ export interface InboxViewProps {
   onOpenUpload: () => void
 }
 
+type PhotoDestinationKind = 'equipment' | 'job'
+
+interface PhotoDestination {
+  kind: PhotoDestinationKind
+  /** Where the photos go, as the buttons and toasts say it. */
+  noun: string
+  /** localStorage key for the item used last on this device. */
+  lastKey: string
+  file: (targetId: string, photos: { id: string }[]) => Promise<InboxFilingResult[]>
+  failure: string
+}
+
+const photoDestinations: Record<PhotoDestinationKind, PhotoDestination> = {
+  equipment: {
+    kind: 'equipment',
+    noun: 'equipment',
+    lastKey: 'inbox.lastEquipment',
+    file: (id, photos) => inboxApi.fileToEquipment(id, photos),
+    failure: 'Could not add to equipment',
+  },
+  job: {
+    kind: 'job',
+    noun: 'a job',
+    lastKey: 'inbox.lastJob',
+    file: (id, photos) => inboxApi.fileToOpenJob(id, photos),
+    failure: 'Could not add to the job',
+  },
+}
+
 const MISMATCH_TEXT =
   "The phone's own position was more than a nautical mile from the boat's track when this was taken. The phone's clock or time zone may be wrong, so the time may not match the track."
 
 // The Inbox: what was shared from a phone and is waiting to be sorted. A
 // contact sheet per group; tapping a picture marks it, and whatever is marked
-// can be added to a passage, sent to Documents or deleted. The duplicate and
+// can be added to a passage, an equipment item or a job, sent to Documents or
+// deleted. The duplicate and
 // soft-focus flags are suggestions: nothing is marked or removed unless the
 // operator says so.
 export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) {
   const inbox = useInbox()
   const timeZone = useVesselStateSelector(selectTimeZone)
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set())
-  const [dialog, setDialog] = useState<'passage' | 'documents' | 'bin' | null>(null)
+  const [dialog, setDialog] = useState<'passage' | 'documents' | 'equipment' | 'job' | 'bin' | null>(null)
   const [busy, setBusy] = useState(false)
+  // Why an item stayed after the last filing, by item id, shown beside its
+  // picture until the next action.
+  const [reasons, setReasons] = useState<Readonly<Record<string, string>>>({})
+  // The equipment item and job last used (a per-device convenience). The
+  // picker checks the id is among those shown before highlighting it.
+  const lastUsed = {
+    equipment: useLocalStorageId(photoDestinations.equipment.lastKey),
+    job: useLocalStorageId(photoDestinations.job.lastKey),
+  }
 
   // The folder last sent to (a per-device convenience) opens the picker, but
   // only while it still exists: it may have been deleted since, on this or
@@ -52,6 +92,10 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
 
   // Marks only count for items still here: a filed or deleted one has gone.
   const selected = useMemo(() => inbox.items.filter((i) => marked.has(i.id)), [inbox.items, marked])
+  // Equipment and jobs take photos only (a GIF or WebP is turned away
+  // before anything is sent); the rest of a selection stays marked.
+  const photos = useMemo(() => selected.filter(isPhotoItem), [selected])
+  const others = useMemo(() => selected.filter((i) => !isPhotoItem(i)), [selected])
   const toggle = (id: string) => setMarked((prev) => {
     const next = new Set(prev)
     if (!next.delete(id)) next.add(id)
@@ -75,11 +119,16 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
     : passages.length === 0 ? 'There is no recorded passage to add them to'
     : null
 
+  const onlyPhotosOn = (d: PhotoDestination) => `Only JPEG or PNG photos can go on ${d.noun}`
+  const cannotAddTo = (d: PhotoDestination): string | null =>
+    selected.length === 0 ? 'Mark some photos first' : photos.length === 0 ? onlyPhotosOn(d) : null
+
   const bin = async () => {
     setBusy(true)
+    setReasons({})
     try {
       const { deleted: n, busy } = await inboxApi.bin(selected.map((i) => i.id))
-      if (busy.length === 0) toast.success(n === 1 ? 'Deleted 1 item' : `Deleted ${n} items`)
+      if (busy.length === 0) toast.success(`Deleted ${plural(n, 'item')}`)
       else if (n === 0) toast.error(busy.length === 1 ? '1 item is being filed, so it stayed' : `${busy.length} items are being filed, so they stayed`)
       else toast.success(`${n} deleted, ${busy.length} ${busy.length === 1 ? 'is' : 'are'} being filed`)
       setMarked(new Set())
@@ -91,22 +140,73 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
     }
   }
 
+  // The photos in the selection go; anything else is left out of the call and
+  // stays marked, so Send to Documents is one tap away.
+  const addPhotos = async (dest: PhotoDestination, targetId: string, targetName: string) => {
+    setDialog(null)
+    setBusy(true)
+    setReasons({})
+    try {
+      // A request that failed part-way still hands back what the earlier ones filed.
+      const { results, error } = await filingOutcome(dest.file(targetId, photos.map((i) => ({ id: i.id }))))
+      const failed = results.filter((r) => !r.ok)
+      const added = results.length - failed.length
+      const answered = new Set(results.map((r) => r.id))
+      const unsent = error === null ? [] : photos.filter((p) => !answered.has(p.id))
+      // Only an item that took a photo is worth remembering; a refused one is not.
+      if (added > 0) {
+        lastUsed[dest.kind][1](targetId)
+        if (error === null) toast.success(`Added ${plural(added, 'photo')} to ${targetName}`)
+      }
+      if (error !== null) {
+        toast.error(added > 0 ? `Added ${plural(added, 'photo')} to ${targetName}; the rest could not be sent` : dest.failure, { description: error })
+        // Nothing was answered: leave the marks as they were, so the operator can try again.
+        if (results.length === 0) return
+      }
+      if (failed.length > 0) {
+        toast.error(`${plural(failed.length, 'item')} stayed in the Inbox`, { description: failed[0].error })
+      }
+      if (others.length > 0) {
+        toast.message(`${plural(others.length, 'file')} stayed in the Inbox`, { description: `${onlyPhotosOn(dest)}. Send the rest to Documents.` })
+      }
+      setReasons({
+        ...Object.fromEntries(others.map((o) => [o.id, onlyPhotosOn(dest)])),
+        ...Object.fromEntries(unsent.map((u) => [u.id, error ?? ''])),
+        ...Object.fromEntries(failed.map((f) => [f.id, f.error ?? 'It was not added'])),
+      })
+      setMarked(new Set([...failed.map((f) => f.id), ...unsent.map((u) => u.id), ...others.map((o) => o.id)]))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const sendToDocuments = async (folderId: string | null) => {
     if (folderId === null) return
     setDialog(null)
     setBusy(true)
+    setReasons({})
     try {
-      const results = await inboxApi.fileToDocuments(folderId, selected.map((i) => ({ id: i.id })))
-      setLastFolder(folderId)
+      const { results, error } = await filingOutcome(inboxApi.fileToDocuments(folderId, selected.map((i) => ({ id: i.id }))))
       const failed = results.filter((r) => !r.ok)
       const sent = results.length - failed.length
-      if (sent > 0) toast.success(sent === 1 ? 'Sent 1 item to Documents' : `Sent ${sent} items to Documents`)
-      if (failed.length > 0) {
-        toast.error(failed.length === 1 ? '1 item stayed in the Inbox' : `${failed.length} items stayed in the Inbox`, { description: failed[0].error })
+      const answered = new Set(results.map((r) => r.id))
+      const unsent = error === null ? [] : selected.filter((i) => !answered.has(i.id))
+      if (sent > 0) {
+        setLastFolder(folderId)
+        if (error === null) toast.success(`Sent ${plural(sent, 'item')} to Documents`)
       }
-      setMarked(new Set(failed.map((f) => f.id)))
-    } catch (err) {
-      toast.error('Could not send to Documents', { description: errorMessage(err) })
+      if (error !== null) {
+        toast.error(sent > 0 ? `Sent ${plural(sent, 'item')} to Documents; the rest could not be sent` : 'Could not send to Documents', { description: error })
+        if (results.length === 0) return
+      }
+      if (failed.length > 0) {
+        toast.error(`${plural(failed.length, 'item')} stayed in the Inbox`, { description: failed[0].error })
+      }
+      setReasons({
+        ...Object.fromEntries(unsent.map((u) => [u.id, error ?? ''])),
+        ...Object.fromEntries(failed.map((f) => [f.id, f.error ?? 'It was not sent'])),
+      })
+      setMarked(new Set([...failed.map((f) => f.id), ...unsent.map((u) => u.id)]))
     } finally {
       setBusy(false)
     }
@@ -117,7 +217,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
       <span className="text-sm tabular-nums text-muted-foreground" role="status">
         {selected.length === 0 ? 'Tap pictures to mark them' : `${selected.length} marked`}
       </span>
-      <Button type="button" size="sm" disabled={busy || cannotAssign !== null} title={cannotAssign ?? undefined} onClick={() => setDialog('passage')}>
+      <Button type="button" size="sm" disabled={busy || cannotAssign !== null} title={cannotAssign ?? undefined} onClick={() => { setReasons({}); setDialog('passage') }}>
         <Route className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
         Add to passage
       </Button>
@@ -125,6 +225,15 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         <FolderInput className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
         Send to Documents
       </Button>
+      {([[photoDestinations.equipment, Wrench, 'Add to equipment'], [photoDestinations.job, ListChecks, 'Add to a job']] as const).map(([dest, Icon, label]) => {
+        const cannot = cannotAddTo(dest)
+        return (
+          <Button key={dest.kind} type="button" size="sm" variant="outline" disabled={busy || cannot !== null} title={cannot ?? undefined} onClick={() => setDialog(dest.kind)}>
+            <Icon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+            {label}
+          </Button>
+        )
+      })}
       <Button type="button" size="sm" variant="outline" disabled={busy || selected.length === 0} onClick={() => setDialog('bin')}>
         <Trash2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
         Delete
@@ -152,7 +261,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
         <EmptyState
           icon={<ImagePlus className="h-8 w-8 text-muted-foreground" aria-hidden="true" />}
           title="Nothing waiting"
-          description="Photos and PDFs you share from a phone wait here until you put them on a passage, send them to Documents or delete them."
+          description="Photos and PDFs you share from a phone wait here until you put them on a passage, equipment item or job, send them to Documents or delete them."
           action={canWrite ? <Button type="button" variant="outline" onClick={onOpenUpload}>Share photos</Button> : undefined}
         />
       )}
@@ -232,6 +341,7 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
                         </span>
                       )}
                     </button>
+                    {reasons[item.id] && <p className="mt-1 line-clamp-3 break-words text-xs text-destructive">{reasons[item.id]}</p>}
                   </li>
                 )
               })}
@@ -244,17 +354,27 @@ export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) 
       <FolderPickerDialog
         open={dialog === 'documents' && !foldersLoading}
         onOpenChange={(open) => { if (!open) setDialog(null) }}
-        title={`Send ${selected.length === 1 ? '1 item' : `${selected.length} items`} to Documents`}
+        title={`Send ${plural(selected.length, 'item')} to Documents`}
         confirmLabel="Send here"
         initialFolderId={rememberedFolder}
         canPick={(folderId) => folderId !== null}
         showLoadError
         onPick={(folderId) => void sendToDocuments(folderId)}
       />
+      {(dialog === 'equipment' || dialog === 'job') && (
+        <InboxTargetDialog
+          key={dialog}
+          kind={dialog}
+          count={photos.length}
+          lastId={lastUsed[dialog][0]}
+          onClose={() => setDialog(null)}
+          onPick={(id, name) => void addPhotos(photoDestinations[dialog], id, name)}
+        />
+      )}
       <ConfirmDelete
         open={dialog === 'bin'}
         onOpenChange={(open) => { if (!open) setDialog(null) }}
-        title={`Delete ${selected.length === 1 ? '1 item' : `${selected.length} items`}?`}
+        title={`Delete ${plural(selected.length, 'item')}?`}
         description="They are removed from the boat for good. The originals stay on your phone."
         confirmLabel="Delete"
         deleting={busy}

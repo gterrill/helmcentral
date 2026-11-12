@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InboxView } from '@/components/passages/inbox-view'
-import type { InboxItem } from '@/lib/inbox-api'
+import { InboxFilingError, type InboxItem } from '@/lib/inbox-api'
 import type { PassageSummary } from '@/lib/passages'
 
 const env = vi.hoisted(() => ({ items: [] as InboxItem[], folders: [{ id: 'folder-1' }] as { id: string }[], keys: [] as unknown[] }))
@@ -151,6 +151,18 @@ describe('InboxView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Send here' }))
     await waitFor(() => expect(api.fileToDocuments).toHaveBeenCalledWith('folder-1', [{ id: 'i1' }]))
     expect(window.localStorage.getItem('inbox.lastFolder')).toBe('folder-1')
+  })
+
+  it('remembers the folder and names what was sent when a later request fails', async () => {
+    env.items = [item({}), item({})]
+    api.fileToDocuments.mockRejectedValue(new InboxFilingError(new Error('network dropped'), [{ id: 'i1', ok: true, document_id: 'd1' }]))
+    view()
+    for (const b of screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') !== null)) fireEvent.click(b)
+    fireEvent.click(screen.getByRole('button', { name: /Send to Documents/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Send here' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Sent 1 item to Documents; the rest could not be sent', { description: 'network dropped' }))
+    expect(window.localStorage.getItem('inbox.lastFolder')).toBe('folder-1')
+    expect(screen.getByRole('status')).toHaveTextContent('1 marked')
   })
 
   it('opens the folder picker on the remembered folder only while that folder still exists', async () => {

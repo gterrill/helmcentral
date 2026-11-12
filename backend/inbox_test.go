@@ -735,6 +735,8 @@ func TestInboxRoutesAreAuthTiered(t *testing.T) {
 		"POST /api/inbox/bin":               tierWrite,
 		"POST /api/inbox/file-to-passage":   tierWrite,
 		"POST /api/inbox/file-to-documents": tierWrite,
+		"POST /api/inbox/file-to-equipment": tierWrite,
+		"POST /api/inbox/file-to-open-job":  tierWrite,
 	}
 	e := echo.New()
 	for _, r := range inboxRoutes() {

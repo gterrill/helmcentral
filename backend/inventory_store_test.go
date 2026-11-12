@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -778,6 +779,64 @@ func TestDocumentStore_ListEquipmentFiltersByCategorySystemStatusZoneAndQuery(t 
 	}
 	if len(byQueryAlias) != 1 || byQueryAlias[0].ID != generator.ID {
 		t.Fatalf("expected the generator matched only through its alias, got %+v", byQueryAlias)
+	}
+}
+
+// TestEquipmentMatchesQuery_EveryWordMustHitSomeField pins the rule the
+// Equipment screen and the Inbox picker share: the query is split into
+// words, and each word must appear (case-insensitively) in the name,
+// manufacturer, model, an alias or the zone name - so typing what a row
+// shows finds that row.
+func TestEquipmentMatchesQuery_EveryWordMustHitSomeField(t *testing.T) {
+	engine := equipmentItem{
+		Name: "Port engine", Manufacturer: "Volvo Penta", Model: "D2-40",
+		Aliases: []string{"genset"}, ZoneName: "Engine room",
+	}
+	cases := []struct {
+		q    string
+		want bool
+	}{
+		{"volvo penta d2-40", true},      // make and model, spread over two fields
+		{"VOLVO d2-40", true},            // case-insensitive
+		{"engine room", true},            // the zone name
+		{"penta room", true},             // words from different fields
+		{"d2-40 volvo", true},            // word order differs from the row
+		{"room port", true},              // zone word before name word
+		{"genset volvo", true},           // alias plus make
+		{"volvo yanmar", false},          // one word hits nothing
+		{"volvo  penta", true},           // runs of spaces do not matter
+	}
+	for _, c := range cases {
+		q := strings.ToLower(strings.TrimSpace(c.q))
+		if got := equipmentMatchesQuery(engine, q); got != c.want {
+			t.Errorf("equipmentMatchesQuery(%q) = %v, want %v", c.q, got, c.want)
+		}
+	}
+}
+
+// TestDocumentStore_ListEquipmentQueryFindsByZoneName covers the zone side
+// through the store, where ZoneName comes from the join.
+func TestDocumentStore_ListEquipmentQueryFindsByZoneName(t *testing.T) {
+	store := newTestDocumentStore(t)
+	zone, err := store.CreateZone("Engine room")
+	if err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	pump, err := store.CreateEquipment(equipmentItem{Name: "Bilge pump", Manufacturer: "Rule", Model: "2000", ZoneID: &zone.ID})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	if _, err := store.CreateEquipment(equipmentItem{Name: "Anchor windlass"}); err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	for _, q := range []string{"engine room", "room bilge", "rule 2000 pump"} {
+		items, err := store.ListEquipment(equipmentFilter{Query: q})
+		if err != nil {
+			t.Fatalf("ListEquipment(%q): %v", q, err)
+		}
+		if len(items) != 1 || items[0].ID != pump.ID {
+			t.Errorf("query %q: expected only the bilge pump, got %+v", q, items)
+		}
 	}
 }
 

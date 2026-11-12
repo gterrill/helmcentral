@@ -602,6 +602,14 @@ export async function uploadEquipmentPhoto(equipmentId: string, file: Blob, file
   return data.item
 }
 
+/** Photos reached an item without going through uploadEquipmentPhoto (the Inbox
+ * filed them): the item's own page re-reads, and so do the lists, because a bin
+ * page's cards show an item's photos. The Equipment index shows none. */
+export function equipmentPhotosAdded(equipmentId: string): void {
+  equipmentListsChanged()
+  invalidateQueries([itemPath(equipmentId)])
+}
+
 /** PUT /api/inventory/equipment/:id/photos - {document_ids} must name
  * EXACTLY the item's current photo set; "Make cover" is this same call
  * with the chosen id moved to the front. */

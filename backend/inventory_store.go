@@ -881,7 +881,7 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 // pair uploadEquipmentPhotoHandler accepts (inventory_handlers.go). No tag
 // involved (2026-09-25 amendment): a document is a photo because of what it
 // IS, not a flag written on upload.
-const photoMIMEsClause = `d.mime IN ('image/jpeg', 'image/png')`
+var photoMIMEsClause = `d.mime IN ('` + strings.Join(photoMIMEs, `', '`) + `')`
 
 // documentDeletableAsOrphanPhotoClause is the shared predicate for "this
 // document may be deleted as a photo nothing else needs any more" (finding
@@ -1323,24 +1323,41 @@ func (s *documentStore) GetEquipment(id string) (equipmentItem, error) {
 	return equipmentByID(s.db, id)
 }
 
-// equipmentMatchesQuery reports whether q (already trimmed and lowercased
-// by the caller) is a case-insensitive substring of it's name,
-// manufacturer, model, or any of its aliases - the single match rule
-// ListEquipment applies regardless of which field actually hits, so a
-// search for "genset" behaves identically whether that word lives in the
-// name column or only in the alias list.
+// EquipmentExists says whether an equipment item with this id is there, without
+// reading the item.
+func (s *documentStore) EquipmentExists(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return rowExists(s.db, `SELECT 1 FROM equipment WHERE id = ?`, id)
+}
+
+// equipmentMatchesQuery reports whether every whitespace-separated word of q
+// (already trimmed and lowercased by the caller) is a case-insensitive
+// substring of at least one of the item's name, manufacturer, model, aliases
+// or zone name. Words may hit different fields and come in any order, so
+// typing what a row shows ("Volvo Penta D2-40", "engine room") finds that
+// row; it is the single match rule ListEquipment applies regardless of which
+// field actually hits.
 func equipmentMatchesQuery(it equipmentItem, q string) bool {
-	if strings.Contains(strings.ToLower(it.Name), q) ||
-		strings.Contains(strings.ToLower(it.Manufacturer), q) ||
-		strings.Contains(strings.ToLower(it.Model), q) {
-		return true
+	fields := make([]string, 0, 4+len(it.Aliases))
+	fields = append(fields, it.Name, it.Manufacturer, it.Model, it.ZoneName)
+	fields = append(fields, it.Aliases...)
+	for i := range fields {
+		fields[i] = strings.ToLower(fields[i])
 	}
-	for _, alias := range it.Aliases {
-		if strings.Contains(strings.ToLower(alias), q) {
-			return true
+	for _, word := range strings.Fields(q) {
+		hit := false
+		for _, f := range fields {
+			if strings.Contains(f, word) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // ListEquipment returns every equipment record matching filter, grouped by
@@ -1721,6 +1738,25 @@ func sameIDSet(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// EquipmentPhotoIDBySHA returns the id of the document with these bytes if it
+// is linked to equipmentID, or "" if the item has no such document.
+func (s *documentStore) EquipmentPhotoIDBySHA(equipmentID, sha string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var id string
+	err := s.db.QueryRow(`
+		SELECT d.id FROM equipment_documents ed
+		JOIN documents d ON d.id = ed.document_id
+		WHERE ed.equipment_id = ? AND d.sha256 = ?`, equipmentID, sha).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("equipment photo by sha256: %w", err)
+	}
+	return id, nil
 }
 
 // AddEquipmentPhoto links documentID to equipmentID, at the end of the
