@@ -14,6 +14,8 @@ function tank(overrides: Partial<TankLevel>): TankLevel {
     warn_percent: 20,
     alarm_percent: 10,
     alarms_off: false,
+    filling: false,
+    seconds_to_full: null,
     ...overrides,
   }
 }
@@ -199,5 +201,51 @@ describe('TanksTile', () => {
     expect(screen.queryByText(/fuel aboard/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/range/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/time to empty/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('TanksTile filling word', () => {
+  const water = (overrides: Partial<TankLevel>) =>
+    tank({ id: 'freshWater.3', label: 'Fresh', category: 'freshWater', kind: 'water', level_percent: 60, ...overrides })
+
+  it('shows only the minutes left instead of OK', () => {
+    render(<TanksTile tanks={[water({ filling: true, seconds_to_full: 12 * 60 })]} loading={false} lastUpdateAgeS={null} />)
+
+    expect(screen.getByText('12 MIN')).toBeInTheDocument()
+    expect(screen.queryByText(/FILLING/)).not.toBeInTheDocument()
+    expect(screen.queryByText('OK')).not.toBeInTheDocument()
+  })
+
+  it('shows plain FILLING when no time is known', () => {
+    render(<TanksTile tanks={[water({ filling: true, seconds_to_full: null })]} loading={false} lastUpdateAgeS={null} />)
+
+    expect(screen.getByText('FILLING')).toBeInTheDocument()
+    expect(screen.getByText('Filling')).toHaveClass('sr-only')
+  })
+
+  it('replaces LOW and CRIT with the time in the neutral word colour', () => {
+    render(<TanksTile tanks={[water({ level_percent: 5, filling: true, seconds_to_full: 600 })]} loading={false} lastUpdateAgeS={null} />)
+
+    expect(screen.queryByText('CRIT')).not.toBeInTheDocument()
+    expect(screen.getByText('10 MIN').closest('p')).toHaveClass('text-muted-foreground')
+  })
+
+  it('says what the word means to a screen reader', () => {
+    render(<TanksTile tanks={[water({ filling: true, seconds_to_full: 12 * 60 })]} loading={false} lastUpdateAgeS={null} />)
+
+    expect(screen.getByText('12 MIN')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByText('Filling, about 12 minutes to full')).toHaveClass('sr-only')
+  })
+
+  it('keeps the usual word on a tank that is not filling', () => {
+    render(<TanksTile tanks={[water({ filling: false, seconds_to_full: null })]} loading={false} lastUpdateAgeS={null} />)
+
+    expect(screen.getByText('OK')).toBeInTheDocument()
+  })
+
+  it('shows no filling word on a stale feed', () => {
+    render(<TanksTile tanks={[water({ filling: true, seconds_to_full: 600 })]} loading={false} lastUpdateAgeS={999} />)
+
+    expect(screen.queryByText(/FILLING/)).not.toBeInTheDocument()
   })
 })

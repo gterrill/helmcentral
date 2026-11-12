@@ -15,10 +15,20 @@ export type TankLevel = {
   alarm_percent: number
   /** Silences the alarms only; the tile still colours by the levels. */
   alarms_off: boolean
+  /** True while the server sees the tank being filled with the boat stopped (ADR 0282). */
+  filling: boolean
+  /** Seconds to 100% at the fill's rate; null when filling at an unsteady rate, or not filling. */
+  seconds_to_full: number | null
+}
+
+/** A tank as the server sends it: an older server omits the filling fields. */
+type TankWire = Omit<TankLevel, 'filling' | 'seconds_to_full'> & {
+  filling?: boolean
+  seconds_to_full?: number | null
 }
 
 type TanksStateResponse = {
-  tanks?: TankLevel[]
+  tanks?: TankWire[]
   /** Set when the server could not give the tanks their levels (ADR 0214). */
   error?: string
 }
@@ -34,7 +44,7 @@ export interface TanksStateValue {
 
 const INITIAL: TanksStateValue = { tanks: [], error: null, lastUpdateAgeS: null }
 
-function isTankLevel(tank: TankLevel): boolean {
+function isTankLevel(tank: TankWire): boolean {
   return typeof tank.id === 'string' &&
     typeof tank.label === 'string' &&
     typeof tank.category === 'string' &&
@@ -48,10 +58,13 @@ function isTankLevel(tank: TankLevel): boolean {
 
 // Only the fields the tile reads: each tank's own age moves on every tick and
 // nothing shows it, so it is left behind rather than compared.
-function toTankLevel(tank: TankLevel): TankLevel {
+function toTankLevel(tank: TankWire): TankLevel {
+  const filling = tank.filling === true
   return {
     id: tank.id, label: tank.label, category: tank.category, kind: tank.kind, level_percent: tank.level_percent,
     warn_percent: tank.warn_percent, alarm_percent: tank.alarm_percent, alarms_off: tank.alarms_off,
+    filling,
+    seconds_to_full: filling && typeof tank.seconds_to_full === 'number' && Number.isFinite(tank.seconds_to_full) ? tank.seconds_to_full : null,
   }
 }
 

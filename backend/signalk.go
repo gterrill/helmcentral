@@ -1376,6 +1376,19 @@ func tankKindFromCategory(category string) string {
 	return "water"
 }
 
+// tankFillKind is the kind of tank whose filling the Tanks tile reports
+// (ADR 0282): "water" for fresh water, "fuel" for fuel, "" for every other
+// category (waste, live wells, lubrication). It is tankKindFromCategory
+// narrowed to an allowlist, so the two never disagree about what a category
+// is; add a category here only if tankKindFromCategory already classes it.
+func tankFillKind(category string) string {
+	switch category {
+	case "freshWater", "water", "fuel":
+		return tankKindFromCategory(category)
+	}
+	return ""
+}
+
 func lookupString(payload map[string]any, keys ...string) string {
 	var current any = payload
 	for _, key := range keys {

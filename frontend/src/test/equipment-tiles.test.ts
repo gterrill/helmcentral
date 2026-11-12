@@ -241,6 +241,7 @@ describe('fuel bar zones', () => {
   const levels = [{
     id: 'fuel.5', label: 'Port forward fuel', category: 'fuel', kind: 'fuel' as const, level_percent: 50,
     warn_percent: 25, alarm_percent: 12, alarms_off: false,
+    filling: false, seconds_to_full: null,
   }]
 
   it("come from the tank's resolved levels, one set for the colours and the alarms", () => {

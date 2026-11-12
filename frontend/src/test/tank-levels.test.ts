@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  fillingWord,
   fuelBarZones,
   tankLevelsError,
   tankTone,
@@ -62,5 +63,31 @@ describe('tankClearText', () => {
   it('says above for a low-bad tank and below for waste, five points back', () => {
     expect(tankClearText('below', 0.25)).toBe('Clears above 25%')
     expect(tankClearText('above', 0.75)).toBe('Clears below 75%')
+  })
+})
+
+describe('fillingWord', () => {
+  it('reads plain FILLING with no time to full', () => {
+    expect(fillingWord(null)).toEqual({ text: 'FILLING', spoken: 'Filling' })
+  })
+
+  it.each([
+    [90, '2 MIN'],
+    [12 * 60 + 20, '12 MIN'],
+    [29 * 60, '29 MIN'],
+    [31 * 60, '30 MIN'],
+    [47 * 60, '45 MIN'],
+    [48 * 60, '50 MIN'],
+    [120 * 60, '2 H'],
+    [3 * 3600 + 18 * 60, '3 H 20 MIN'],
+    [4 * 3600, '4 H'],
+    [3 * 3600 + 58 * 60, '4 H'],
+  ])('rounds %i s to %s', (seconds, text) => {
+    expect(fillingWord(seconds).text).toBe(text)
+  })
+
+  it('speaks the minutes in full', () => {
+    expect(fillingWord(12 * 60).spoken).toBe('Filling, about 12 minutes to full')
+    expect(fillingWord(3 * 3600 + 20 * 60).spoken).toBe('Filling, about 3 hours 20 minutes to full')
   })
 })

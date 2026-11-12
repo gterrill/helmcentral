@@ -117,6 +117,8 @@ func sampleTracks(settingsPath string) {
 		}
 	}
 
+	sampleTankFilling(state, err, now)
+
 	/*
 	 * Heavy-weather trends (ADR 0070), read straight off the delta-stream
 	 * snapshot rather than the vessel-state fetch, because none of these three
