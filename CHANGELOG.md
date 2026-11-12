@@ -11,6 +11,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mate can now work out a passage from a marina up a river, or from an
+  island's name.** Before, a start such as Bundaberg Port Marina or Great
+  Keppel Island came back as "on land", because the charts close the river
+  mouth and mark an island in its middle. Mate now measures from the water in
+  front of the place, up to a mile and a half out, and says how far it moved
+  and that the stretch up the river is not in the distance, time or fuel. A
+  town well inland, such as Bundaberg itself, is still refused, and Mate then
+  looks for that town's marina or harbour and says which one it used.
+
 ## [0.65.0] - 2026-11-12
 
 ### Added

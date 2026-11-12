@@ -243,3 +243,26 @@ func TestRouteDistance_ATooLargeResultLosesTheWaypointsNotTheDistance(t *testing
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestRouteMovedNote_SaysTheMoveIsNotInTheFigures(t *testing.T) {
+	r := waterRoute{
+		Points:       []shorelinePoint{{-24.75417, 152.39881}, {-24.70, 152.48}},
+		StartMovedNm: 0.73,
+	}
+	got := routeMovedNote(r)
+	for _, want := range []string{"start", "0.73 nm behind the charted shoreline", "-24.75417, 152.39881", "not in the distance, time or fuel"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("note %q lacks %q", got, want)
+		}
+	}
+	r = waterRoute{Points: []shorelinePoint{{-20, 149}, {-20.1, 149.1}}, StartMovedNm: 0.2, EndMovedNm: 0.4}
+	got = routeMovedNote(r)
+	for _, want := range []string{"start", "0.20 nm", "-20.00000, 149.00000", "destination", "0.40 nm", "-20.10000, 149.10000"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("note %q lacks %q", got, want)
+		}
+	}
+	if got := routeMovedNote(waterRoute{Points: []shorelinePoint{{-20, 149}, {-20.1, 149.1}}}); got != "" {
+		t.Errorf("no move, note %q", got)
+	}
+}

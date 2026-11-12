@@ -172,8 +172,10 @@ the chart.
 - **Clearance:** The route keeps about 90 m (0.05 nm) off the charted shore. A
   gap between islands narrower than that counts as closed.
 - **A place on the shore:** A town, jetty or marina is often charted a few
-  metres inland. Mate measures to the water in front of it, up to half a mile
-  out, and says it did.
+  metres inland. A marina up a river can sit further back, because the charts
+  close the river mouth, and an island's marked point sits in its middle. Mate
+  measures to the water in front of the place, up to a mile and a half out, and
+  says how far it moved. That stretch isn't in the distance, time or fuel.
 - **Reefs:** A reef isn't treated as land. Mate's route can cross one, so check
   the chart.
 
@@ -181,7 +183,9 @@ A route needs every square between the two ends and a few miles either side, so
 if one is missing Mate says which and gives no distance:
 
 - **A square isn't downloaded.** It names the square, such as 21°S 148°E.
-- **A position is on land.** Either end is more than half a mile inland.
+- **A position is on land.** Either end is more than a mile and a half inland,
+  as a town usually is. Mate then looks for that town's marina, harbour or
+  anchorage and says which one it used.
 - **No way through.** No water joins the two within 50 nm of the line.
 - **Too far.** A run over 300 nm needs shorter legs.
 - **Too intricate.** Very rarely, a run crosses so much broken coast that Mate

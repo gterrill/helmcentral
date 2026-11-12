@@ -443,3 +443,71 @@ func TestRouteOverWater_NarrowMarinaEntranceStillRoutes(t *testing.T) {
 		}
 	}
 }
+
+// ── real shoreline: Bundaberg and Great Keppel ────────────────────────────
+//
+// testdata/water_route/burnett.json.gz is natural=coastline from the boat's
+// Overpass server, trimmed to the ways touching 24.92°S-24.68°S,
+// 152.28°E-152.52°E, data as of 2026-11-03. OpenStreetMap closes the Burnett
+// River near its mouth, so the marina upriver sits behind the coastline.
+// testdata/water_route/great-keppel.json.gz is the same for the ways touching
+// 23.24°S-23.10°S, 150.88°E-151.02°E, data as of 2026-10-30; the island's
+// marked point is in its middle. These are the places Mate's passage tools
+// refused with "on land" from the boat.
+
+func TestRouteOverWater_RiverMarinaBehindTheClosedMouthIsMovedAndSaid(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/burnett.json.gz")
+	sea := shorelinePoint{-24.70, 152.48}
+	for _, tc := range []struct {
+		name string
+		from shorelinePoint
+	}{
+		{"Bundaberg Port Marina", shorelinePoint{-24.7606659, 152.3873018}},
+		{"Bundaberg Port", shorelinePoint{-24.7711044, 152.3850191}},
+		{"Burnett Heads", shorelinePoint{-24.7752885, 152.4082645}},
+	} {
+		r, err := routeOverWater(context.Background(), tc.from, sea, lines, 5)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		t.Logf("%s: start moved %.3f nm, %.2f nm routed, %.2f straight, %d points", tc.name, r.StartMovedNm, r.DistanceNm, r.StraightLineNm, len(r.Points))
+		if r.StartMovedNm <= 0.5 || r.StartMovedNm >= 2 {
+			t.Errorf("%s: start moved %.3f nm, want between 0.5 and 2", tc.name, r.StartMovedNm)
+		}
+		if r.EndMovedNm != 0 {
+			t.Errorf("%s: end was in water but moved %.3f nm", tc.name, r.EndMovedNm)
+		}
+		if r.DistanceNm < r.StraightLineNm-r.StartMovedNm-0.1 || r.DistanceNm > r.StraightLineNm+1 {
+			t.Errorf("%s: routed %.2f nm against %.2f straight", tc.name, r.DistanceNm, r.StraightLineNm)
+		}
+		if routePolylineCrossesShore(r, lines) {
+			t.Errorf("%s: route crosses the shoreline", tc.name)
+		}
+	}
+}
+
+func TestRouteOverWater_GreatKeppelMarkedPointIsMovedAndSaid(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/great-keppel.json.gz")
+	from := shorelinePoint{-23.1733975, 150.9635654}
+	sea := shorelinePoint{-23.22, 151.00}
+	r, err := routeOverWater(context.Background(), from, sea, lines, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Great Keppel: start moved %.3f nm, %.2f nm routed, %d points", r.StartMovedNm, r.DistanceNm, len(r.Points))
+	if r.StartMovedNm <= 0.5 || r.StartMovedNm > waterRouteSnapMaxNm {
+		t.Errorf("start moved %.3f nm, want over 0.5 and within the snap limit", r.StartMovedNm)
+	}
+	if routePolylineCrossesShore(r, lines) {
+		t.Errorf("route crosses the shoreline")
+	}
+}
+
+func TestRouteOverWater_BundabergTownStaysAnOnLandError(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/burnett.json.gz")
+	_, err := routeOverWater(context.Background(), shorelinePoint{-24.8689782, 152.3454873}, shorelinePoint{-24.70, 152.48}, lines, 5)
+	if err == nil || !strings.Contains(err.Error(), "start") || !strings.Contains(err.Error(), "on land, 6.82 nm inside") || !strings.Contains(err.Error(), "more than the 1.5 nm") {
+		t.Fatalf("want a start-on-land error naming about 6.8 nm, got %v", err)
+	}
+	t.Log(err)
+}
