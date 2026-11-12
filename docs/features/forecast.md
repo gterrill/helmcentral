@@ -221,8 +221,8 @@ boat. You can see a thundery spell coming and pick your day before it arrives.
 - **Four steps, not a gradient:** Under 10% draws nothing, so a quiet stretch
   is an empty slot. From 10% to 30% is a pale block, 30% to 60% is stronger, and
   60% or more is solid. The key under each chart, "Lightning chance", shows
-  the three shades. Its ⓘ button says what the band measures, that hatched
-  hours have no data, and who the data comes from.
+  the three shades. Its ⓘ button says what the band measures and who the
+  data comes from.
 - **Hatched means no data:** The forecast reaches about 14.5 days, and the
   Upper Air trace runs a day or two longer. Hours the forecast doesn't
   cover are hatched with thin diagonal lines. That includes the hours before

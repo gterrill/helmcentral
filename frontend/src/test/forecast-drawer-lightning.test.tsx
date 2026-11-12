@@ -290,7 +290,7 @@ describe('ForecastDrawer lightning band on the Cloud, Temperature & Rain chart',
     expect(screen.queryByText(/Crown copyright/)).toBeNull()
 
     fireEvent.click(within(key).getByRole('button', { name: 'Lightning details' }))
-    expect(screen.getByText('The chance of at least one lightning flash within about 20 km in each 3-hour window. Hatched hours have no data.')).toBeInTheDocument()
+    expect(screen.getByText('The chance of at least one lightning flash within about 20 km in each 3-hour window.')).toBeInTheDocument()
     expect(screen.getByText('Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.')).toBeInTheDocument()
   })
 
@@ -579,7 +579,7 @@ describe('ForecastDrawer lightning band on the Upper Air chart', () => {
     const key = screen.getByTestId('forecast-upper-air-lightning-key')
     expect(key).not.toHaveTextContent(/Met Office/)
     fireEvent.click(within(key).getByRole('button', { name: 'Lightning details' }))
-    expect(screen.getByText(/Hatched hours have no data\./)).toBeInTheDocument()
+    expect(screen.queryByText(/Hatched/)).toBeNull()
     expect(screen.getByText('Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.')).toBeInTheDocument()
     unmount()
 

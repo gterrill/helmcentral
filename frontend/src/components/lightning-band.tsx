@@ -140,7 +140,7 @@ export function LightningKey({ testId, status, provider, held, staleBadge }: Lig
               <Info className="h-3.5 w-3.5" aria-hidden="true" />
             </PopoverTrigger>
             <PopoverContent align="start" className="w-64 space-y-2 p-3 text-xs">
-              <p>The chance of at least one lightning flash within about 20 km in each 3-hour window. Hatched hours have no data.</p>
+              <p>The chance of at least one lightning flash within about 20 km in each 3-hour window.</p>
               {provider === UKMO_PROVIDER ? <p>Lightning data © Crown copyright, Met Office, CC BY-SA 4.0.</p> : null}
             </PopoverContent>
           </Popover>
