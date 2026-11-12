@@ -119,6 +119,8 @@ Step-by-step instructions for specific jobs.
   tag, using it, and the iPhone Copy route.
 - [Photograph your gear](how-to/photograph-your-gear.md): from an item's
   editor, or on the spot while adding it from a bin.
+- [Share photos from an Android phone](how-to/share-photos-from-an-android-phone.md):
+  install Helmcentral as an app, then use the phone's share sheet.
 - [Draw your deck plans](how-to/draw-deck-plans.md): add a picture of each
   deck, outline locations on it and pin bins.
 - [Run a stocktake](how-to/run-a-stocktake.md): scan a bin and its contents to

@@ -370,13 +370,30 @@ function updatePolling(entry: Entry) {
   entry.intervalMs = min
   if (min !== undefined) {
     entry.interval = setInterval(() => {
-      if (entry.path !== undefined) void fetchQuery(entry.key, entry.path)
+      if (entry.path === undefined) return
+      if (isHidden() && pollersPauseWhenHidden(entry)) return
+      void fetchQuery(entry.key, entry.path)
     }, min)
   }
 }
 
 interface Subscription {
   interval: number | undefined
+  /** Skip the poll's tick while the tab is hidden. */
+  pauseWhenHidden: boolean
+}
+
+const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
+
+// A tick is skipped only when every reader that polls this entry has asked to pause.
+function pollersPauseWhenHidden(entry: Entry): boolean {
+  let any = false
+  for (const s of entry.subscribers) {
+    if (s.interval === undefined || s.interval <= 0) continue
+    if (!s.pauseWhenHidden) return false
+    any = true
+  }
+  return any
 }
 
 function subscribeEntry(
@@ -507,6 +524,10 @@ export interface UseApiQueryOptions<T> {
   queryKey: QueryKey
   path: string
   refetchInterval?: number
+  /** Skips the poll's ticks while the tab is hidden; the next tick after it shows again fetches. */
+  pauseWhenHidden?: boolean
+  /** Reads again when the window regains focus or the tab becomes visible. */
+  refetchOnFocus?: boolean
   enabled?: boolean
   select?: (raw: never) => T
   /**
@@ -535,6 +556,8 @@ function useEntrySubscription(
   path: string,
   refetchInterval: number | undefined,
   enabled: boolean,
+  pauseWhenHidden = false,
+  refetchOnFocus = false,
 ): { hash: string; key: QueryKey; subscribe: (onChange: () => void) => () => void } {
   const hash = hashKey(queryKey)
 
@@ -544,11 +567,11 @@ function useEntrySubscription(
 
   // One subscription record per hook instance; the interval lives on it so a
   // change does not resubscribe.
-  const subRef = useRef<Subscription>({ interval: refetchInterval })
+  const subRef = useRef<Subscription>({ interval: refetchInterval, pauseWhenHidden })
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (!enabled) return noopSubscribe()
-      subRef.current = { interval: subRef.current.interval }
+      subRef.current = { ...subRef.current }
       return subscribeEntry(key, path, subRef.current, onChange)
     },
     [key, path, enabled],
@@ -556,6 +579,20 @@ function useEntrySubscription(
   useEffect(() => {
     retunePolling(key, subRef.current, refetchInterval)
   }, [key, refetchInterval])
+  useEffect(() => {
+    subRef.current.pauseWhenHidden = pauseWhenHidden
+  }, [pauseWhenHidden])
+  useEffect(() => {
+    if (!enabled || !refetchOnFocus) return
+    const onFocus = () => { void fetchQuery(key, path) }
+    const onVisible = () => { if (!isHidden()) onFocus() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [key, path, enabled, refetchOnFocus])
   return { hash, key, subscribe }
 }
 
@@ -575,11 +612,11 @@ function useEntrySubscription(
  * `select` may be a fresh function on every render.
  */
 export function useApiQuerySelector<T, S>(
-  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select' | 'trackFetching'>,
+  { queryKey, path, refetchInterval, pauseWhenHidden, refetchOnFocus, enabled = true }: Omit<UseApiQueryOptions<T>, 'select' | 'trackFetching'>,
   select: (data: T | undefined, error: Error | null, previous: S | undefined) => S,
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
-  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, pauseWhenHidden, refetchOnFocus)
   const getSnapshot = useCallback((): Snapshot => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY), [hash, enabled])
   const selectSnapshot = useCallback(
     (snapshot: Snapshot, previous: S | undefined): S => {
@@ -606,11 +643,13 @@ export function useApiQuery<T>({
   queryKey,
   path,
   refetchInterval,
+  pauseWhenHidden,
+  refetchOnFocus,
   enabled = true,
   select,
   trackFetching = false,
 }: UseApiQueryOptions<T>): UseApiQueryResult<T> {
-  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, pauseWhenHidden, refetchOnFocus)
 
   // A request leaving and landing flips isFetching twice. Only a reader that
   // asked (trackFetching) re-renders on those flips (ADR 0215): every other

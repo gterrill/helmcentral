@@ -8,8 +8,8 @@ which gave a photo sign its hold in the replay, and [ADR 0106](0106-documents-in
 which keeps files in hash-named storage. It follows the staged-review habit of
 [ADR 0150](0150-imports-are-staged-reviewed-and-remember-their-source.md). This is the first of four
 steps: the store, the upload page, the Inbox view and its two destinations. The
-share target on the phone, the equipment and job destinations, and Mate's part
-come later.
+share target on the phone is [ADR 0280](0280-sharing-to-helmcentral-from-an-android-phone.md);
+the equipment and job destinations, and Mate's part, come later.
 
 ## Context
 
@@ -162,11 +162,15 @@ selects them for the operator to confirm; nothing is removed otherwise. A sea an
 sky scores low honestly, which is why this only suggests.
 
 **Routes and the page.** Reads are `tierRead` and every change is `tierWrite`. The
-Inbox is a view of Passages at `/passages/inbox`, with a count badge on the
-Passages page, and the page that shares to it is `/passages/upload`, an address
-that fits on a phone's Home Screen. The Documents folder picker opens at the
-folder last sent to, remembered in the device's local storage and forgotten
-without complaint when storage is blocked.
+Inbox is a panel of its own with a row in the sidebar just before Passages, at
+`/inbox`, and the page that shares to it is `/inbox/upload`, an address that fits
+on a phone's Home Screen. The row carries the number waiting, hidden at zero. It
+is not a view of Passages because it files into Passages, Documents and, in later
+steps, Equipment and open jobs, so no one of them owns it. An earlier draft put it
+under `/passages/inbox` with a button on the Passages page; that was never
+released, so the old addresses are not redirected. The Documents folder picker
+opens at the folder last sent to, remembered in the device's local storage and
+forgotten without complaint when storage is blocked.
 
 ## Consequences
 

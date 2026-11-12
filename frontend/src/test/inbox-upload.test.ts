@@ -232,6 +232,43 @@ describe('uploadFiles', () => {
     expect(tally.warnings).toEqual([{ name: 'x1.jpg', warning: 'Its EXIF block is damaged' }])
   })
 
+  it('says how each file ended, so a waiting list can drop the ones the box has answered for', async () => {
+    const ended: [string, string, string?][] = []
+    await uploadFiles(files('a.jpg', 'known.jpg', 'bad.jpg', 'dup.jpg', 'unreadable.jpg'), {
+      hash: async (f) => {
+        if (f.name === 'unreadable.jpg') throw new Error('cannot read')
+        return `h-${f.name}`
+      },
+      known: async () => ['h-known.jpg'],
+      prepare: async (f) => {
+        if (f.name === 'bad.jpg') throw new Error('could not decode')
+        return prepared(f.name)
+      },
+      upload: async (p) => (p.filename === 'dup.jpg' ? { status: 'already_uploaded', where: 'filed' } : { status: 'stored', item: {} as never }),
+      onFileDone: (file, outcome) => { ended.push(outcome.kind === 'failed' ? [file.name, outcome.kind, outcome.error] : [file.name, outcome.kind]) },
+    })
+    expect(ended).toEqual([
+      ['unreadable.jpg', 'failed', 'cannot read'],
+      ['a.jpg', 'stored'],
+      ['known.jpg', 'already_held'],
+      ['bad.jpg', 'failed', 'could not decode'],
+      ['dup.jpg', 'already_held'],
+    ])
+  })
+
+  it('does not report a file it never started', async () => {
+    const stop = new AbortController()
+    const ended: string[] = []
+    await uploadFiles(files('a.jpg', 'b.jpg'), {
+      ...fresh,
+      prepare: async (f) => prepared(f.name),
+      upload: async () => { stop.abort(); return { status: 'stored', item: {} as never } },
+      onFileDone: (f) => { ended.push(f.name) },
+      signal: stop.signal,
+    })
+    expect(ended).toEqual(['a.jpg'])
+  })
+
   it('stops starting new files once told to', async () => {
     const stop = new AbortController()
     const calls: string[] = []

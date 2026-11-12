@@ -126,6 +126,9 @@ export interface UploadTally {
   warnings: { name: string; warning: string }[]
 }
 
+/** `already_held`: the box already had the bytes, in the Inbox, in Documents or filed. */
+export type FileOutcome = { kind: 'stored' } | { kind: 'already_held' } | { kind: 'failed'; error: string }
+
 export interface UploadDeps {
   hash: (file: File) => Promise<string>
   /** Which of these hashes the box already has. */
@@ -133,10 +136,41 @@ export interface UploadDeps {
   prepare: (file: File, sourceSha256: string) => Promise<PreparedFile>
   upload: (prepared: PreparedFile) => Promise<InboxUploadResult>
   onProgress?: (tally: UploadTally) => void
+  /**
+   * Called once for each file as it ends, after the tally counts it, and awaited.
+   * `index` is the file's place in the batch, for a caller that keeps ids by place:
+   * a waiting list removes the files the box answered for. A file never started
+   * (the batch was stopped) is not reported. If this throws, the batch stops with
+   * that error, because a list that cannot be kept true must not go on.
+   */
+  onFileDone?: (file: Pick<File, 'name'>, outcome: FileOutcome, index: number) => void | Promise<void>
   /** Called after every tenth stored file. */
   onCheckpoint?: () => void
   /** Stops starting new files; the one in flight finishes. */
   signal?: AbortSignal
+}
+
+/**
+ * Files read from storage only when one is wanted, so a long batch never holds
+ * more than the file in hand. `read` may be called twice for one file, once to
+ * hash it and again to send it.
+ */
+export interface FileSource {
+  readonly length: number
+  name(index: number): string
+  read(index: number): Promise<File>
+}
+
+/** Thrown by `FileSource.read` for a file that is no longer there: dropped from the batch, neither sent nor failed. */
+export class FileGoneError extends Error {
+  constructor() {
+    super('the file is no longer on the list')
+    this.name = 'FileGoneError'
+  }
+}
+
+function sourceOf(files: readonly File[]): FileSource {
+  return { length: files.length, name: (i) => files[i].name, read: async (i) => files[i] }
 }
 
 /**
@@ -146,22 +180,30 @@ export interface UploadDeps {
  * the rest go on. If the box cannot be asked, the batch fails: sending
  * everything blind would defeat the check.
  */
-export async function uploadFiles(files: readonly File[], deps: UploadDeps): Promise<UploadTally> {
+export async function uploadFiles(input: readonly File[] | FileSource, deps: UploadDeps): Promise<UploadTally> {
+  const files = 'length' in input && 'read' in input ? input : sourceOf(input)
   const tally: UploadTally = { stage: 'checking', total: files.length, checked: 0, done: 0, uploaded: 0, skipped: 0, failed: [], noTime: 0, warnings: [] }
   const report = () => deps.onProgress?.({ ...tally, failed: [...tally.failed], warnings: [...tally.warnings] })
   report()
 
   const hashes: string[] = []
   const unreadable = new Set<number>()
-  for (const [i, file] of files.entries()) {
+  for (let i = 0; i < files.length; i++) {
     if (deps.signal?.aborted) return tally
     try {
-      hashes[i] = await deps.hash(file)
+      hashes[i] = await deps.hash(await files.read(i))
     } catch (err) {
       hashes[i] = ''
       unreadable.add(i)
-      tally.failed.push({ name: file.name, error: errorMessage(err) })
+      if (err instanceof FileGoneError) {
+        tally.total -= 1
+        report()
+        continue
+      }
+      const error = errorMessage(err)
+      tally.failed.push({ name: files.name(i), error })
       tally.done += 1
+      await deps.onFileDone?.({ name: files.name(i) }, { kind: 'failed', error }, i)
     }
     tally.checked += 1
     report()
@@ -176,30 +218,43 @@ export async function uploadFiles(files: readonly File[], deps: UploadDeps): Pro
 
   tally.stage = 'sending'
   report()
-  for (const [i, file] of files.entries()) {
+  for (let i = 0; i < files.length; i++) {
     if (deps.signal?.aborted) break
     if (unreadable.has(i)) continue
+    const name = files.name(i)
     if (hashes[i] !== '' && known.has(hashes[i])) {
       tally.skipped += 1
       tally.done += 1
+      await deps.onFileDone?.({ name }, { kind: 'already_held' }, i)
       report()
       continue
     }
+    let outcome: FileOutcome
     try {
-      const prepared = await deps.prepare(file, hashes[i])
-      for (const warning of prepared.warnings) tally.warnings.push({ name: file.name, warning })
+      const prepared = await deps.prepare(await files.read(i), hashes[i])
+      for (const warning of prepared.warnings) tally.warnings.push({ name, warning })
       const result = await deps.upload(prepared)
       if (result.status === 'stored') {
+        outcome = { kind: 'stored' }
         tally.uploaded += 1
         if (prepared.meta.captureMs === null) tally.noTime += 1
         if (tally.uploaded % CHECKPOINT_EVERY === 0) deps.onCheckpoint?.()
       } else {
+        outcome = { kind: 'already_held' }
         tally.skipped += 1
       }
     } catch (err) {
-      tally.failed.push({ name: file.name, error: errorMessage(err) })
+      if (err instanceof FileGoneError) {
+        tally.total -= 1
+        report()
+        continue
+      }
+      const error = errorMessage(err)
+      outcome = { kind: 'failed', error }
+      tally.failed.push({ name, error })
     }
     tally.done += 1
+    await deps.onFileDone?.({ name }, outcome, i)
     report()
   }
   return tally

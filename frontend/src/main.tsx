@@ -1,9 +1,11 @@
-// First, so the development switches see the query the page was opened with.
-import '@/lib/dev-flags'
+// First: it keeps the query the page was opened with before the router rewrites
+// the address. The development switches and the share target's flags read it.
+import '@/lib/opened-search'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 
 import { App } from '@/App'
+import { registerShareWorker } from '@/lib/share-worker'
 import '@fontsource/geist-sans/400.css'
 import '@fontsource/geist-sans/500.css'
 import '@fontsource/geist-sans/600.css'
@@ -30,3 +32,8 @@ async function renderApp() {
 }
 
 void renderApp()
+
+// The installed app only: it is what makes Share to Helmcentral reach the phone's waiting list.
+registerShareWorker().catch((err: unknown) => {
+  console.error('Share to Helmcentral is not available: the service worker could not start', err)
+})

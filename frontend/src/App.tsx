@@ -5,6 +5,7 @@ import {
   CircleHelp,
   CloudSun,
   FileText,
+  Inbox,
   LayoutDashboard,
   Maximize,
   Mic,
@@ -21,6 +22,7 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
+import { useInboxCount } from '@/hooks/use-inbox'
 import { LiveAlarmBanner } from '@/components/live-alarm-banner'
 import { LiveDisplayShell } from '@/components/display-shell'
 import { LiveAlarmsDrawer, LiveAnchorWatchDrawer, LiveForecastPage, LiveRadarDrawer } from '@/components/live-drawers'
@@ -39,6 +41,7 @@ import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
+const InboxRoutePanel = lazy(() => import('@/components/passages/inbox-route-panel').then((mod) => ({ default: mod.InboxRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
 const WatchesRoutePanel = lazy(() => import('@/components/watches/watches-route-panel').then((mod) => ({ default: mod.WatchesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
@@ -83,6 +86,7 @@ import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
+import { InboxBannerSlot } from '@/components/inbox-banner-slot'
 import { useHasActiveWindBulletin } from '@/hooks/use-forecast-warnings'
 import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useForecastSunTimes } from '@/hooks/use-weather-forecast'
@@ -157,6 +161,22 @@ import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { cn } from '@/lib/utils'
 
+// The waiting count on the Inbox row. Its own component, so the poll that feeds
+// it re-renders the badge and not the whole shell.
+function InboxNavBadge() {
+  const count = useInboxCount()
+  if (count === null || count === 0) return null
+  return (
+    <span
+      role="img"
+      aria-label={`${count} waiting`}
+      className="ml-auto min-w-5 rounded-md px-1 text-center text-xs font-medium tabular-nums group-data-[collapsible=icon]:hidden"
+    >
+      {count}
+    </span>
+  )
+}
+
 /**
  * Ordered the way the boat is actually run, not the order the panels were
  * built in: what you want at a glance underway first (Alarms, Anchor Watch,
@@ -184,6 +204,7 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   // The id stays 'radar', and so does the /radar address, so saved links work.
   { id: 'radar', label: 'Windy', icon: Wind },
+  { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'watches', label: 'Watches', icon: Eye },
   { id: 'documents', label: 'Documents', icon: FileText },
@@ -1095,6 +1116,7 @@ function AppShell() {
   // single stable callback per destination covers every call site.
   const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
   const openAlarmsPanel = useCallback(() => navigate.toPanel('alarms'), [navigate])
+  const openInboxUpload = useCallback(() => navigate({ panel: 'inbox', route: { view: 'upload' } }), [navigate])
   const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
@@ -1590,6 +1612,8 @@ function AppShell() {
           />
         )
       }
+      case 'inbox':
+        return <InboxRoutePanel canWrite={canWrite} />
       case 'passages':
         return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'watches':
@@ -1854,6 +1878,7 @@ function AppShell() {
                   {id === 'settings' && settingsDirty && (
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
+                  {id === 'inbox' && <InboxNavBadge />}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
@@ -2174,6 +2199,11 @@ function AppShell() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className={cn('mx-auto flex w-full flex-1 min-h-0 flex-col gap-4', !isFullscreenDashboard && 'max-w-[1800px]')}>
             <ConnectionBanner />
+            {/* Files shared from this phone and not yet uploaded (ADR 0280).
+                The upload page lists them itself. */}
+            {!(appLocation.panel === 'inbox' && appLocation.route.view === 'upload') && (
+              <InboxBannerSlot canWrite={canWrite} onUploadNow={openInboxUpload} />
+            )}
             {/* z-55 keeps a live alarm above the Mate sheet's backdrop (z-50)
                 while staying under the dashboard header, which sits at
                 z-60 same as the page selector and every other top-level

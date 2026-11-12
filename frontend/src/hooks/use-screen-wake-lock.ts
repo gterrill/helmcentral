@@ -21,6 +21,7 @@ export function servedOverHttps(): boolean {
  * dashboard holds the wake lock there instead of waiting for full screen.
  */
 export function runningFromHomeScreen(): boolean {
+  if (typeof window.matchMedia !== 'function') return false
   return window.matchMedia('(display-mode: standalone)').matches
 }
 

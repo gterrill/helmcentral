@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -103,11 +104,33 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 	// http.FileServer already answers HEAD with GET's status and headers
 	// and no body.
 	methods := []string{http.MethodGet, http.MethodHead}
+
+	// The manifest's share target posts files here. The installed app's
+	// service worker answers the POST itself and the server never sees it. If
+	// the post does arrive, no worker was running, so the files are lost; say
+	// so on the upload page rather than answer with a bare error.
+	//
+	// The body is read and discarded first. Redirecting with a large upload
+	// unread makes Go close the connection mid-upload, and the phone then
+	// shows a network error instead of following the redirect. The cap is
+	// 200 MB (the inbox has no upload limit of its own to reuse); past it the
+	// error is logged and the redirect still goes out.
+	e.POST(shareTargetRoute, func(c echo.Context) error {
+		if _, err := io.Copy(io.Discard, http.MaxBytesReader(c.Response(), c.Request().Body, shareDrainMaxBytes)); err != nil {
+			log.Printf("static: draining the unhandled share body: %v", err)
+		}
+		return c.Redirect(http.StatusSeeOther, shareWithoutWorkerLocation)
+	})
+
 	e.Match(methods, staticRootRoute, serve)
 	e.Match(methods, staticCatchAllRoute, serve)
 }
 
 const (
+	shareTargetRoute           = "/share-target"
+	shareWithoutWorkerLocation = "/inbox/upload?share_error=no-worker"
+	shareDrainMaxBytes         = 200 << 20
+
 	staticRootRoute     = "/"
 	staticCatchAllRoute = "/*"
 )

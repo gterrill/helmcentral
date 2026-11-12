@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
@@ -54,6 +54,9 @@ beforeEach(() => {
     }
     if (url.endsWith('/api/assistant/conversations')) {
       return { ok: true, json: async () => ({ conversations: [] }) }
+    }
+    if (url.endsWith('/api/inbox/count')) {
+      return { ok: true, json: async () => ({ count: 4 }) }
     }
     return { ok: false, json: async () => ({}) }
   }))
@@ -350,6 +353,19 @@ describe('App sidebar navigation', () => {
     expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
   })
 
+  it('shows how many files wait in the Inbox on its sidebar row', async () => {
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Inbox/ })
+    const badge = await within(button).findByLabelText('4 waiting')
+    expect(badge).toHaveTextContent('4')
+    // Placed like the amber dots: inside the row's button, so it takes the button's
+    // own padding and hover colours when the sidebar is expanded.
+    expect(button.contains(badge)).toBe(true)
+    // Collapsed to icons, the row is a square icon and the count is hidden by the
+    // same group state the sidebar uses for its other badges.
+    expect(badge.className).toContain('group-data-[collapsible=icon]:hidden')
+  })
+
   // The order of the top-level sidebar items is a deliberate product
   // decision, not an accident of the order panels were built in: the
   // things you reach for underway sit at the top, the reference and
@@ -368,6 +384,7 @@ describe('App sidebar navigation', () => {
       'Anchor Watch',
       'Forecast',
       'Windy',
+      'Inbox',
       'Passages',
       'Watches',
       'Documents',

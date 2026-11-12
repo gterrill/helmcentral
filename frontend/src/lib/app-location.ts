@@ -15,7 +15,7 @@ import { formatListSort, parseListSort, type ListSort } from '@/lib/list-order'
 // its own carries a `route`, a single union of that panel's views, so going
 // to a view replaces the whole slice and no sibling field is ever left
 // behind to clear.
-export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages', 'watches'] as const
+export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'inbox', 'passages', 'watches'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** The panels with a single view and nothing to remember beyond being open. */
@@ -99,11 +99,8 @@ export type PassagesFilter = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'cr
 /**
  * `/passages` is the index. `/passages/<id>` is one passage, `/passages/cruises/<id>`
  * one Cruise, and `/passages/combined?ids=a,b` an ad-hoc selection viewed together.
- * `/passages/inbox` is the Inbox of photos and files shared from a phone, and
- * `/passages/upload` the page that shares them (the address to put on a phone's
- * Home Screen); neither belongs to a filter.
  */
-export type PassagesRoute = FilteredPassagesRoute | { view: 'cruise'; id: string } | InboxRoute
+export type PassagesRoute = FilteredPassagesRoute | { view: 'cruise'; id: string }
 
 /** The views that remember which filter of the listing they came from. */
 export type FilteredPassagesRoute =
@@ -111,8 +108,12 @@ export type FilteredPassagesRoute =
   | { view: 'passage'; id: string; filter: PassagesFilter }
   | { view: 'combined'; ids: string[]; filter: PassagesFilter }
 
-/** The Inbox and the page that shares to it: no filter, and no passage. */
-export type InboxRoute = { view: 'inbox' } | { view: 'upload' }
+/**
+ * `/inbox` is the Inbox of photos and files shared from a phone, and
+ * `/inbox/upload` the page that shares them (the address to put on a phone's
+ * Home Screen and the one the share target opens).
+ */
+export type InboxRoute = { view: 'index' } | { view: 'upload' }
 
 /** The starting points the Watches page offers on an empty list. */
 export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
@@ -136,6 +137,7 @@ export type AppLocation =
   | { panel: 'documents'; route: DocumentsRoute }
   | { panel: 'inventory'; route: InventoryRoute }
   | { panel: 'wall-displays'; route: WallDisplaysRoute }
+  | { panel: 'inbox'; route: InboxRoute }
   | { panel: 'passages'; route: PassagesRoute }
   | { panel: 'watches'; route: WatchesRoute }
   /** ADR 0110: the wall display at `/display/<slug>`. `slug` is null on a bare
@@ -298,6 +300,10 @@ export function parseAppLocation(pathname: string): AppLocation {
     }
   }
 
+  if (first === 'inbox') {
+    return { panel: 'inbox', route: second === 'upload' ? { view: 'upload' } : { view: 'index' } }
+  }
+
   if (first === 'passages') {
     const params = new URLSearchParams(search)
     const cruiseParam = params.get('cruise')
@@ -306,8 +312,6 @@ export function parseAppLocation(pathname: string): AppLocation {
       : params.get('filter') === 'unfiled' ? { kind: 'unfiled' } : { kind: 'all' }
     const indexRoute: AppLocation = { panel: 'passages', route: { view: 'index', filter } }
     if (second === undefined) return indexRoute
-    if (second === 'inbox') return { panel: 'passages', route: { view: 'inbox' } }
-    if (second === 'upload') return { panel: 'passages', route: { view: 'upload' } }
     if (second === 'cruises') {
       const idSegment = segments[2]
       const id = idSegment !== undefined ? decodeSegment(idSegment) : null
@@ -552,9 +556,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
       return `/display/${encodeURIComponent(loc.slug)}`
     }
 
+    case 'inbox':
+      return loc.route.view === 'upload' ? '/inbox/upload' : '/inbox'
+
     case 'passages': {
       const { route } = loc
-      if (route.view === 'inbox' || route.view === 'upload') return `/passages/${route.view}`
       const params = new URLSearchParams()
       if ('filter' in route) {
         if (route.filter.kind === 'unfiled') params.set('filter', 'unfiled')

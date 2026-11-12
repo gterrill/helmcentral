@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { ApiError, apiRequest } from '@/lib/api-query'
+import { runningFromHomeScreen } from '@/hooks/use-screen-wake-lock'
 import { errorMessage } from '@/lib/errors'
+import { SERVICE_WORKER_PATH, registerAppWorker } from '@/lib/service-worker'
 
 /**
  * Web push registration for this browser (ADR 0038, ADR 0045).
@@ -19,7 +21,6 @@ export type WebPushSupport =
   | { kind: 'unsupported' }
   | { kind: 'blocked' }
 
-const SERVICE_WORKER_PATH = '/sw.js'
 const KEY_URL = '/api/alarm-transports/webpush/key'
 const SUBSCRIBE_URL = '/api/alarm-transports/webpush/subscribe'
 const UNSUBSCRIBE_URL = '/api/alarm-transports/webpush/unsubscribe'
@@ -48,11 +49,6 @@ function isAppleMobile(): boolean {
   return /iP(hone|ad|od)/.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua))
 }
 
-function isInstalledToHomeScreen(): boolean {
-  if (typeof window.matchMedia !== 'function') return false
-  return window.matchMedia('(display-mode: standalone)').matches
-}
-
 function notificationPermission(): NotificationPermission | null {
   // A bare Notification.permission throws on some iOS Safari builds.
   if (!('Notification' in window)) return null
@@ -72,7 +68,7 @@ function detectSupport(): WebPushSupport {
   if (!('PushManager' in window)) {
     // Safari on iOS exposes serviceWorker in an ordinary tab but withholds
     // PushManager until the site is installed to the Home Screen.
-    if (isAppleMobile() && !isInstalledToHomeScreen()) return { kind: 'ios-not-installed' }
+    if (isAppleMobile() && !runningFromHomeScreen()) return { kind: 'ios-not-installed' }
     return { kind: 'unsupported' }
   }
 
@@ -133,7 +129,7 @@ export function useWebPush() {
 
       // Registered lazily, on this click. A helm kiosk that will never want
       // push should not have a service worker installed on first paint.
-      await navigator.serviceWorker.register(SERVICE_WORKER_PATH, { scope: '/' })
+      await registerAppWorker()
       const registration = await navigator.serviceWorker.ready
 
       const subscription = await registration.pushManager.subscribe({

@@ -20,7 +20,6 @@ import { formatTimeOrDayTime, selectTimeZone } from '@/lib/vessel-time'
 export interface InboxViewProps {
   canWrite: boolean
   passages: PassageSummary[]
-  onBack: () => void
   onOpenUpload: () => void
 }
 
@@ -32,7 +31,7 @@ const MISMATCH_TEXT =
 // can be added to a passage, sent to Documents or deleted. The duplicate and
 // soft-focus flags are suggestions: nothing is marked or removed unless the
 // operator says so.
-export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxViewProps) {
+export function InboxView({ canWrite, passages, onOpenUpload }: InboxViewProps) {
   const inbox = useInbox()
   const timeZone = useVesselStateSelector(selectTimeZone)
   const [marked, setMarked] = useState<ReadonlySet<string>>(new Set())
@@ -140,8 +139,6 @@ export function InboxView({ canWrite, passages, onBack, onOpenUpload }: InboxVie
   return (
     <Page
       title="Inbox"
-      onBack={onBack}
-      backLabel="Back to passages"
       primaryAction={canWrite ? { label: 'Share photos', icon: <ImagePlus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />, onClick: onOpenUpload, variant: 'outline' } : undefined}
     >
       {inbox.error && (
