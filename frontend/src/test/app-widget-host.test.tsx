@@ -36,6 +36,7 @@ const BASE_ANSWERS: Record<string, unknown> = {
   '/api/upper-air': polls.UPPER_AIR,
   '/api/routes/active': polls.ROUTE_ACTIVE,
   '/api/depth-trend': polls.DEPTH_TREND,
+  '/api/barometer-trend': polls.BAROMETER_TREND,
   '/api/czone/switches': polls.CZONE_SWITCHES,
   '/api/electrical/overnight': polls.OVERNIGHT,
   '/api/alarm-rules': polls.ALARM_RULES,

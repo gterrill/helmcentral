@@ -113,6 +113,19 @@ export function liftClusterBox(box: { x: number; w: number }): { x: number; w: n
 
 export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
 
+/**
+ * The minimum height for Today & Now rose when the barometer row was added,
+ * and react-grid-layout applies minH only while an operator resizes, so a page
+ * saved at the old height would clip the row. The height is lifted to the
+ * minimum when drawn (and saved with the next layout change). A taller tile is
+ * left as saved, and other tiles deliberately keep their saved heights. The
+ * phone and tablet cell uses minHeight and grows with its content, so it needs
+ * no lift.
+ */
+export function liftTodayNowHeight(id: string, h: number): number {
+  return id === 'today-now' ? Math.max(h, WIDGET_CONSTRAINTS['today-now']?.minH ?? h) : h
+}
+
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
   'wind': { minW: 3, minH: 6 },
@@ -121,7 +134,9 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'solar': { minW: 3, minH: 6 },
   'depth-tide': { minW: 2, minH: 4 },
   'position': { minW: 2, minH: 3 },
-  'today-now': { minW: 2, minH: 4 },
+  // Five rows: the barometer row sits below the weather row, and four rows
+  // (136px of content) cannot hold both.
+  'today-now': { minW: 2, minH: 5 },
   'tanks': { minW: 2, minH: 3 },
   'route': { minW: 2, minH: 3 },
   'nearby-vessels': { minW: 2, minH: 3 },
@@ -250,7 +265,7 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
         x: box.x,
         y: w.y,
         w: box.w,
-        h: rows[w.id] ?? w.h,
+        h: liftTodayNowHeight(w.id, rows[w.id] ?? w.h),
         ...(drop ? { x: drop.x, y: drop.y, w: drop.w, h: drop.h } : {}),
         // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
         // compaction skips `static` items entirely (they neither move nor get
@@ -296,7 +311,7 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
     const nextX = Math.min(Math.max(w.x + dx, 0), Math.max(0, GRID_COLUMNS - w.w))
     const nextY = Math.max(w.y + dy, 0)
     if (nextX === w.x && nextY === w.y) return
-    commit([{ i: w.id, x: nextX, y: nextY, w: w.w, h: w.h }])
+    commit([{ i: w.id, x: nextX, y: nextY, w: w.w, h: liftTodayNowHeight(w.id, w.h) }])
   }, [commit])
 
   const handleHandleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>, w: DashboardLayoutItem) => {
