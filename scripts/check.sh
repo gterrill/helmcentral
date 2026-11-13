@@ -1,6 +1,8 @@
 #!/bin/sh
 # The pre-PR checks in one command: `check.sh backend` or `check.sh frontend`
-# (`make check-backend`, `make check-frontend`).
+# (`make check-backend`, `make check-frontend`), or `check.sh all` (`make
+# check`), which runs both, then the help-pages lint, the changelog check and
+# the commit-message check.
 #
 # Every step runs even when an earlier one fails, so one run reports
 # everything; only a failed node_modules check stops the frontend run, since
@@ -90,8 +92,17 @@ frontend)
 		step npm-build frontend npm run build
 	fi
 	;;
+all)
+	# Each area is its own run of this script, so its summary sits in the
+	# step's log and the summary below names the log.
+	step backend . sh scripts/check.sh backend
+	step frontend . sh scripts/check.sh frontend
+	step docs-lint-changed . make --no-print-directory docs-lint-changed
+	step changelog . sh scripts/check-changelog.sh
+	step commit-messages . sh scripts/check-commit-messages.sh
+	;;
 *)
-	echo "usage: check.sh backend|frontend" >&2
+	echo "usage: check.sh backend|frontend|all" >&2
 	exit 2
 	;;
 esac

@@ -48,14 +48,18 @@ claims against the code.
 
 ## 4. Test
 
-Run every suite the change touches:
+Run `make check`: it is the one command a builder runs before reporting done.
+It runs these, in order, and carries on past a failure:
 
 - Backend: `make check-backend`
 - Frontend: `make check-frontend`
 - Help pages under `docs/`: `make docs-lint-changed`
-- A change under `.github/workflows/`: `make workflow-lint`
 - `CHANGELOG.md`: `sh scripts/check-changelog.sh`. A rebase merges this file
   without a conflict, so this is what catches an entry left in a released section.
+- Commit messages: `sh scripts/check-commit-messages.sh`, which rejects Claude
+  attribution.
+
+A change under `.github/workflows/` also needs `make workflow-lint`.
 
 Any new or changed Flux runs once through `scripts/flux.sh` against the box
 (`INFLUX_URL=http://<reachable-host>:8086` if the settings address is
@@ -65,7 +69,7 @@ A UI change is previewed now, before review, following "Preview from a
 worktree" in the `run-dashboard` skill, at desktop and phone widths. Fixes the
 preview prompts go through this step again.
 
-Run the two check targets as they are, with no `tail` or `grep` on the end:
+Run the check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
 non-zero on any failure. A failure under load needs confirming by rerunning
 that test file alone before you call it a flake. Reproduce a failure this way:
@@ -102,7 +106,7 @@ and seen failing on the unfixed code; a builder subagent's brief asks for that
 run and its hand-back shows it.
 
 A builder's brief is self-contained and says: run tests only through `make
-check-frontend` and `make check-backend`, or `npx vitest run <file>` from
+check` (or `make check-frontend` and `make check-backend`), or `npx vitest run <file>` from
 `<worktree>/frontend` and `go -C <worktree>/backend test -short ./...`; edit
 with the Edit tool only. Start a fresh builder for each review round; never
 `SendMessage` to the old one.

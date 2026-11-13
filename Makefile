@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop flux prune-merged check-vite-config check-frontend-deps check-backend check-frontend
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop flux prune-merged check-vite-config check-frontend-deps check-backend check-frontend check hooks
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -77,6 +77,7 @@ worktree:
 	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name>"; exit 1; fi
 	git fetch origin
 	git worktree add --no-track -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)" origin/main
+	git -C "../$(notdir $(CURDIR))-$(NAME)" config core.hooksPath .githooks
 	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
 	@cd "../$(notdir $(CURDIR))-$(NAME)/frontend" && if node "$(CURDIR)/scripts/check-frontend-deps.mjs" .; then \
 		echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"; \
@@ -86,6 +87,13 @@ worktree:
 		npm ci || { rm -rf node_modules; \
 			echo "worktree: npm ci failed, so the worktree has no node_modules. Run npm ci in its frontend once it can reach the registry."; exit 1; }; \
 	fi
+
+# Turns on the repo's git hooks (.githooks) for this checkout: the commit-msg
+# hook rejects Claude attribution in a commit message. `make worktree` does this
+# for a new worktree; run it once in the main checkout. The setting is shared by
+# every worktree of a checkout, so it is not needed again per worktree there.
+hooks:
+	git config core.hooksPath .githooks
 
 # Runs the worktree's Go backend on the first free port from 8091 against a
 # throwaway copy of the dev state, and prints the VITE_API_PROXY_TARGET line for
@@ -116,6 +124,13 @@ check-backend:
 # knip:deps and the build. See scripts/check.sh.
 check-frontend:
 	@sh scripts/check.sh frontend
+
+# Everything a builder runs before reporting done: check-backend,
+# check-frontend, docs-lint-changed, the changelog check and the commit-message
+# check, in that order. Continues past a failure and exits non-zero if any step
+# failed. See scripts/check.sh.
+check:
+	@sh scripts/check.sh all
 
 # Clears up after merged work: removes each worktree, local branch and remote
 # branch whose GitHub PR is merged. Lists what it would do by default;
