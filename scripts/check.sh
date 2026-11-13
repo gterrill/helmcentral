@@ -48,6 +48,10 @@ counts() {
 		found=$(grep -E '^ +(Test Files|Tests) ' "$log" | sed 's/^ */   /')
 		echo "${found:-   (no pass counts found in the log)}"
 		;;
+	backend | frontend)
+		# The nested run's own summary block, from its "== summary" line on.
+		sed -n '/^== summary/,$p' "$log" | sed 's/^/   /'
+		;;
 	esac
 }
 

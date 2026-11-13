@@ -15,11 +15,17 @@
 # Exits 1 on a match, listing "<short sha> <subject>" per commit in range mode.
 set -eu
 
-patterns='Co-Authored-By:[[:space:]]*Claude|Generated with \[Claude Code\]'
+# A Co-Authored-By trailer naming Claude or Anthropic (this covers
+# noreply@anthropic.com), or the "Generated with Claude Code" footer with or
+# without brackets or the robot emoji before it.
+patterns='Co-Authored-By:.*(Claude|Anthropic)|Generated with \[?Claude Code\]?'
 
 if [ "${1:-}" = "--file" ]; then
-  if grep -qiE "$patterns" "${2:?usage: check-commit-messages.sh --file FILE}"; then
-    echo "commit-msg: remove the Claude attribution (Co-Authored-By: Claude / Generated with [Claude Code]); the operator forbids it" >&2
+  file="${2:?usage: check-commit-messages.sh --file FILE}"
+  # Check only what git keeps: nothing from the scissors line down (`git commit
+  # -v` puts the diff there) and no # comment lines.
+  if sed '/^# -\{24\} >8 -\{24\}$/,$d' "$file" | git stripspace --strip-comments | grep -qiE "$patterns"; then
+    echo "commit-msg: remove the Claude attribution (Co-Authored-By: Claude / Generated with Claude Code); the operator forbids it" >&2
     exit 1
   fi
   exit 0
@@ -28,19 +34,12 @@ fi
 range="${1:-origin/main..HEAD}"
 cd "$(dirname "$0")/.."
 
-# Listed first so a bad range fails here, under set -e, rather than reading as
-# an empty one.
-shas="$(git rev-list "$range")"
+# Assigned on its own so a bad range fails here, under set -e, rather than
+# reading as an empty one.
+bad="$(git log --format='%h %s' -i -E --grep="$patterns" "$range")"
 
-bad=0
-for sha in $shas; do
-  if git log -1 --format=%B "$sha" | grep -qiE "$patterns"; then
-    git log -1 --format='%h %s' "$sha"
-    bad=1
-  fi
-done
-
-if [ "$bad" -ne 0 ]; then
+if [ -n "$bad" ]; then
+  echo "$bad"
   echo "check-commit-messages: the commits above carry Claude attribution; reword them" >&2
   exit 1
 fi

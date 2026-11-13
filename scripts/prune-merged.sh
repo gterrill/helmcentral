@@ -87,15 +87,18 @@ for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
     fi
   fi
 
+  # Another session may have deleted the branch since the checks above. Any
+  # failure from the removals below stops the run.
+  git show-ref --verify --quiet "refs/heads/$branch" || { echo "skip $branch: deleted while this ran"; continue; }
+
   echo "$branch (merged)"
   if [ -n "$wt" ]; then
     # The node_modules link points at this checkout's real install. Remove the
     # link itself, never its target, before git removes the directory.
     [ -L "$wt/frontend/node_modules" ] && run rm "$wt/frontend/node_modules"
-    # Another session may have removed either one already; that is not a failure.
-    run git worktree remove "$wt" || echo "  worktree $wt already gone"
+    run git worktree remove "$wt"
   fi
-  run git branch -D "$branch" || echo "  branch $branch already gone"
+  run git branch -D "$branch"
   if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
     run git push --quiet origin --delete "$branch"
   fi
