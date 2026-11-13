@@ -207,36 +207,47 @@ describe("PlanTable verdicts", () => {
     expect(verdict).toHaveTextContent("…");
   });
 
-  it("looks a leg's arrival-night warning up under the day it arrives, not the day it leaves", () => {
-    // Leaves Alpha at 8 PM on the 14th, reaches Bravo at 1 AM on the 15th: the
-    // server keys Bravo's nights by its arrival date.
-    show(
-      assessment({
+  it("shows the arrival stop's first night on a leg that arrives after midnight, keyed by the plan's arrive date", () => {
+    // Leaves Alpha at 6 PM on the 10th and reaches Bravo at 2 AM on the 11th. The
+    // server lists Bravo's nights from its plan arrive date (the 10th, two nights).
+    const plan: Plan = {
+      ...PLAN,
+      stops: [
+        stop("Alpha", "2026-11-10", 0, "2026-11-10", { departTime: "18:00" }),
+        stop("Bravo", "2026-11-10", 2, "2026-11-12"),
+        stop("Charlie", "2026-11-12", 0, "2026-11-12"),
+      ],
+    };
+    vi.mocked(usePlanAssessment).mockReturnValue({
+      assessment: assessment({
         legs: [
-          legAssessment({
-            verdict: "go", depart: "2026-11-14T20:00:00+10:00", arrive: "2026-11-15T01:00:00+10:00",
-          }),
-          legAssessment({ leg: 1, date: "2026-11-16" }),
+          legAssessment({ date: "2026-11-10", verdict: "go", depart: "2026-11-10T18:00:00+10:00", arrive: "2026-11-11T02:00:00+10:00" }),
+          legAssessment({ leg: 1, date: "2026-11-12" }),
         ],
-        stops: [{ stop: 1, nights: [{ date: "2026-11-15", warning: "Gale Warning", url: "https://example.test/b" }] }],
-      }),
-    );
-    expect(rows()[0]).toHaveTextContent("Bravo tonight: Gale Warning");
-  });
-
-  it("does not put an arrival-night warning for the departure day on a leg that arrives after midnight", () => {
-    show(
-      assessment({
-        legs: [
-          legAssessment({
-            verdict: "go", depart: "2026-11-14T20:00:00+10:00", arrive: "2026-11-15T01:00:00+10:00",
-          }),
-          legAssessment({ leg: 1, date: "2026-11-16" }),
+        stops: [
+          {
+            stop: 1,
+            nights: [
+              { date: "2026-11-10", warning: "Strong Wind Warning", url: "" },
+              { date: "2026-11-11", warning: "Gale Warning", url: "" },
+            ],
+          },
         ],
-        stops: [{ stop: 1, nights: [{ date: "2026-11-14", warning: "Strong Wind Warning", url: "" }] }],
       }),
+      loading: false,
+      error: null,
+    });
+    render(
+      <PlanTable plan={plan} legs={[leg(0), leg(1)]} legsLoading={false} legsError={null} canWrite selectedRowKey={null}
+        addingNight={false} onSelect={() => {}} onAddNight={() => {}} />,
     );
-    expect(rows()[0]).not.toHaveTextContent("Strong Wind Warning");
+    const all = rows();
+    expect(all[0]).toHaveTextContent("Strong Wind Warning");
+    expect(all[0]).not.toHaveTextContent("Gale Warning");
+    const stopRows = all.filter((r) => r.getAttribute("data-kind") === "stop");
+    const text = stopRows.map((r) => r.textContent ?? "").join("|");
+    expect(text.match(/Gale Warning/g)).toHaveLength(1);
+    expect(text).not.toContain("Strong Wind Warning");
   });
 
   it("names what could not be checked in the words the Mate card uses", () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
+import { invalidatePlanAssessments } from '@/hooks/use-plan-assessment'
 import type { VesselRoles } from '@/lib/vessel-settings'
 
 /** A sector's no-go figures; null/absent is unset (never 0). Marginal and gust limits are worked out, not stored. */
@@ -237,6 +238,8 @@ export function useSettingsForm(): UseSettingsFormResult {
       // The Offline coastline switch is part of this save; its status line
       // must not keep saying "Off" until the next poll.
       void invalidateQueries(['/api/offline-coastline'])
+      // Plan verdicts are worked out against the passage limits.
+      if (patch.assistant?.passage_limits !== undefined) void invalidatePlanAssessments()
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

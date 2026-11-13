@@ -400,6 +400,20 @@ func TestAssessPlan_NoDaylightWindowHasNoTimeAndNoVerdict(t *testing.T) {
 	}
 }
 
+func TestAssessPlan_ADaylightWindowThatHasGoneTodaySaysSoNotThatThereWasNone(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	f := &paFake{}
+	d := paDeps(f)
+	d.now = func() time.Time { return paAt(14, 18, 0) } // sunset is 5.32 PM
+	l := assessPlan(context.Background(), p, legs, d).Legs[0]
+	if l.Note != "Today's window has passed" || l.NoteKind != planKindWindowPassed || l.Depart != "" || l.Verdict != "" || l.DepartSuggested {
+		t.Fatalf("leg = %+v", l)
+	}
+	if len(f.rankings) != 0 {
+		t.Fatal("nothing to rank when the window has gone")
+	}
+}
+
 func TestAssessPlan_AnOperatorTimeIsNeverReplaced(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	p.Stops[0].DepartTime = "14:00" // arrives 7 PM, after sunset: judged, never moved
@@ -684,6 +698,20 @@ func TestAssessPlan_AnOvernightLegIsNotAssessedYet(t *testing.T) {
 	}
 }
 
+func TestAssessPlan_AnOvernightLegStillShowsItsEtaFromTheOperatorsTime(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	legs[0].DistanceNm = 200 // 33.3 hours at 6 kn
+	p.Stops[0].DepartTime = "08:00"
+	l := paAssess(t, p, legs, &paFake{}).Legs[0]
+	if l.NoteKind != planKindOvernight || l.Verdict != "" {
+		t.Fatalf("leg = %+v", l)
+	}
+	want := paAt(14, 8, 0).Add(hoursDuration(200.0 / 6))
+	if l.Arrive == "" || !paParse(t, l.Arrive).Equal(want) {
+		t.Fatalf("arrive = %q, want %s", l.Arrive, want)
+	}
+}
+
 func TestAssessPlan_ForecastTimeIsTheOldestSourceTime(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	p.Stops[0].DepartTime = "08:00"
@@ -840,6 +868,15 @@ func TestAssessPlan_WarningsThatCannotBeReadAreSaidOnceNotTakenForNone(t *testin
 	got := paAssess(t, p, legs, f)
 	if !strings.Contains(got.WarningsError, "unavailable") || f.warningsReads != 1 {
 		t.Fatalf("warnings_error %q after %d reads", got.WarningsError, f.warningsReads)
+	}
+}
+
+func TestAssessPlan_AStopWhoseDateCannotBeReadIsSaidNotTakenForNoWarnings(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[1].Arrive = "next tuesday"
+	got := paAssess(t, p, legs, &paFake{})
+	if !strings.Contains(got.WarningsError, "Pelican Bay") || !strings.Contains(got.WarningsError, "next tuesday") || !strings.Contains(got.WarningsError, "could not be read") {
+		t.Fatalf("warnings_error = %q", got.WarningsError)
 	}
 }
 

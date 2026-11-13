@@ -223,17 +223,6 @@ interface RowAssessment {
 }
 
 /**
- * The day a leg reaches its arrival stop, which is how the server keys that
- * stop's nights: the assessed arrival in the stop's zone, else the stop's own
- * arrival date from the plan. A leg that arrives after midnight is not on the
- * day it leaves.
- */
-function arrivalDay(leg: PlanLegAssessment | undefined, to: Plan["stops"][number]): string {
-  if (leg?.arrive && zoneKnown(to.timezone)) return formatDayKey(new Date(leg.arrive), to.timezone);
-  return to.arrive;
-}
-
-/**
  * Every row's view of the assessment, built from one pass over its legs and
  * warnings. With no assessment (none yet, or the check failed) a row has none
  * either: nothing from an earlier plan is passed on.
@@ -252,7 +241,9 @@ function buildRowAssessments(
       if (row.kind === "passage") {
         const leg = legs.get(row.legIndex);
         const to = plan.stops[row.legIndex + 1];
-        const arrivalWarning = to ? warnings.get(`${row.legIndex + 1}|${arrivalDay(leg, to)}`) : undefined;
+        // The server lists a stop's nights from its plan arrive date, so the passage
+        // row shows the arrival stop's first night, even for a leg that lands after midnight.
+        const arrivalWarning = to ? warnings.get(`${row.legIndex + 1}|${to.arrive}`) : undefined;
         return [row.key, { leg, state, nightWarning: undefined, arrivalWarning }];
       }
       const nightWarning = warnings.get(`${row.stopIndex}|${row.dayKey}`);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { PLANS_PATH } from "@/hooks/use-plans";
-import { useApiQuery } from "@/lib/api-query";
+import { invalidateQueries, useApiQuery } from "@/lib/api-query";
 import type { LegVerdict, Plan, PlanAssessment, PlanLegAssessment, PlanNoteKind } from "@/lib/plans";
 
 // The plan's verdicts, worked out on the server with Mate's passage rules and
@@ -43,7 +43,7 @@ interface PlanAssessmentApi {
 
 const VERDICTS: readonly string[] = ["go", "marginal", "no_go", "no_data"];
 const NOTE_KINDS: readonly string[] = [
-  "problem", "no_forecast", "not_routed", "past", "overnight", "no_window", "no_departure", "gap", "other",
+  "problem", "no_forecast", "not_routed", "past", "overnight", "no_window", "window_passed", "no_departure", "gap", "other",
 ];
 
 function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
@@ -105,6 +105,15 @@ function useSettledShape(planId: number, shape: string, delayMs: number): string
   return settled.planId === planId ? settled.shape : shape;
 }
 
+/**
+ * Asks every mounted plan assessment again, whatever its plan: the verdicts
+ * depend on the passage limits, which are saved outside the plan. The plan
+ * queries that are not an assessment are left alone.
+ */
+export function invalidatePlanAssessments(): Promise<void> {
+  return invalidateQueries([PLANS_PATH], (key) => key[2] !== "assessment");
+}
+
 export function usePlanAssessment(plan: Plan | null) {
   const planId = plan?.id ?? 0;
   const shape = useMemo(() => (plan ? assessmentShape(plan) : ""), [plan]);
@@ -113,6 +122,10 @@ export function usePlanAssessment(plan: Plan | null) {
     queryKey: [PLANS_PATH, planId, "assessment", settled],
     path: `${PLANS_PATH}/${planId}/assessment`,
     refetchInterval: FORECAST_REFRESH_SECONDS * 1000,
+    // The verdicts follow the operator's passage limits, which are saved elsewhere:
+    // a mount always asks again (the query store revalidates on mount), and so does
+    // coming back to the window.
+    refetchOnFocus: true,
     enabled: plan !== null && plan.stops.length > 1,
     select: mapAssessment,
   });

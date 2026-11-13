@@ -57,6 +57,11 @@ describe("mapAssessment", () => {
     expect(a.stops[0]).toEqual({ stop: 1, nights: [{ date: "2026-11-14", warning: "Gale Warning", url: "https://example.test/w" }] });
   });
 
+  it("keeps the window-passed note kind as itself, not as other", () => {
+    const raw = { ...API_ASSESSMENT, legs: [{ ...API_ASSESSMENT.legs[1], note: "Today's window has passed", note_kind: "window_passed" }] };
+    expect(mapAssessment(raw as never).legs[0].noteKind).toBe("window_passed");
+  });
+
   it("keeps a missing forecast time null, not an empty stamp", () => {
     expect(mapAssessment({ ...API_ASSESSMENT, forecast_as_of: "" } as never).forecastAsOf).toBeNull();
   });
@@ -256,6 +261,31 @@ describe("usePlanAssessment", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("asks again when the window regains focus or the tab becomes visible, so limits changed elsewhere show", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply(API_ASSESSMENT));
+    vi.stubGlobal("fetch", fetchMock);
+    renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  });
+
+  it("asks again on a remount instead of serving the cached verdicts alone", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply(API_ASSESSMENT));
+    vi.stubGlobal("fetch", fetchMock);
+    const first = renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+    await waitFor(() => expect(first.result.current.assessment).not.toBeNull());
+    first.unmount();
+    renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("does not ask for a plan of one stop", async () => {

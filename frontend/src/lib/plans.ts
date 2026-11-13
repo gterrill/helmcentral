@@ -88,6 +88,7 @@ export type PlanNoteKind =
   | "past"
   | "overnight"
   | "no_window"
+  | "window_passed"
   | "no_departure"
   | "gap"
   | "other";

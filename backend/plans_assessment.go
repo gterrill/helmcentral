@@ -35,13 +35,14 @@ const (
 	// own step.
 	planDepartureStep = assistantTidalDepartureStep
 
-	planNoteNoWindow   = "No daylight window"
-	planNoteNoForecast = "No forecast yet"
-	planNoteNotRouted  = "Not routed"
-	planNotePast       = "Date has passed"
-	planNoteDepartPast = "Departure time has passed"
-	planNoteOvernight  = "Overnight legs are not assessed yet"
-	planNoteGap        = "Forecast missing for part of the leg"
+	planNoteNoWindow     = "No daylight window"
+	planNoteWindowPassed = "Today's window has passed"
+	planNoteNoForecast   = "No forecast yet"
+	planNoteNotRouted    = "Not routed"
+	planNotePast         = "Date has passed"
+	planNoteDepartPast   = "Departure time has passed"
+	planNoteOvernight    = "Overnight legs are not assessed yet"
+	planNoteGap          = "Forecast missing for part of the leg"
 )
 
 // planNoteKind says what sort of note a leg carries, so the table does not read
@@ -49,16 +50,17 @@ const (
 type planNoteKind string
 
 const (
-	planKindNone        planNoteKind = ""
-	planKindProblem     planNoteKind = "problem"      // the one problem said above the table for the whole plan
-	planKindNoForecast  planNoteKind = "no_forecast"  // the day is past the forecast
-	planKindNotRouted   planNoteKind = "not_routed"   // the leg did not route
-	planKindPast        planNoteKind = "past"         // the day has gone
-	planKindOvernight   planNoteKind = "overnight"    // the leg runs past a day
-	planKindNoWindow    planNoteKind = "no_window"    // no departure fits the daylight
-	planKindNoDeparture planNoteKind = "no_departure" // the ranking gave no departure
-	planKindGap         planNoteKind = "gap"          // the forecast has a hole in the leg
-	planKindOther       planNoteKind = "other"
+	planKindNone         planNoteKind = ""
+	planKindProblem      planNoteKind = "problem"       // the one problem said above the table for the whole plan
+	planKindNoForecast   planNoteKind = "no_forecast"   // the day is past the forecast
+	planKindNotRouted    planNoteKind = "not_routed"    // the leg did not route
+	planKindPast         planNoteKind = "past"          // the day has gone
+	planKindOvernight    planNoteKind = "overnight"     // the leg runs past a day
+	planKindNoWindow     planNoteKind = "no_window"     // no departure fits the daylight
+	planKindWindowPassed planNoteKind = "window_passed" // today had a daylight window and it has gone
+	planKindNoDeparture  planNoteKind = "no_departure"  // the ranking gave no departure
+	planKindGap          planNoteKind = "gap"           // the forecast has a hole in the leg
+	planKindOther        planNoteKind = "other"
 )
 
 var errNoDepartureRanked = errors.New("no departure in the window could be ranked")
@@ -359,11 +361,13 @@ func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) 
 	}
 	w.hours = leg.DistanceNm / env.speed
 	w.res.Hours, w.res.SpeedKn = &w.hours, &env.speed
-	if w.hours > planAssessMaxLegHours {
-		return planKindOvernight, planNoteOvernight
-	}
+	// The arrival is known from the hours and the speed, so it shows even for a
+	// leg that is not judged.
 	if !w.depart.IsZero() {
 		w.res.Arrive = fmtLeg(w.depart.Add(hoursDuration(w.hours)), w.toLoc)
+	}
+	if w.hours > planAssessMaxLegHours {
+		return planKindOvernight, planNoteOvernight
 	}
 	return planKindNone, ""
 }
@@ -404,15 +408,29 @@ func (d planAssessDeps) setSuggestionWindow(w *planLegWork, env planEnv) (planNo
 	if !w.depart.IsZero() {
 		return planKindNone, ""
 	}
-	earliest, latest, ok := d.departureWindow(w, env)
-	if !ok {
+	earliest, latest, state := d.departureWindow(w, env)
+	switch state {
+	case windowNone:
 		return planKindNoWindow, planNoteNoWindow
+	case windowPassed:
+		return planKindWindowPassed, planNoteWindowPassed
 	}
 	w.query.Earliest, w.query.Latest = earliest, latest
 	return planKindNone, ""
 }
 
-func (d planAssessDeps) departureWindow(w *planLegWork, env planEnv) (earliest, latest time.Time, ok bool) {
+// windowState says whether a leg's day has a departure window: it fits (the
+// zero value is not used), the day never had one, or it had one and now is past it.
+type windowState int
+
+const (
+	windowFits windowState = iota + 1
+	windowNone
+	windowPassed
+)
+
+func (d planAssessDeps) departureWindow(w *planLegWork, env planEnv) (earliest, latest time.Time, state windowState) {
+	state = windowNone
 	fromDay, err := dayStart(w.from.Depart, w.fromLoc)
 	if err != nil {
 		return
@@ -439,11 +457,17 @@ func (d planAssessDeps) departureWindow(w *planLegWork, env planEnv) (earliest, 
 		latest = set
 	}
 	earliest = ceilToStep(dawn, planDepartureStep)
+	latest = latest.Truncate(planDepartureStep)
+	if latest.Before(earliest) {
+		return // the day never had a window
+	}
 	if soonest := ceilToStep(env.now, planDepartureStep); soonest.After(earliest) {
 		earliest = soonest
 	}
-	latest = latest.Truncate(planDepartureStep)
-	return earliest, latest, !latest.Before(earliest)
+	if latest.Before(earliest) {
+		return earliest, latest, windowPassed
+	}
+	return earliest, latest, windowFits
 }
 
 // readAndJudge reads what the verdicts need from the providers, all at once: the
@@ -663,7 +687,8 @@ func (d planAssessDeps) readWarnings(p plan, now time.Time, out *planAssessment)
 		}
 		arrive, err := dayStart(s.Arrive, zone.Loc)
 		if err != nil {
-			continue
+			out.WarningsError = "The arrival date at " + s.Name + " could not be read: " + strconv.Quote(s.Arrive)
+			return
 		}
 		today := now.In(zone.Loc).Format(planDateLayout)
 		entry := stopNights{stop: i, place: s, today: today}
