@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"sort"
 	"strings"
@@ -526,51 +525,65 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-
 	var args assistantTidalDepartureArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse plan_tidal_departure arguments: %w", err)
 	}
+	q, err := args.query(d.now())
+	if err != nil {
+		return "", fmt.Errorf("plan_tidal_departure: %w", err)
+	}
+	ranking, err := d.rankTidalDepartures(ctx, q)
+	if err != nil {
+		return "", fmt.Errorf("plan_tidal_departure: %w", err)
+	}
+	result := ranking.result()
+	return capToolResultJSON(&result, func() bool { return false })
+}
+
+// query checks the tool's arguments and turns them into a ranking's input. Its
+// errors say what is wrong with an argument and leave the tool's name to the
+// caller.
+func (args assistantTidalDepartureArgs) query(now time.Time) (tidalRankQuery, error) {
 	for _, req := range []struct {
 		name string
 		v    *float64
 	}{{"lat", args.Lat}, {"lon", args.Lon}, {"course_deg", args.CourseDeg}, {"passage_hours", args.PassageHours}} {
 		if req.v == nil {
-			return "", fmt.Errorf("plan_tidal_departure: %s is required", req.name)
+			return tidalRankQuery{}, fmt.Errorf("%s is required", req.name)
 		}
 	}
 	lat, lon, course, hours := *args.Lat, *args.Lon, *args.CourseDeg, *args.PassageHours
 	if !validLatLon(lat, lon) {
-		return "", fmt.Errorf("plan_tidal_departure: lat/lon is not a valid position")
+		return tidalRankQuery{}, fmt.Errorf("lat/lon is not a valid position")
 	}
 	if course < 0 || course > 360 {
-		return "", fmt.Errorf("plan_tidal_departure: course_deg must be between 0 and 360")
+		return tidalRankQuery{}, fmt.Errorf("course_deg must be between 0 and 360")
 	}
 	suppliedSet := args.FloodSetDeg != nil
 	if suppliedSet && (*args.FloodSetDeg < 0 || *args.FloodSetDeg > 360) {
-		return "", fmt.Errorf("plan_tidal_departure: flood_set_deg must be between 0 and 360")
+		return tidalRankQuery{}, fmt.Errorf("flood_set_deg must be between 0 and 360")
 	}
 	// The passage is sampled in whole minutes, so anything under one rounds
 	// to zero and the mean divides 0 by 0.
 	if !(hours >= 1.0/60) || hours > assistantTidalDepartureMaxHours {
-		return "", fmt.Errorf("plan_tidal_departure: passage_hours must be at least one minute and at most %d", assistantTidalDepartureMaxHours)
+		return tidalRankQuery{}, fmt.Errorf("passage_hours must be at least one minute and at most %d", assistantTidalDepartureMaxHours)
 	}
 	if suppliedSet {
 		switch args.FloodSetSource {
 		case "standing_notes", "general_knowledge", "operator":
 		default:
-			return "", fmt.Errorf("plan_tidal_departure: flood_set_source must be standing_notes, general_knowledge or operator")
+			return tidalRankQuery{}, fmt.Errorf("flood_set_source must be standing_notes, general_knowledge or operator")
 		}
 	} else if args.FloodSetSource != "" {
-		return "", fmt.Errorf("plan_tidal_departure: flood_set_deg is required with flood_set_source %q", args.FloodSetSource)
+		return tidalRankQuery{}, fmt.Errorf("flood_set_deg is required with flood_set_source %q", args.FloodSetSource)
 	}
-	route := args.Route
-	if len(route) == 1 {
-		return "", fmt.Errorf("plan_tidal_departure: route needs at least two points, as estimate_passage returns them; leave it out to use lat and lon")
+	if len(args.Route) == 1 {
+		return tidalRankQuery{}, fmt.Errorf("route needs at least two points, as estimate_passage returns them; leave it out to use lat and lon")
 	}
-	for i, p := range route {
+	for i, p := range args.Route {
 		if !validLatLon(p.Lat, p.Lon) {
-			return "", fmt.Errorf("plan_tidal_departure: route point %d is not a valid position", i+1)
+			return tidalRankQuery{}, fmt.Errorf("route point %d is not a valid position", i+1)
 		}
 	}
 	offsetMin := args.SlackOffsetMin
@@ -580,16 +593,14 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 	if offsetMin < -assistantTidalMaxSlackOffsetMin {
 		offsetMin = -assistantTidalMaxSlackOffsetMin
 	}
-	offset := time.Duration(offsetMin) * time.Minute
 
 	// A departure in the past is not one to plan, so the window starts no earlier
 	// than now, and a default latest follows that start.
-	now := d.now()
 	earliest := now
 	if s := strings.TrimSpace(args.Earliest); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			return "", fmt.Errorf("plan_tidal_departure: earliest must be RFC3339: %w", err)
+			return tidalRankQuery{}, fmt.Errorf("earliest must be RFC3339: %w", err)
 		}
 		if t.After(earliest) {
 			earliest = t
@@ -599,262 +610,25 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 	if s := strings.TrimSpace(args.Latest); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			return "", fmt.Errorf("plan_tidal_departure: latest must be RFC3339: %w", err)
+			return tidalRankQuery{}, fmt.Errorf("latest must be RFC3339: %w", err)
 		}
 		latest = t
 	}
 	if !latest.After(earliest) {
 		if !latest.After(now) {
-			return "", fmt.Errorf("plan_tidal_departure: the departure window is already past: latest is not after now")
+			return tidalRankQuery{}, fmt.Errorf("the departure window is already past: latest is not after now")
 		}
-		return "", fmt.Errorf("plan_tidal_departure: latest must be after earliest")
+		return tidalRankQuery{}, fmt.Errorf("latest must be after earliest")
 	}
 	if latest.Sub(earliest) > assistantTidalDepartureMaxWindow {
-		return "", fmt.Errorf("plan_tidal_departure: the departure window may span at most %d hours", int(assistantTidalDepartureMaxWindow/time.Hour))
+		return tidalRankQuery{}, fmt.Errorf("the departure window may span at most %d hours", int(assistantTidalDepartureMaxWindow/time.Hour))
 	}
-
-	// Whole minutes keep the arithmetic exact (6.2 h is 372 min, not 372 min
-	// less a float rounding error).
-	duration := time.Duration(math.Round(hours*60)) * time.Minute
-	need := latest.Add(duration)
-
-	// The route may start in open water off the creek or berth the boat is in, so
-	// a start away from lat/lon is said, not refused, until it is a different passage.
-	var notes []string
-	if len(route) >= 2 {
-		off := haversineMeters(lat, lon, route[0].Lat, route[0].Lon) / metersPerNauticalMile
-		if off > assistantTidalRouteMaxNm {
-			return "", fmt.Errorf("plan_tidal_departure: the route starts at %g, %g, %.1f nm from lat/lon %g, %g; more than %g nm apart is a different passage, so give the route from the departure position",
-				route[0].Lat, route[0].Lon, off, lat, lon, assistantTidalRouteMaxNm)
-		}
-		if off > assistantTidalRouteNoteNm {
-			notes = append(notes, fmt.Sprintf("The route starts %.1f nm from lat/lon, which is not on it. The stream was read along the route.", off))
-		}
-	}
-
-	n := int(math.Ceil(float64(duration) / float64(assistantTidalSampleStep)))
-	samples, err := tidalSamples(route, lat, lon, course, n)
-	if err != nil {
-		return "", fmt.Errorf("plan_tidal_departure: %w", err)
-	}
-
-	// The model is read along a route. One cell is not the whole run, so with no
-	// route the model is not used at all.
-	var currents tidalPointCurrents
-	noData := "no route was given, so the current along the passage was not read"
-	if len(route) >= 2 {
-		noData = ""
-		currents, err = d.fetchTidalCurrents(ctx, samples, now, need)
-		if err != nil {
-			return "", fmt.Errorf("plan_tidal_departure: %w", err)
-		}
-	}
-
-	// Every departure is ranked on the model over the samples it has data for. The
-	// tide is used only when the model has no data for any sample of any departure.
-	distNm := make([]float64, len(samples))
-	for k, s := range samples {
-		distNm[k] = s.distNm
-	}
-	var scored []tidalScored
-	anyData := false
-	for dep := earliest; !dep.After(latest); dep = dep.Add(assistantTidalDepartureStep) {
-		var run alongRun
-		if noData == "" {
-			run = alongCourse(currents, samples, distNm, dep, duration)
-			anyData = anyData || run.covered > 0
-		}
-		scored = append(scored, tidalScored{dep: dep, run: run})
-	}
-	basis := assistantTidalBasisModel
-	if !anyData {
-		basis = assistantTidalBasisPhase
-		if noData == "" {
-			noData = noModelDataReason(currents, samples)
-		}
-		if !suppliedSet {
-			return "", fmt.Errorf("plan_tidal_departure: the Open-Meteo model has no current for the run (%s) and flood_set_deg was not given, so there is nothing to rank with; give flood_set_deg and its flood_set_source from the standing notes, the operator or general knowledge, or say the stream cannot be timed", noData)
-		}
-		log.Printf("assistant: plan_tidal_departure: tide_phase used because the Open-Meteo model has no current for the run: %s", noData)
-	}
-
-	// Tide data is read only by the tide-phase method. Times are in the station's
-	// zone then, and in the departure position's zone under the model.
-	var st assistantResolvedTideStation
-	var cycles []tidalHalfCycle
-	var loc *time.Location
-	var timeBasis string
-	// Each sample is on its own leg, so a route is scored on the leg courses; with
-	// no route every sample has course_deg. alongFactor[k] is how much of the stream
-	// the sample feels, and mostAcross says whether the whole run is square to it.
-	var alongFactor []float64
-	mostAcross := true
-	if basis == assistantTidalBasisPhase {
-		st, err = d.resolveTideStation(lat, lon)
-		if err != nil {
-			return "", fmt.Errorf("plan_tidal_departure: %w", err)
-		}
-		cycles, err = tidalHalfCycles(st.chart.Extremes, offset, earliest, need)
-		if err != nil {
-			return "", fmt.Errorf("plan_tidal_departure: station %q (%s): %w", st.info.Name, st.providerID, err)
-		}
-		loc, timeBasis = st.loc, st.timeBasis
-		alongFactor = make([]float64, len(samples))
-		for k, s := range samples {
-			alongFactor[k] = math.Cos((s.course - *args.FloodSetDeg) * math.Pi / 180)
-			if math.Abs(alongFactor[k]) >= assistantTidalCrossStreamCos {
-				mostAcross = false
-			}
-		}
-	} else {
-		// Times are the boat's, in the zone at the departure. Only this method needs it.
-		z, zerr := tidalZoneAt(lat, lon)
-		if zerr != nil {
-			return "", fmt.Errorf("plan_tidal_departure: the time zone at the departure position is not known: %w", zerr)
-		}
-		loc, timeBasis = z.Loc, z.Name
-	}
-	// A departure covered less than half is judged on too little of its run to
-	// stand against a better covered one. When none is covered half, the ones with
-	// data are ranked anyway and the answer says every run was mostly uncovered.
-	anyWellCovered := false
-	for _, sc := range scored {
-		if sc.run.coveredFraction() >= assistantTidalMinCoveredFraction && sc.run.covered > 0 {
-			anyWellCovered = true
-		}
-	}
-	if basis == assistantTidalBasisModel && !anyWellCovered {
-		notes = append(notes, "Every departure's run was mostly uncovered by the model, so these figures rest on a small part of the passage.")
-	}
-	for i := range scored {
-		sc := &scored[i]
-		if basis == assistantTidalBasisModel {
-			sc.mean, sc.fair = sc.run.meanKn, sc.run.fairFraction
-			sc.ineligible = sc.run.covered == 0 || (anyWellCovered && sc.run.coveredFraction() < assistantTidalMinCoveredFraction)
-			continue
-		}
-		sum, fair := 0.0, 0
-		for k := 0; k <= n; k++ {
-			t := sc.dep.Add(time.Duration(float64(duration) * float64(k) / float64(n)))
-			a := tidalAssist(cycles, t, alongFactor[k])
-			sum += a
-			if a > 0 {
-				fair++
-			}
-		}
-		sc.mean, sc.fair = sum/float64(n+1), float64(fair)/float64(n+1)
-	}
-
-	// Local maxima (plateau-tolerant, the window edges counting against their
-	// one neighbour), best first, kept only if at least two hours from every
-	// one already chosen so the list is distinct departures, not adjacent slots.
-	var peaks []tidalScored
-	for i, c := range scored {
-		if c.ineligible {
-			continue
-		}
-		if (i > 0 && !scored[i-1].ineligible && scored[i-1].mean > c.mean) || (i+1 < len(scored) && !scored[i+1].ineligible && scored[i+1].mean > c.mean) {
-			continue
-		}
-		peaks = append(peaks, c)
-	}
-	sort.SliceStable(peaks, func(i, j int) bool { return peaks[i].mean > peaks[j].mean })
-	var chosen []tidalScored
-	for _, p := range peaks {
-		apart := true
-		for _, c := range chosen {
-			gap := p.dep.Sub(c.dep)
-			if gap < 0 {
-				gap = -gap
-			}
-			if gap < assistantTidalMinSeparation {
-				apart = false
-				break
-			}
-		}
-		if apart {
-			chosen = append(chosen, p)
-			if len(chosen) == assistantTidalMaxCandidates {
-				break
-			}
-		}
-	}
-	// The one to avoid is the worst departure that has data to judge it by.
-	var worst tidalScored
-	haveWorst := false
-	for _, c := range scored {
-		if c.ineligible {
-			continue
-		}
-		if !haveWorst || c.mean < worst.mean {
-			worst, haveWorst = c, true
-		}
-	}
-
-	build := func(c tidalScored) assistantTidalCandidate {
-		arr := c.dep.Add(duration)
-		cand := assistantTidalCandidate{
-			Departure:    boatDayClock(c.dep, loc),
-			DepartureISO: c.dep.UTC().Format(time.RFC3339),
-			Arrival:      boatDayClock(arr, loc),
-			ArrivalISO:   arr.UTC().Format(time.RFC3339),
-			FairFraction: roundTo2(c.fair),
-		}
-		if basis == assistantTidalBasisPhase {
-			m := roundTo2(c.mean)
-			cand.MeanAssist = &m
-			cand.Phases = tidalPhasesCrossed(cycles, c.dep, arr, loc)
-			names := make([]string, len(cand.Phases))
-			for i, p := range cand.Phases {
-				names[i] = p.Phase
-			}
-			cand.Stream = strings.Join(names, " then ")
-			// modelled_current_missing in the result is the one reason.
-			return cand
-		}
-		frac := roundTo2(c.run.coveredFraction())
-		cand.CoveredFraction, cand.Uncovered = &frac, c.run.uncovered
-		if c.run.covered == 0 {
-			cand.AlongCourseMissing = "the model has no current at any point of this run"
-			return cand
-		}
-		mean, peak := roundTo2(c.run.meanKn), roundTo2(c.run.peakKn)
-		cand.MeanAlongCourseKn, cand.PeakAlongCourseKn = &mean, &peak
-		return cand
-	}
-
-	basisText, modelMissing := assistantTidalBasisModelText, ""
-	if basis == assistantTidalBasisPhase {
-		basisText, modelMissing = assistantTidalBasisPhaseText, noData
-	}
-	result := assistantTidalDepartureResult{
-		TimeBasis:              timeBasis,
-		CourseDeg:              course,
-		RankingBasis:           basis,
-		ModelledCurrentMissing: modelMissing,
-		RoutePoints:            len(route),
-		SlackOffsetMin:         offsetMin,
-		PassageHours:           hours,
-		Best:                   make([]assistantTidalCandidate, 0, len(chosen)),
-		Worst:                  build(worst),
-		Basis:                  basisText,
-		Reading:                readingTidalDeparture,
-	}
-	for _, c := range chosen {
-		result.Best = append(result.Best, build(c))
-	}
-	if basis == assistantTidalBasisPhase {
-		result.Station, result.Provider = &st.info, st.providerID
-		result.HeightDatum, result.Modelled = st.datum, st.followsPos
-		result.FloodSetDeg, result.FloodSetSource = args.FloodSetDeg, args.FloodSetSource
-		if mostAcross {
-			notes = append(notes, "The course runs mostly across the stream, so departure timing barely changes the help along the track.")
-		}
-	} else if suppliedSet {
-		notes = append(notes, "The flood direction given was not used: the modelled current covers the run, so the departures are ranked on it.")
-	}
-	result.Note = strings.Join(notes, " ")
-	return capToolResultJSON(&result, func() bool { return false })
+	return tidalRankQuery{
+		Lat: lat, Lon: lon, CourseDeg: course, Hours: hours, Route: args.Route,
+		FloodSetDeg: args.FloodSetDeg, FloodSetSource: args.FloodSetSource,
+		SlackOffset: time.Duration(offsetMin) * time.Minute,
+		Earliest:    earliest, Latest: latest, Now: now,
+	}, nil
 }
 
 // tidalHalfCycles turns the station's extremes into contiguous flood and ebb

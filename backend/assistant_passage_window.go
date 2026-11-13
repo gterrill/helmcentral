@@ -71,7 +71,23 @@ type passageWindowLimiting struct {
 	Factor string  `json:"factor"`
 	Sector *string `json:"sector"`
 	Text   string  `json:"text"`
+	// Short is the same figure without the leg's name, the direction the wind
+	// comes from or the marginal threshold: "gusts 32 kn ahead". The passage plan
+	// table reads it; the card does not carry it.
+	Short string `json:"-"`
 }
+
+// passageNoData is why a cell has no verdict.
+type passageNoData int
+
+const (
+	passageNoDataNone passageNoData = iota
+	// passageNoDataBeyondForecast: every missing hour lies past the last hour the
+	// forecast has, so the leg is further ahead than the forecast reaches.
+	passageNoDataBeyondForecast
+	// passageNoDataGap: the forecast has a hole inside the leg's hours.
+	passageNoDataGap
+)
 
 type passageWindowCell struct {
 	Leg        int                    `json:"leg"`
@@ -86,6 +102,11 @@ type passageWindowCell struct {
 	// wind is what the model reads beside the limiting line (ADR 0265). It is
 	// not part of the card.
 	wind string
+	// noData says why the state is no_data. ratio is how far the worst figure
+	// stood past its limit (1 is at it), which orders no-go cells by how bad they
+	// are. Neither is part of the card.
+	noData passageNoData
+	ratio  float64
 }
 
 type passageWindowRow struct {
@@ -136,6 +157,10 @@ type tideSource func(ctx context.Context, lat, lon float64) ([]tideExtremePoint,
 const (
 	passageWindowMaxLegs        = 6
 	passageWindowMaxStayNights  = 14
+	// passageWindowMaxRoutePoints is how many points of a route the wind check
+	// is given. It judges the wind against each segment's bearing and reads one
+	// forecast per segment, so planPassageLeg keeps no more than this.
+	passageWindowMaxRoutePoints = 10
 	passageWindowSampleSplitNM  = 30.0
 	passageWindowTideMinAssist  = 0.5
 	passageWindowTideWindowDeg  = 60.0
@@ -187,8 +212,8 @@ func (a passageWindowArgs) validate() error {
 		return fail("legs must hold 1 to %d legs, got %d", passageWindowMaxLegs, n)
 	}
 	for i, l := range a.Legs {
-		if n := len(l.Route); n < 2 || n > 10 {
-			return fail("legs[%d].route must hold 2 to 10 points (start, any vias, end), got %d", i, n)
+		if n := len(l.Route); n < 2 || n > passageWindowMaxRoutePoints {
+			return fail("legs[%d].route must hold 2 to %d points (start, any vias, end), got %d", i, passageWindowMaxRoutePoints, n)
 		}
 		for j, p := range l.Route {
 			if p.Lat < -90 || p.Lat > 90 {
@@ -350,7 +375,69 @@ type passageLegPlan struct {
 	dailyEnd passageRoutePoint
 }
 
+// capRoutePoints keeps at most max points of a route: both ends, and the bends
+// that matter. It is Douglas-Peucker (douglasPeucker) at the smallest tolerance
+// that leaves no more than max points, found by bisection.
+func capRoutePoints(route []passageRoutePoint, max int) []passageRoutePoint {
+	if len(route) <= max || max < 2 {
+		return route
+	}
+	const metresPerDegree = 111195.0
+	var latSum float64
+	for _, p := range route {
+		latSum += p.Lat
+	}
+	cosLat := math.Cos(latSum / float64(len(route)) * math.Pi / 180)
+	xy := make([][2]float64, len(route))
+	pathM := 0.0
+	for i, p := range route {
+		xy[i] = [2]float64{p.Lon * metresPerDegree * cosLat, p.Lat * metresPerDegree}
+		if i > 0 {
+			pathM += math.Hypot(xy[i][0]-xy[i-1][0], xy[i][1]-xy[i-1][1])
+		}
+	}
+	keepAt := func(tol float64) (keep []bool, n int) {
+		keep = make([]bool, len(route))
+		keep[0], keep[len(route)-1] = true, true
+		douglasPeucker(xy, 0, len(route)-1, tol, keep)
+		for _, k := range keep {
+			if k {
+				n++
+			}
+		}
+		return keep, n
+	}
+	// No point lies further off a chord than the whole path is long, so at that
+	// tolerance only the ends are kept.
+	lo, hi := 0.0, pathM
+	for i := 0; i < 40; i++ {
+		mid := (lo + hi) / 2
+		if _, n := keepAt(mid); n <= max {
+			hi = mid
+		} else {
+			lo = mid
+		}
+	}
+	keep, _ := keepAt(hi)
+	out := make([]passageRoutePoint, 0, max)
+	for i, k := range keep {
+		if k {
+			out = append(out, route[i])
+		}
+	}
+	return out
+}
+
+// hoursDuration is a number of hours as a Duration.
+func hoursDuration(hours float64) time.Duration {
+	return time.Duration(hours * float64(time.Hour))
+}
+
+// planPassageLeg lays out a leg: its segments, the points the forecast is read
+// at, and its hours. A route over passageWindowMaxRoutePoints is thinned to that
+// many points first, so every caller gives the wind check the same bound.
 func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
+	l.Route = capRoutePoints(l.Route, passageWindowMaxRoutePoints)
 	first, last := l.Route[0], l.Route[len(l.Route)-1]
 	name := strings.TrimSpace(l.Name)
 	if name == "" {
@@ -430,6 +517,9 @@ type passageCandidate struct {
 	factor string
 	sector string
 	text   string
+	// short is the line without the leg's name, the wind's direction or the
+	// marginal threshold (passageWindowLimiting.Short).
+	short string
 }
 
 func (c passageCandidate) beats(o passageCandidate) bool {
@@ -480,7 +570,9 @@ type passageAssessor struct {
 	fc     forecastSource
 	tides  tideSource
 	sun    func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)
-	loc    *time.Location
+	// skipWindAgainstTide leaves wind against tide out of every cell, and out of
+	// not_checked: a passage plan has no flood direction to judge it by.
+	skipWindAgainstTide bool
 
 	// cache holds every sample point's hours, fetched up front and read-only
 	// after. fetchedAt is the oldest source time among them.
@@ -493,6 +585,36 @@ type passageAssessor struct {
 }
 
 func passagePointKey(pt passageRoutePoint) string { return fmt.Sprintf("%.2f,%.2f", pt.Lat, pt.Lon) }
+
+// newPassageAssessor is an assessor with empty caches. The itinerary and the
+// passage plan table both judge legs through one; cell is given the zone its
+// days are read in.
+func newPassageAssessor(limits passageLimits, fc forecastSource, tides tideSource, sun func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)) *passageAssessor {
+	return &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun,
+		cache: map[string]map[int64]passageHour{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
+}
+
+// prefetchLegs fetches the forecast at every distinct sample point of the legs.
+func (as *passageAssessor) prefetchLegs(ctx context.Context, plans []passageLegPlan) error {
+	var points []passageRoutePoint
+	seen := map[string]bool{}
+	for _, plan := range plans {
+		for _, pt := range plan.samples {
+			if k := passagePointKey(pt); !seen[k] {
+				seen[k] = true
+				points = append(points, pt)
+			}
+		}
+	}
+	return as.prefetch(ctx, points)
+}
+
+// legEndSun is the sunrise and sunset at the end of a leg on the day t falls in,
+// in loc: the day the daylight rule judges an arrival on. The assessor's cell and
+// the passage plan's departure window both read it here.
+func legEndSun(sun func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool), plan passageLegPlan, t time.Time, loc *time.Location) (rise, set time.Time, ok bool) {
+	return sun(t.In(loc), plan.dailyEnd.Lat, plan.dailyEnd.Lon)
+}
 
 const passageWindowFetchWorkers = 4
 
@@ -530,7 +652,7 @@ launch:
 			}
 			f, err := as.fc.Fetch(ctx, pt.Lat, pt.Lon)
 			if err != nil {
-				out[i].err = fmt.Errorf("assess_passage_window: forecast at %.2f, %.2f: %w", pt.Lat, pt.Lon, err)
+				out[i].err = fmt.Errorf("forecast at %.2f, %.2f: %w", pt.Lat, pt.Lon, err)
 				return
 			}
 			out[i].f = f
@@ -538,7 +660,7 @@ launch:
 	}
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("assess_passage_window: %w", err)
+		return err
 	}
 	for i, r := range out {
 		if r.err != nil {
@@ -555,7 +677,7 @@ launch:
 func (as *passageAssessor) hoursAt(pt passageRoutePoint) (map[int64]passageHour, error) {
 	h, ok := as.cache[passagePointKey(pt)]
 	if !ok {
-		return nil, fmt.Errorf("assess_passage_window: no forecast was fetched at %.2f, %.2f", pt.Lat, pt.Lon)
+		return nil, fmt.Errorf("no forecast was fetched at %.2f, %.2f", pt.Lat, pt.Lon)
 	}
 	return h, nil
 }
@@ -593,7 +715,8 @@ func (as *passageAssessor) wavesWithoutDirection(waveM float64, h passageHour, l
 		}
 		sev = s
 		c := passageCandidate{s, ratio, "wave", "",
-			fmt.Sprintf("Waves %s%s · %s", waveFigures(waveM, h), marginalNote(s, *lim), label)}
+			fmt.Sprintf("Waves %s%s · %s", waveFigures(waveM, h), marginalNote(s, *lim), label),
+			"waves " + waveFigures(waveM, h)}
 		if worst == nil || c.beats(*worst) {
 			worst = &c
 		}
@@ -613,8 +736,21 @@ func waveFigures(heightM float64, h passageHour) string {
 	return fmt.Sprintf("%.1f m", heightM)
 }
 
-func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time) (passageWindowCell, error) {
-	arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
+// lastHour is the unix time of the latest hour a point's forecast has, 0 for none.
+func lastHour(hours map[int64]passageHour) int64 {
+	var last int64
+	for t := range hours {
+		if t > last {
+			last = t
+		}
+	}
+	return last
+}
+
+// cell judges one leg leaving at depart, reading its days in loc. Its errors
+// carry no tool name; the caller adds its own.
+func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time, loc *time.Location) (passageWindowCell, error) {
+	arrive := depart.Add(hoursDuration(plan.hours))
 	cell := passageWindowCell{
 		Leg: idx, Date: depart.Format("2006-01-02"),
 		Depart: depart.Format(time.RFC3339), Arrive: arrive.Format(time.RFC3339),
@@ -627,17 +763,18 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			worst, haveWorst = c, true
 		}
 	}
-	missing := false
+	missing, gap := false, false
 	anyGust := false
 	tally := newPassageWindTally(plan.hours, len(plan.segs))
 
-	// Wind against tide: only for a leg with a known flood set and a band.
+	// Wind against tide: only for a leg with a known flood set and a band, and
+	// never when the assessor was told to leave it out.
 	var cycles []tidalHalfCycle
 	tideOn := false
-	if plan.args.FloodSetDeg != nil && as.limits.WindAgainstTideOffsetKn != nil {
+	if plan.args.FloodSetDeg != nil && as.limits.WindAgainstTideOffsetKn != nil && !as.skipWindAgainstTide {
 		ext, err := as.tideExtremes(ctx, plan.args.Route[0])
 		if cerr := ctx.Err(); cerr != nil {
-			return cell, fmt.Errorf("assess_passage_window: %w", cerr)
+			return cell, cerr
 		}
 		if err == nil {
 			cycles, err = tidalHalfCycles(ext, 0, depart.Truncate(time.Hour), arrive)
@@ -648,7 +785,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 		tideOn = err == nil
 	}
-	if !tideOn {
+	if !tideOn && !as.skipWindAgainstTide {
 		notChecked["wind_against_tide"] = true
 	}
 
@@ -671,7 +808,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 		h, ok := hours[t.Unix()]
 		if !ok {
-			missing = true
+			// An hour past the last the forecast has is a leg further ahead than
+			// it reaches; one before it is a hole in the data.
+			missing, gap = true, gap || t.Unix() <= lastHour(hours)
 			tally.gap(t, depart, arrive)
 			continue
 		}
@@ -685,12 +824,13 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		windFrom := degreesToDirection(h.WindDirDeg)
 		lim := as.limits.sector(sector)
 		if lim.WindKnNoGo == nil {
-			return cell, fmt.Errorf("assess_passage_window: Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
+			return cell, fmt.Errorf("Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
 		}
 		windNoGo := *lim.WindKnNoGo
 		sev, ratio := judge(windKn, rawWindKn, windNoGo)
 		consider(passageCandidate{sev, ratio, "wind", sector,
-			fmt.Sprintf("Wind %d kn from %s, %s%s · %s", int(windKn), windFrom, sector, marginalNote(sev, windNoGo), seg.label)})
+			fmt.Sprintf("Wind %d kn from %s, %s%s · %s", int(windKn), windFrom, sector, marginalNote(sev, windNoGo), seg.label),
+			fmt.Sprintf("wind %d kn %s", int(windKn), sector)})
 
 		// Providers leave a gust they do not have at 0. An hour at 0 beside
 		// hours with a figure is a calm hour (0 cannot exceed a positive
@@ -701,7 +841,8 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			gustNoGo := windNoGo + passageGustAboveWindKn
 			sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
 			consider(passageCandidate{sev, ratio, "gust", sector,
-				fmt.Sprintf("Gusts %d kn from %s, %s%s · %s", int(gustKn), windFrom, sector, marginalNote(sev, gustNoGo), seg.label)})
+				fmt.Sprintf("Gusts %d kn from %s, %s%s · %s", int(gustKn), windFrom, sector, marginalNote(sev, gustNoGo), seg.label),
+				fmt.Sprintf("gusts %d kn %s", int(gustKn), sector)})
 		}
 
 		switch {
@@ -712,7 +853,8 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			if waveNoGo := as.limits.sector(waveSector).WaveMNoGo; waveNoGo != nil {
 				sev, ratio := judge(waveM, h.WaveM, *waveNoGo)
 				consider(passageCandidate{sev, ratio, "wave", waveSector,
-					fmt.Sprintf("Waves %s %s%s · %s", waveFigures(waveM, h), waveSector, marginalNote(sev, *waveNoGo), seg.label)})
+					fmt.Sprintf("Waves %s %s%s · %s", waveFigures(waveM, h), waveSector, marginalNote(sev, *waveNoGo), seg.label),
+					fmt.Sprintf("waves %s %s", waveFigures(waveM, h), waveSector)})
 			} else {
 				notChecked["wave"] = true
 			}
@@ -746,28 +888,30 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 				if angleBetween(set, h.WindDirDeg) <= passageWindowTideWindowDeg {
 					tideNoGo := windNoGo - *as.limits.WindAgainstTideOffsetKn
 					if tideNoGo <= 0 {
-						return cell, fmt.Errorf("assess_passage_window: the wind against tide reduction (%g kn) is not below the %s no-go wind (%g kn). Fix it in Settings → Mate → Passage limits", *as.limits.WindAgainstTideOffsetKn, sector, windNoGo)
+						return cell, fmt.Errorf("the wind against tide reduction (%g kn) is not below the %s no-go wind (%g kn). Fix it in Settings → Mate → Passage limits", *as.limits.WindAgainstTideOffsetKn, sector, windNoGo)
 					}
 					sev, ratio := judge(windKn, rawWindKn, tideNoGo)
 					consider(passageCandidate{sev, ratio, "wind_against_tide", "",
-						fmt.Sprintf("Wind %d kn against the %s%s · %s", int(windKn), phase, marginalNote(sev, tideNoGo), plan.name)})
+						fmt.Sprintf("Wind %d kn against the %s%s · %s", int(windKn), phase, marginalNote(sev, tideNoGo), plan.name),
+						fmt.Sprintf("wind %d kn against the %s", int(windKn), phase)})
 				}
 			}
 		}
 	}
 
 	if as.limits.DaylightArrival {
-		end := plan.dailyEnd
-		rise, set, ok := as.sun(arrive.In(as.loc), end.Lat, end.Lon)
+		rise, set, ok := legEndSun(as.sun, plan, arrive, loc)
 		switch {
 		case !ok:
 			notChecked["daylight"] = true
 		case arrive.Before(rise):
 			consider(passageCandidate{2, 1, "daylight", "",
-				fmt.Sprintf("Arrives %s, before sunrise %s · %s", boatClock(arrive, as.loc), boatClock(rise, as.loc), plan.name)})
+				fmt.Sprintf("Arrives %s, before sunrise %s · %s", boatClock(arrive, loc), boatClock(rise, loc), plan.name),
+				fmt.Sprintf("arrives %s, before sunrise %s", boatClock(arrive, loc), boatClock(rise, loc))})
 		case arrive.After(set):
 			consider(passageCandidate{2, 1, "daylight", "",
-				fmt.Sprintf("Arrives %s, after sunset %s · %s", boatClock(arrive, as.loc), boatClock(set, as.loc), plan.name)})
+				fmt.Sprintf("Arrives %s, after sunset %s · %s", boatClock(arrive, loc), boatClock(set, loc), plan.name),
+				fmt.Sprintf("arrives %s, after sunset %s", boatClock(arrive, loc), boatClock(set, loc))})
 		}
 	}
 
@@ -782,10 +926,17 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 	default:
 		cell.State = "go"
 	}
+	if haveWorst {
+		cell.ratio = worst.ratio
+	}
 	if cell.State == "no_data" {
 		cell.Note = passageWindowNoForecastNote
+		cell.noData = passageNoDataBeyondForecast
+		if gap {
+			cell.noData = passageNoDataGap
+		}
 	} else if haveWorst {
-		l := &passageWindowLimiting{Factor: worst.factor, Text: worst.text}
+		l := &passageWindowLimiting{Factor: worst.factor, Text: worst.text, Short: worst.short}
 		if worst.sector != "" {
 			sec := worst.sector
 			l.Sector = &sec
@@ -821,8 +972,7 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 		return passageWindowPayload{}, fmt.Errorf("assess_passage_window: %w", err)
 	}
 	loc := firstZone.Loc
-	as := &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun, loc: loc,
-		cache: map[string]map[int64]passageHour{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
+	as := newPassageAssessor(limits, fc, tides, sun)
 
 	plans := make([]passageLegPlan, len(args.Legs))
 	out := passageWindowPayload{
@@ -864,7 +1014,7 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 			if i+1 == len(plans) {
 				break
 			}
-			arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
+			arrive := depart.Add(hoursDuration(plan.hours))
 			ay, am, ad := arrive.Date()
 			if n := args.StaysNights[i]; n > 0 {
 				depart = departAt(time.Date(ay, am, ad+n, 0, 0, 0, 0, loc), clockFor(i+1))
@@ -876,18 +1026,8 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 			}
 		}
 	}
-	var points []passageRoutePoint
-	seen := map[string]bool{}
-	for _, plan := range plans {
-		for _, pt := range plan.samples {
-			if k := passagePointKey(pt); !seen[k] {
-				seen[k] = true
-				points = append(points, pt)
-			}
-		}
-	}
-	if err := as.prefetch(ctx, points); err != nil {
-		return passageWindowPayload{}, err
+	if err := as.prefetchLegs(ctx, plans); err != nil {
+		return passageWindowPayload{}, fmt.Errorf("assess_passage_window: %w", err)
 	}
 	fetched := now
 	if !as.fetchedAt.IsZero() {
@@ -899,9 +1039,9 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 		row := passageWindowRow{DepartDate: ds, Cells: make([]passageWindowCell, 0, len(plans))}
 		states := make([]string, 0, len(plans))
 		for i, plan := range plans {
-			cell, err := as.cell(ctx, i, plan, departs[r][i])
+			cell, err := as.cell(ctx, i, plan, departs[r][i], loc)
 			if err != nil {
-				return passageWindowPayload{}, err
+				return passageWindowPayload{}, fmt.Errorf("assess_passage_window: %w", err)
 			}
 			row.Cells = append(row.Cells, cell)
 			states = append(states, cell.State)
@@ -1076,24 +1216,26 @@ func (m *passageModelResult) shrink() bool {
 	return false
 }
 
-func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw json.RawMessage) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	args, err := parsePassageWindowArgs(raw)
-	if err != nil {
-		return "", err
-	}
-	if d.passageLimits == nil {
-		return "", fmt.Errorf("assess_passage_window: passage limits are not available")
-	}
-	limits, err := d.passageLimits()
-	if err != nil {
-		return "", fmt.Errorf("assess_passage_window: %w", err)
-	}
+// passageSources are the forecast and tide readers a passage assessment judges
+// with, wired from the configured providers.
+type passageSources struct {
+	fc    forecastSource
+	tides tideSource
+	// fallbackModel is the wave model some point fell back to, "" when none
+	// did. Read it after the forecast has been fetched.
+	fallbackModel func() string
+}
+
+// passageSources wires the configured weather, wave and tide providers for an
+// assessment named tool, which leads its log lines; its errors carry no tool
+// name. zone names the
+// time zone every point's forecast is fetched in. A weather provider that
+// cannot be resolved is an error; no wave provider is a gap the result shows
+// as waves not checked, never calm seas.
+func (d assistantToolDeps) passageSources(tool string, zone func() (string, error), now time.Time) (passageSources, error) {
 	wx, wxID, err := d.weather()
 	if err != nil {
-		return "", fmt.Errorf("assess_passage_window: %w", err)
+		return passageSources{}, err
 	}
 
 	// A provider gap is logged once per cause per call, naming the provider
@@ -1105,12 +1247,10 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		defer logMu.Unlock()
 		if !logged[cause] {
 			logged[cause] = true
-			log.Printf("assistant: assess_passage_window: "+format, v...)
+			log.Printf("assistant: "+tool+": "+format, v...)
 		}
 	}
 
-	// No wave provider is a gap the card shows as "wave not checked", not an
-	// error and never calm seas.
 	var wv waveProvider
 	var wvID string
 	if d.waves != nil {
@@ -1122,7 +1262,6 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		}
 	}
 	const days = assistantMaxForecastDays
-	now := d.now()
 	// Fetch runs for several points at once.
 	var fallbackMu sync.Mutex
 	var fallbackModel string
@@ -1130,18 +1269,29 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		if err := ctx.Err(); err != nil {
 			return passageForecast{}, err
 		}
-		// Every point is fetched in the itinerary's zone, the one the assessor
-		// buckets and labels every day in (assessItinerary), so a provider's
-		// daily rollup can't land on a different boundary from the one read.
-		if len(args.Legs) == 0 || len(args.Legs[0].Route) == 0 {
-			return passageForecast{}, fmt.Errorf("assess_passage_window: the itinerary has no first point to take its time zone from")
-		}
-		first := args.Legs[0].Route[0]
-		itineraryZone, err := zoneAt(first.Lat, first.Lon)
+		zoneName, err := zone()
 		if err != nil {
 			return passageForecast{}, err
 		}
-		wb, err := wx.FetchForecast(lat, lon, days, itineraryZone.Name)
+		// The wave read is slow and does not depend on the weather one, so they run
+		// together; the weather's error, if any, still decides the result.
+		type waveRead struct {
+			b    waveForecastBundle
+			werr error
+		}
+		var waves chan waveRead
+		if wv != nil {
+			waves = make(chan waveRead, 1)
+			go func() {
+				b, werr := wv.FetchWaves(lat, lon, days)
+				waves <- waveRead{b, werr}
+			}()
+		}
+		wb, err := wx.FetchForecast(lat, lon, days, zoneName)
+		var wr waveRead
+		if waves != nil {
+			wr = <-waves
+		}
 		if err != nil {
 			return passageForecast{}, fmt.Errorf("weather provider %q: %w", wxID, err)
 		}
@@ -1154,7 +1304,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 			if err := ctx.Err(); err != nil {
 				return passageForecast{}, err
 			}
-			if b, werr := wv.FetchWaves(lat, lon, days); werr != nil {
+			if b, werr := wr.b, wr.werr; werr != nil {
 				logOnce("wavefetch:"+wvID+":"+werr.Error(), "wave provider %q failed at %.2f, %.2f, waves not checked: %v", wvID, lat, lon, werr)
 			} else {
 				vb = &b
@@ -1179,13 +1329,53 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		}
 		st, err := d.resolveTideStation(lat, lon)
 		if err != nil {
-			err = fmt.Errorf("assess_passage_window: %w", err)
 			_, id, _ := d.tides()
 			logOnce("tides:"+id+":"+err.Error(), "tide provider %q failed at %.2f, %.2f, wind against tide not checked: %v", id, lat, lon, err)
 			return nil, err
 		}
 		return st.chart.Extremes, nil
 	}
+	return passageSources{fc: fc, tides: tides, fallbackModel: func() string {
+		fallbackMu.Lock()
+		defer fallbackMu.Unlock()
+		return fallbackModel
+	}}, nil
+}
+
+func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	args, err := parsePassageWindowArgs(raw)
+	if err != nil {
+		return "", err
+	}
+	if d.passageLimits == nil {
+		return "", fmt.Errorf("assess_passage_window: passage limits are not available")
+	}
+	limits, err := d.passageLimits()
+	if err != nil {
+		return "", fmt.Errorf("assess_passage_window: %w", err)
+	}
+	now := d.now()
+	src, err := d.passageSources("assess_passage_window", func() (string, error) {
+		// Every point is fetched in the itinerary's zone, the one the assessor
+		// buckets and labels every day in (assessItinerary), so a provider's
+		// daily rollup can't land on a different boundary from the one read.
+		if len(args.Legs) == 0 || len(args.Legs[0].Route) == 0 {
+			return "", fmt.Errorf("the itinerary has no first point to take its time zone from")
+		}
+		first := args.Legs[0].Route[0]
+		itineraryZone, err := zoneAt(first.Lat, first.Lon)
+		if err != nil {
+			return "", err
+		}
+		return itineraryZone.Name, nil
+	}, now)
+	if err != nil {
+		return "", fmt.Errorf("assess_passage_window: %w", err)
+	}
+	fc, tides := src.fc, src.tides
 	payload, err := assessItinerary(ctx, args, limits, now, fc, tides, sunTimes)
 	if err != nil {
 		return "", err
@@ -1200,7 +1390,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	}
 	model := newPassageModelResult(payload, d.cards != nil)
 	model.Notes = ignoredSpeedNotes(args)
-	if fallbackModel != "" {
+	if fallbackModel := src.fallbackModel(); fallbackModel != "" {
 		model.Notes = append(model.Notes, fmt.Sprintf("Wave figures at some points come from the fallback model %s, because the usual wave model has no data there. Say so when you give wave figures.", fallbackModel))
 	}
 	text, err := capToolResultJSON(model, model.shrink)

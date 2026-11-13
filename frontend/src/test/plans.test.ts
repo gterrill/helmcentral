@@ -266,7 +266,7 @@ describe("the editor's draft", () => {
 });
 
 describe("leg wording", () => {
-  const base = { from: 0, to: 1, distanceNm: null, courseDeg: null, route: [], note: "", reason: "", errorKind: "", errorStop: "", moved: [] };
+  const base = { from: 0, to: 1, distanceNm: null, courseDeg: null, route: [], note: "", reason: "", errorKind: "", errorStop: "", errorTo: "", moved: [] };
 
   it("says a stop on land needs moving, without coordinates", () => {
     const text = legErrorText({
@@ -277,6 +277,21 @@ describe("leg wording", () => {
     });
     expect(text.summary).toBe("Can't route: Great Sandy Straits Marina is on land here. Change the stop to a spot on the water.");
     expect(text.detail).toContain("-25.2930");
+  });
+
+  it("says closed-off water plainly with both stop names, no coordinates", () => {
+    const text = legErrorText({
+      ...base,
+      error: "no passage distance for Manly Boat Harbour to The Boat Works: no water route found from -27.4550, 153.1880 to -27.8615, 153.3520 within 50 nm of the straight line: the water between them is closed off by charted shoreline",
+      reason: "no water route found from -27.4550, 153.1880 to -27.8615, 153.3520 within 50 nm of the straight line: the water between them is closed off by charted shoreline",
+      errorKind: "closed_off",
+      errorStop: "Manly Boat Harbour",
+      errorTo: "The Boat Works",
+    });
+    expect(text.summary).toBe(
+      "Can't route: the water between Manly Boat Harbour and The Boat Works is closed off on the chart. Move a stop or add a via place.",
+    );
+    expect(text.detail).toContain("-27.4550");
   });
 
   it("shortens any other router error and keeps the full message as detail", () => {

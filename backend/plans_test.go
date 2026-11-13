@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -684,6 +685,22 @@ func TestPlanLegs_AnEndOnLandNamesTheStopAndKeepsTheRouterMessage(t *testing.T) 
 	if !strings.HasPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") ||
 		legs[0].Reason != strings.TrimPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") {
 		t.Fatalf("the reason is the router's words without the sentence round them: %q / %q", legs[0].Error, legs[0].Reason)
+	}
+}
+
+func TestPlanLegs_ClosedOffWaterGetsAKindAndTheTwoPlaceNames(t *testing.T) {
+	prev := planRouteSegment
+	t.Cleanup(func() { planRouteSegment = prev })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		return waterRoute{}, fmt.Errorf("%w from -27.4550, 153.1880 to -27.8615, 153.3520 within 50 nm of the straight line: the water between them is closed off by charted shoreline", errNoWaterRoute)
+	}
+	p := planAt(t, "2026-11-14", 1, 1, 0)
+	legs := planLegs(context.Background(), p)
+	if legs[0].ErrorKind != "closed_off" || legs[0].ErrorStop != "Great Sandy Straits Marina" || legs[0].ErrorTo != "Pelican Bay" {
+		t.Fatalf("leg 0 = %+v", legs[0])
+	}
+	if !strings.Contains(legs[0].Error, "closed off by charted shoreline") {
+		t.Fatalf("the router's wording must stay: %q", legs[0].Error)
 	}
 }
 

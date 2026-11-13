@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { ForecastPage } from "@/components/forecast-page";
+import { usePlanAssessment } from "@/hooks/use-plan-assessment";
 import { usePlanLegs, usePlans } from "@/hooks/use-plans";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
@@ -40,6 +41,7 @@ vi.mock("@/components/plan-leg-map", () => ({
   PlanLegMap: () => <div data-testid="leg-map" />,
 }));
 vi.mock("@/hooks/use-plans");
+vi.mock("@/hooks/use-plan-assessment");
 vi.mock("@/hooks/use-plan-day-forecast");
 vi.mock("@/hooks/use-weather-forecast");
 vi.mock("@/hooks/use-wave-forecast");
@@ -107,16 +109,17 @@ function plansState(plans: unknown[], currentId: number | null, legs: unknown[] 
     refetch: vi.fn(),
   } as never);
   vi.mocked(usePlanLegs).mockReturnValue({ legs, loading: false, error: null } as never);
+  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: null, loading: false, error: null });
 }
 
 const LEGS = [
-  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", moved: [] },
-  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land", reason: "start is on land", errorKind: "", errorStop: "", moved: [] },
+  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", errorTo: "", moved: [] },
+  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land", reason: "start is on land", errorKind: "", errorStop: "", errorTo: "", moved: [] },
 ];
 
 const ROUTED = [
   LEGS[0],
-  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", moved: [] },
+  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", errorTo: "", moved: [] },
 ];
 
 const boatProps = {

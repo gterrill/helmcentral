@@ -263,16 +263,7 @@ func (f *forecastWarningsFetcher) fetchOnce(now time.Time) {
 		return
 	}
 
-	bundle, err := provider.FetchWarnings(lat, lon)
-	if err == nil && forecastWarningsBundleIsStaleServed(bundle, provider.TTLSeconds(), now) {
-		// The WASM adapter's own stale-on-error cache fallback
-		// (wasm_forecast_warnings_provider.go) returns err == nil with an old
-		// CachedAt when the upstream is unreachable, so a dead provider looks
-		// exactly like a healthy cache hit unless this is checked explicitly.
-		// Treating it as a failure here, not a value, is what keeps a dead
-		// BOM from reading as "no warnings in force".
-		err = fmt.Errorf("provider %q served a cached bundle from %s, older than its own %ds TTL: the upstream fetch is failing", id, bundle.CachedAt.UTC().Format(time.RFC3339), provider.TTLSeconds())
-	}
+	bundle, err := fetchCheckedWarnings(provider, id, lat, lon, now)
 	if err != nil {
 		f.logFetchError(fmt.Sprintf("forecast warnings provider %q error: %v", id, err))
 		f.nextDue = now.Add(f.interval)
@@ -289,6 +280,21 @@ func (f *forecastWarningsFetcher) fetchOnce(now time.Time) {
 	}
 
 	f.nextDue = now.Add(f.interval)
+}
+
+// fetchCheckedWarnings reads the provider's warnings at a place and refuses a
+// stale-served bundle. The WASM adapter's own stale-on-error cache fallback
+// (wasm_forecast_warnings_provider.go) returns err == nil with an old CachedAt
+// when the upstream is unreachable, so a dead provider looks exactly like a
+// healthy cache hit unless this is checked explicitly. Treating it as a failure
+// here, not a value, is what keeps a dead BOM from reading as "no warnings in
+// force". The fetch loop and the passage plan both read through it.
+func fetchCheckedWarnings(provider forecastWarningsProvider, id string, lat, lon float64, now time.Time) (forecastWarningsBundle, error) {
+	bundle, err := provider.FetchWarnings(lat, lon)
+	if err == nil && forecastWarningsBundleIsStaleServed(bundle, provider.TTLSeconds(), now) {
+		err = fmt.Errorf("provider %q served a cached bundle from %s, older than its own %ds TTL: the upstream fetch is failing", id, bundle.CachedAt.UTC().Format(time.RFC3339), provider.TTLSeconds())
+	}
+	return bundle, err
 }
 
 // forecastWarningsBundleIsStaleServed reports whether bundle can only have

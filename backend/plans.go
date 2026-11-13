@@ -720,9 +720,12 @@ type planLeg struct {
 	Error  string `json:"error,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// ErrorKind and ErrorStop are structured forms of Error for the page's
-	// own wording: "on_land" and the stop whose end is off the water.
+	// own wording: "on_land" with the stop whose end is off the water, or
+	// "closed_off" with the two places (ErrorStop to ErrorTo) the charted
+	// shoreline cuts apart.
 	ErrorKind string `json:"error_kind,omitempty"`
 	ErrorStop string `json:"error_stop,omitempty"`
+	ErrorTo   string `json:"error_to,omitempty"`
 	// Moved lists stops charted behind the shoreline and how far, as Note
 	// says in the router's words.
 	Moved []planLegMoved `json:"moved,omitempty"`
@@ -819,7 +822,11 @@ func planLegFor(ctx context.Context, route segmentRouter, p plan, i int) planLeg
 		leg.Reason = err.Error()
 		leg.Error = fmt.Sprintf("no passage distance for %s to %s: %s", segmentName(p, i, seg.Segment), segmentName(p, i, seg.Segment+1), leg.Reason)
 		var onLand *waterRouteOnLandError
-		if errors.As(err, &onLand) {
+		if errors.Is(err, errNoWaterRoute) {
+			leg.ErrorKind = "closed_off"
+			leg.ErrorStop = segmentName(p, i, seg.Segment)
+			leg.ErrorTo = segmentName(p, i, seg.Segment+1)
+		} else if errors.As(err, &onLand) {
 			leg.ErrorKind = "on_land"
 			if onLand.AtStart {
 				leg.ErrorStop = segmentName(p, i, seg.Segment)
@@ -961,6 +968,7 @@ func updatePlanHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
+	planAssessMemoDrop(id)
 	return respondPlan(c, saved)
 }
 
@@ -993,6 +1001,7 @@ func patchPlanStopHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
+	planAssessMemoDrop(id)
 	return respondPlan(c, saved)
 }
 
@@ -1008,6 +1017,7 @@ func deletePlanHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
+	planAssessMemoDrop(id)
 	return c.JSON(http.StatusOK, map[string]bool{"deleted": true})
 }
 
@@ -1039,5 +1049,6 @@ func plansRoutes() []apiRoute {
 		{http.MethodDelete, "/api/plans/:id", tierWrite, deletePlanHandler},
 		{http.MethodPatch, "/api/plans/:id/stops/:index", tierWrite, patchPlanStopHandler},
 		{http.MethodGet, "/api/plans/:id/legs", tierRead, planLegsHandler},
+		{http.MethodGet, "/api/plans/:id/assessment", tierRead, planAssessmentHandler},
 	}
 }

@@ -5,32 +5,51 @@ import { Map as MapIcon, Plus } from "lucide-react";
 import { PlanLegMap } from "@/components/plan-leg-map";
 import { Button } from "@/components/ui/button";
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
+import { usePlanAssessment } from "@/hooks/use-plan-assessment";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
 import type { ForecastPlace } from "@/lib/forecast-place";
+import { notCheckedWords } from "@/lib/passage-measures";
 import { PlanForecastContext, PlanForecastStore, placeKey } from "@/lib/plan-forecast-store";
 import {
   buildPlanRows,
+  currentText,
   formatWaveRange,
   formatWindRange,
   legForecastPlace,
+  verdictText,
   windRelation,
   withinForecastHorizon,
+  type LegVerdict,
   type Plan,
+  type PlanAssessment,
   type PlanLeg,
+  type PlanLegAssessment,
+  type PlanStopWarning,
   legErrorText,
   legNoteText,
   type PlanRow,
 } from "@/lib/plans";
 import { formatDayMonth, formatWeekday } from "@/lib/stay";
-import { formatDayKey, zoneKnown } from "@/lib/vessel-time";
+import { formatDayKey, formatHourMinute, formatTimeOfDay, zoneKnown } from "@/lib/vessel-time";
 
-// The columns, widest screen first. Below md each row is a card and each cell
-// carries its own label. The Verdict column joins the end of this template
-// when the verdicts ship; the row cells are kept narrow enough to take it.
+// The columns, widest first. The grid switches on the table's own width (the
+// table is an @container), not the screen's: beside the sidebar and a second
+// column a 768 px screen leaves the table about 480 px. Narrower than that
+// each row is a card and each cell carries its own label. Leg and Depart → ETA
+// get the most room and wrap; nothing in them is cut short with an ellipsis.
+// There is no Lightning column: the lightning forecast is read for the boat's
+// own cell only, so it cannot be read for a leg (ADR 0286).
 const GRID =
-  "md:grid md:grid-cols-[3rem_6.5rem_minmax(0,1fr)_4.5rem_5.5rem_minmax(0,8rem)_4rem_4.5rem] md:items-start md:gap-x-3";
+  "@[72rem]:grid @[72rem]:grid-cols-[3rem_6rem_minmax(14rem,2fr)_4rem_minmax(9rem,1.2fr)_minmax(6.5rem,1fr)_3.5rem_4rem_minmax(5.5rem,0.8fr)_minmax(9.5rem,1.2fr)] @[72rem]:items-start @[72rem]:gap-x-2";
+
+const VERDICT_CLASS: Record<LegVerdict, string> = {
+  go: "text-emerald-600 dark:text-emerald-400",
+  marginal: "text-amber-600 dark:text-amber-400",
+  no_go: "text-red-600 dark:text-red-400",
+  no_data: "text-muted-foreground",
+};
 
 /**
  * The row the operator chose, by its key (PlanRow.key). Its stop and dates are
@@ -116,11 +135,37 @@ export function PlanTable({
     }
     return [...byKey.values()];
   }, [rows, plan, legByFrom, today]);
+  const { assessment, error: assessmentError } = usePlanAssessment(plan);
+  const assessmentState: AssessmentState = assessment ? "ready" : assessmentError ? "failed" : "loading";
+  const rowAssessments = useMemo(
+    () => buildRowAssessments(rows, assessment, assessmentState),
+    [rows, assessment, assessmentState],
+  );
+  const zone = plan.stops[0]?.timezone;
   return (
-    <div role="table" aria-label={`${plan.name} day by day`} className="space-y-2">
+    <div role="table" aria-label={`${plan.name} day by day`} className="@container space-y-2">
       {legsError && (
         <p role="alert" className="text-xs text-destructive">
           The legs could not be routed: {legsError}
+        </p>
+      )}
+      {assessmentError && (
+        <p role="alert" className="text-xs text-destructive">
+          The plan could not be checked against the forecast: {assessmentError}
+        </p>
+      )}
+      {assessment?.problem && (
+        <p role="alert" className="text-xs text-destructive">
+          {assessment.problem}
+        </p>
+      )}
+      {assessment?.warningsError && (
+        <p className="text-xs text-muted-foreground">Warnings not checked: {assessment.warningsError}</p>
+      )}
+      {assessment && zone && (
+        <p data-testid="plan-assessment-asof" className="text-xs text-muted-foreground">
+          Verdicts as of {formatTimeOfDay(assessment.asOf, zone)}
+          {assessment.forecastAsOf ? ` · forecast fetched ${formatTimeOfDay(assessment.forecastAsOf, zone)}` : ""}
         </p>
       )}
       <div
@@ -135,6 +180,8 @@ export function PlanTable({
         <span role="columnheader">Wind</span>
         <span role="columnheader">Gusts</span>
         <span role="columnheader">Waves</span>
+        <span role="columnheader">Current</span>
+        <span role="columnheader">Verdict</span>
       </div>
       <PlanForecastContext.Provider value={store}>
         {places.map((place) => (
@@ -147,6 +194,7 @@ export function PlanTable({
               row={row}
               plan={plan}
               leg={row.kind === "passage" ? legByFrom.get(row.legIndex) : undefined}
+              assessed={rowAssessments.get(row.key)!}
               legsLoading={legsLoading}
               canWrite={canWrite}
               selected={selectedRowKey === row.key}
@@ -161,6 +209,43 @@ export function PlanTable({
   );
 }
 
+type AssessmentState = "loading" | "ready" | "failed";
+
+/** What the assessment says about one row, worked out once per assessment. */
+interface RowAssessment {
+  /** A passage row's leg verdict; undefined until the assessment has one for it. */
+  leg: PlanLegAssessment | undefined;
+  state: AssessmentState;
+  /** A stop row's warning for the night it is read for. */
+  nightWarning: PlanStopWarning | undefined;
+  /** A passage row's warning at the stop it arrives at, for the night of arrival. */
+  arrivalWarning: PlanStopWarning | undefined;
+}
+
+/** Every row's view of the assessment, built from one pass over its legs and warnings. */
+function buildRowAssessments(
+  rows: PlanRow[],
+  assessment: PlanAssessment | null,
+  state: AssessmentState,
+): Map<string, RowAssessment> {
+  const legs = new Map((assessment?.legs ?? []).map((l) => [l.leg, l]));
+  const warnings = new Map<string, PlanStopWarning>();
+  for (const s of assessment?.stops ?? []) for (const n of s.nights) warnings.set(`${s.stop}|${n.date}`, n);
+  return new Map(
+    rows.map((row) => [
+      row.key,
+      row.kind === "passage"
+        ? {
+            leg: legs.get(row.legIndex),
+            state,
+            nightWarning: undefined,
+            arrivalWarning: warnings.get(`${row.legIndex + 1}|${row.dayKey}`),
+          }
+        : { leg: undefined, state, nightWarning: warnings.get(`${row.stopIndex}|${row.dayKey}`), arrivalWarning: undefined },
+    ]),
+  );
+}
+
 function Cell({
   label,
   className = "",
@@ -172,7 +257,7 @@ function Cell({
 }) {
   return (
     <div role="cell" className={`min-w-0 ${className}`}>
-      <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground md:hidden">
+      <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground @[72rem]:hidden">
         {label}
       </span>
       <span className="text-sm tabular-nums">{children}</span>
@@ -180,10 +265,116 @@ function Cell({
   );
 }
 
+function WarningLink({ warning, prefix = "" }: { warning: PlanStopWarning; prefix?: string }) {
+  const text = `${prefix}${warning.warning}`;
+  return warning.url ? (
+    <a href={warning.url} target="_blank" rel="noreferrer" className="underline">
+      {text}
+    </a>
+  ) : (
+    <>{text}</>
+  );
+}
+
+/**
+ * Depart → ETA. An operator's time reads plain; one the server suggested reads
+ * "Suggested 6.40 AM" in muted italics, so it is never taken for a time the
+ * operator set. With no time at all there is nothing to show.
+ */
+function departEtaText(
+  a: PlanLegAssessment | undefined,
+  fromZone: string,
+  toZone: string,
+  operatorTime: string,
+): { text: string; suggested: boolean } {
+  if (a?.depart) {
+    const dep = formatTimeOfDay(a.depart, fromZone);
+    const eta = a.arrive ? ` → ${formatTimeOfDay(a.arrive, toZone)}` : " →";
+    return { text: `${a.departSuggested ? "Suggested " : ""}${dep}${eta}`, suggested: a.departSuggested };
+  }
+  const m = /^(\d\d):(\d\d)$/.exec(operatorTime);
+  if (m) return { text: `${formatHourMinute(Number(m[1]), Number(m[2]))} →`, suggested: false };
+  return { text: "—", suggested: false };
+}
+
+function DepartEtaCell({
+  passage,
+  a,
+  fromZone,
+  toZone,
+  operatorTime,
+  state,
+}: {
+  passage: boolean;
+  a: PlanLegAssessment | undefined;
+  fromZone: string;
+  toZone: string;
+  operatorTime: string;
+  state: AssessmentState;
+}) {
+  if (!passage) return <Cell label="Depart → ETA">—</Cell>;
+  const { text, suggested } = departEtaText(a, fromZone, toZone, operatorTime);
+  const waiting = text === "—" && a === undefined && state === "loading";
+  return (
+    <Cell label="Depart → ETA">
+      <span
+        className={`block break-words ${suggested ? "italic text-muted-foreground" : ""}`}
+        title={
+          suggested
+            ? "Suggested: no departure time is set. The best verdict inside daylight (Go over Marginal, No-Go only when every time is No-Go), then the fairest stream."
+            : undefined
+        }
+      >
+        {waiting ? "…" : text}
+      </span>
+    </Cell>
+  );
+}
+
+/** The verdict column for a passage row: the verdict and its limiting factor, or why there is none. */
+function VerdictText({
+  a,
+  state,
+  noForecast,
+}: {
+  a: PlanLegAssessment | undefined;
+  state: AssessmentState;
+  noForecast: boolean;
+}) {
+  if (a === undefined) {
+    return <span className="text-sm text-muted-foreground">{state === "loading" ? "…" : "—"}</span>;
+  }
+  // The problem that stopped every verdict is said once, above the table.
+  if (a.verdict === null && a.noteKind === "problem") {
+    return <span className="text-sm text-muted-foreground">Not checked</span>;
+  }
+  // A day past the forecast already says so across the wind columns.
+  if (a.verdict === null && noForecast && a.noteKind === "no_forecast") {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
+  const text = verdictText(a);
+  if (text === null) return <span className="text-sm text-muted-foreground">—</span>;
+  const notChecked = a.verdict === null ? [] : notCheckedWords(a.notChecked);
+  return (
+    <>
+      <p
+        className={`text-sm font-medium ${a.verdict ? VERDICT_CLASS[a.verdict] : "text-muted-foreground"}`}
+        title={a.verdict === "go" && a.limiting ? `Closest to a limit: ${a.limiting}` : undefined}
+      >
+        {text}
+      </p>
+      {notChecked.length > 0 && (
+        <p className="text-xs text-muted-foreground">Not checked: {notChecked.join(", ")}</p>
+      )}
+    </>
+  );
+}
+
 const PlanDayRow = memo(function PlanDayRow({
   row,
   plan,
   leg,
+  assessed,
   legsLoading,
   canWrite,
   selected,
@@ -194,6 +385,8 @@ const PlanDayRow = memo(function PlanDayRow({
   row: PlanRow;
   plan: Plan;
   leg: PlanLeg | undefined;
+  /** What the server's assessment says about this row. */
+  assessed: RowAssessment;
   legsLoading: boolean;
   canWrite: boolean;
   selected: boolean;
@@ -236,7 +429,7 @@ const PlanDayRow = memo(function PlanDayRow({
       <div role="cell" className="min-w-0">
         <button
           type="button"
-          className="block w-full min-w-0 truncate text-left text-sm font-medium hover:underline"
+          className="block w-full min-w-0 break-words text-left text-sm font-medium hover:underline"
           aria-pressed={selected}
           // A leg that did not route has no place to open the forecast at.
           disabled={unrouted}
@@ -245,7 +438,7 @@ const PlanDayRow = memo(function PlanDayRow({
           {passage && to ? `${from.name} → ${to.name}` : `${from.name} · ${leaving ? "leave" : "lay day"}`}
         </button>
         {passage && from.vias.length > 0 && (
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="break-words text-xs text-muted-foreground">
             via {from.vias.map((v) => v.name).join(", ")}
           </p>
         )}
@@ -300,18 +493,25 @@ const PlanDayRow = memo(function PlanDayRow({
               ? "Not routed"
               : `${leg.distanceNm.toFixed(1)} nm`}
       </Cell>
-      <Cell label="Depart → ETA">{passage && from.departTime ? `${from.departTime} →` : "—"}</Cell>
+      <DepartEtaCell
+        passage={passage}
+        a={assessed.leg}
+        fromZone={from.timezone}
+        toZone={to?.timezone ?? from.timezone}
+        operatorTime={from.departTime}
+        state={assessed.state}
+      />
 
       {unrouted ? (
-        <div role="cell" className="min-w-0 text-sm text-muted-foreground md:col-span-3">
+        <div role="cell" className="min-w-0 text-sm text-muted-foreground @[72rem]:col-span-3">
           {leg?.error ? "No forecast: the leg is not routed" : legsLoading ? "…" : "—"}
         </div>
       ) : noForecast ? (
-        <div role="cell" className="min-w-0 text-sm text-muted-foreground md:col-span-3">
+        <div role="cell" className="min-w-0 text-sm text-muted-foreground @[72rem]:col-span-3">
           No forecast yet
         </div>
       ) : forecast.error ? (
-        <div role="cell" className="min-w-0 text-xs text-destructive md:col-span-3">
+        <div role="cell" className="min-w-0 text-xs text-destructive @[72rem]:col-span-3">
           Forecast failed: {forecast.error}
         </div>
       ) : (
@@ -340,8 +540,42 @@ const PlanDayRow = memo(function PlanDayRow({
         </>
       )}
 
+      <Cell label="Current">
+        {passage && assessed.leg?.currentKn != null ? (
+          currentText(assessed.leg.currentKn)
+        ) : (
+          <span title={passage ? assessed.leg?.currentNote || undefined : undefined}>
+            {passage && assessed.leg === undefined && assessed.state === "loading" ? "…" : "—"}
+          </span>
+        )}
+      </Cell>
+
+      <div role="cell" className="min-w-0">
+        <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground @[72rem]:hidden">
+          Verdict
+        </span>
+        {passage ? (
+          <VerdictText
+            a={assessed.leg}
+            state={assessed.state}
+            noForecast={noForecast}
+          />
+        ) : (
+          assessed.nightWarning && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              <WarningLink warning={assessed.nightWarning} />
+            </p>
+          )
+        )}
+        {passage && assessed.arrivalWarning && to && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            <WarningLink warning={assessed.arrivalWarning} prefix={`${to.name} tonight: `} />
+          </p>
+        )}
+      </div>
+
       {mapOpen && hasMap && leg && to && (
-        <div className="mt-2 md:col-span-8">
+        <div className="mt-2 @[72rem]:col-span-10">
           <PlanLegMap from={from} to={to} leg={leg} />
         </div>
       )}

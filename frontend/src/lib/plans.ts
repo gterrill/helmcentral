@@ -64,18 +64,116 @@ export interface PlanLeg {
   error: string;
   /** The router's words alone, without the "no passage distance for A to B" lead. */
   reason: string;
-  /** "on_land" when a stop is off the water; empty for any other failure. */
+  /** "on_land" when a stop is off the water, "closed_off" when the shoreline cuts two places apart; empty for any other failure. */
   errorKind: string;
   errorStop: string;
+  /** With "closed_off", the place after errorStop. */
+  errorTo: string;
   /** Stops charted behind the shoreline and how far, in nautical miles. */
   moved: Array<{ stop: string; nm: number }>;
 }
 
+export type LegVerdict = "go" | "marginal" | "no_go" | "no_data";
+
+/**
+ * What sort of reason a leg's note is, sent by the server so the table never
+ * reads the words. "problem" is the one thing said above the table for the
+ * whole plan; "no_forecast" is a day past the forecast; "" is no note.
+ */
+export type PlanNoteKind =
+  | ""
+  | "problem"
+  | "no_forecast"
+  | "not_routed"
+  | "past"
+  | "overnight"
+  | "no_window"
+  | "no_departure"
+  | "gap"
+  | "other";
+
+/**
+ * A leg's verdict and the figures beside it, from the server's assessment
+ * (ADR 0286). `verdict` is null when the leg has none and `note` says why.
+ * `depart` and `arrive` are instants; `departSuggested` marks a departure the
+ * operator did not set. `currentKn` is positive when the current helps the boat,
+ * null when it could not be read.
+ */
+export interface PlanLegAssessment {
+  leg: number;
+  date: string;
+  verdict: LegVerdict | null;
+  limiting: string;
+  note: string;
+  noteKind: PlanNoteKind;
+  depart: string | null;
+  departSuggested: boolean;
+  arrive: string | null;
+  hours: number | null;
+  speedKn: number | null;
+  currentKn: number | null;
+  currentNote: string;
+  notChecked: string[];
+}
+
+/** An official warning in force the night the boat is at a stop. */
+export interface PlanStopWarning {
+  date: string;
+  warning: string;
+  url: string;
+}
+
+export interface PlanAssessment {
+  /** When the verdicts were worked out. */
+  asOf: string;
+  /** When the oldest forecast they read was fetched; null when none was read. */
+  forecastAsOf: string | null;
+  /** The one thing that stopped the verdicts for the whole plan. */
+  problem: string;
+  /** Why warnings could not be read; empty when they could. */
+  warningsError: string;
+  legs: PlanLegAssessment[];
+  stops: Array<{ stop: number; nights: PlanStopWarning[] }>;
+}
+
+/**
+ * The verdict column's text: "Go", "Marginal: wind 15 kn ahead", "No-Go: gusts
+ * 32 kn ahead", "No data". A leg with no verdict says why instead; null when it
+ * has neither.
+ */
+export function verdictText(leg: Pick<PlanLegAssessment, "verdict" | "limiting" | "note">): string | null {
+  switch (leg.verdict) {
+    case "go":
+      return "Go";
+    case "marginal":
+      return leg.limiting ? `Marginal: ${leg.limiting}` : "Marginal";
+    case "no_go":
+      return leg.limiting ? `No-Go: ${leg.limiting}` : "No-Go";
+    case "no_data":
+      return "No data";
+    default:
+      return leg.note === "" ? null : leg.note;
+  }
+}
+
+/** "0.8 kn hindering", "1.0 kn helping", "0.0 kn" when it rounds to nothing. */
+export function currentText(kn: number): string {
+  const size = Math.abs(kn).toFixed(1);
+  if (size === "0.0") return `${size} kn`;
+  return `${size} kn ${kn > 0 ? "helping" : "hindering"}`;
+}
+
 /** The operator's wording for a failed leg; `detail` is the router's message. */
-export function legErrorText(leg: Pick<PlanLeg, "error" | "reason" | "errorKind" | "errorStop">): {
+export function legErrorText(leg: Pick<PlanLeg, "error" | "reason" | "errorKind" | "errorStop" | "errorTo">): {
   summary: string;
   detail: string;
 } {
+  if (leg.errorKind === "closed_off" && leg.errorStop && leg.errorTo) {
+    return {
+      summary: `Can't route: the water between ${leg.errorStop} and ${leg.errorTo} is closed off on the chart. Move a stop or add a via place.`,
+      detail: leg.error,
+    };
+  }
   if (leg.errorKind === "on_land" && leg.errorStop) {
     return {
       summary: `Can't route: ${leg.errorStop} is on land here. Change the stop to a spot on the water.`,

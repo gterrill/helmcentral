@@ -35,14 +35,15 @@ shore. If that route isn't the one you'll sail, add a via place.
 
 In the table, choose **Route** on a passage row to see the path on a small map.
 If Helmcentral can't route a leg, the row says why and shows no distance. It
-never draws a straight line.
+never draws a straight line. When the charted shoreline closes off the water
+between two places, the row names them. Move a stop or add a via place.
 
 ## Read the table
 
 1. The page opens on the plan whose dates include today, or the next one coming
    up. Choose another plan from the buttons above the table.
-2. Each row is a day. A passage row shows the leg, its distance and your
-   departure time if you set one. Its wind, gusts and waves are read at the
+2. Each row is a day. A passage row shows the leg, its distance, when you leave
+   and when you should arrive. Its wind, gusts and waves are read at the
    middle of the leg, with the wind marked ahead, abeam or astern of your
    course. A lay day shows the wind and waves from 6 PM that day to 6 AM the
    next morning. The last stop's final row says **leave**: it is the day you
@@ -53,6 +54,41 @@ never draws a straight line.
    passage row that's the middle of the leg, and the heading says so. A leg that
    couldn't be routed can't be opened. The heading says it isn't the boat's
    position. Choose **Boat** to go back.
+
+## Read the verdict
+
+The last column judges each passage against your own passage limits. Set those
+first under **Settings → Mate → Passage limits**, as
+[Set your passage limits](set-passage-limits.md) describes. Until you do, the
+page says the limits aren't set and shows no verdicts.
+
+1. Read the word first. **Go** means every hour of the leg is inside your limits.
+   **Marginal** means some hour is past 70 percent of a limit. **No-Go** means
+   some hour is past a limit, and the row names it, for example "No-Go: gusts 32
+   kn ahead". **No data** means the forecast has a gap along the leg.
+2. Look at **Depart → ETA**. A time in plain type is the one you set with
+   **Leave at**. A time in italics, like "Suggested 6.40 AM", is Helmcentral's
+   suggestion, and the verdict is judged at that time. It's the Go time with the
+   fairest stream, or a Marginal one when no time is Go. When every time that
+   day is a No-Go, it shows the least bad one, and the verdict says No-Go. To use
+   another, choose **Change plan** and set **Leave at**. Helmcentral never moves
+   a time you set. The arrival comes from the speed your boat made on the
+   passages Helmcentral recorded over the last twelve months. With none recorded
+   yet, the row says there's no ETA.
+3. If the row says "No daylight window", no departure between first light and
+   the last one that arrives in daylight fits the leg. Set a **Leave at** if you
+   want to see how the leg judges at a time you pick.
+4. Look at **Current**. "0.8 kn hindering" means the modelled current runs
+   against you at that time. A dash means the model has no figure for the leg,
+   and hovering over it says why.
+5. Read the line above the table. It says when the verdicts were worked out and
+   when the forecast behind them was fetched. They update on their own each
+   time the forecast refreshes.
+
+A leg further out than the forecast says "No forecast yet" and has no verdict.
+A leg that would run past a day says it isn't judged yet. On a lay day, the
+verdict column shows an official warning that covers that night, and stays empty
+when there isn't one.
 
 ## Change or delete a plan
 
