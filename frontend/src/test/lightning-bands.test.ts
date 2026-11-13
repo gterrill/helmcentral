@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 import {
   LIGHTNING_STEP_EDGES,
+  dayLightning,
   lightningAt,
   lightningLabel,
   lightningOpacity,
@@ -224,5 +225,112 @@ describe('lightningAt', () => {
     expect(lightningAt([a, b], T0 + 3 * H)).toBe(b)
     expect(lightningAt([a, b], T0 + 3 * H - 1)).toBe(a)
     expect(lightningAt([a, b], T0 + 6 * H)).toBeNull()
+  })
+})
+
+describe('dayLightning', () => {
+  // Brisbane is UTC+10 all year: 2026-06-14 runs 14:00Z on the 13th to 14:00Z on the 14th.
+  const DAY = Date.UTC(2026, 5, 13, 14)
+  const at = (hour: number, probability: number, hours = 3) => ({ startMs: DAY + hour * H, endMs: DAY + (hour + hours) * H, probability })
+  const steps = (r: ReturnType<typeof dayLightning>) => r.segments.map((seg) => seg.step)
+  const BNE = 'Australia/Brisbane'
+  const EMPTY = { segments: [], peak: null, sentence: null }
+
+  it('places the windows on the day as the chart band does, one slot per hour', () => {
+    const r = dayLightning([at(0, 0.05), at(3, 0.2), at(6, 0.45), at(9, 0.8), at(12, 0.02, 12)], '2026-06-14', BNE)
+    expect(steps(r)).toEqual([1, 2, 3])
+    // Hours 9 to 11, each slot halfway to its neighbours, on a 24-point axis.
+    expect(r.segments[2].from).toBeCloseTo(8.5 / 23)
+    expect(r.segments[2].to).toBeCloseTo(11.5 / 23)
+    expect(r.peak?.probability).toBe(0.8)
+    expect(r.sentence).toBe('Lightning likely from 9 AM to 12 PM.')
+  })
+
+  it('keeps a window to its own hours where the zone is not on the 3-hour grid', () => {
+    // New York in June is UTC-4: 18Z-21Z is 2 PM to 5 PM.
+    const nyDay = Date.UTC(2026, 5, 14, 4)
+    const w = (startZ: number, probability: number) => ({ startMs: nyDay + (startZ - 4) * H, endMs: nyDay + (startZ - 1) * H, probability })
+    const r = dayLightning([3, 6, 9, 12, 15, 18, 21, 24, 27].map((z) => w(z, z === 18 ? 0.8 : 0.02)), '2026-06-14', 'America/New_York')
+    expect(steps(r)).toEqual([3])
+    expect(r.sentence).toBe('Lightning likely from 2 PM to 5 PM.')
+  })
+
+  it('does not carry a storm just past midnight into the day before', () => {
+    expect(dayLightning([at(0, 0.02, 24), at(24, 0.8)], '2026-06-14', BNE)).toEqual(EMPTY)
+  })
+
+  it('words the sentence by the strongest step, over its first stretch', () => {
+    expect(dayLightning([at(0, 0.02, 21), at(21, 0.15)], '2026-06-14', BNE).sentence).toBe('Slight chance of lightning from 9 PM to midnight.')
+    expect(dayLightning([at(0, 0.05), at(3, 0.35), at(6, 0.15), at(9, 0.4), at(12, 0.02, 12)], '2026-06-14', BNE).sentence).toBe(
+      'Lightning possible from 3 AM to 6 AM.',
+    )
+    expect(dayLightning([at(0, 0.7), at(3, 0.02, 18), at(21, 0.7)], '2026-06-14', BNE).sentence).toBe('Lightning likely from 12 AM to 3 AM.')
+  })
+
+  it('says throughout the day only when the strongest step holds every hour', () => {
+    expect(dayLightning([at(0, 0.5, 24)], '2026-06-14', BNE).sentence).toBe('Lightning possible throughout the day.')
+  })
+
+  it('reads overlapping windows the way the chart band does, without failing', () => {
+    // The chart takes the first window holding an hour, so A's 15% wins 3 to 6 AM.
+    const r = dayLightning([at(0, 0.15, 6), at(3, 0.7), at(6, 0.02, 18)], '2026-06-14', BNE)
+    expect(steps(r)).toEqual([1])
+    expect(r.peak?.probability).toBe(0.15)
+    expect(r.sentence).toBe('Slight chance of lightning from 12 AM to 6 AM.')
+  })
+
+  it('leaves out the hours before the run and marks the hours past its end as no data', () => {
+    const r = dayLightning([at(6, 0.4), at(9, 0.1, 1)], '2026-06-14', BNE)
+    expect(steps(r)).toEqual([2, 1, null])
+    // The chart band's own slot for 6 AM, from halfway after 5 AM.
+    expect(r.segments[0].from).toBeCloseTo(5.5 / 23)
+    expect(r.segments[2].to).toBeCloseTo(1)
+  })
+
+  it('has no peak or sentence on a quiet day, though hours past the run still show', () => {
+    const r = dayLightning([at(0, 0.05, 12)], '2026-06-14', BNE)
+    expect(steps(r)).toEqual([null])
+    expect(r.peak).toBeNull()
+    expect(r.sentence).toBeNull()
+  })
+
+  it('has nothing to lay out with no window held, or on a day before the run', () => {
+    expect(dayLightning([], '2026-06-14', BNE)).toEqual(EMPTY)
+    expect(dayLightning([at(30, 0.8)], '2026-06-14', BNE)).toEqual(EMPTY)
+  })
+
+  it('ends the sentence where the stretch ends, not where its window does', () => {
+    // The 20% window comes first, so the chart reads it for noon to 3 PM.
+    expect(dayLightning([at(12, 0.2), at(0, 0.7, 24)], '2026-06-14', BNE).sentence).toBe('Lightning likely from 12 AM to 12 PM.')
+  })
+
+  it('still draws a run that starts in the last hour of the day', () => {
+    const r = dayLightning([at(23, 0.7)], '2026-06-14', BNE)
+    expect(steps(r)).toEqual([3])
+    expect(r.segments[0].to - r.segments[0].from).toBeGreaterThan(0)
+    expect(r.sentence).toBe('Lightning likely from 11 PM to midnight.')
+  })
+
+  it('places a clocks-change day by wall-clock hour, as the chart does', () => {
+    // Sydney springs forward on 2026-10-04 (AEDT, UTC+11 after 2 AM): 3 PM to 6 PM is 04:00Z to 07:00Z.
+    const r = dayLightning(
+      [
+        { startMs: Date.UTC(2026, 9, 3, 14), endMs: Date.UTC(2026, 9, 4, 4), probability: 0.02 },
+        { startMs: Date.UTC(2026, 9, 4, 4), endMs: Date.UTC(2026, 9, 4, 7), probability: 0.7 },
+        { startMs: Date.UTC(2026, 9, 4, 7), endMs: Date.UTC(2026, 9, 4, 13), probability: 0.02 },
+      ],
+      '2026-10-04',
+      'Australia/Sydney',
+    )
+    expect(r.segments[0].from).toBeCloseTo(14.5 / 23)
+    expect(r.sentence).toBe('Lightning likely from 3 PM to 6 PM.')
+  })
+
+  it('lays a clocks-forward day over its 23 hours', () => {
+    // Sydney springs forward at 2 AM on 2026-10-04: the day runs 14:00Z on the 3rd to 13:00Z on the 4th.
+    const midnight = Date.UTC(2026, 9, 3, 14)
+    const r = dayLightning([{ startMs: midnight, endMs: midnight + 23 * H, probability: 0.5 }], '2026-10-04', 'Australia/Sydney')
+    expect(r.segments).toEqual([expect.objectContaining({ from: 0, to: 1, step: 2 })])
+    expect(r.sentence).toBe('Lightning possible throughout the day.')
   })
 })

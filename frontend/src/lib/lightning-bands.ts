@@ -2,7 +2,8 @@
 // to a step, and where a window sits on a chart's time axis. Pure, so the
 // edges and the mapping are tested without a chart.
 
-import { unknownZoneMessage, zoneKnown } from '@/lib/vessel-time'
+import { addDaysISO } from '@/lib/stay'
+import { formatAxisTime, hourOfDayIn, unknownZoneMessage, zonedDayStart, zonedWallInstant, zoneKnown } from '@/lib/vessel-time'
 
 /** One 3-hour window of lightning probability at the boat, in epoch milliseconds. */
 export interface LightningWindow {
@@ -189,6 +190,87 @@ export function placeLightningOnSamples(
     }
   }
   return { blocks, gaps, peak }
+}
+
+/** One stretch of a day card's lightning strip, as fractions of the card's width. `step` is null for no data. */
+export interface DayLightningSegment {
+  from: number
+  to: number
+  step: 1 | 2 | 3 | null
+}
+
+/** A day card's lightning: the strip's stretches, the day's strongest window (null under 10%) and its summary sentence. */
+export interface DayLightning {
+  segments: DayLightningSegment[]
+  peak: LightningWindow | null
+  sentence: string | null
+}
+
+const DAY_SENTENCE_LEAD = ['', 'Slight chance of lightning', 'Lightning possible', 'Lightning likely'] as const
+
+/**
+ * The Cloud chart band's own placement, shrunk onto a day card: one sample at
+ * each wall-clock hour of the local day in `zone`, placed by
+ * placeLightningOnSamples, so the card shows what the chart does. The one
+ * difference is the hours before the run, which the chart hatches and the
+ * card leaves out, since they have passed. With no window held at all there
+ * is nothing to lay out.
+ *
+ * The sentence is worded by the day's strongest step, over the first stretch
+ * of hours at that step, from the start of the window holding its first hour
+ * to the end of the window holding its last. Times are written as the
+ * summary's rain and sun sentences write them ("3 PM", "12 AM"), except that a
+ * stretch running to the end of the day ends at "midnight". It says
+ * "throughout the day" when that step holds every hour of the day.
+ */
+export function dayLightning(windows: LightningWindow[], dayKey: string, zone: string): DayLightning {
+  const empty: DayLightning = { segments: [], peak: null, sentence: null }
+  if (windows.length === 0) return empty
+  const dayStartMs = zonedDayStart(dayKey, zone).getTime()
+  const dayEndMs = zonedDayStart(addDaysISO(dayKey, 1), zone).getTime()
+  const runStartMs = Math.min(...windows.map((w) => w.startMs))
+  if (dayEndMs <= runStartMs) return empty
+
+  // The Cloud chart's samples: each wall-clock hour that exists that day, at
+  // hour / 23 across the plot. A clocks-forward day has no 2 AM.
+  const [year, month, day] = dayKey.split('-').map(Number)
+  const sampleMs: number[] = []
+  const xs: number[] = []
+  for (let hour = 0; hour < 24; hour += 1) {
+    const ms = zonedWallInstant(Date.UTC(year, month - 1, day, hour), zone).getTime()
+    if (hourOfDayIn(ms, zone) !== hour) continue
+    sampleMs.push(ms)
+    xs.push(hour / 23)
+  }
+
+  const { blocks, gaps, peak } = placeLightningOnSamples(windows, sampleMs, xs)
+  // The hours before the run have passed: the chart hatches them, the card leaves them out.
+  const passed = sampleMs[0] < runStartMs ? String(sampleMs[0]) : null
+  const segments: DayLightningSegment[] = [
+    ...blocks.map((b) => ({ from: b.x, to: b.x + b.width, step: b.step })),
+    ...gaps.filter((g) => g.key !== passed).map((g) => ({ from: g.x, to: g.x + g.width, step: null })),
+  ].sort((a, b) => a.from - b.from)
+  const top = peak ? lightningStep(peak.window.probability) : 0
+  if (top === 0) return { segments, peak: null, sentence: null }
+
+  const held = sampleMs.map((ms) => lightningAt(windows, ms))
+  const atTop = (idx: number) => {
+    const w = held[idx]
+    return w !== null && lightningStep(w.probability) === top
+  }
+  const first = held.findIndex((_, idx) => atTop(idx))
+  let last = first
+  while (last + 1 < held.length && atTop(last + 1)) last += 1
+  // The stretch runs from its first window's start to its last window's end,
+  // but never into the hour before or after it, which another window holds.
+  const fromMs = Math.max((held[first] as LightningWindow).startMs, first > 0 ? sampleMs[first - 1] : dayStartMs)
+  const toMs = Math.min((held[last] as LightningWindow).endMs, last + 1 < sampleMs.length ? sampleMs[last + 1] : dayEndMs)
+  const lead = DAY_SENTENCE_LEAD[top]
+  const sentence =
+    fromMs === dayStartMs && toMs === dayEndMs
+      ? `${lead} throughout the day.`
+      : `${lead} from ${formatAxisTime(fromMs, zone)} to ${toMs === dayEndMs ? 'midnight' : formatAxisTime(toMs, zone)}.`
+  return { segments, peak: peak?.window ?? null, sentence }
 }
 
 /** The whole band as one "no data" strip, for a chart with no sample to place windows on. */

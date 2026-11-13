@@ -4,8 +4,10 @@
 Accepted. The plugin and host landed first, then the chart bands: a four-step
 violet band on the Cloud, Temperature & Rain chart and the Upper Air trace,
 keyed by its three steps, with the Met Office credit behind an info button
-in that key, as a map keeps its attribution. Both are drawn for the boat
-only; a planned stay shows no band and the key says why.
+in that key, as a map keeps its attribution. Each day card then took a
+small copy of the Cloud chart's band, placed by the same code, and the day
+summary a sentence naming the day's strongest stretch. All of it is drawn for
+the boat only; a planned stay shows no band and the key says why.
 
 ## Context
 

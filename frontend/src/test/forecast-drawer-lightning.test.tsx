@@ -445,6 +445,76 @@ describe('ForecastDrawer lightning band over thin data and changing answers', ()
   })
 })
 
+describe('ForecastDrawer lightning strip on the day cards', () => {
+  it('lays the windows along the day card at the chart steps, and names the peak', () => {
+    renderDrawer(feed({ windows: [windowAt(0, 0.05), windowAt(3, 0.2), windowAt(6, 0.45), windowAt(9, 0.8), { startMs: DAY_START + 12 * H, endMs: DAY_START + 24 * H, probability: 0.02 }] }))
+
+    const card = screen.getByRole('button', { name: /^Select forecast day Sunday/ })
+    const cells = within(card).getByTestId('forecast-day-lightning').querySelectorAll('[data-step]')
+    expect(Array.from(cells, (c) => c.getAttribute('data-step'))).toEqual(['1', '2', '3'])
+    // The chart's own slots for hours 9 to 11, on a 24-point axis.
+    expect(parseFloat((cells[2] as HTMLElement).style.left)).toBeCloseTo((8.5 / 23) * 100)
+    expect(parseFloat((cells[2] as HTMLElement).style.width)).toBeCloseTo((3 / 23) * 100)
+    expect(card).toHaveAccessibleName(/, lightning chance up to 80%$/)
+  })
+
+  it('adds the lightning sentence to the day summary, between rain and sun', () => {
+    renderDrawer(feed({ windows: [windowAt(0, 0.05), windowAt(3, 0.2), windowAt(6, 0.45), windowAt(9, 0.8), { startMs: DAY_START + 12 * H, endMs: DAY_START + 24 * H, probability: 0.02 }] }), {
+      forecast: [buildDay({ precipitationSummary: 'Heavy rain expected throughout the day.' })],
+    })
+
+    expect(screen.getByTestId('forecast-cloud-summary').textContent).toBe(
+      'Heavy rain expected throughout the day. Lightning likely from 9 AM to 12 PM. No sun protection needed.',
+    )
+  })
+
+  it('leaves lightning out of the summary on a quiet day and for a stay', () => {
+    const quiet = feed({ windows: [{ startMs: DAY_START, endMs: DAY_START + 24 * H, probability: 0.05 }] })
+    const { unmount } = renderDrawer(quiet)
+    expect(screen.getByTestId('forecast-cloud-summary')).not.toHaveTextContent(/lightning/i)
+    unmount()
+
+    renderDrawer(feed(), { stay: STAY })
+    expect(screen.getByTestId('forecast-cloud-summary')).not.toHaveTextContent(/lightning/i)
+  })
+
+  it('draws no strip on a quiet day and says nothing about lightning', () => {
+    renderDrawer(feed({ windows: [{ startMs: DAY_START, endMs: DAY_START + 24 * H, probability: 0.05 }] }))
+
+    const card = screen.getByRole('button', { name: /^Select forecast day Sunday/ })
+    expect(within(card).queryByTestId('forecast-day-lightning')).toBeNull()
+    expect(card).not.toHaveAccessibleName(/lightning/)
+  })
+
+  it('marks the hours past the run as no data, not as quiet', () => {
+    renderDrawer(feed({ windows: [{ startMs: DAY_START, endMs: DAY_START + 12 * H, probability: 0.05 }] }))
+
+    const cells = screen.getByTestId('forecast-day-lightning').querySelectorAll('[data-step]')
+    expect(Array.from(cells, (c) => c.getAttribute('data-step'))).toEqual(['none'])
+  })
+
+  it('greys the strip when the feed is stale, as the chart band is', () => {
+    renderDrawer(feed({ updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString() }))
+
+    expect(screen.getByTestId('forecast-day-lightning')).toHaveClass('grayscale')
+  })
+
+  it('draws no strip when no window is held', () => {
+    renderDrawer(feed({ windows: [], refreshError: 'GET bucket: 503' }))
+
+    expect(screen.queryByTestId('forecast-day-lightning')).toBeNull()
+  })
+
+  it('draws no strip for a planned stay or a boat without a lightning plugin', () => {
+    const { unmount } = renderDrawer(feed(), { stay: STAY })
+    expect(screen.queryByTestId('forecast-day-lightning')).toBeNull()
+    unmount()
+
+    renderDrawer(feed({ provider: null, providerSeen: false }))
+    expect(screen.queryByTestId('forecast-day-lightning')).toBeNull()
+  })
+})
+
 describe('ForecastDrawer lightning band on the Upper Air chart', () => {
   const DAYS = ['2026-06-14', '2026-06-15']
   // Samples at 00, 06, 12 and 18Z on each day: eight points, index 0 to 7.
