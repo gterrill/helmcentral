@@ -28,9 +28,8 @@ early, delay a passage or pick a different anchorage.
   strong one-hour squall shows in the speed range. A single odd hour at the very
   start or end of the day can still show as a change. The peak gust comes with
   its hour, and a steady day stays one short sentence.
-- **A planned stay:** The forecast page can also show the weather at a marina
-  or anchorage you have booked for later. See
-  [Looking ahead to a planned stay](#looking-ahead-to-a-planned-stay).
+- **Passage plans:** The forecast page can also lay out a run of stops day by
+  day, with the weather for each. See [Passage plans](#passage-plans).
 - **Separate providers:** Weather, waves and tides each come from their own
   provider plugin. If one is down, you get an explicit failure for that section
   rather than a stale number. The card says which provider answered, whether
@@ -241,7 +240,7 @@ boat. You can see a thundery spell coming and pick your day before it arrives.
   forecast says it's quiet.
 - **It's the boat's position only:** Lightning is worked out for the grid
   square the boat is in, roughly 20 by 30 kilometres. When you switch the page
-  to a [planned stay](#looking-ahead-to-a-planned-stay), the bands aren't drawn
+  to a [passage plan](#passage-plans), the bands aren't drawn
   and the key says "Lightning is for the boat's position, not the stay."
 
 A probability over a square that size says nothing about the next ten minutes
@@ -281,47 +280,68 @@ no data for are hatched, and the key under the chart says what's wrong.
   stays empty, even if something fails first. If a later answer names no
   plugin, the band and key go away again.
 
-## Looking ahead to a planned stay
+## Passage plans
 
-The week before you move to another marina, you want the weather there for the
-days you will be there, not the weather where you are tied up now. Plan the stay
-once, with the place and your arrival and departure dates, and the forecast page
-can show that place alongside the boat's.
+The week before a run, you want to see every day of it at once: where you'll be,
+how far each leg is, and what the wind and sea will do. A plan is your run as a
+list of stops with the nights at each, and the forecast page lays it out one row
+per day.
 
-There is one stay at a time, kept on the boat's server, so every phone, tablet
-and wall display sees the same one. It disappears the day after you leave.
+Plans are kept on the boat's server, so every phone, tablet and wall display
+sees the same ones. You can keep several. The page opens on the plan whose dates
+include today, or the next one coming up, and buttons above the table switch to
+another. A plan whose last day has passed moves under **Past** and stays there
+until you delete it.
 
-The page always opens on the boat. Beside the heading sits a button with the
-place and the dates, such as "Coral Coast Marina · 27-31 Oct". Choose it to
-switch to the stay, and choose **Boat** to come back. The heading says which
-you're looking at, and while it's the stay, the heading adds that this isn't
+The page always opens on the boat. Choose a place name in a row to look at that
+place's full forecast, and choose **Boat** to come back. The heading says which
+you're looking at, and while it's a plan stop the heading adds that this isn't
 the boat's position. Nothing on the dashboard changes. The tiles, the clock's
 sunrise and sunset, the day and night theme, the anchor rode planner and the
 alarms all keep reading from the boat's own position.
 
-Here's what the stay view shows:
+Here's what the table shows:
 
-- **The ten days, with your days marked.** Days you will be at the place carry a
-  STAY tag. The forecast reaches about ten days ahead, so a stay further out
-  gets a placeholder card for each day it doesn't reach, reading "No forecast
-  yet · from 3 Nov". That date is when the forecast first covers the day.
-  Nothing is guessed to fill the gap, and the last day is never stretched.
-- **Times at the place.** Sunrise, sunset, the hours on every chart and the tide
-  times are the place's local time. When its clock differs from the boat's, a
-  note beside the buttons says so.
-- **Upper air.** The tinted band on the sixteen-day trace marks your stay. Read
-  it as the trend in the upper air over those days, whether heights are falling
-  or recovering, and not as a forecast for each day. A stay further out than the
-  trace says so.
+- **One row per day.** A passage row is the day you sail from one stop to the
+  next. A lay day is a day you stay put. Dates after the first follow from the
+  nights, so adding a night to a stop moves every later day.
+- **Distance by water.** Each leg is measured along a route that stays on the
+  water, through any via places you added, in order. If a leg can't be routed,
+  its row says why and shows no distance. A straight line is never drawn in its
+  place. **Route** on a passage row shows the path on a small map.
+- **Wind against your course.** A passage row gives the day's wind range, then
+  whether it sits ahead, abeam or astern of the leg's course, the gusts and the
+  wave height. They're read at the middle of the leg. A lay day shows the wind
+  overnight and its direction. There's no shelter label.
+- **No forecast yet.** The forecast reaches about ten days ahead, so a day
+  further out says "No forecast yet" and shows nothing. Nothing is guessed to
+  fill the gap.
+- **Times at the place.** Dates are the place's own. When a place's clock
+  differs from the boat's, a note under the table says so once you've opened it.
+- **Departure time.** If you set **Leave at** on a leg, the row shows it. Helmcentral
+  never changes a time you set.
+
+On a phone each row becomes a card.
+
+The full forecast for a place, once you open it, works as it always has for a
+place away from the boat:
+
+- **Your days marked.** The days of the row you chose carry a STAY tag, and days
+  the forecast doesn't reach are placeholder cards reading "No forecast yet ·
+  from 3 Nov". That date is when the forecast first covers the day.
+- **Upper air.** The tinted band on the sixteen-day trace marks those days. Read
+  it as the trend in the upper air over them, and not as a forecast for each
+  day.
 - **No lightning bands.** Lightning is only worked out for the boat's position,
-  so the charts show no band for the stay and the key says why.
+  so the charts show no band for a plan stop and the key says why. The table has
+  no lightning column for the same reason.
 - **Tide from the nearest station.** The tide chart uses the station closest to
   the place, names it, and says how far it is from the place. A station more
   than 20 nautical miles away is flagged, because a tide there can differ from
   the tide at the berth. Your saved tide station and automatic station setting
-  are left as they are, and only this view uses the nearer one. If your tide
-  provider is the default one, which follows a position rather than a station,
-  the chart is modelled for the place itself and names no station.
+  are left as they are. If your tide provider is the default one, which follows
+  a position rather than a station, the chart is modelled for the place itself
+  and names no station.
 - **Warnings for that place.** A wind or surf warning is worded as the place's
   and names its zone, so you don't read a warning for somewhere else as your
   own.
@@ -329,12 +349,15 @@ Here's what the stay view shows:
   a river or beside a lake, the card says "No wave forecast for this spot". It
   doesn't borrow the open water's sea state.
 
-Mate can read the stay when you talk about "the marina", and it can propose one
-for you from a place name and dates. A proposal is a card, and nothing is set
-until you apply it. See [Plan a stay](../how-to/plan-a-stay.md) for the steps.
+Here's where it stops. The table has no Current column yet, and the ETA is
+blank. There's no Go or No-Go verdict, no suggested departure time, and no mark
+when a forecast changes. A leg is one day, so a passage that runs overnight
+isn't modelled. Mate can't make or change a plan, though it can read the stop
+your current plan has you at or heading for when you talk about "the marina".
+See [Make a passage plan](../how-to/make-a-passage-plan.md) for the steps.
 
-Helmcentral doesn't notify you when the stay comes inside the forecast. Look at
-the placeholder cards, which say when each day arrives.
+Helmcentral doesn't notify you when a plan day comes inside the forecast. Look
+at the rows, which say "No forecast yet" until it does.
 
 ## Alarm rules that use this
 
@@ -392,7 +415,7 @@ touches land has no figures. Here is what you see when that happens:
   flat line, because that would look like a calm sea that nobody forecast.
   There's no Retry button, because trying again won't change the answer. The
   sea temperature still shows when the weather source has it.
-- **For a planned stay:** The page says there is no wave forecast for that spot.
+- **For a plan stop:** The page says there is no wave forecast for that spot.
 - **With the blend switched on:** Helmcentral asks Open-Meteo's own blend of
   models for the spot instead. The card's footer then says "fallback model:
   best_match", which is Open-Meteo's name for that blend. Steps are under

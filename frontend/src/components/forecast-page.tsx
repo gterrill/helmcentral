@@ -1,16 +1,18 @@
 import { useState } from "react";
 
-import { CalendarRange, Pencil } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import {
   ForecastDrawer,
   type ForecastDrawerProps,
 } from "@/components/forecast-drawer";
-import { ForecastStaySheet } from "@/components/forecast-stay-sheet";
+import { ConfirmDelete } from "@/components/patterns";
+import { PlanEditor } from "@/components/plan-editor";
+import { PlanTable, type PlanPlaceSelection } from "@/components/plan-table";
 import { Button } from "@/components/ui/button";
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
-import { usePlannedStay } from "@/hooks/use-planned-stay";
 import { useForecastWarnings } from "@/hooks/use-forecast-warnings";
+import { usePlanLegs, usePlans } from "@/hooks/use-plans";
 import { useUpperAir } from "@/hooks/use-upper-air";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
@@ -18,87 +20,156 @@ import {
   buildForecastDrawerProps,
   type ForecastBoatProps,
 } from "@/lib/forecast-drawer-props";
-import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
+import { errorMessage } from "@/lib/errors";
+import { findPlanRow, type Plan, type PlanRowRef } from "@/lib/plans";
 import { formatStayRange } from "@/lib/stay";
+import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
 
 interface ForecastPageProps {
   boat: ForecastBoatProps;
-  /** The boat's IANA zone, to tell whether the stay keeps a different clock. */
+  /** The boat's IANA zone, to tell whether a plan stop keeps a different clock. */
   boatTimeZone: string | undefined;
   canWrite: boolean;
 }
 
+const planRange = (plan: Plan) => formatStayRange(plan.firstDate, plan.lastDate);
+
 /**
- * The Forecast page: the boat's forecast, and beside it the planned stay's.
+ * The Forecast page: the boat's forecast, and above it the passage plan's day
+ * by day table.
  *
- * It opens on the boat. A chip carrying the place and dates switches to the
- * stay and a Boat button returns, one tap each way; the header always names
- * which place is on screen. The stay's feeds are their own queries, held back
- * until the stay is showing, so the dashboard tiles, the clock's sunrise and
- * sunset, Auto theme and the Rode Planner keep reading the boat's.
+ * It opens on the boat. Choosing a row in the table shows that row's place in
+ * the drawer and a Boat button returns; the header always names which place is
+ * on screen. A row's feeds are their own queries, held back until it is
+ * chosen, so the dashboard tiles, the clock's sunrise and sunset, Auto theme
+ * and the Rode Planner keep reading the boat's.
  */
 export function ForecastPage({
   boat,
   boatTimeZone,
   canWrite,
 }: ForecastPageProps) {
-  const { stay, save, clear } = usePlannedStay();
-  const [view, setView] = useState<"boat" | "stay">("boat");
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const { plans, currentId, create, update, patchStop, remove, error: plansError } = usePlans();
+  const [pickedId, setPickedId] = useState<number | null>(null);
+  const [selection, setSelection] = useState<PlanPlaceSelection | null>(null);
+  const [editing, setEditing] = useState<"new" | "change" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  // A stay that was cleared, or has ended, while open drops the view back to
-  // the boat; nothing is left showing a place that is no longer planned.
-  const showingStay = view === "stay" && stay !== null;
-  const place = stay ? { lat: stay.lat, lon: stay.lon } : undefined;
+  // The plan on show is the one the operator picked, else the one the server
+  // names as current. A picked plan that was deleted drops back to current.
+  const plan =
+    plans.find((p) => p.id === (pickedId ?? currentId)) ??
+    plans.find((p) => p.id === currentId) ??
+    null;
+  const { legs, loading: legsLoading, error: legsError } = usePlanLegs(plan);
+
+  // The chosen row is held as which row it is. Its stop and dates are read
+  // from the plan as it is now, so +1 night or a refetch never leaves the
+  // drawer on old dates. A row the plan no longer has drops the selection.
+  const selectedRow =
+    selection && plan && selection.planId === plan.id
+      ? findPlanRow(plan, selection.row)
+      : null;
+  if (selection && !selectedRow) setSelection(null);
+  const selected = selectedRow && plan
+    ? {
+        kind: selectedRow.kind,
+        dayKey: selectedRow.dayKey,
+        stop: plan.stops[selectedRow.kind === "stop" ? selectedRow.stopIndex : selectedRow.legIndex],
+      }
+    : null;
+  const selectedRef: PlanRowRef | null = selection?.row ?? null;
+
+  const place = selected
+    ? { lat: selected.stop.lat, lon: selected.stop.lon }
+    : undefined;
+  const showingPlace = selected !== null;
 
   const weather = useWeatherForecast(FORECAST_REFRESH_SECONDS, {
     place,
-    enabled: showingStay,
+    enabled: showingPlace,
   });
   const waves = useWaveForecast(FORECAST_REFRESH_SECONDS, {
     place,
-    enabled: showingStay,
+    enabled: showingPlace,
   });
-  const upperAir = useUpperAir(undefined, { place, enabled: showingStay });
+  const upperAir = useUpperAir(undefined, { place, enabled: showingPlace });
   const warnings = useForecastWarnings(FORECAST_REFRESH_SECONDS, {
     place,
-    enabled: showingStay,
+    enabled: showingPlace,
   });
 
-  const stayProps: ForecastDrawerProps | null =
-    showingStay && stay
+  const placeProps: ForecastDrawerProps | null =
+    selected
       ? {
           ...buildForecastDrawerProps({
             weather,
             waves,
             upperAir,
-            // Lightning has no place of its own. The stay view carries the
+            // Lightning has no place of its own. A row's view carries the
             // boat's feed only so the drawer can say it isn't drawn here.
             lightning: boat.lightning,
             warnings,
             unit: boat.unit,
           }),
           stay: {
-            placeName: stay.name,
-            lat: stay.lat,
-            lon: stay.lon,
-            arrive: stay.arrive,
-            depart: stay.depart,
-            timezone: stay.timezone,
+            placeName: selected.stop.name,
+            lat: selected.stop.lat,
+            lon: selected.stop.lon,
+            arrive: selected.kind === "stop" ? selected.stop.arrive : selected.dayKey,
+            depart: selected.kind === "stop" ? selected.stop.depart : selected.dayKey,
+            timezone: selected.stop.timezone,
           },
         }
       : null;
 
-  // A zone this browser does not know is said plainly; the comparison of
-  // clocks is skipped for it rather than thrown.
-  const zoneProblem = stay
-    ? (unknownZoneMessage(stay.timezone) ?? unknownZoneMessage(boatTimeZone))
+  const stopZone = selected?.stop.timezone;
+  const zoneProblem = stopZone
+    ? (unknownZoneMessage(stopZone) ?? unknownZoneMessage(boatTimeZone))
     : null;
   const clockDiffers =
-    stay !== null &&
+    stopZone !== undefined &&
     !zoneProblem &&
     boatTimeZone !== undefined &&
-    zoneClocksDiffer(stay.timezone, boatTimeZone, Date.now());
+    zoneClocksDiffer(stopZone, boatTimeZone, Date.now());
+
+  const pick = (id: number) => {
+    setPickedId(id);
+    setSelection(null);
+  };
+
+  const addNight = async (stopIndex: number) => {
+    if (!plan) return;
+    setActionError(null);
+    try {
+      await patchStop(plan.id, stopIndex, {
+        nights: plan.stops[stopIndex].nights + 1,
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  };
+
+  const deletePlan = async () => {
+    if (!plan) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await remove(plan.id);
+      setPickedId(null);
+      setSelection(null);
+      setConfirmDelete(false);
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const open = plans.filter((p) => p.status !== "past");
+  const past = plans.filter((p) => p.status === "past");
 
   return (
     <div className="space-y-3">
@@ -107,74 +178,134 @@ export function ForecastPage({
           data-testid="forecast-place-label"
           className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
         >
-          {showingStay && stay
-            ? `Forecast for ${stay.name} — not the boat's position`
+          {selected
+            ? `Forecast for ${selected.stop.name} — not the boat's position`
             : "Forecast for the boat's position"}
         </p>
+        {showingPlace && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-8 text-xs"
+            onClick={() => setSelection(null)}
+          >
+            Boat
+          </Button>
+        )}
+        {canWrite && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => {
+              setEditing("new");
+            }}
+          >
+            <Plus size={13} aria-hidden className="mr-1" />
+            New plan
+          </Button>
+        )}
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {stay ? (
-            <>
-              <div
-                className="inline-flex rounded-md border border-border bg-card p-0.5"
-                role="group"
-                aria-label="Forecast place"
-              >
+      {plansError && (
+        <p role="alert" className="text-xs text-destructive">
+          {plansError}
+        </p>
+      )}
+
+      {plans.length > 0 && (
+        <section aria-label="Passage plans" className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
+              role="group"
+              aria-label="Plans"
+            >
+              {open.map((p) => (
                 <Button
+                  key={p.id}
                   type="button"
                   size="sm"
-                  variant={showingStay ? "ghost" : "secondary"}
-                  className="h-8 text-xs"
-                  aria-pressed={!showingStay}
-                  onClick={() => setView("boat")}
-                >
-                  Boat
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={showingStay ? "secondary" : "ghost"}
+                  variant={plan?.id === p.id ? "secondary" : "ghost"}
                   className="h-8 min-w-0 max-w-64 text-xs"
-                  aria-pressed={showingStay}
-                  onClick={() => setView("stay")}
+                  aria-pressed={plan?.id === p.id}
+                  onClick={() => pick(p.id)}
                 >
-                  <CalendarRange
-                    size={13}
-                    aria-hidden
-                    className="mr-1 shrink-0"
-                  />
-                  <span className="truncate">{`${stay.name} · ${formatStayRange(stay.arrive, stay.depart)}`}</span>
+                  <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
                 </Button>
-              </div>
-              {canWrite && (
+              ))}
+            </div>
+            {canWrite && plan && (
+              <>
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
                   className="h-8 text-xs"
-                  onClick={() => setSheetOpen(true)}
+                  onClick={() => setEditing("change")}
                 >
                   <Pencil size={13} aria-hidden className="mr-1" />
-                  Change stay
+                  Change plan
                 </Button>
-              )}
-            </>
-          ) : (
-            canWrite && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs"
-                onClick={() => setSheetOpen(true)}
-              >
-                <CalendarRange size={13} aria-hidden className="mr-1" />
-                Plan a stay
-              </Button>
-            )
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 size={13} aria-hidden className="mr-1" />
+                  Delete plan
+                </Button>
+              </>
+            )}
+          </div>
+
+          {past.length > 0 && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                Past ({past.length})
+              </summary>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {past.map((p) => (
+                  <Button
+                    key={p.id}
+                    type="button"
+                    size="sm"
+                    variant={plan?.id === p.id ? "secondary" : "outline"}
+                    className="h-8 min-w-0 max-w-64 text-xs"
+                    aria-pressed={plan?.id === p.id}
+                    onClick={() => pick(p.id)}
+                  >
+                    <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                  </Button>
+                ))}
+              </div>
+            </details>
           )}
-        </div>
-      </div>
+
+          {actionError && (
+            <p role="alert" className="text-xs text-destructive">
+              {actionError}
+            </p>
+          )}
+
+          {plan && (
+            <PlanTable
+              plan={plan}
+              legs={legs}
+              legsLoading={legsLoading}
+              legsError={legsError}
+              canWrite={canWrite}
+              selectedRow={selectedRef}
+              onSelect={(row) => setSelection({ planId: plan.id, row })}
+              onAddNight={(i) => void addNight(i)}
+            />
+          )}
+        </section>
+      )}
 
       {zoneProblem && (
         <p
@@ -185,30 +316,51 @@ export function ForecastPage({
         </p>
       )}
 
-      {clockDiffers && stay && (
+      {clockDiffers && selected && stopZone && (
         <p
           data-testid="forecast-stay-clock-note"
           className="text-xs text-muted-foreground"
         >
-          Stay times are {zoneOffsetLabel(stay.timezone, Date.now())}, local to {stay.name}, not
+          Times here are {zoneOffsetLabel(stopZone, Date.now())}, local to {selected.stop.name}, not
           the boat&apos;s clock.
         </p>
       )}
 
       <ForecastDrawer
-        key={showingStay ? "stay" : "boat"}
-        {...(stayProps ?? boat)}
+        key={
+          selected && plan
+            ? `${plan.id}-${selected.kind}-${selected.stop.name}-${selected.dayKey}-${selected.stop.arrive}-${selected.stop.depart}`
+            : "boat"
+        }
+        {...(placeProps ?? boat)}
       />
 
       {canWrite && (
-        <ForecastStaySheet
-          open={sheetOpen}
-          onOpenChange={setSheetOpen}
-          stay={stay}
-          onSave={save}
-          onClear={clear}
+        <PlanEditor
+          open={editing !== null}
+          onOpenChange={(o) => {
+            if (!o) setEditing(null);
+          }}
+          plan={editing === "change" ? plan : null}
+          onSave={async (input) => {
+            const saved =
+              editing === "change" && plan
+                ? await update(plan.id, input)
+                : await create(input);
+            setPickedId(saved.id);
+            setSelection(null);
+          }}
         />
       )}
+
+      <ConfirmDelete
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ${plan?.name ?? "plan"}?`}
+        description="The plan and its dates are removed. Nothing else changes."
+        deleting={deleting}
+        onConfirm={() => void deletePlan()}
+      />
     </div>
   );
 }

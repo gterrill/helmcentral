@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ForecastPage } from "@/components/forecast-page";
-import { usePlannedStay } from "@/hooks/use-planned-stay";
+import { usePlanLegs, usePlans } from "@/hooks/use-plans";
+import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useUpperAir } from "@/hooks/use-upper-air";
@@ -31,24 +32,49 @@ vi.mock("@/components/forecast-drawer", () => ({
     );
   },
 }));
-vi.mock("@/components/forecast-stay-sheet", () => ({
-  ForecastStaySheet: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="stay-sheet" /> : null,
+vi.mock("@/components/plan-editor", () => ({
+  PlanEditor: ({ open, plan }: { open: boolean; plan: { name: string } | null }) =>
+    open ? <div data-testid="plan-editor" data-plan={plan?.name ?? ""} /> : null,
 }));
-vi.mock("@/hooks/use-planned-stay");
+vi.mock("@/components/plan-leg-map", () => ({
+  PlanLegMap: () => <div data-testid="leg-map" />,
+}));
+vi.mock("@/hooks/use-plans");
+vi.mock("@/hooks/use-plan-day-forecast");
 vi.mock("@/hooks/use-weather-forecast");
 vi.mock("@/hooks/use-wave-forecast");
 vi.mock("@/hooks/use-upper-air");
 vi.mock("@/hooks/use-forecast-warnings");
 
-const STAY = {
-  name: "Coral Coast Marina",
-  lat: -27.2,
-  lon: 153.1,
-  arrive: "2026-10-27",
-  depart: "2026-10-31",
-  timezone: "Australia/Brisbane",
+const stop = (name: string, arrive: string, nights: number, extra = {}) => {
+  const d = new Date(Date.UTC(+arrive.slice(0, 4), +arrive.slice(5, 7) - 1, +arrive.slice(8) + nights));
+  return {
+    name,
+    lat: -27.2,
+    lon: 153.1,
+    arrive,
+    nights,
+    depart: d.toISOString().slice(0, 10),
+    vias: [],
+    departTime: "",
+    timezone: "Australia/Brisbane",
+    ...extra,
+  };
 };
+
+const PLAN = {
+  id: 1,
+  name: "Home run",
+  status: "active" as const,
+  firstDate: "2026-11-14",
+  lastDate: "2026-11-17",
+  stops: [
+    stop("Great Sandy Straits Marina", "2026-11-14", 2),
+    stop("Pelican Bay", "2026-11-16", 1, { vias: [{ name: "Inskip Point", lat: -25.8, lon: 153 }], departTime: "06:30" }),
+    stop("Mooloolaba", "2026-11-17", 0),
+  ],
+};
+const PAST = { ...PLAN, id: 2, name: "Old run", status: "past" as const, firstDate: "2026-09-01", lastDate: "2026-09-03" };
 
 const BOAT_DRAY = { dayKey: "boat-day" };
 const STAY_DAY = { dayKey: "stay-day" };
@@ -67,16 +93,31 @@ const weatherResult = (forecast: unknown[]) => ({
   refetch: vi.fn(),
 });
 
-function stayState(stay: typeof STAY | null) {
-  vi.mocked(usePlannedStay).mockReturnValue({
-    stay,
+const patchStop = vi.fn();
+function plansState(plans: unknown[], currentId: number | null, legs: unknown[] = []) {
+  vi.mocked(usePlans).mockReturnValue({
+    plans,
+    currentId,
     loading: false,
     error: null,
-    save: vi.fn(),
-    clear: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    patchStop,
+    remove: vi.fn(),
     refetch: vi.fn(),
-  });
+  } as never);
+  vi.mocked(usePlanLegs).mockReturnValue({ legs, loading: false, error: null } as never);
 }
+
+const LEGS = [
+  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "" },
+  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land" },
+];
+
+const ROUTED = [
+  LEGS[0],
+  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "" },
+];
 
 const boatProps = {
   forecast: [BOAT_DRAY] as never,
@@ -89,6 +130,15 @@ function mockFeeds() {
   vi.mocked(useWeatherForecast).mockImplementation(
     (_s, options) => weatherResult(options?.place ? [STAY_DAY] : []) as never,
   );
+  vi.mocked(usePlanDayForecast).mockImplementation((_place, dayKey) => ({
+    loading: false,
+    error: null,
+    coverage: dayKey > "2026-11-16" ? "beyond" : "inside",
+    wind: dayKey > "2026-11-16" ? null : { minKts: 12, maxKts: 18, gustKts: 26, fromDeg: 90 },
+    windDirection: "E",
+    waveMinM: 0.8,
+    waveMaxM: 1.4,
+  }));
   vi.mocked(useWaveForecast).mockImplementation(
     () =>
       ({
@@ -147,207 +197,200 @@ describe("ForecastPage", () => {
     mockFeeds();
   });
 
-  it("with no stay, shows the boat's forecast, names its position and offers to plan a stay", () => {
-    stayState(null);
+  it("with no plan, shows the boat's forecast and offers a new plan", () => {
+    plansState([], null);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
-      "Forecast for the boat's position",
-    );
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent("Forecast for the boat's position");
     expect(drawerForecast()).toEqual([BOAT_DRAY]);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New plan" }));
+    expect(screen.getByTestId("plan-editor")).toHaveAttribute("data-plan", "");
+  });
+
+  it("opens on the current plan with one row per day and the boat's forecast below", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getByRole("button", { name: /Home run · 14–17 Nov/ })).toHaveAttribute("aria-pressed", "true");
+    const rows = screen.getAllByTestId("plan-row");
+    expect(rows.map((r) => r.getAttribute("data-kind"))).toEqual(["stop", "stop", "passage", "passage"]);
+    expect(drawerForecast()).toEqual([BOAT_DRAY]);
+  });
+
+  it("shows a passage row's distance, vias, departure time and wind against the course", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const passage = screen.getAllByTestId("plan-row")[2];
+    expect(passage).toHaveTextContent("Great Sandy Straits Marina → Pelican Bay");
+    expect(passage).toHaveTextContent("17.5 nm");
+    expect(passage).toHaveTextContent("12–18 kn ahead");
+    expect(passage).toHaveTextContent("26 kn");
+    expect(passage).toHaveTextContent("0.8–1.4 m");
+    const second = screen.getAllByTestId("plan-row")[3];
+    expect(second).toHaveTextContent("via");
+  });
+  it("shows a stop row's overnight wind with no shelter label", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const stopRow = screen.getAllByTestId("plan-row")[0];
+    expect(stopRow).toHaveTextContent("12–18 kn E");
+    expect(stopRow).not.toHaveTextContent(/shelter/i);
+  });
+
+  it("fails a leg that could not be routed in words, with no distance", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const leg2 = screen.getAllByTestId("plan-row")[3];
+    expect(leg2).toHaveTextContent("start is on land");
+    expect(leg2).toHaveTextContent("Not routed");
+  });
+
+  it("says No forecast yet beyond the horizon and shows no figures", () => {
+    plansState([PLAN], 1, ROUTED);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const last = screen.getAllByTestId("plan-row")[3];
+    expect(last).toHaveTextContent("No forecast yet");
+    expect(last).not.toHaveTextContent(/ kn/);
+  });
+
+  it("reads no forecast for a leg that did not route, and says why", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const leg2 = screen.getAllByTestId("plan-row")[3];
+    expect(leg2).toHaveTextContent("start is on land");
+    expect(leg2).toHaveTextContent("No forecast: the leg is not routed");
+    expect(leg2).not.toHaveTextContent(/ kn/);
+    expect(vi.mocked(usePlanDayForecast)).toHaveBeenCalledWith(null, "2026-11-17");
+  });
+
+  it("keeps a row's drawer on the plan's current dates after a night is added", () => {
+    plansState([PLAN], 1, LEGS);
+    const { rerender } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Great Sandy Straits Marina · lay day" })[0]);
+    expect(drawerStay()).toMatchObject({ arrive: "2026-11-14", depart: "2026-11-16" });
+    const longer = {
+      ...PLAN,
+      stops: [stop("Great Sandy Straits Marina", "2026-11-14", 3), stop("Pelican Bay", "2026-11-17", 1), stop("Mooloolaba", "2026-11-18", 0)],
+    };
+    plansState([longer], 1, LEGS);
+    rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(drawerStay()).toMatchObject({ arrive: "2026-11-14", depart: "2026-11-17" });
+  });
+
+  it("drops back to the boat when the chosen row is no longer in the plan", () => {
+    plansState([PLAN], 1, LEGS);
+    const { rerender } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Great Sandy Straits Marina · lay day" })[1]);
+    expect(drawerStay()).not.toBeNull();
+    const shorter = {
+      ...PLAN,
+      stops: [stop("Great Sandy Straits Marina", "2026-11-14", 1), stop("Pelican Bay", "2026-11-15", 1), stop("Mooloolaba", "2026-11-16", 0)],
+    };
+    plansState([shorter], 1, LEGS);
+    rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     expect(drawerStay()).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Plan a stay" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent("Forecast for the boat's position");
   });
 
-  it("opens on the boat even when a stay is saved, with the stay as a chip", () => {
-    stayState(STAY);
+  it("keeps past plans in a Past section and lets the operator open one", () => {
+    plansState([PLAN, PAST], 1, LEGS);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
-      "Forecast for the boat's position",
-    );
-    expect(drawerForecast()).toEqual([BOAT_DRAY]);
-    expect(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    ).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Past (1)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Old run/ }));
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
   });
 
-  it("holds the stay's feeds back while the boat is showing", () => {
-    stayState(STAY);
+  it("adds a night to a stop through the server's shifting rule", () => {
+    plansState([PLAN], 1, LEGS);
+    patchStop.mockResolvedValue(PLAN);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    for (const hook of [
-      useWeatherForecast,
-      useWaveForecast,
-      useUpperAir,
-      useForecastWarnings,
-    ]) {
-      const [, options] = vi.mocked(hook).mock.calls[0] as unknown as [
-        number,
-        { place?: unknown; enabled?: boolean },
-      ];
+    fireEvent.click(screen.getAllByRole("button", { name: "+1 night" })[0]);
+    expect(patchStop).toHaveBeenCalledWith(1, 0, { nights: 3 });
+  });
+
+  it("opens a row's place in the drawer with the row's own days, and returns to the boat", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Great Sandy Straits Marina · lay day" })[0]);
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent("Forecast for Great Sandy Straits Marina — not the boat's position");
+    expect(drawerForecast()).toEqual([STAY_DAY]);
+    expect(drawerStay()).toEqual({
+      placeName: "Great Sandy Straits Marina",
+      lat: -27.2,
+      lon: 153.1,
+      arrive: "2026-11-14",
+      depart: "2026-11-16",
+      timezone: "Australia/Brisbane",
+    });
+    const [, options] = vi.mocked(useWeatherForecast).mock.calls.at(-1) as unknown as [number, { place?: unknown; enabled?: boolean }];
+    expect(options).toEqual({ place: { lat: -27.2, lon: 153.1 }, enabled: true });
+    expect(JSON.parse(screen.getByTestId("drawer").getAttribute("data-warning") || "null")).toMatchObject({ region: "Gold Coast" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Boat" }));
+    expect(drawerStay()).toBeNull();
+    expect(drawerMounts.mock.calls.map((c) => c[0])).toEqual(["boat", "stay", "boat"]);
+  });
+
+  it("hands a place view the boat's lightning feed rather than fetching one for the place", () => {
+    plansState([PLAN], 1, LEGS);
+    const lightning = { windows: [], provider: "ukmo-lightning" };
+    render(<ForecastPage boat={{ ...boatProps, lightning: lightning as never }} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: /lay day/ })[0]);
+    expect(JSON.parse(screen.getByTestId("drawer").getAttribute("data-lightning") || "null")).toEqual(lightning);
+  });
+
+  it("holds the place feeds back while the boat is showing", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    for (const hook of [useWeatherForecast, useWaveForecast, useUpperAir, useForecastWarnings]) {
+      const [, options] = vi.mocked(hook).mock.calls[0] as unknown as [number, { enabled?: boolean }];
       expect(options.enabled).toBe(false);
     }
   });
 
-  it("switches to the stay with one tap, naming the place and that it is not the boat", () => {
-    stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    );
-
-    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
-      "Forecast for Coral Coast Marina — not the boat's position",
-    );
-    expect(drawerForecast()).toEqual([STAY_DAY]);
-    expect(drawerStay()).toEqual({
-      placeName: "Coral Coast Marina",
-      lat: -27.2,
-      lon: 153.1,
-      arrive: "2026-10-27",
-      depart: "2026-10-31",
-      timezone: "Australia/Brisbane",
-    });
-    const [, options] = vi
-      .mocked(useWeatherForecast)
-      .mock.calls.at(-1) as unknown as [
-      number,
-      { place?: unknown; enabled?: boolean },
-    ];
-    expect(options).toEqual({
-      place: { lat: -27.2, lon: 153.1 },
-      enabled: true,
-    });
-    // The warnings handed over are the place's.
-    expect(
-      JSON.parse(
-        screen.getByTestId("drawer").getAttribute("data-warning") || "null",
-      ),
-    ).toMatchObject({ region: "Gold Coast" });
-  });
-
-  // Lightning has no place parameter, so the stay view is handed the boat's
-  // feed and no hook of its own; the drawer draws none of it for a stay.
-  it("hands the stay view the boat's lightning feed rather than fetching one for the place", () => {
-    stayState(STAY);
-    const lightning = { windows: [], provider: "ukmo-lightning" };
-    render(
-      <ForecastPage
-        boat={{ ...boatProps, lightning: lightning as never }}
-        boatTimeZone="Australia/Brisbane"
-        canWrite
-      />,
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    );
-
-    expect(
-      JSON.parse(screen.getByTestId("drawer").getAttribute("data-lightning") || "null"),
-    ).toEqual(lightning);
-    expect(drawerStay()).not.toBeNull();
-  });
-
-  it("mounts a fresh drawer for each place so the selected day does not carry over", () => {
-    stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Boat" }));
-    expect(drawerMounts.mock.calls.map((c) => c[0])).toEqual([
-      "boat",
-      "stay",
-      "boat",
-    ]);
-  });
-
-  it("returns to the boat with one tap", () => {
-    stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Boat" }));
-    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
-      "Forecast for the boat's position",
-    );
-    expect(drawerForecast()).toEqual([BOAT_DRAY]);
-    expect(drawerStay()).toBeNull();
-  });
-
-  it("notes the place's clock beside the chip only when it differs from the boat's", () => {
-    stayState({ ...STAY, lon: 174.8, timezone: "Pacific/Tarawa" });
-    const { unmount } = render(
-      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
-    );
-    expect(screen.getByTestId("forecast-stay-clock-note")).toHaveTextContent(
-      "Stay times are UTC+12",
-    );
+  it("notes the place's clock only when it differs from the boat's", () => {
+    plansState([{ ...PLAN, stops: PLAN.stops.map((s) => ({ ...s, timezone: "Pacific/Tarawa" })) }], 1, LEGS);
+    const { unmount } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: /lay day/ })[0]);
+    expect(screen.getByTestId("forecast-stay-clock-note")).toHaveTextContent("Times here are UTC+12");
     unmount();
 
-    stayState(STAY);
+    plansState([PLAN], 1, LEGS);
     render(<ForecastPage boat={boatProps} boatTimeZone="Etc/GMT-10" canWrite />);
-    expect(
-      screen.queryByTestId("forecast-stay-clock-note"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("says so, without throwing, when this browser does not know the stay's zone", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    stayState({ ...STAY, timezone: "Not/AZone" });
-    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    expect(screen.getByTestId("forecast-stay-zone-error")).toHaveTextContent(
-      "Zone Not/AZone unknown to this browser",
-    );
+    fireEvent.click(screen.getAllByRole("button", { name: /lay day/ })[0]);
     expect(screen.queryByTestId("forecast-stay-clock-note")).not.toBeInTheDocument();
   });
 
-  it("opens the sheet to plan or change a stay", () => {
-    stayState(null);
-    const { unmount } = render(
-      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Plan a stay" }));
-    expect(screen.getByTestId("stay-sheet")).toBeInTheDocument();
-    unmount();
-
-    stayState(STAY);
+  it("says so, without throwing, when this browser does not know the stop's zone", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    plansState([{ ...PLAN, stops: PLAN.stops.map((s) => ({ ...s, timezone: "Not/AZone" })) }], 1, LEGS);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    fireEvent.click(screen.getByRole("button", { name: "Change stay" }));
-    expect(screen.getByTestId("stay-sheet")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /lay day/ })[0]);
+    expect(screen.getByTestId("forecast-stay-zone-error")).toHaveTextContent("Zone Not/AZone unknown to this browser");
   });
 
-  it("offers a reader no way to plan, change or clear a stay", () => {
-    stayState(STAY);
-    render(
-      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite={false} />,
-    );
-    expect(
-      screen.queryByRole("button", { name: "Plan a stay" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Change stay" }),
-    ).not.toBeInTheDocument();
-    // They can still read it.
-    expect(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    ).toBeInTheDocument();
+  it("opens the editor on the plan to change it", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    expect(screen.getByTestId("plan-editor")).toHaveAttribute("data-plan", "Home run");
   });
 
-  it("falls back to the boat when the stay it was showing is cleared", () => {
-    stayState(STAY);
-    const { rerender } = render(
-      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
-    );
-    stayState(null);
+  it("offers a reader no way to add, change, delete or lengthen anything", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite={false} />);
+    for (const name of ["New plan", "Change plan", "Delete plan", "+1 night"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("falls back to the boat when the plan it was showing is deleted", () => {
+    plansState([PLAN], 1, LEGS);
+    const { rerender } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getAllByRole("button", { name: /lay day/ })[0]);
+    plansState([], null);
     rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
-      "Forecast for the boat's position",
-    );
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent("Forecast for the boat's position");
     expect(drawerStay()).toBeNull();
   });
 });

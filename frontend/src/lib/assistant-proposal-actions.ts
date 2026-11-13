@@ -1,7 +1,6 @@
 import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type AssistantProposalOp, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
-import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 import { SAVED_PLACES_PATH } from '@/hooks/use-saved-places'
 import { WATCHES_PATH } from '@/hooks/use-watches'
@@ -23,7 +22,6 @@ const reads = (path: string) => () => void invalidateQueries([path])
  * so a new type cannot leave its page stale after Apply.
  */
 export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void> = {
-  planned_stay: reads(PLANNED_STAY_PATH),
   alarm_rule: reads(ALARM_RULES_PATH),
   watch: reads(WATCHES_PATH),
   saved_place: reads(SAVED_PLACES_PATH),

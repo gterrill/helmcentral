@@ -45,7 +45,7 @@ export const POINT_LABEL_LAYOUT: SymbolLayerSpecification['layout'] = {
  * is mounted only once WebGL2 is known to be there. A browser without it gets
  * the note and nothing else.
  */
-export function RequireWebGL2({ name, children }: { name: 'marina' | 'anchorage'; children: ReactNode }) {
+export function RequireWebGL2({ name, children }: { name: 'marina' | 'anchorage' | 'plan-leg'; children: ReactNode }) {
   if (!hasWebGL2()) {
     return (
       <div data-testid={`${name}-map-fallback`} className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">

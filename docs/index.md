@@ -65,8 +65,8 @@ Step-by-step instructions for specific jobs.
 
 - [Installing Helmcentral](how-to/install.md): with Docker or by hand.
 - [Upgrading across a breaking release](how-to/upgrading.md)
-- [Plan a stay](how-to/plan-a-stay.md): see the forecast for a marina you've
-  booked.
+- [Make a passage plan](how-to/make-a-passage-plan.md): lay out a run stop by
+  stop and see the weather for every day.
 - [Set an anchor watch](how-to/set-an-anchor-watch.md): drop the watch, move
   the anchor or radius, and raise it.
 - [Set an alarm threshold](how-to/set-an-alarm-threshold.md): create an alarm

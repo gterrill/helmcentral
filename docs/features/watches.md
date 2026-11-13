@@ -116,7 +116,7 @@ why when it can't.
 - **Tanks:** Each tank's level, and how much it has moved since the last report.
   Fresh water comes first, then fuel, then black water.
 - **Weather:** Pressure, how it has moved over three hours, and the true wind.
-  If you have a planned stay, it also shows the forecast wind there for your
+  If you have a passage plan, it also shows the forecast wind there for your
   dates.
 - **Instruments:** Any sensor that has frozen, gone out of range, or gone silent.
 
@@ -178,7 +178,7 @@ watch. These are the defaults:
 - **Tanks:** A level that has changed by 10 percentage points or more since the
   last report.
 - **Weather:** Pressure down 3 hPa or more in 3 hours, or the forecast wind at
-  your planned stay reaching your lowest no-go wind from your
+  the stop of your passage plan reaching your lowest no-go wind from your
   [passage limits](../how-to/set-passage-limits.md). Without passage limits the
   forecast is shown and not judged.
 

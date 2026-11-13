@@ -42,7 +42,7 @@ summer. It also follows half-hour zones, so a boat in Adelaide keeps UTC+9:30.
 - **Offshore:** Beyond that the boat uses the ship's zone for its longitude,
   for example UTC+11 in the Coral Sea. These zones have no daylight saving and
   no abbreviation, so a time shows as "UTC+11".
-- **A place you ask about:** A planned stay, a tide station or a passage
+- **A place you ask about:** A passage plan stop, a tide station or a passage
   waypoint keeps its own zone, not the boat's. A forecast for a marina is in
   that marina's time, and a note says so when it differs from the boat's.
 
@@ -51,7 +51,7 @@ summer. It also follows half-hour zones, so a boat in Adelaide keeps UTC+9:30.
 Every screen reads the zone from the boat, so a phone ashore and a wall display
 left on UTC both show the boat's time. That covers the clock tile, tide times,
 sunrise and sunset, alarm times, passage dates and the times on the Forecast
-page. A passage or a planned stay shows its own place's time, as described
+page. A passage or a plan stop shows its own place's time, as described
 above.
 
 - **Times you recorded yourself:** When a document was uploaded, indexed or

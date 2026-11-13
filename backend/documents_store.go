@@ -314,7 +314,7 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
-	if err := createPlannedStaySchema(db); err != nil {
+	if err := createPlansSchema(db); err != nil {
 		return err
 	}
 
