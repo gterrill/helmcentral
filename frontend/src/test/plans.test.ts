@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildPlanRows,
+  legErrorText,
+  legNoteText,
   draftToInput,
   previewArrivals,
   dayCoverage,
@@ -231,5 +233,33 @@ describe("the editor's draft", () => {
     expect(input.name).toBe("Run");
     expect(input.stops[0]).toMatchObject({ arrive: "2026-11-14", vias: [via], departTime: "06:30" });
     expect(input.stops[1]).toMatchObject({ name: "B", arrive: "2026-11-15", vias: [], departTime: "" });
+  });
+});
+
+describe("leg wording", () => {
+  const base = { from: 0, to: 1, distanceNm: null, courseDeg: null, route: [], note: "", errorKind: "", errorStop: "", moved: [] };
+
+  it("says a stop on land needs moving, without coordinates", () => {
+    const text = legErrorText({
+      ...base,
+      error: "no passage distance for Great Sandy Straits Marina to Pelican Bay: the start (-25.2930, 152.9070) is on land and the water in front of it could not be found",
+      errorKind: "on_land",
+      errorStop: "Great Sandy Straits Marina",
+    });
+    expect(text.summary).toBe("Can't route: Great Sandy Straits Marina is on land here. Change the stop to a spot on the water.");
+    expect(text.detail).toContain("-25.2930");
+  });
+
+  it("shortens any other router error and keeps the full message as detail", () => {
+    const text = legErrorText({ ...base, error: "no passage distance for A to B: the plan's legs took longer than 1m0s to route" });
+    expect(text.summary).toBe("Can't route this leg: the plan's legs took longer than 1m0s to route");
+    expect(text.detail).toContain("no passage distance for A to B");
+  });
+
+  it("says how far up a river a stop is, in one decimal", () => {
+    expect(legNoteText({ ...base, moved: [{ stop: "Mooloolaba Marina", nm: 0.22 }] })).toBe(
+      "Mooloolaba Marina is 0.2 nm up a river; the distance starts at the nearest water.",
+    );
+    expect(legNoteText({ ...base, moved: [] })).toBe("");
   });
 });

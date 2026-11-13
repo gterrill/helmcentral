@@ -596,3 +596,34 @@ func TestPlanRouteCache_KnownFailuresAreRememberedBrieflyAndNotAcrossACoastlineC
 		t.Fatal("a route found on another coastline must not be served")
 	}
 }
+
+func TestPlanLegs_AnEndOnLandNamesTheStopAndKeepsTheRouterMessage(t *testing.T) {
+	prev := planRouteSegment
+	t.Cleanup(func() { planRouteSegment = prev })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		return waterRoute{}, &waterRouteOnLandError{End: "start", msg: "the start (-25.5000, 152.9000) is on land and the water in front of it could not be found"}
+	}
+	p := planAt(t, "2026-11-14", 1, 1, 0)
+	legs := planLegs(context.Background(), p)
+	if legs[0].ErrorKind != "on_land" || legs[0].ErrorStop != "Great Sandy Straits Marina" {
+		t.Fatalf("leg 0 = %+v", legs[0])
+	}
+	if !strings.Contains(legs[0].Error, "is on land and the water in front of it could not be found") {
+		t.Fatalf("the router's wording must stay: %q", legs[0].Error)
+	}
+}
+
+func TestPlanLegs_AnEndMovedToTheWaterIsReportedByStopName(t *testing.T) {
+	prev := planRouteSegment
+	t.Cleanup(func() { planRouteSegment = prev })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		r := routeOf(4, [2]float64{aLat, aLon}, [2]float64{bLat, bLon})
+		r.EndMovedNm = 0.22
+		return r, nil
+	}
+	p := planAt(t, "2026-11-14", 1, 1, 0)
+	legs := planLegs(context.Background(), p)
+	if len(legs[0].Moved) != 1 || legs[0].Moved[0].Stop != "Pelican Bay" || legs[0].Moved[0].Nm != 0.22 {
+		t.Fatalf("moved = %+v", legs[0].Moved)
+	}
+}

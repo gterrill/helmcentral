@@ -56,6 +56,33 @@ export interface PlanLeg {
   route: Array<[number, number]>;
   note: string;
   error: string;
+  /** "on_land" when a stop is off the water; empty for any other failure. */
+  errorKind: string;
+  errorStop: string;
+  /** Stops charted behind the shoreline and how far, in nautical miles. */
+  moved: Array<{ stop: string; nm: number }>;
+}
+
+/** The operator's wording for a failed leg; `detail` is the router's message. */
+export function legErrorText(leg: Pick<PlanLeg, "error" | "errorKind" | "errorStop">): {
+  summary: string;
+  detail: string;
+} {
+  if (leg.errorKind === "on_land" && leg.errorStop) {
+    return {
+      summary: `Can't route: ${leg.errorStop} is on land here. Change the stop to a spot on the water.`,
+      detail: leg.error,
+    };
+  }
+  const reason = leg.error.replace(/^no passage distance for .*?: /, "");
+  return { summary: `Can't route this leg: ${reason}`, detail: leg.error };
+}
+
+/** The operator's wording for stops charted behind the shoreline. */
+export function legNoteText(leg: Pick<PlanLeg, "moved">): string {
+  return leg.moved
+    .map((m) => `${m.stop} is ${m.nm.toFixed(1)} nm up a river; the distance starts at the nearest water.`)
+    .join(" ");
 }
 
 export type PlanRow =

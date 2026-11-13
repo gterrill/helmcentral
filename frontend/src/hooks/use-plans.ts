@@ -57,6 +57,9 @@ interface PlanLegApi {
   route: Array<[number, number]> | null;
   note?: string;
   error?: string;
+  error_kind?: string;
+  error_stop?: string;
+  moved?: Array<{ stop: string; nm: number }>;
 }
 
 function mapStop(s: PlanStopApi): PlanStop {
@@ -110,6 +113,9 @@ export function mapLeg(l: PlanLegApi): PlanLeg {
     route: l.route ?? [],
     note: l.note ?? "",
     error,
+    errorKind: l.error_kind ?? "",
+    errorStop: l.error_stop ?? "",
+    moved: l.moved ?? [],
   };
 }
 

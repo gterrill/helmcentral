@@ -14,6 +14,8 @@ import {
   windRelation,
   type Plan,
   type PlanLeg,
+  legErrorText,
+  legNoteText,
   type PlanRow,
   type PlanRowRef,
 } from "@/lib/plans";
@@ -185,11 +187,15 @@ function PlanDayRow({
           </p>
         )}
         {passage && leg?.error && (
-          <p role="alert" className="text-xs text-destructive">
-            {leg.error}
+          <p role="alert" className="text-xs text-destructive" title={legErrorText(leg).detail}>
+            {legErrorText(leg).summary}
           </p>
         )}
-        {passage && leg?.note && <p className="text-xs text-muted-foreground">{leg.note}</p>}
+        {passage && leg && leg.moved.length > 0 && (
+          <p className="text-xs text-muted-foreground" title={leg.note}>
+            {legNoteText(leg)}
+          </p>
+        )}
         <div className="mt-1 flex flex-wrap gap-1">
           {!passage && canWrite && (
             <Button

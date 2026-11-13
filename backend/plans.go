@@ -642,6 +642,18 @@ type planLeg struct {
 	Route      [][2]float64 `json:"route"`
 	Note       string       `json:"note,omitempty"`
 	Error      string       `json:"error,omitempty"`
+	// ErrorKind and ErrorStop are structured forms of Error for the page's
+	// own wording: "on_land" and the stop whose end is off the water.
+	ErrorKind string `json:"error_kind,omitempty"`
+	ErrorStop string `json:"error_stop,omitempty"`
+	// Moved lists stops charted behind the shoreline and how far, as Note
+	// says in the router's words.
+	Moved []planLegMoved `json:"moved,omitempty"`
+}
+
+type planLegMoved struct {
+	Stop string  `json:"stop"`
+	Nm   float64 `json:"nm"`
 }
 
 // planLegsDeadline bounds the whole legs request. A segment still routing
@@ -790,6 +802,15 @@ func planLegFor(ctx context.Context, p plan, i int) planLeg {
 		}
 		if err != nil {
 			leg.Error = fmt.Sprintf("no passage distance for %s to %s: %v", segmentName(p, i, k), segmentName(p, i, k+1), err)
+			var onLand *waterRouteOnLandError
+			if errors.As(err, &onLand) {
+				leg.ErrorKind = "on_land"
+				if onLand.End == "start" {
+					leg.ErrorStop = segmentName(p, i, k)
+				} else {
+					leg.ErrorStop = segmentName(p, i, k+1)
+				}
+			}
 			return leg
 		}
 		total += r.DistanceNm
@@ -798,6 +819,12 @@ func planLegFor(ctx context.Context, p plan, i int) planLeg {
 				continue
 			}
 			route = append(route, [2]float64{roundTo5(pt.Lat), roundTo5(pt.Lon)})
+		}
+		if r.StartMovedNm > 0 {
+			leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, k), Nm: r.StartMovedNm})
+		}
+		if r.EndMovedNm > 0 {
+			leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, k+1), Nm: r.EndMovedNm})
 		}
 		if n := routeMovedNote(r); n != "" {
 			notes = append(notes, n)

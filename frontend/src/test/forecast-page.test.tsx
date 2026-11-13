@@ -110,13 +110,13 @@ function plansState(plans: unknown[], currentId: number | null, legs: unknown[] 
 }
 
 const LEGS = [
-  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "" },
-  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land" },
+  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", errorKind: "", errorStop: "", moved: [] },
+  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land", errorKind: "", errorStop: "", moved: [] },
 ];
 
 const ROUTED = [
   LEGS[0],
-  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "" },
+  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", errorKind: "", errorStop: "", moved: [] },
 ];
 
 const boatProps = {

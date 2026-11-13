@@ -174,25 +174,7 @@ export function ForecastPage({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p
-          data-testid="forecast-place-label"
-          className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
-        >
-          {selected
-            ? `Forecast for ${selected.stop.name} — not the boat's position`
-            : "Forecast for the boat's position"}
-        </p>
-        {showingPlace && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-8 text-xs"
-            onClick={() => setSelection(null)}
-          >
-            Boat
-          </Button>
-        )}
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Plans</h2>
         {canWrite && (
           <Button
             type="button"
@@ -325,6 +307,28 @@ export function ForecastPage({
           the boat&apos;s clock.
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2
+          data-testid="forecast-place-label"
+          className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
+        >
+          {selected
+            ? `Forecast for ${selected.stop.name} — not the boat's position`
+            : "Forecast for the boat's position"}
+        </h2>
+        {showingPlace && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-8 text-xs"
+            onClick={() => setSelection(null)}
+          >
+            Boat
+          </Button>
+        )}
+      </div>
 
       <ForecastDrawer
         key={
