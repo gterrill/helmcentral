@@ -2,6 +2,10 @@
 
 ## Status
 
+Superseded by [ADR 0285](0285-passage-plans-replace-the-planned-stay.md): the single
+stay became a list of plans with stops. The forecast endpoints' `lat` and `lon`,
+the place search, the drawer's stay view and `get_planned_stay` carry on.
+
 Accepted (2026-10-24)
 
 ## Context

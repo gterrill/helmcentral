@@ -438,16 +438,16 @@ func TestVesselStatus_StaleAnomalyReadingIsAbsent(t *testing.T) {
 
 func pinPlannedStayClock(t *testing.T) {
 	t.Helper()
-	prev := plannedStayNow
-	plannedStayNow = func() time.Time { return vesselStatusTestNow }
-	t.Cleanup(func() { plannedStayNow = prev })
+	prev := planNow
+	planNow = func() time.Time { return vesselStatusTestNow }
+	t.Cleanup(func() { planNow = prev })
 }
 
 func plannedStayStoreForTest(t *testing.T, stay plannedStay) func() *documentStore {
 	t.Helper()
 	pinPlannedStayClock(t)
 	store := newTestDocumentStore(t)
-	if _, err := store.SetPlannedStay(stay); err != nil {
+	if _, err := setStayForTest(store, stay); err != nil {
 		t.Fatalf("SetPlannedStay: %v", err)
 	}
 	return func() *documentStore { return store }
@@ -498,7 +498,7 @@ func TestVesselStatus_NoPlannedStayOrAnEndedOne(t *testing.T) {
 	}
 	// A stay whose last day has passed is no stay at all (plannedStayActive):
 	// save it while it is current, then let the clock move past it.
-	if _, err := store.SetPlannedStay(plannedStay{Name: "Old", Lat: -19.1, Lon: 146.8, Arrive: "2026-10-28", Depart: "2026-10-28"}); err != nil {
+	if _, err := setStayForTest(store, plannedStay{Name: "Old", Lat: -19.1, Lon: 146.8, Arrive: "2026-10-28", Depart: "2026-10-28"}); err != nil {
 		t.Fatal(err)
 	}
 	d.now = func() time.Time { return vesselStatusTestNow.Add(72 * time.Hour) }

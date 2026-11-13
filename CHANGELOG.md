@@ -11,6 +11,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Plan a stay is now Passage plans, and your saved stay is gone.** The
+  Forecast page's **Plan a stay** button and chip are replaced by **New plan**.
+  A plan is a run of stops with the nights at each, so one marina booking is a
+  plan with one stop. Helmcentral drops the stay you saved. After you upgrade,
+  open the Forecast page, choose **New plan**, search for the place, set your
+  arrival date and nights, and save. Mate can no longer set a stay for you, so
+  ask it to read your plan instead, or make the plan yourself. The old
+  `/api/planned-stay` address is gone.
+
+### Added
+
+- **Plan a run stop by stop and see every day of it on the Forecast page.** Add
+  the places in order with the nights at each, and add a via place on a leg
+  where the route needs steering. The table has one row per day with the
+  distance by water, the wind against your course, the gusts and the waves, and
+  **+1 night** moves every later date. Days past the ten-day forecast say "No
+  forecast yet". A leg that can't be routed says why and shows no distance. On
+  a phone each row is a card. The table has no current, lightning or verdict
+  columns yet.
+
 ### Fixed
 
 - **Mate can now work out a passage from a marina up a river, or from an

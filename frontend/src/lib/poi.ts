@@ -215,9 +215,15 @@ const COMPASS_POINTS = [
   'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
 ]
 
+/** Three-figure compass bearing, e.g. "045°"; north is "000°", never "360°". */
+export function formatBearingFigures(deg: number): string {
+  const normalized = ((deg % 360) + 360) % 360
+  return `${String(Math.round(normalized) % 360).padStart(3, '0')}°`
+}
+
 /** Three-figure compass bearing plus point, e.g. "045° NE". */
 export function formatBearing(deg: number): string {
   const normalized = ((deg % 360) + 360) % 360
   const point = COMPASS_POINTS[Math.round(normalized / 22.5) % 16]
-  return `${String(Math.round(normalized)).padStart(3, '0')}° ${point}`
+  return `${formatBearingFigures(deg)} ${point}`
 }

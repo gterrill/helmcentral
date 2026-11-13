@@ -111,7 +111,7 @@ func TestFindPlaces_BearingIsNeverACourse(t *testing.T) {
 func TestPlannedStayNote_DoesNotRepeatTheDescription(t *testing.T) {
 	env := newProposalEnv(t)
 	env.deps.now = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
-	if _, err := env.docs.SetPlannedStay(plannedStay{Name: "Coral Coast Marina", Lat: -27.2, Lon: 153.1, Arrive: "2026-10-27", Depart: "2026-10-31"}); err != nil {
+	if _, err := setStayForTest(env.docs, plannedStay{Name: "Coral Coast Marina", Lat: -27.2, Lon: 153.1, Arrive: "2026-10-27", Depart: "2026-10-31"}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := runRecordTool(t, env.deps, "get_planned_stay", `{}`)

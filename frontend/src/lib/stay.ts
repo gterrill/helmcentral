@@ -1,6 +1,6 @@
 import { haversineMeters } from "@/lib/geo";
 
-// Date arithmetic for a planned stay. Arrival and departure are calendar days
+// Date arithmetic for the days spent at a plan stop. Arrival and departure are calendar days
 // at the place (YYYY-MM-DD), compared as strings and shifted in UTC so the
 // browser's own zone never moves a day.
 
@@ -21,18 +21,11 @@ const MONTHS = [
   "Dec",
 ];
 
-export interface PlannedStay {
-  name: string;
-  lat: number;
-  lon: number;
+/** The days a place is stayed at, YYYY-MM-DD at the place, arrival and departure included. */
+export interface StayRange {
   arrive: string;
   depart: string;
-  /** IANA zone at the place; the server works it out and ignores a value sent. */
-  timezone: string;
 }
-
-/** What the operator sends: the server adds the zone. */
-export type PlannedStayInput = Omit<PlannedStay, "timezone">;
 
 function parts(dayKey: string): [number, number, number] {
   const [year, month, day] = dayKey.split("-").map(Number);
@@ -81,7 +74,7 @@ export function formatStayRange(arrive: string, depart: string): string {
 
 export function isStayDay(
   dayKey: string,
-  stay: Pick<PlannedStay, "arrive" | "depart">,
+  stay: StayRange,
 ): boolean {
   return dayKey >= stay.arrive && dayKey <= stay.depart;
 }
@@ -100,7 +93,7 @@ export interface PendingStayDay {
  */
 export function pendingStayDays(
   forecastDayKeys: string[],
-  stay: Pick<PlannedStay, "arrive" | "depart">,
+  stay: StayRange,
 ): PendingStayDay[] {
   if (forecastDayKeys.length === 0) return [];
   const last = forecastDayKeys[forecastDayKeys.length - 1];

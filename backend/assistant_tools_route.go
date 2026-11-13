@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -146,38 +145,33 @@ func (d assistantToolDeps) routePassage(ctx context.Context, tool string, fromLa
 	if d.offlineCoastline == nil {
 		return assistantRoutedPassage{}, fmt.Errorf("%s: no passage distance: Offline coastline is not available on this install, so the run cannot be routed over water", tool)
 	}
-	route, err := d.offlineCoastline().RouteOverWater(ctx, startLat, startLon, toLat, toLon)
+	reader := d.offlineCoastline()
+	passage, err := routePassageThrough(ctx, func(ctx context.Context, from, to [2]float64) (waterRoute, error) {
+		return reader.RouteOverWater(ctx, from[0], from[1], to[0], to[1])
+	}, [][2]float64{{startLat, startLon}, {toLat, toLon}})
 	if err != nil {
 		return assistantRoutedPassage{}, fmt.Errorf("%s: no passage distance: %w", tool, err)
 	}
 
-	note := routeMovedNote(route)
-	waypoints := make([]assistantLatLon, len(route.Points))
-	for i, p := range route.Points {
+	waypoints := make([]assistantLatLon, len(passage.Points))
+	for i, p := range passage.Points {
 		waypoints[i] = assistantLatLon{Lat: roundTo5(p.Lat), Lon: roundTo5(p.Lon)}
 	}
-	legs := make([]assistantRouteLeg, 0, len(route.Points)-1)
-	course, longest := 0, -1.0
-	for i := 1; i < len(route.Points); i++ {
-		a, b := route.Points[i-1], route.Points[i]
-		nm := haversineMeters(a.Lat, a.Lon, b.Lat, b.Lon) / metersPerNauticalMile
-		brg := int(math.Round(bearingDeg(a.Lat, a.Lon, b.Lat, b.Lon))) % 360
-		legs = append(legs, assistantRouteLeg{BearingDeg: brg, DistanceNm: roundTo1(nm)})
-		if nm > longest {
-			longest, course = nm, brg
-		}
+	legs := make([]assistantRouteLeg, len(passage.Legs))
+	for i, l := range passage.Legs {
+		legs[i] = assistantRouteLeg{BearingDeg: l.BearingDeg, DistanceNm: roundTo1(l.Nm)}
 	}
 	return assistantRoutedPassage{
 		From:               assistantLatLon{Lat: startLat, Lon: startLon},
 		To:                 assistantLatLon{Lat: toLat, Lon: toLon},
-		DistanceNm:         roundTo1(route.DistanceNm),
-		StraightLineNm:     roundTo1(route.StraightLineNm),
-		CourseDeg:          course,
+		DistanceNm:         roundTo1(passage.DistanceNm),
+		StraightLineNm:     roundTo1(passage.StraightLineNm),
+		CourseDeg:          passage.CourseDeg,
 		FirstLegBearingDeg: legs[0].BearingDeg,
 		Legs:               legs,
 		Route:              waypoints,
-		RouteNote:          note,
-		rawDistanceNm:      route.DistanceNm,
+		RouteNote:          strings.Join(passage.Notes, " "),
+		rawDistanceNm:      passage.DistanceNm,
 	}, nil
 }
 
