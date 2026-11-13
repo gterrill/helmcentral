@@ -6,16 +6,14 @@ import { Input } from "@/components/ui/input";
 import { searchPlaces, type PlaceCandidate } from "@/hooks/use-place-search";
 import { errorMessage } from "@/lib/errors";
 import { isSubmitEnter } from "@/lib/keyboard";
-
-const bearingLabel = (deg: number) =>
-  `${String(Math.round(deg) % 360).padStart(3, "0")}°`;
+import { formatBearingFigures } from "@/lib/poi";
 
 // Distance and bearing from the boat when the server gave them, then the kind
 // of place; whatever is missing is left out.
 const candidateLabel = (candidate: PlaceCandidate) =>
   [
     candidate.distanceNm !== null ? `${candidate.distanceNm.toFixed(1)} NM` : "",
-    candidate.bearingDeg !== null ? bearingLabel(candidate.bearingDeg) : "",
+    candidate.bearingDeg !== null ? formatBearingFigures(candidate.bearingDeg) : "",
     candidate.kind,
   ]
     .filter((part) => part !== "")

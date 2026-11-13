@@ -1,3 +1,5 @@
+import { circularMeanDegOrNull } from "@/lib/boat-model";
+import { shortTurn } from "@/lib/replay-camera";
 import { addDaysISO, daysBetweenISO } from "@/lib/stay";
 
 // Passage plans: the operator's intended run, stop by stop. The server owns
@@ -39,11 +41,14 @@ export interface Plan {
   lastDate: string;
 }
 
-/** What the operator sends: the server adds the id, status, departures and zones. */
+/**
+ * What the operator sends: the server adds the id, status, departures and
+ * zones. Only the first stop's arrival is sent; the server dates the rest.
+ */
 export interface PlanInput {
   name: string;
   stops: Array<
-    Pick<PlanStop, "name" | "lat" | "lon" | "arrive" | "nights" | "vias" | "departTime">
+    Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias" | "departTime"> & { arrive?: string }
   >;
 }
 
@@ -55,7 +60,10 @@ export interface PlanLeg {
   courseDeg: number | null;
   route: Array<[number, number]>;
   note: string;
+  /** Why the leg failed, in the router's words: the tooltip's full sentence. */
   error: string;
+  /** The router's words alone, without the "no passage distance for A to B" lead. */
+  reason: string;
   /** "on_land" when a stop is off the water; empty for any other failure. */
   errorKind: string;
   errorStop: string;
@@ -64,7 +72,7 @@ export interface PlanLeg {
 }
 
 /** The operator's wording for a failed leg; `detail` is the router's message. */
-export function legErrorText(leg: Pick<PlanLeg, "error" | "errorKind" | "errorStop">): {
+export function legErrorText(leg: Pick<PlanLeg, "error" | "reason" | "errorKind" | "errorStop">): {
   summary: string;
   detail: string;
 } {
@@ -74,8 +82,7 @@ export function legErrorText(leg: Pick<PlanLeg, "error" | "errorKind" | "errorSt
       detail: leg.error,
     };
   }
-  const reason = leg.error.replace(/^no passage distance for .*?: /, "");
-  return { summary: `Can't route this leg: ${reason}`, detail: leg.error };
+  return { summary: `Can't route this leg: ${leg.reason}`, detail: leg.error };
 }
 
 /** The operator's wording for stops charted behind the shoreline. */
@@ -85,9 +92,14 @@ export function legNoteText(leg: Pick<PlanLeg, "moved">): string {
     .join(" ");
 }
 
+/**
+ * `key` is what the row is, not its date: "stop-2-1" is stop 2's second lay
+ * day, "leg-0" the passage leaving stop 0. It holds when a night added earlier
+ * moves every later date, so a selection can be kept by key.
+ */
 export type PlanRow =
-  | { kind: "stop"; dayKey: string; dayNumber: number; stopIndex: number }
-  | { kind: "passage"; dayKey: string; dayNumber: number; legIndex: number };
+  | { kind: "stop"; key: string; dayKey: string; dayNumber: number; stopIndex: number }
+  | { kind: "passage"; key: string; dayKey: string; dayNumber: number; legIndex: number };
 
 /**
  * One row per day. A stop's lay days are rows of their own; the day the boat
@@ -106,14 +118,14 @@ export function buildPlanRows(plan: Pick<Plan, "stops">): PlanRow[] {
   const stopRows = (stopIndex: number, from: number, count: number) => {
     for (let n = 0; n < count; n += 1) {
       const dayKey = addDaysISO(stops[stopIndex].arrive, from + n);
-      rows.push({ kind: "stop", dayKey, dayNumber: day(dayKey), stopIndex });
+      rows.push({ kind: "stop", key: `stop-${stopIndex}-${n}`, dayKey, dayNumber: day(dayKey), stopIndex });
     }
   };
   const last = stops.length - 1;
   stopRows(0, 0, last === 0 ? stops[0].nights + 1 : stops[0].nights);
   for (let i = 0; i < last; i += 1) {
     const dayKey = stops[i].depart;
-    rows.push({ kind: "passage", dayKey, dayNumber: day(dayKey), legIndex: i });
+    rows.push({ kind: "passage", key: `leg-${i}`, dayKey, dayNumber: day(dayKey), legIndex: i });
     // The arrival day at the next stop is the passage row above.
     // The last stop also has its departure day, the plan's last date.
     stopRows(i + 1, 1, i + 1 === last ? stops[i + 1].nights : Math.max(stops[i + 1].nights - 1, 0));
@@ -121,38 +133,12 @@ export function buildPlanRows(plan: Pick<Plan, "stops">): PlanRow[] {
   return rows;
 }
 
-/** Which row of a plan, by what it is rather than by its date. */
-export interface PlanRowRef {
-  kind: PlanRow["kind"];
-  /** The stop index of a stop row, the leg index of a passage row. */
-  index: number;
-  /** Which of that stop's lay days, counting from 0; always 0 for a passage. */
-  nth: number;
-}
-
-const rowIndex = (row: PlanRow) => (row.kind === "stop" ? row.stopIndex : row.legIndex);
-
-/** The reference of every row, in order. */
-export function planRowRefs(rows: PlanRow[]): PlanRowRef[] {
-  const seen = new Map<string, number>();
-  return rows.map((row) => {
-    const id = `${row.kind}-${rowIndex(row)}`;
-    const nth = seen.get(id) ?? 0;
-    seen.set(id, nth + 1);
-    return { kind: row.kind, index: rowIndex(row), nth };
-  });
-}
-
 /**
- * The row a reference points at in the plan as it is now, with its current
- * date; null when the plan no longer has that row.
+ * The row a key points at in the plan as it is now, with its current date;
+ * null when the plan no longer has that row.
  */
-export function findPlanRow(plan: Pick<Plan, "stops">, ref: PlanRowRef): PlanRow | null {
-  const rows = buildPlanRows(plan);
-  const at = planRowRefs(rows).findIndex(
-    (r) => r.kind === ref.kind && r.index === ref.index && r.nth === ref.nth,
-  );
-  return at < 0 ? null : rows[at];
+export function findPlanRow(plan: Pick<Plan, "stops">, key: string): PlanRow | null {
+  return buildPlanRows(plan).find((r) => r.key === key) ?? null;
 }
 
 export type WindRelation = "ahead" | "abeam" | "astern";
@@ -164,7 +150,7 @@ export type WindRelation = "ahead" | "abeam" | "astern";
  * the rest abeam.
  */
 export function windRelation(courseDeg: number, windFromDeg: number): WindRelation {
-  const off = Math.abs((((windFromDeg - courseDeg) % 360) + 540) % 360 - 180);
+  const off = Math.abs(shortTurn(courseDeg, windFromDeg));
   if (off < 60) return "ahead";
   if (off > 120) return "astern";
   return "abeam";
@@ -172,16 +158,9 @@ export function windRelation(courseDeg: number, windFromDeg: number): WindRelati
 
 /** Mean of compass bearings, so 350 and 10 average to 0 and not 180. Null for none. */
 export function circularMeanDeg(degrees: number[]): number | null {
-  const valid = degrees.filter((d) => Number.isFinite(d) && d >= 0);
-  if (valid.length === 0) return null;
-  let x = 0;
-  let y = 0;
-  for (const d of valid) {
-    x += Math.cos((d * Math.PI) / 180);
-    y += Math.sin((d * Math.PI) / 180);
-  }
-  if (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9) return null;
-  return (Math.round((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360;
+  // The forecast sends a negative bearing for a reading it does not have.
+  const mean = circularMeanDegOrNull(degrees.filter((d) => Number.isFinite(d) && d >= 0));
+  return mean === null ? null : Math.round(mean) % 360;
 }
 
 export interface DayWind {
@@ -285,10 +264,6 @@ export type DraftStop = Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias
  * no via places and no departure time whatever it held before it was last.
  */
 export function draftToInput(name: string, firstArrive: string, stops: DraftStop[]): PlanInput {
-  const arrivals = previewArrivals(
-    firstArrive,
-    stops.map((s) => s.nights),
-  );
   return {
     name: name.trim(),
     stops: stops.map((s, i) => {
@@ -297,7 +272,8 @@ export function draftToInput(name: string, firstArrive: string, stops: DraftStop
         name: s.name.trim(),
         lat: s.lat,
         lon: s.lon,
-        arrive: arrivals[i],
+        // Only the first arrival is the operator's; the server dates the rest.
+        arrive: i === 0 ? firstArrive : undefined,
         nights: s.nights,
         vias: last ? [] : s.vias,
         departTime: last ? "" : s.departTime,

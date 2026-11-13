@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -21,7 +21,7 @@ import {
   type ForecastBoatProps,
 } from "@/lib/forecast-drawer-props";
 import { errorMessage } from "@/lib/errors";
-import { findPlanRow, type Plan, type PlanRowRef } from "@/lib/plans";
+import { findPlanRow, type Plan } from "@/lib/plans";
 import { formatStayRange } from "@/lib/stay";
 import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
 
@@ -70,7 +70,7 @@ export function ForecastPage({
   // drawer on old dates. A row the plan no longer has drops the selection.
   const selectedRow =
     selection && plan && selection.planId === plan.id
-      ? findPlanRow(plan, selection.row)
+      ? findPlanRow(plan, selection.rowKey)
       : null;
   if (selection && !selectedRow) setSelection(null);
   const selected = selectedRow && plan
@@ -80,7 +80,7 @@ export function ForecastPage({
         stop: plan.stops[selectedRow.kind === "stop" ? selectedRow.stopIndex : selectedRow.legIndex],
       }
     : null;
-  const selectedRef: PlanRowRef | null = selection?.row ?? null;
+  const selectedRowKey = selection?.rowKey ?? null;
 
   const place = selected
     ? { lat: selected.stop.lat, lon: selected.stop.lon }
@@ -140,17 +140,24 @@ export function ForecastPage({
     setSelection(null);
   };
 
-  const addNight = async (stopIndex: number) => {
-    if (!plan) return;
-    setActionError(null);
-    try {
-      await patchStop(plan.id, stopIndex, {
-        nights: plan.stops[stopIndex].nights + 1,
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  };
+  const planId = plan?.id;
+  const selectRow = useCallback(
+    (rowKey: string) => {
+      if (planId !== undefined) setSelection({ planId, rowKey });
+    },
+    [planId],
+  );
+
+  const addNight = useCallback(
+    (stopIndex: number) => {
+      if (!plan) return;
+      setActionError(null);
+      patchStop(plan.id, stopIndex, { nights: plan.stops[stopIndex].nights + 1 }).catch((err) =>
+        setActionError(errorMessage(err)),
+      );
+    },
+    [plan, patchStop],
+  );
 
   const deletePlan = async () => {
     if (!plan) return;
@@ -168,8 +175,8 @@ export function ForecastPage({
     }
   };
 
-  const open = plans.filter((p) => p.status !== "past");
-  const past = plans.filter((p) => p.status === "past");
+  const open = useMemo(() => plans.filter((p) => p.status !== "past"), [plans]);
+  const past = useMemo(() => plans.filter((p) => p.status === "past"), [plans]);
 
   return (
     <div className="space-y-3">
@@ -281,9 +288,9 @@ export function ForecastPage({
               legsLoading={legsLoading}
               legsError={legsError}
               canWrite={canWrite}
-              selectedRow={selectedRef}
-              onSelect={(row) => setSelection({ planId: plan.id, row })}
-              onAddNight={(i) => void addNight(i)}
+              selectedRowKey={selectedRowKey}
+              onSelect={selectRow}
+              onAddNight={addNight}
             />
           )}
         </section>

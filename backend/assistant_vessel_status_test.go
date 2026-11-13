@@ -438,9 +438,9 @@ func TestVesselStatus_StaleAnomalyReadingIsAbsent(t *testing.T) {
 
 func pinPlannedStayClock(t *testing.T) {
 	t.Helper()
-	prev := plannedStayNow
-	plannedStayNow = func() time.Time { return vesselStatusTestNow }
-	t.Cleanup(func() { plannedStayNow = prev })
+	prev := planNow
+	planNow = func() time.Time { return vesselStatusTestNow }
+	t.Cleanup(func() { planNow = prev })
 }
 
 func plannedStayStoreForTest(t *testing.T, stay plannedStay) func() *documentStore {

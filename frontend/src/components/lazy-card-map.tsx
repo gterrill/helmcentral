@@ -1,5 +1,6 @@
 import { createContext, Suspense, useContext, useRef, useState, type ReactNode } from 'react'
 
+import type { CardMapName } from '@/components/mate-card-map'
 import { useNearViewport } from '@/hooks/use-near-viewport'
 
 type Expanded = readonly [boolean, (expanded: boolean) => void]
@@ -26,7 +27,7 @@ const NOTE = 'flex h-full items-center justify-center text-[10px] uppercase trac
  * thread doesn't jump, and stays blank until the first measurement so a card
  * already on screen never flashes the "far away" note.
  */
-export function LazyCardMap({ name, className, children }: { name: 'marina' | 'anchorage' | 'plan-leg'; className: string; children: ReactNode }) {
+export function LazyCardMap({ name, className, children }: { name: CardMapName; className: string; children: ReactNode }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const near = useNearViewport(boxRef)
   const expandedState = useState(false)

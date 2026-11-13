@@ -1,23 +1,26 @@
-import { useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Map as MapIcon, Plus } from "lucide-react";
 
 import { PlanLegMap } from "@/components/plan-leg-map";
 import { Button } from "@/components/ui/button";
+import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
+import { useWaveForecast } from "@/hooks/use-wave-forecast";
+import { useWeatherForecast } from "@/hooks/use-weather-forecast";
+import type { ForecastPlace } from "@/lib/forecast-place";
+import { PlanForecastContext, PlanForecastStore, placeKey } from "@/lib/plan-forecast-store";
 import {
   buildPlanRows,
   formatWaveRange,
   formatWindRange,
   legForecastPlace,
-  planRowRefs,
   windRelation,
   type Plan,
   type PlanLeg,
   legErrorText,
   legNoteText,
   type PlanRow,
-  type PlanRowRef,
 } from "@/lib/plans";
 import { formatDayMonth, formatWeekday } from "@/lib/stay";
 
@@ -28,16 +31,14 @@ const GRID =
   "md:grid md:grid-cols-[3rem_6.5rem_minmax(0,1fr)_4.5rem_5.5rem_minmax(0,8rem)_4rem_4.5rem] md:items-start md:gap-x-3";
 
 /**
- * The row the operator chose, by what it is. Its stop and dates are read from
- * the plan as it is now, so a change to the plan never leaves them stale.
+ * The row the operator chose, by its key (PlanRow.key). Its stop and dates are
+ * read from the plan as it is now, so a change to the plan never leaves them
+ * stale.
  */
 export interface PlanPlaceSelection {
   planId: number;
-  row: PlanRowRef;
+  rowKey: string;
 }
-
-const sameRow = (a: PlanRowRef | null, b: PlanRowRef) =>
-  a !== null && a.kind === b.kind && a.index === b.index && a.nth === b.nth;
 
 interface PlanTableProps {
   plan: Plan;
@@ -45,15 +46,30 @@ interface PlanTableProps {
   legsLoading: boolean;
   legsError: string | null;
   canWrite: boolean;
-  selectedRow: PlanRowRef | null;
-  onSelect: (row: PlanRowRef) => void;
+  selectedRowKey: string | null;
+  /** Stable between renders, so rows that did not change do not re-render. */
+  onSelect: (rowKey: string) => void;
+  /** Stable between renders. */
   onAddNight: (stopIndex: number) => void;
 }
 
-const rowKey = (row: PlanRow) =>
-  row.kind === "stop"
-    ? `stop-${row.stopIndex}-${row.dayKey}`
-    : `leg-${row.legIndex}-${row.dayKey}`;
+/** Where a row's forecast is read: a stop's own place, a leg's mid-route; null for an unrouted leg. */
+const rowPlace = (row: PlanRow, plan: Plan, leg: PlanLeg | undefined): ForecastPlace | null => {
+  if (row.kind === "passage") return legForecastPlace(leg);
+  const stop = plan.stops[row.stopIndex];
+  return { lat: stop.lat, lon: stop.lon };
+};
+
+/** The one forecast read for a place, written to the store for the rows at it. */
+function PlaceFeedReader({ place, store }: { place: ForecastPlace; store: PlanForecastStore }) {
+  const weather = useWeatherForecast(FORECAST_REFRESH_SECONDS, { place, enabled: true });
+  const waves = useWaveForecast(FORECAST_REFRESH_SECONDS, { place, enabled: true });
+  const key = placeKey(place);
+  useEffect(() => {
+    store.set(key, { weather, waves });
+  }, [store, key, weather, waves]);
+  return null;
+}
 
 export function PlanTable({
   plan,
@@ -61,12 +77,22 @@ export function PlanTable({
   legsLoading,
   legsError,
   canWrite,
-  selectedRow,
+  selectedRowKey,
   onSelect,
   onAddNight,
 }: PlanTableProps) {
-  const rows = buildPlanRows(plan);
-  const refs = planRowRefs(rows);
+  const rows = useMemo(() => buildPlanRows(plan), [plan]);
+  const legByFrom = useMemo(() => new Map(legs.map((l) => [l.from, l])), [legs]);
+  const store = useMemo(() => new PlanForecastStore(), []);
+  // Each distinct place is read once, however many rows sit at it.
+  const places = useMemo(() => {
+    const byKey = new Map<string, ForecastPlace>();
+    for (const row of rows) {
+      const place = rowPlace(row, plan, row.kind === "passage" ? legByFrom.get(row.legIndex) : undefined);
+      if (place && !byKey.has(placeKey(place))) byKey.set(placeKey(place), place);
+    }
+    return [...byKey.values()];
+  }, [rows, plan, legByFrom]);
   return (
     <div role="table" aria-label={`${plan.name} day by day`} className="space-y-2">
       {legsError && (
@@ -87,21 +113,26 @@ export function PlanTable({
         <span role="columnheader">Gusts</span>
         <span role="columnheader">Waves</span>
       </div>
-      <div className="space-y-2">
-        {rows.map((row, at) => (
-          <PlanDayRow
-            key={rowKey(row)}
-            row={row}
-            plan={plan}
-            leg={row.kind === "passage" ? legs.find((l) => l.from === row.legIndex) : undefined}
-            legsLoading={legsLoading}
-            canWrite={canWrite}
-            selected={sameRow(selectedRow, refs[at])}
-            onSelect={() => onSelect(refs[at])}
-            onAddNight={onAddNight}
-          />
+      <PlanForecastContext.Provider value={store}>
+        {places.map((place) => (
+          <PlaceFeedReader key={placeKey(place)} place={place} store={store} />
         ))}
-      </div>
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <PlanDayRow
+              key={row.key}
+              row={row}
+              plan={plan}
+              leg={row.kind === "passage" ? legByFrom.get(row.legIndex) : undefined}
+              legsLoading={legsLoading}
+              canWrite={canWrite}
+              selected={selectedRowKey === row.key}
+              onSelect={onSelect}
+              onAddNight={onAddNight}
+            />
+          ))}
+        </div>
+      </PlanForecastContext.Provider>
     </div>
   );
 }
@@ -125,7 +156,7 @@ function Cell({
   );
 }
 
-function PlanDayRow({
+const PlanDayRow = memo(function PlanDayRow({
   row,
   plan,
   leg,
@@ -141,7 +172,7 @@ function PlanDayRow({
   legsLoading: boolean;
   canWrite: boolean;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (rowKey: string) => void;
   onAddNight: (stopIndex: number) => void;
 }) {
   const [mapOpen, setMapOpen] = useState(false);
@@ -149,7 +180,7 @@ function PlanDayRow({
   const from = plan.stops[passage ? row.legIndex : row.stopIndex];
   const to = passage ? plan.stops[row.legIndex + 1] : null;
   // A leg that did not route has no place to read a forecast at.
-  const place = passage ? legForecastPlace(leg) : { lat: from.lat, lon: from.lon };
+  const place = rowPlace(row, plan, leg);
   const unrouted = passage && place === null;
   const forecast = usePlanDayForecast(place, row.dayKey);
 
@@ -177,7 +208,7 @@ function PlanDayRow({
           type="button"
           className="block w-full min-w-0 truncate text-left text-sm font-medium hover:underline"
           aria-pressed={selected}
-          onClick={onSelect}
+          onClick={() => onSelect(row.key)}
         >
           {passage && to ? `${from.name} → ${to.name}` : `${from.name} · lay day`}
         </button>
@@ -279,4 +310,4 @@ function PlanDayRow({
       )}
     </div>
   );
-}
+});

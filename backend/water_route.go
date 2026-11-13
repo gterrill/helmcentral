@@ -117,10 +117,10 @@ type waterRoute struct {
 }
 
 // waterRouteOnLandError is an end point on land with no water found in front
-// of it. End is "start" or "destination"; the message is the router's wording.
+// of it. AtStart says which end; the message is the router's wording.
 type waterRouteOnLandError struct {
-	End string
-	msg string
+	AtStart bool
+	msg     string
 }
 
 func (e *waterRouteOnLandError) Error() string { return e.msg }
@@ -582,7 +582,7 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 			moved := wrAdd(q, wrScale(water, waterRouteClearanceNm))
 			movedNear, _, _, still, _ := nearestShore(moved, allSegs)
 			if still {
-				return waterRoute{}, &waterRouteOnLandError{End: e.name, msg: fmt.Sprintf("the %s (%.4f, %.4f) is on land and the water in front of it could not be found", e.name, e.in.Lat, e.in.Lon)}
+				return waterRoute{}, &waterRouteOnLandError{AtStart: i == 0, msg: fmt.Sprintf("the %s (%.4f, %.4f) is on land and the water in front of it could not be found", e.name, e.in.Lat, e.in.Lon)}
 			}
 			e.movd = wrDist(e.pt, moved)
 			e.pt = moved

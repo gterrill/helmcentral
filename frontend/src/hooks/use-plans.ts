@@ -57,6 +57,7 @@ interface PlanLegApi {
   route: Array<[number, number]> | null;
   note?: string;
   error?: string;
+  reason?: string;
   error_kind?: string;
   error_stop?: string;
   moved?: Array<{ stop: string; nm: number }>;
@@ -113,6 +114,7 @@ export function mapLeg(l: PlanLegApi): PlanLeg {
     route: l.route ?? [],
     note: l.note ?? "",
     error,
+    reason: l.reason ?? "",
     errorKind: l.error_kind ?? "",
     errorStop: l.error_stop ?? "",
     moved: l.moved ?? [],
@@ -196,19 +198,19 @@ export function usePlans() {
  * The routed legs of one plan. The key carries the stops' places so an edit
  * to a stop or a via asks again; dates and nights do not change a route.
  */
+const selectLegs = (raw: { legs: PlanLegApi[] }) => raw.legs.map(mapLeg);
+
+/** The stops' places and their vias, as one string: the part of a plan a route depends on. */
+const routeShape = (plan: Plan) =>
+  plan.stops.map((s) => `${s.lat},${s.lon}${s.vias.map((v) => `;${v.lat},${v.lon}`).join("")}`).join("|");
+
 export function usePlanLegs(plan: Plan | null) {
-  const shape = useMemo(
-    () =>
-      plan
-        ? plan.stops.map((s) => [s.lat, s.lon, s.vias.map((v) => [v.lat, v.lon])])
-        : [],
-    [plan],
-  );
+  const shape = useMemo(() => (plan ? routeShape(plan) : ""), [plan]);
   const { data, error, isLoading } = useApiQuery<PlanLeg[]>({
     queryKey: [PLANS_PATH, plan?.id ?? 0, "legs", shape],
     path: `${PLANS_PATH}/${plan?.id ?? 0}/legs`,
     enabled: plan !== null && plan.stops.length > 1,
-    select: (raw: { legs: PlanLegApi[] }) => raw.legs.map(mapLeg),
+    select: selectLegs,
   });
   return {
     legs: data ?? [],

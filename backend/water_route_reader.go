@@ -4,9 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // waterRouteMargins are the corridor margins tried in turn, in nautical
@@ -191,4 +196,242 @@ func (r *offlineCoastlineReader) routeWithin(ctx context.Context, fromLat, fromL
 		return route, nil
 	}
 	return waterRoute{}, lastErr
+}
+
+// ── a passage through several points ──────────────────────────────────────
+
+// segmentRouter routes one point-to-point segment over water.
+type segmentRouter func(ctx context.Context, from, to [2]float64) (waterRoute, error)
+
+// routedPassageLeg is one straight run of a routed passage.
+type routedPassageLeg struct {
+	BearingDeg int
+	Nm         float64
+}
+
+// routedPassageMove is an input point charted behind the shoreline and how far
+// it was moved to the water. Point indexes the points the passage was routed
+// through; a via shared by two segments can appear twice.
+type routedPassageMove struct {
+	Point int
+	Nm    float64
+}
+
+// routedPassage is a run over water through a list of points, routed segment
+// by segment. route_distance, estimate_passage and the plan legs all read it.
+type routedPassage struct {
+	// Points runs from the first point to the last, a bend at each headland.
+	Points         []shorelinePoint
+	DistanceNm     float64
+	StraightLineNm float64
+	// CourseDeg is the bearing of the longest straight run, the one course for
+	// wind angle and tide. Legs has every run.
+	CourseDeg int
+	Legs      []routedPassageLeg
+	// Notes says, per segment, which ends were charted behind the shoreline.
+	Notes []string
+	Moved []routedPassageMove
+}
+
+// routedPassageError is the segment that could not be routed (0 is the first)
+// and why. Its text is the router's, unchanged.
+type routedPassageError struct {
+	Segment int
+	Err     error
+}
+
+func (e *routedPassageError) Error() string { return e.Err.Error() }
+func (e *routedPassageError) Unwrap() error { return e.Err }
+
+// routePassageThrough routes each segment between consecutive points with route
+// and joins them. A segment that fails fails the whole passage with a
+// *routedPassageError; a straight line is never put in its place.
+func routePassageThrough(ctx context.Context, route segmentRouter, points [][2]float64) (routedPassage, error) {
+	var out routedPassage
+	for k := 0; k+1 < len(points); k++ {
+		r, err := route(ctx, points[k], points[k+1])
+		if err != nil {
+			return routedPassage{}, &routedPassageError{Segment: k, Err: err}
+		}
+		out.DistanceNm += r.DistanceNm
+		out.StraightLineNm += r.StraightLineNm
+		start := 0
+		if k > 0 {
+			start = 1 // the joint is the previous segment's last point
+		}
+		out.Points = append(out.Points, r.Points[start:]...)
+		if r.StartMovedNm > 0 {
+			out.Moved = append(out.Moved, routedPassageMove{Point: k, Nm: r.StartMovedNm})
+		}
+		if r.EndMovedNm > 0 {
+			out.Moved = append(out.Moved, routedPassageMove{Point: k + 1, Nm: r.EndMovedNm})
+		}
+		if n := routeMovedNote(r); n != "" {
+			out.Notes = append(out.Notes, n)
+		}
+	}
+	longest := -1.0
+	for i := 1; i < len(out.Points); i++ {
+		a, b := out.Points[i-1], out.Points[i]
+		nm := haversineMeters(a.Lat, a.Lon, b.Lat, b.Lon) / metersPerNauticalMile
+		brg := int(math.Round(bearingDeg(a.Lat, a.Lon, b.Lat, b.Lon))) % 360
+		out.Legs = append(out.Legs, routedPassageLeg{BearingDeg: brg, Nm: nm})
+		if nm > longest {
+			longest, out.CourseDeg = nm, brg
+		}
+	}
+	return out, nil
+}
+
+// ── memoised segments ─────────────────────────────────────────────────────
+
+// waterRouteFailureTTL is how long a failed segment is remembered, so a page
+// refetched every few seconds does not repeat a search that just failed.
+var waterRouteFailureTTL = 30 * time.Second
+
+const waterRouteCacheMax = 256
+
+// waterRouteKey names a segment on one state of the coastline: the stamp
+// changes when a square is downloaded, replaced or removed.
+type waterRouteKey struct {
+	pts   [4]float64
+	stamp string
+}
+
+func (k waterRouteKey) String() string { return fmt.Sprintf("%s|%v", k.stamp, k.pts) }
+
+type waterRouteEntry struct {
+	route   waterRoute
+	err     error
+	at      time.Time
+	expires time.Time // zero for a success: its stamp keeps it honest
+}
+
+// waterRouteCache remembers routed segments, and runs identical concurrent
+// searches once.
+type waterRouteCache struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	entries map[waterRouteKey]waterRouteEntry
+	flight  singleflight.Group
+}
+
+func newWaterRouteCache() *waterRouteCache { return &waterRouteCache{now: time.Now} }
+
+func (c *waterRouteCache) lookup(key waterRouteKey) (waterRouteEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if ok && !e.expires.IsZero() && !c.now().Before(e.expires) {
+		delete(c.entries, key)
+		return waterRouteEntry{}, false
+	}
+	return e, ok
+}
+
+func (c *waterRouteCache) store(key waterRouteKey, route waterRoute, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[waterRouteKey]waterRouteEntry{}
+	}
+	if _, held := c.entries[key]; !held && len(c.entries) >= waterRouteCacheMax {
+		c.evictOneLocked()
+	}
+	now := c.now()
+	e := waterRouteEntry{route: route, err: err, at: now}
+	if err != nil {
+		e.expires = now.Add(waterRouteFailureTTL)
+	}
+	c.entries[key] = e
+}
+
+// evictOneLocked drops the oldest entry, so one new segment costs one old one
+// and not the whole cache.
+func (c *waterRouteCache) evictOneLocked() {
+	var oldest waterRouteKey
+	var oldestAt time.Time
+	first := true
+	for k, e := range c.entries {
+		if first || e.at.Before(oldestAt) {
+			oldest, oldestAt, first = k, e.at, false
+		}
+	}
+	delete(c.entries, oldest)
+}
+
+type waterRouteResult struct {
+	route waterRoute
+	err   error
+}
+
+// route serves key from the cache or finds it. A result is remembered only
+// while ctx is alive: a failure caused by this request running out of time says
+// nothing about the segment.
+func (c *waterRouteCache) route(ctx context.Context, key waterRouteKey, find func() (waterRoute, error)) (waterRoute, error) {
+	if e, ok := c.lookup(key); ok {
+		return e.route, e.err
+	}
+	run := func() (waterRouteResult, bool) {
+		v, _, shared := c.flight.Do(key.String(), func() (any, error) {
+			r, err := find()
+			if ctx.Err() == nil {
+				c.store(key, r, err)
+			}
+			return waterRouteResult{route: r, err: err}, nil
+		})
+		return v.(waterRouteResult), shared
+	}
+	res, shared := run()
+	// A search shared with another request ends with that request's context.
+	if shared && res.err != nil && ctx.Err() == nil &&
+		(errors.Is(res.err, context.Canceled) || errors.Is(res.err, context.DeadlineExceeded)) {
+		res.route, res.err = find()
+		if ctx.Err() == nil {
+			c.store(key, res.route, res.err)
+		}
+	}
+	return res.route, res.err
+}
+
+// coverageStamp identifies the squares held and ready right now.
+func (r *offlineCoastlineReader) coverageStamp() (string, error) {
+	recs, err := r.Store.Records()
+	if err != nil {
+		return "", fmt.Errorf("could not read the Offline coastline squares: %w", err)
+	}
+	h := fnv.New64a()
+	for _, rec := range recs {
+		if rec.Status == coastlineStatusReady {
+			fmt.Fprintf(h, "%v,%v,%d,%d;", rec.Square.Lat, rec.Square.Lon, rec.DownloadedAt.Unix(), rec.DataAsOf.Unix())
+		}
+	}
+	return strconv.FormatUint(h.Sum64(), 16), nil
+}
+
+// memoisedRouter checks the install, the switch and the squares once, then
+// returns a router whose results are remembered in memo for the coastline as it
+// is now: turning the coastline off ends them, a changed set of squares starts
+// afresh, and a failure is kept only briefly.
+func (r *offlineCoastlineReader) memoisedRouter(memo *waterRouteCache) (segmentRouter, error) {
+	if r == nil || r.Store == nil {
+		return nil, errors.New("Offline coastline is not available on this install, so the run cannot be routed over water")
+	}
+	enabled, err := r.Enabled()
+	if err != nil {
+		return nil, fmt.Errorf("could not read the Offline coastline setting: %w", err)
+	}
+	if !enabled {
+		return nil, errors.New("Offline coastline is off — turn it on in Settings → Offline coastline")
+	}
+	stamp, err := r.coverageStamp()
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, from, to [2]float64) (waterRoute, error) {
+		key := waterRouteKey{pts: [4]float64{from[0], from[1], to[0], to[1]}, stamp: stamp}
+		return memo.route(ctx, key, func() (waterRoute, error) {
+			return r.RouteOverWater(ctx, from[0], from[1], to[0], to[1])
+		})
+	}, nil
 }

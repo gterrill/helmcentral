@@ -40,12 +40,15 @@ export const POINT_LABEL_LAYOUT: SymbolLayerSpecification['layout'] = {
   'text-offset': [0, 0.8],
 }
 
+/** The maps that sit in a card, named for their test ids and the WebGL2 note. A new map adds its name here. */
+export type CardMapName = 'marina' | 'anchorage' | 'plan-leg'
+
 /**
  * The map body reads the theme tokens, which throw when one is missing, so it
  * is mounted only once WebGL2 is known to be there. A browser without it gets
  * the note and nothing else.
  */
-export function RequireWebGL2({ name, children }: { name: 'marina' | 'anchorage' | 'plan-leg'; children: ReactNode }) {
+export function RequireWebGL2({ name, children }: { name: CardMapName; children: ReactNode }) {
   if (!hasWebGL2()) {
     return (
       <div data-testid={`${name}-map-fallback`} className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">

@@ -10,7 +10,6 @@ import {
   circularMeanDeg,
   clearMovedLegs,
   findPlanRow,
-  planRowRefs,
   formatWaveRange,
   formatWindRange,
   legForecastPlace,
@@ -86,22 +85,20 @@ describe("buildPlanRows final day", () => {
   });
 });
 
-describe("plan row references", () => {
+describe("plan row keys", () => {
   const plan = { stops: [stop("A", "2026-11-14", 2), stop("B", "2026-11-16", 2), stop("C", "2026-11-18", 0)] };
-  it("finds a row again by what it is, not by its date", () => {
-    const rows = buildPlanRows(plan);
-    const refs = planRowRefs(rows);
-    const second = refs[rows.findIndex((r) => r.kind === "stop" && r.stopIndex === 0 && r.dayKey === "2026-11-15")];
-    expect(second).toEqual({ kind: "stop", index: 0, nth: 1 });
-    // A night added at A moves every later date; the reference still lands on A's second lay day.
+  it("names a row by what it is, not by its date", () => {
+    expect(buildPlanRows(plan).map((r) => r.key)).toEqual(["stop-0-0", "stop-0-1", "leg-0", "stop-1-0", "leg-1"]);
+  });
+  it("finds a row again by its key after the dates move", () => {
+    // A night added at A moves every later date; the key still lands on A's second lay day.
     const longer = { stops: [stop("A", "2026-11-14", 3), stop("B", "2026-11-17", 2), stop("C", "2026-11-19", 0)] };
-    expect(findPlanRow(longer, second)).toMatchObject({ kind: "stop", stopIndex: 0, dayKey: "2026-11-15" });
-    const leg = findPlanRow(longer, { kind: "passage", index: 0, nth: 0 });
-    expect(leg).toMatchObject({ kind: "passage", legIndex: 0, dayKey: "2026-11-17" });
+    expect(findPlanRow(longer, "stop-0-1")).toMatchObject({ kind: "stop", stopIndex: 0, dayKey: "2026-11-15" });
+    expect(findPlanRow(longer, "leg-0")).toMatchObject({ kind: "passage", legIndex: 0, dayKey: "2026-11-17" });
   });
   it("is null when the row is gone", () => {
-    expect(findPlanRow({ stops: [stop("A", "2026-11-14", 1)] }, { kind: "passage", index: 0, nth: 0 })).toBeNull();
-    expect(findPlanRow(plan, { kind: "stop", index: 0, nth: 5 })).toBeNull();
+    expect(findPlanRow({ stops: [stop("A", "2026-11-14", 1)] }, "leg-0")).toBeNull();
+    expect(findPlanRow(plan, "stop-0-5")).toBeNull();
   });
 });
 
@@ -232,12 +229,14 @@ describe("the editor's draft", () => {
     ]);
     expect(input.name).toBe("Run");
     expect(input.stops[0]).toMatchObject({ arrive: "2026-11-14", vias: [via], departTime: "06:30" });
-    expect(input.stops[1]).toMatchObject({ name: "B", arrive: "2026-11-15", vias: [], departTime: "" });
+    // The server dates every stop after the first.
+    expect(input.stops[1]).toMatchObject({ name: "B", vias: [], departTime: "" });
+    expect(input.stops[1].arrive).toBeUndefined();
   });
 });
 
 describe("leg wording", () => {
-  const base = { from: 0, to: 1, distanceNm: null, courseDeg: null, route: [], note: "", errorKind: "", errorStop: "", moved: [] };
+  const base = { from: 0, to: 1, distanceNm: null, courseDeg: null, route: [], note: "", reason: "", errorKind: "", errorStop: "", moved: [] };
 
   it("says a stop on land needs moving, without coordinates", () => {
     const text = legErrorText({
@@ -251,7 +250,11 @@ describe("leg wording", () => {
   });
 
   it("shortens any other router error and keeps the full message as detail", () => {
-    const text = legErrorText({ ...base, error: "no passage distance for A to B: the plan's legs took longer than 1m0s to route" });
+    const text = legErrorText({
+      ...base,
+      error: "no passage distance for A to B: the plan's legs took longer than 1m0s to route",
+      reason: "the plan's legs took longer than 1m0s to route",
+    });
     expect(text.summary).toBe("Can't route this leg: the plan's legs took longer than 1m0s to route");
     expect(text.detail).toContain("no passage distance for A to B");
   });

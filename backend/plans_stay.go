@@ -22,42 +22,16 @@ type plannedStay struct {
 	// Timezone is the IANA zone at the place (ADR 0230), worked out on every
 	// read.
 	Timezone string `json:"timezone"`
-}
-
-// stayZoneAt finds the zone at a stop's position. A variable so a test can
-// make the lookup fail.
-var stayZoneAt = zoneAt
-
-// plannedStayNow is the clock plans are judged by; tests replace it.
-var plannedStayNow = time.Now
-
-// withZone sets Timezone from the stay's position. A position with no zone is
-// an error, not UTC.
-func (s plannedStay) withZone() (plannedStay, error) {
-	z, err := stayZoneAt(s.Lat, s.Lon)
-	if err != nil {
-		return s, err
-	}
-	s.Timezone = z.Name
-	return s, nil
-}
-
-// plannedStayActive reports whether the stay still counts at now. Its dates
-// are the place's own, so "today" is the date at the place: it is gone the day
-// after departure. A place whose zone cannot be found is an error.
-func plannedStayActive(s plannedStay, now time.Time) (bool, error) {
-	zone, err := stayZoneAt(s.Lat, s.Lon)
-	if err != nil {
-		return false, err
-	}
-	return s.Depart >= now.In(zone.Loc).Format(planDateLayout), nil
+	// Active is whether the stay still counts: its dates are the place's own,
+	// so it is gone the day after departure.
+	Active bool `json:"-"`
 }
 
 // GetPlannedStay returns the stop of the current plan: the stop the boat is at
 // tonight (on a passage day, the destination), the first stop of an upcoming plan, or, when every plan
 // is past, the last stop of the one that ended most recently (which
-// plannedStayActive then reads as over). ok is false when there are no plans.
-func (s *documentStore) GetPlannedStay() (plannedStay, bool, error) {
+// Active then reads as over). ok is false when there are no plans.
+func (s *documentStore) GetPlannedStay(now time.Time) (plannedStay, bool, error) {
 	plans, err := s.ListPlans()
 	if err != nil {
 		return plannedStay{}, false, err
@@ -65,18 +39,9 @@ func (s *documentStore) GetPlannedStay() (plannedStay, bool, error) {
 	if len(plans) == 0 {
 		return plannedStay{}, false, nil
 	}
-	now := plannedStayNow()
-	idx, ok, err := selectCurrentPlan(plans, now)
+	idx, _, err := selectCurrentPlan(plans, now)
 	if err != nil {
 		return plannedStay{}, false, fmt.Errorf("get planned stay: %w", err)
-	}
-	if !ok {
-		for i, p := range plans {
-			_, last := planDates(p)
-			if _, best := planDates(plans[idx]); last > best {
-				idx = i
-			}
-		}
 	}
 	p := plans[idx]
 	today, err := planToday(p, now)
@@ -89,18 +54,26 @@ func (s *documentStore) GetPlannedStay() (plannedStay, bool, error) {
 	// departure, the last stop.
 	stop := p.Stops[len(p.Stops)-1]
 	for _, st := range p.Stops {
-		if today < addPlanDays(st.Arrive, st.Nights) {
+		if today < st.Depart {
 			stop = st
 			break
 		}
+	}
+	// "Today" for the stay is the date at the stop itself, which may not be
+	// the first stop's zone.
+	zone, err := stayZoneAt(stop.Lat, stop.Lon)
+	if err != nil {
+		return plannedStay{}, false, fmt.Errorf("get planned stay: the stop's time zone is not known: %w", err)
 	}
 	return plannedStay{
 		Name:      stop.Name,
 		Lat:       stop.Lat,
 		Lon:       stop.Lon,
 		Arrive:    stop.Arrive,
-		Depart:    addPlanDays(stop.Arrive, stop.Nights),
+		Depart:    stop.Depart,
 		UpdatedAt: p.UpdatedAt,
+		Timezone:  zone.Name,
+		Active:    stop.Depart >= dayAt(zone, now),
 	}, true, nil
 }
 
@@ -117,29 +90,18 @@ func (d assistantToolDeps) executeGetPlannedStay(ctx context.Context, _ json.Raw
 	if err != nil {
 		return "", err
 	}
-	stay, ok, err := store.GetPlannedStay()
+	stay, ok, err := store.GetPlannedStay(d.now())
 	if err != nil {
 		return "", fmt.Errorf("get_planned_stay: %w", err)
 	}
 	var res assistantPlannedStayResult
-	active := false
-	if ok {
-		var zerr error
-		if active, zerr = plannedStayActive(stay, d.now()); zerr != nil {
-			return "", fmt.Errorf("get_planned_stay: the stop's time zone is not known: %w", zerr)
-		}
-	}
 	switch {
 	case !ok:
 		res.Note = "No plan is saved."
-	case !active:
+	case !stay.Active:
 		res.Note = "The last plan ended before today, so none is planned."
 	default:
-		withZone, zerr := stay.withZone()
-		if zerr != nil {
-			return "", fmt.Errorf("get_planned_stay: the stop's time zone is not known: %w", zerr)
-		}
-		res.Stay = &withZone
+		res.Stay = &stay
 		res.Note = "The operator's current plan on the Forecast page is at or heading for this stop."
 	}
 	return capToolResultJSON(&res, nil)

@@ -110,13 +110,13 @@ function plansState(plans: unknown[], currentId: number | null, legs: unknown[] 
 }
 
 const LEGS = [
-  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", errorKind: "", errorStop: "", moved: [] },
-  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land", errorKind: "", errorStop: "", moved: [] },
+  { from: 0, to: 1, distanceNm: 17.5, courseDeg: 90, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", moved: [] },
+  { from: 1, to: 2, distanceNm: null, courseDeg: null, route: [], note: "", error: "no passage distance for Pelican Bay to Mooloolaba: start is on land", reason: "start is on land", errorKind: "", errorStop: "", moved: [] },
 ];
 
 const ROUTED = [
   LEGS[0],
-  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", errorKind: "", errorStop: "", moved: [] },
+  { from: 1, to: 2, distanceNm: 9, courseDeg: 10, route: [[-27, 153], [-26.9, 153.2]], note: "", error: "", reason: "", errorKind: "", errorStop: "", moved: [] },
 ];
 
 const boatProps = {
@@ -321,8 +321,9 @@ describe("ForecastPage", () => {
       depart: "2026-11-16",
       timezone: "Australia/Brisbane",
     });
-    const [, options] = vi.mocked(useWeatherForecast).mock.calls.at(-1) as unknown as [number, { place?: unknown; enabled?: boolean }];
-    expect(options).toEqual({ place: { lat: -27.2, lon: 153.1 }, enabled: true });
+    // The table reads its own places too, so look for the page's call among them.
+    const optionsSeen = vi.mocked(useWeatherForecast).mock.calls.map((c) => c[1]);
+    expect(optionsSeen).toContainEqual({ place: { lat: -27.2, lon: 153.1 }, enabled: true });
     expect(JSON.parse(screen.getByTestId("drawer").getAttribute("data-warning") || "null")).toMatchObject({ region: "Gold Coast" });
 
     fireEvent.click(screen.getByRole("button", { name: "Boat" }));

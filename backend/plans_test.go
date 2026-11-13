@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 // stay. These tests book plans around late October 2026 on the Queensland
 // coast (UTC+10), with the clock pinned to 24 Oct.
 func init() {
-	plannedStayNow = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
+	planNow = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
 }
 
 func stopsOf(arrive string, nights ...int) []planStop {
@@ -267,18 +268,18 @@ func TestSelectCurrentPlan(t *testing.T) {
 	later := planAt(t, "2026-12-01", 1, 0)
 	soon := planAt(t, "2026-11-20", 1, 0)
 
-	idx, ok, err := selectCurrentPlan([]plan{past, later, spans, soon}, now)
-	if err != nil || !ok || idx != 2 {
-		t.Fatalf("a plan spanning today wins: idx=%d ok=%v err=%v", idx, ok, err)
+	idx, st, err := selectCurrentPlan([]plan{past, later, spans, soon}, now)
+	if err != nil || st != planStatusActive || idx != 2 {
+		t.Fatalf("a plan spanning today wins: idx=%d status=%q err=%v", idx, st, err)
 	}
-	idx, ok, _ = selectCurrentPlan([]plan{past, later, soon}, now)
-	if !ok || idx != 2 {
+	idx, st, _ = selectCurrentPlan([]plan{past, later, soon}, now)
+	if st != planStatusUpcoming || idx != 2 {
 		t.Fatalf("else the next upcoming (20 Nov, not 1 Dec): idx=%d", idx)
 	}
-	if _, ok, _ := selectCurrentPlan([]plan{past}, now); ok {
-		t.Fatal("only a past plan: there is no current plan")
+	if _, st, _ := selectCurrentPlan([]plan{past}, now); st != planStatusPast {
+		t.Fatalf("only a past plan: it is named as past, got %q", st)
 	}
-	if _, ok, _ := selectCurrentPlan(nil, now); ok {
+	if idx, st, _ := selectCurrentPlan(nil, now); idx != -1 || st != "" {
 		t.Fatal("no plans, no current plan")
 	}
 }
@@ -311,14 +312,18 @@ func routeOf(nm float64, pts ...[2]float64) waterRoute {
 func TestPlanLegs_DistanceIsTheSumThroughTheVias(t *testing.T) {
 	prev := planRouteSegment
 	t.Cleanup(func() { planRouteSegment = prev })
+	// Legs are routed at once, so the stand-in answers by place, not by order.
+	var mu sync.Mutex
 	var calls [][4]float64
 	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		mu.Lock()
 		calls = append(calls, [4]float64{aLat, aLon, bLat, bLon})
+		mu.Unlock()
 		// 10 nm to the first via, 7.5 nm from it, 2 nm for any other segment.
-		switch len(calls) {
-		case 1:
+		switch {
+		case bLat == -25.8:
 			return routeOf(10, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
-		case 2:
+		case aLat == -25.8:
 			return routeOf(7.5, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
 		}
 		return routeOf(2, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
@@ -337,8 +342,8 @@ func TestPlanLegs_DistanceIsTheSumThroughTheVias(t *testing.T) {
 		t.Fatalf("leg 0 is two segments and leg 1 one, got %d routed", len(calls))
 	}
 	// Segment order: stop 0 -> via A -> stop 1.
-	if calls[0][2] != -25.8 || calls[1][0] != -25.8 || calls[1][2] != p.Stops[1].Lat {
-		t.Fatalf("segments out of order: %v", calls)
+	if r := legs[0].Route; len(r) != 3 || r[1][0] != -25.8 || r[2][0] != p.Stops[1].Lat {
+		t.Fatalf("segments out of order: %v", r)
 	}
 	if legs[0].From != 0 || legs[0].To != 1 || legs[1].From != 1 || legs[1].To != 2 {
 		t.Fatalf("leg indices: %+v", legs)
@@ -483,41 +488,55 @@ func TestPlanHandlers_LegsEndpointReportsDistancesAndErrors(t *testing.T) {
 
 func TestGetPlannedStay_IsTheStopOfTheCurrentPlan(t *testing.T) {
 	store := newTestDocumentStore(t)
-	if _, ok, err := store.GetPlannedStay(); err != nil || ok {
+	at := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+	if _, ok, err := store.GetPlannedStay(at(2026, 10, 24)); err != nil || ok {
 		t.Fatalf("no plans, no stay: ok=%v err=%v", ok, err)
 	}
 	// 24 Oct: the plan has not started, so the stay is its first stop.
-	saved, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-10-27", 4, 1, 0)})
-	if err != nil {
+	if _, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-10-27", 4, 1, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	stay, ok, err := store.GetPlannedStay()
-	if err != nil || !ok || stay.Name != "Great Sandy Straits Marina" || stay.Arrive != "2026-10-27" || stay.Depart != "2026-10-31" {
+	stay, ok, err := store.GetPlannedStay(at(2026, 10, 24))
+	if err != nil || !ok || stay.Name != "Great Sandy Straits Marina" || stay.Arrive != "2026-10-27" || stay.Depart != "2026-10-31" || stay.Timezone != "Australia/Brisbane" || !stay.Active {
 		t.Fatalf("stay = %+v ok=%v err=%v", stay, ok, err)
 	}
-	// Mid-plan, the stop the boat is at (or sailing from) today.
-	prev := plannedStayNow
-	t.Cleanup(func() { plannedStayNow = prev })
-	plannedStayNow = func() time.Time { return time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC) } // lay day at the first stop
-	stay, _, _ = store.GetPlannedStay()
+	// Mid-plan, the stop the boat is at (or sailing from) today: a lay day at
+	// the first stop.
+	stay, _, _ = store.GetPlannedStay(at(2026, 10, 29))
 	if stay.Name != "Great Sandy Straits Marina" || stay.Depart != "2026-10-31" {
 		t.Fatalf("lay-day stay = %+v", stay)
 	}
 	// 1 Nov is the day the boat sails Pelican Bay to Mooloolaba: it spends the
 	// night at the destination.
-	plannedStayNow = func() time.Time { return time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC) }
-	stay, _, _ = store.GetPlannedStay()
+	stay, _, _ = store.GetPlannedStay(at(2026, 11, 1))
 	if stay.Name != "Mooloolaba" || stay.Arrive != "2026-11-01" {
 		t.Fatalf("passage-day stay must be the destination, got %+v", stay)
 	}
-	// After the plan, the last stop, which plannedStayActive reads as ended.
-	plannedStayNow = func() time.Time { return time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC) }
-	stay, ok, _ = store.GetPlannedStay()
-	active, _ := plannedStayActive(stay, plannedStayNow())
-	if !ok || stay.Name != "Mooloolaba" || active {
-		t.Fatalf("past plan: %+v ok=%v active=%v", stay, ok, active)
+	// After the plan, the last stop, which Active reads as ended.
+	stay, ok, _ = store.GetPlannedStay(at(2026, 12, 1))
+	if !ok || stay.Name != "Mooloolaba" || stay.Active {
+		t.Fatalf("past plan: %+v ok=%v", stay, ok)
 	}
-	_ = saved
+}
+
+func TestGetPlannedStay_AllPastIsTheLastStopOfTheMostRecentlyEndedPlan(t *testing.T) {
+	store := newTestDocumentStore(t)
+	// Saved in an order where the latest-ending plan is neither first nor last.
+	for _, c := range []struct{ arrive, lastStop string }{
+		{"2026-03-01", "ended March"},
+		{"2026-05-01", "ended May"},
+		{"2026-04-01", "ended April"},
+	} {
+		stops := stopsOf(c.arrive, 1, 0)
+		stops[1].Name = c.lastStop
+		if _, err := store.CreatePlan(plan{Name: c.lastStop, Stops: stops}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stay, ok, err := store.GetPlannedStay(time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC))
+	if err != nil || !ok || stay.Name != "ended May" || stay.Active {
+		t.Fatalf("the plan that ended most recently, over: %+v ok=%v err=%v", stay, ok, err)
+	}
 }
 
 // setStayForTest saves a one-stop plan standing for the old planned stay.
@@ -576,13 +595,13 @@ func TestPlanLegs_AnOverallDeadlineFailsTheLegsExplicitly(t *testing.T) {
 
 func TestPlanRouteCache_KnownFailuresAreRememberedBrieflyAndNotAcrossACoastlineChange(t *testing.T) {
 	now := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
-	c := &planRouteCache{now: func() time.Time { return now }}
-	key := planSegmentKey{pts: [4]float64{1, 2, 3, 4}, stamp: "squares-v1"}
+	c := &waterRouteCache{now: func() time.Time { return now }}
+	key := waterRouteKey{pts: [4]float64{1, 2, 3, 4}, stamp: "squares-v1"}
 	c.store(key, waterRoute{}, errors.New("start is on land"))
 	if e, ok := c.lookup(key); !ok || e.err == nil {
 		t.Fatalf("a failure should be served within its TTL: %+v %v", e, ok)
 	}
-	now = now.Add(planFailureTTL + time.Second)
+	now = now.Add(waterRouteFailureTTL + time.Second)
 	if _, ok := c.lookup(key); ok {
 		t.Fatal("a failure must expire so a fixed coastline is retried")
 	}
@@ -597,11 +616,49 @@ func TestPlanRouteCache_KnownFailuresAreRememberedBrieflyAndNotAcrossACoastlineC
 	}
 }
 
+func TestWaterRouteCache_IdenticalConcurrentSearchesRunOnceAndFullDropsOnlyOne(t *testing.T) {
+	c := newWaterRouteCache()
+	key := waterRouteKey{pts: [4]float64{1, 2, 3, 4}, stamp: "s"}
+	var mu sync.Mutex
+	searches := 0
+	release := make(chan struct{})
+	find := func() (waterRoute, error) {
+		mu.Lock()
+		searches++
+		mu.Unlock()
+		<-release
+		return routeOf(3, [2]float64{1, 2}, [2]float64{3, 4}), nil
+	}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if r, err := c.route(context.Background(), key, find); err != nil || r.DistanceNm != 3 {
+				t.Errorf("route = %+v %v", r, err)
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if searches != 1 {
+		t.Fatalf("four identical requests should share one search, ran %d", searches)
+	}
+
+	for i := 0; i < waterRouteCacheMax+5; i++ {
+		c.store(waterRouteKey{pts: [4]float64{float64(i)}, stamp: "s"}, waterRoute{}, nil)
+	}
+	if len(c.entries) != waterRouteCacheMax {
+		t.Fatalf("a full cache drops one entry per new one, holds %d", len(c.entries))
+	}
+}
+
 func TestPlanLegs_AnEndOnLandNamesTheStopAndKeepsTheRouterMessage(t *testing.T) {
 	prev := planRouteSegment
 	t.Cleanup(func() { planRouteSegment = prev })
 	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
-		return waterRoute{}, &waterRouteOnLandError{End: "start", msg: "the start (-25.5000, 152.9000) is on land and the water in front of it could not be found"}
+		return waterRoute{}, &waterRouteOnLandError{AtStart: true, msg: "the start (-25.5000, 152.9000) is on land and the water in front of it could not be found"}
 	}
 	p := planAt(t, "2026-11-14", 1, 1, 0)
 	legs := planLegs(context.Background(), p)
@@ -610,6 +667,10 @@ func TestPlanLegs_AnEndOnLandNamesTheStopAndKeepsTheRouterMessage(t *testing.T) 
 	}
 	if !strings.Contains(legs[0].Error, "is on land and the water in front of it could not be found") {
 		t.Fatalf("the router's wording must stay: %q", legs[0].Error)
+	}
+	if !strings.HasPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") ||
+		legs[0].Reason != strings.TrimPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") {
+		t.Fatalf("the reason is the router's words without the sentence round them: %q / %q", legs[0].Error, legs[0].Reason)
 	}
 }
 

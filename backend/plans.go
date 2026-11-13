@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"log"
 	"math"
 	"net/http"
@@ -35,15 +34,22 @@ import (
 // interface declares every one.
 
 const (
-	planNameMax     = 120
-	planMaxStops    = 30
-	planMaxVias     = 10
-	planMaxNights   = 365
-	planDateLayout  = "2006-01-02"
-	planStatusPast  = "past"
-	planStatusSoon  = "upcoming"
-	planStatusToday = "active"
+	planNameMax        = 120
+	planMaxStops       = 30
+	planMaxVias        = 10
+	planMaxNights      = 365
+	planDateLayout     = "2006-01-02"
+	planStatusPast     = "past"
+	planStatusUpcoming = "upcoming"
+	planStatusActive   = "active"
 )
+
+// planNow is the clock plans are judged by; tests replace it.
+var planNow = time.Now
+
+// stayZoneAt finds the zone at a stop's position, from the cache. A variable
+// so a test can make the lookup fail.
+var stayZoneAt = zoneAtCached
 
 var planTimePattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 
@@ -135,27 +141,29 @@ func parsePlanDate(field, v string) (time.Time, *planError) {
 	return d, nil
 }
 
-func addPlanDays(date string, days int) string {
-	d, err := time.Parse(planDateLayout, date)
-	if err != nil {
-		return date
-	}
-	return d.AddDate(0, 0, days).Format(planDateLayout)
-}
-
+// planDaysBetween is the whole days from one calendar day to another. Both
+// are parsed dates, midnight UTC, so the difference is exact.
 func planDaysBetween(from, to time.Time) int {
-	return int(math.Round(to.Sub(from).Hours() / 24))
+	return int(to.Sub(from) / (24 * time.Hour))
 }
 
 // rechainStops makes every arrival after the first the previous arrival plus
-// its nights.
-func rechainStops(stops []planStop) {
-	for i := range stops {
-		if i > 0 {
-			stops[i].Arrive = addPlanDays(stops[i-1].Arrive, stops[i-1].Nights)
-		}
-		stops[i].Depart = addPlanDays(stops[i].Arrive, stops[i].Nights)
+// its nights, and sets each stop's departure. It fails when the first arrival
+// is not a date.
+func rechainStops(stops []planStop) error {
+	if len(stops) == 0 {
+		return nil
 	}
+	day, err := time.Parse(planDateLayout, stops[0].Arrive)
+	if err != nil {
+		return fmt.Errorf("the first arrival %q is not a date: %w", stops[0].Arrive, err)
+	}
+	for i := range stops {
+		stops[i].Arrive = day.Format(planDateLayout)
+		day = day.AddDate(0, 0, stops[i].Nights)
+		stops[i].Depart = day.Format(planDateLayout)
+	}
+	return nil
 }
 
 func copyStops(in []planStop) []planStop {
@@ -169,12 +177,85 @@ func copyStops(in []planStop) []planStop {
 
 // ── validation ──────────────────────────────────────────────────────────
 
-func checkLatLon(field string, lat, lon float64) *planError {
+// perr is a planError with a formatted message.
+func perr(field, format string, args ...any) *planError {
+	return &planError{Field: field, Message: fmt.Sprintf(format, args...)}
+}
+
+// checkLatLon names the coordinate that is out of range, "lat" or "lon", and
+// says why. axis is "" when both are fine.
+func checkLatLon(lat, lon float64) (axis, why string) {
 	if math.IsNaN(lat) || lat < -90 || lat > 90 {
-		return &planError{Field: field, Message: "lat must be within -90..90"}
+		return "lat", "lat must be within -90..90"
 	}
 	if math.IsNaN(lon) || lon < -180 || lon > 180 {
-		return &planError{Field: field, Message: "lon must be within -180..180"}
+		return "lon", "lon must be within -180..180"
+	}
+	return "", ""
+}
+
+// checkNights refuses a night count outside 0..planMaxNights. prefix leads the
+// message ("stop 2: ") or is empty.
+func checkNights(field, prefix string, nights int) *planError {
+	if nights < 0 || nights > planMaxNights {
+		return perr(field, "%snights must be 0..%d", prefix, planMaxNights)
+	}
+	return nil
+}
+
+func normaliseVia(v *planVia, stopNo, viaNo int) *planError {
+	v.Name = strings.TrimSpace(v.Name)
+	if v.Name == "" {
+		return perr("vias", "stop %d: name via place %d", stopNo, viaNo)
+	}
+	if axis, why := checkLatLon(v.Lat, v.Lon); axis != "" {
+		return perr("vias", "stop %d via %d: %s", stopNo, viaNo, why)
+	}
+	return nil
+}
+
+// normaliseStop trims and checks stop i of a plan whose last stop is last.
+func normaliseStop(s *planStop, i, last int) *planError {
+	n := i + 1
+	s.Name = strings.TrimSpace(s.Name)
+	if s.Name == "" {
+		return perr("stops.name", "name stop %d", n)
+	}
+	if utf8.RuneCountInString(s.Name) > planNameMax {
+		return perr("stops.name", "stop %d: name is longer than %d characters", n, planNameMax)
+	}
+	if axis, why := checkLatLon(s.Lat, s.Lon); axis != "" {
+		return perr("stops."+axis, "stop %d: %s", n, why)
+	}
+	if e := checkNights("stops.nights", fmt.Sprintf("stop %d: ", n), s.Nights); e != nil {
+		return e
+	}
+	if i == 0 {
+		if _, e := parsePlanDate("stops.arrive", s.Arrive); e != nil {
+			return e
+		}
+	}
+	if len(s.Vias) > planMaxVias {
+		return perr("vias", "stop %d: at most %d via places", n, planMaxVias)
+	}
+	for j := range s.Vias {
+		if e := normaliseVia(&s.Vias[j], n, j+1); e != nil {
+			return e
+		}
+	}
+	if s.DepartTime != "" && !planTimePattern.MatchString(s.DepartTime) {
+		return perr("depart_time", "stop %d: departure time must be HH:MM", n)
+	}
+	if i == last {
+		if len(s.Vias) > 0 {
+			return perr("vias", "the last stop has no leg leaving it, so no via places")
+		}
+		if s.DepartTime != "" {
+			return perr("depart_time", "the last stop has no leg leaving it, so no departure time")
+		}
+	}
+	if s.Vias == nil {
+		s.Vias = []planVia{}
 	}
 	return nil
 }
@@ -185,73 +266,27 @@ func checkLatLon(field string, lat, lon float64) *planError {
 func normalisePlan(p plan) (plan, *planError) {
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
-		return plan{}, &planError{Field: "name", Message: "name the plan"}
+		return plan{}, perr("name", "name the plan")
 	}
 	if utf8.RuneCountInString(p.Name) > planNameMax {
-		return plan{}, &planError{Field: "name", Message: fmt.Sprintf("name is longer than %d characters", planNameMax)}
+		return plan{}, perr("name", "name is longer than %d characters", planNameMax)
 	}
 	if len(p.Stops) == 0 {
-		return plan{}, &planError{Field: "stops", Message: "add at least one stop"}
+		return plan{}, perr("stops", "add at least one stop")
 	}
 	if len(p.Stops) > planMaxStops {
-		return plan{}, &planError{Field: "stops", Message: fmt.Sprintf("a plan has at most %d stops", planMaxStops)}
+		return plan{}, perr("stops", "a plan has at most %d stops", planMaxStops)
 	}
 	p.Stops = copyStops(p.Stops)
 	last := len(p.Stops) - 1
 	for i := range p.Stops {
-		s := &p.Stops[i]
-		s.Name = strings.TrimSpace(s.Name)
-		if s.Name == "" {
-			return plan{}, &planError{Field: "stops.name", Message: fmt.Sprintf("name stop %d", i+1)}
-		}
-		if utf8.RuneCountInString(s.Name) > planNameMax {
-			return plan{}, &planError{Field: "stops.name", Message: fmt.Sprintf("stop %d: name is longer than %d characters", i+1, planNameMax)}
-		}
-		if e := checkLatLon("stops.lat", s.Lat, s.Lon); e != nil {
-			if strings.HasPrefix(e.Message, "lon") {
-				e.Field = "stops.lon"
-			}
-			e.Message = fmt.Sprintf("stop %d: %s", i+1, e.Message)
+		if e := normaliseStop(&p.Stops[i], i, last); e != nil {
 			return plan{}, e
 		}
-		if s.Nights < 0 || s.Nights > planMaxNights {
-			return plan{}, &planError{Field: "stops.nights", Message: fmt.Sprintf("stop %d: nights must be 0..%d", i+1, planMaxNights)}
-		}
-		if i == 0 {
-			if _, e := parsePlanDate("stops.arrive", s.Arrive); e != nil {
-				return plan{}, e
-			}
-		}
-		if len(s.Vias) > planMaxVias {
-			return plan{}, &planError{Field: "vias", Message: fmt.Sprintf("stop %d: at most %d via places", i+1, planMaxVias)}
-		}
-		for j := range s.Vias {
-			v := &s.Vias[j]
-			v.Name = strings.TrimSpace(v.Name)
-			if v.Name == "" {
-				return plan{}, &planError{Field: "vias", Message: fmt.Sprintf("stop %d: name via place %d", i+1, j+1)}
-			}
-			if e := checkLatLon("vias", v.Lat, v.Lon); e != nil {
-				e.Message = fmt.Sprintf("stop %d via %d: %s", i+1, j+1, e.Message)
-				return plan{}, e
-			}
-		}
-		if s.DepartTime != "" && !planTimePattern.MatchString(s.DepartTime) {
-			return plan{}, &planError{Field: "depart_time", Message: fmt.Sprintf("stop %d: departure time must be HH:MM", i+1)}
-		}
-		if i == last {
-			if len(s.Vias) > 0 {
-				return plan{}, &planError{Field: "vias", Message: "the last stop has no leg leaving it, so no via places"}
-			}
-			if s.DepartTime != "" {
-				return plan{}, &planError{Field: "depart_time", Message: "the last stop has no leg leaving it, so no departure time"}
-			}
-		}
-		if s.Vias == nil {
-			s.Vias = []planVia{}
-		}
 	}
-	rechainStops(p.Stops)
+	if err := rechainStops(p.Stops); err != nil {
+		return plan{}, perr("stops.arrive", "%v", err)
+	}
 	return p, nil
 }
 
@@ -261,11 +296,13 @@ func normalisePlan(p plan) (plan, *planError) {
 // modified.
 func applyStopEdit(stops []planStop, idx int, arrive *string, nights *int) ([]planStop, *planError) {
 	if idx < 0 || idx >= len(stops) {
-		return nil, &planError{Field: "index", Message: "there is no such stop"}
+		return nil, perr("index", "there is no such stop")
 	}
 	out := copyStops(stops)
-	if nights != nil && (*nights < 0 || *nights > planMaxNights) {
-		return nil, &planError{Field: "nights", Message: fmt.Sprintf("nights must be 0..%d", planMaxNights)}
+	if nights != nil {
+		if e := checkNights("nights", "", *nights); e != nil {
+			return nil, e
+		}
 	}
 	if arrive != nil {
 		want, e := parsePlanDate("arrive", *arrive)
@@ -275,13 +312,16 @@ func applyStopEdit(stops []planStop, idx int, arrive *string, nights *int) ([]pl
 		if idx == 0 {
 			out[0].Arrive = *arrive
 		} else {
-			before, _ := time.Parse(planDateLayout, out[idx-1].Arrive)
+			before, err := time.Parse(planDateLayout, out[idx-1].Arrive)
+			if err != nil {
+				return nil, perr("arrive", "the stop before has no date: %v", err)
+			}
 			n := planDaysBetween(before, want)
 			if n < 0 {
-				return nil, &planError{Field: "arrive", Message: "that is before the boat reaches the stop before"}
+				return nil, perr("arrive", "that is before the boat reaches the stop before")
 			}
 			if n > planMaxNights {
-				return nil, &planError{Field: "arrive", Message: fmt.Sprintf("that is more than %d nights after the stop before", planMaxNights)}
+				return nil, perr("arrive", "that is more than %d nights after the stop before", planMaxNights)
 			}
 			out[idx-1].Nights = n
 		}
@@ -289,7 +329,9 @@ func applyStopEdit(stops []planStop, idx int, arrive *string, nights *int) ([]pl
 	if nights != nil {
 		out[idx].Nights = *nights
 	}
-	rechainStops(out)
+	if err := rechainStops(out); err != nil {
+		return nil, perr("arrive", "%v", err)
+	}
 	return out, nil
 }
 
@@ -304,86 +346,113 @@ func planToday(p plan, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return now.In(zone.Loc).Format(planDateLayout), nil
+	return dayAt(zone, now), nil
 }
 
+// dayAt is the calendar day at a place.
+func dayAt(zone placeZone, now time.Time) string {
+	return now.In(zone.Loc).Format(planDateLayout)
+}
+
+// planDates are the first arrival and the last departure. The stops' Depart
+// is set by rechainStops, which every read and write of a plan runs.
 func planDates(p plan) (first, last string) {
 	if len(p.Stops) == 0 {
 		return "", ""
 	}
-	end := p.Stops[len(p.Stops)-1]
-	return p.Stops[0].Arrive, addPlanDays(end.Arrive, end.Nights)
+	return p.Stops[0].Arrive, p.Stops[len(p.Stops)-1].Depart
 }
 
-// planStatus is "upcoming", "active" (the dates span today) or "past",
-// judged at the first stop.
+// planStatusOn is "upcoming", "active" (the dates span today) or "past" for a
+// given day.
+func planStatusOn(p plan, today string) string {
+	first, last := planDates(p)
+	switch {
+	case today < first:
+		return planStatusUpcoming
+	case today > last:
+		return planStatusPast
+	}
+	return planStatusActive
+}
+
+// planStatus is the plan's status, judged at the first stop.
 func planStatus(p plan, now time.Time) (string, error) {
 	today, err := planToday(p, now)
 	if err != nil {
 		return "", err
 	}
-	first, last := planDates(p)
-	switch {
-	case today < first:
-		return planStatusSoon, nil
-	case today > last:
-		return planStatusPast, nil
-	}
-	return planStatusToday, nil
+	return planStatusOn(p, today), nil
 }
 
 // selectCurrentPlan picks the plan the table opens on: the one whose dates
-// span today, else the next upcoming. ok is false when every plan is past.
-func selectCurrentPlan(plans []plan, now time.Time) (int, bool, error) {
-	active, soon := -1, -1
+// span today, else the next upcoming, else, when every plan is past, the one
+// that ended most recently. status says which of the three it is; idx is -1
+// and status "" when there are no plans.
+func selectCurrentPlan(plans []plan, now time.Time) (idx int, status string, err error) {
+	best := map[string]int{}
 	for i, p := range plans {
 		st, err := planStatus(p, now)
 		if err != nil {
-			return 0, false, err
+			return -1, "", err
 		}
-		first, _ := planDates(p)
-		switch st {
-		case planStatusToday:
-			if active < 0 {
-				active = i
-			} else if f, _ := planDates(plans[active]); first < f {
-				active = i
-			}
-		case planStatusSoon:
-			if soon < 0 {
-				soon = i
-			} else if f, _ := planDates(plans[soon]); first < f {
-				soon = i
-			}
+		cur, seen := best[st]
+		if !seen || planComesFirst(st, p, plans[cur]) {
+			best[st] = i
 		}
 	}
-	if active >= 0 {
-		return active, true, nil
+	for _, st := range []string{planStatusActive, planStatusUpcoming, planStatusPast} {
+		if i, ok := best[st]; ok {
+			return i, st, nil
+		}
 	}
-	if soon >= 0 {
-		return soon, true, nil
+	return -1, "", nil
+}
+
+// planComesFirst says whether a beats b among plans of one status: the
+// earlier start for a plan under way or coming, the later end for one past.
+func planComesFirst(status string, a, b plan) bool {
+	aFirst, aLast := planDates(a)
+	bFirst, bLast := planDates(b)
+	if status == planStatusPast {
+		return aLast > bLast
 	}
-	return 0, false, nil
+	return aFirst < bFirst
+}
+
+// planZones finds every stop's zone, once. On a failure, stop is the index of
+// the stop that has none.
+func planZones(p plan) (zones []placeZone, stop int, err error) {
+	zones = make([]placeZone, len(p.Stops))
+	for i, s := range p.Stops {
+		z, err := stayZoneAt(s.Lat, s.Lon)
+		if err != nil {
+			return nil, i, err
+		}
+		zones[i] = z
+	}
+	return zones, -1, nil
 }
 
 // decoratePlan adds what is worked out on every read: status, first and last
 // dates, each stop's departure date and its zone. A position with no zone is
 // an error, not UTC.
 func decoratePlan(p plan, now time.Time) (plan, error) {
-	p.Stops = copyStops(p.Stops)
-	rechainStops(p.Stops)
-	for i := range p.Stops {
-		z, err := stayZoneAt(p.Stops[i].Lat, p.Stops[i].Lon)
-		if err != nil {
-			return p, fmt.Errorf("stop %d (%s): %w", i+1, p.Stops[i].Name, err)
-		}
-		p.Stops[i].Timezone = z.Name
+	if len(p.Stops) == 0 {
+		return p, errors.New("plan has no stops")
 	}
-	st, err := planStatus(p, now)
-	if err != nil {
+	p.Stops = copyStops(p.Stops)
+	if err := rechainStops(p.Stops); err != nil {
 		return p, err
 	}
-	p.Status = st
+	zones, bad, err := planZones(p)
+	if err != nil {
+		return p, fmt.Errorf("stop %d (%s): %w", bad+1, p.Stops[bad].Name, err)
+	}
+	for i, z := range zones {
+		p.Stops[i].Timezone = z.Name
+	}
+	p.Status = planStatusOn(p, dayAt(zones[0], now))
 	p.FirstDate, p.LastDate = planDates(p)
 	return p, nil
 }
@@ -391,10 +460,8 @@ func decoratePlan(p plan, now time.Time) (plan, error) {
 // checkPlanZones refuses a stop whose position has no time zone before
 // anything is saved.
 func checkPlanZones(p plan) *planError {
-	for i, s := range p.Stops {
-		if _, err := stayZoneAt(s.Lat, s.Lon); err != nil {
-			return &planError{Field: "stops.lat", Message: fmt.Sprintf("stop %d: the place's time zone is not known: %v", i+1, err)}
-		}
+	if _, bad, err := planZones(p); err != nil {
+		return perr("stops.lat", "stop %d: the place's time zone is not known: %v", bad+1, err)
 	}
 	return nil
 }
@@ -425,19 +492,29 @@ func loadPlan(q sqlQueryer, id int64) (plan, bool, error) {
 		if err := rows.Scan(&s.Name, &s.Lat, &s.Lon, &s.Arrive, &s.Nights, &vias, &s.DepartTime); err != nil {
 			return plan{}, false, fmt.Errorf("scan plan stop: %w", err)
 		}
-		if err := json.Unmarshal([]byte(vias), &s.Vias); err != nil {
-			return plan{}, false, fmt.Errorf("plan %d stop %q: stored via places are unreadable: %w", id, s.Name, err)
-		}
-		if s.Vias == nil {
-			s.Vias = []planVia{}
+		if err := decodeStopVias(id, &s, vias); err != nil {
+			return plan{}, false, err
 		}
 		p.Stops = append(p.Stops, s)
 	}
 	if err := rows.Err(); err != nil {
 		return plan{}, false, fmt.Errorf("read plan stops: %w", err)
 	}
-	rechainStops(p.Stops)
+	if err := rechainStops(p.Stops); err != nil {
+		return plan{}, false, fmt.Errorf("plan %d: %w", id, err)
+	}
 	return p, true, nil
+}
+
+// decodeStopVias reads a stop's stored via places.
+func decodeStopVias(id int64, s *planStop, vias string) error {
+	if err := json.Unmarshal([]byte(vias), &s.Vias); err != nil {
+		return fmt.Errorf("plan %d stop %q: stored via places are unreadable: %w", id, s.Name, err)
+	}
+	if s.Vias == nil {
+		s.Vias = []planVia{}
+	}
+	return nil
 }
 
 func writePlanStops(tx *sql.Tx, id int64, stops []planStop) error {
@@ -500,31 +577,47 @@ func (s *documentStore) GetPlan(id int64) (plan, bool, error) {
 func (s *documentStore) ListPlans() ([]plan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id FROM plans ORDER BY id`)
+	// One query: each plan's stops follow it in position order. A plan with no
+	// stops has one row with a NULL position.
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.created_at, p.updated_at, s.position,
+			COALESCE(s.name, ''), COALESCE(s.lat, 0), COALESCE(s.lon, 0), COALESCE(s.arrive, ''),
+			COALESCE(s.nights, 0), COALESCE(s.vias, '[]'), COALESCE(s.depart_time, '')
+		FROM plans p LEFT JOIN plan_stops s ON s.plan_id = p.id
+		ORDER BY p.id, s.position`)
 	if err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
-	var ids []int64
+	defer rows.Close()
+	out := []plan{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+		var id, created, updated int64
+		var name string
+		var position sql.NullInt64
+		var st planStop
+		var vias string
+		if err := rows.Scan(&id, &name, &created, &updated, &position,
+			&st.Name, &st.Lat, &st.Lon, &st.Arrive, &st.Nights, &vias, &st.DepartTime); err != nil {
 			return nil, fmt.Errorf("list plans: %w", err)
 		}
-		ids = append(ids, id)
+		if len(out) == 0 || out[len(out)-1].ID != id {
+			c, u := time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+			out = append(out, plan{ID: id, Name: name, Stops: []planStop{}, CreatedAt: &c, UpdatedAt: &u})
+		}
+		if !position.Valid {
+			continue
+		}
+		if err := decodeStopVias(id, &st, vias); err != nil {
+			return nil, err
+		}
+		cur := &out[len(out)-1]
+		cur.Stops = append(cur.Stops, st)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
-	out := make([]plan, 0, len(ids))
-	for _, id := range ids {
-		p, ok, err := loadPlan(s.db, id)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, p)
+	for i := range out {
+		if err := rechainStops(out[i].Stops); err != nil {
+			return nil, fmt.Errorf("plan %d: %w", out[i].ID, err)
 		}
 	}
 	return out, nil
@@ -641,7 +734,10 @@ type planLeg struct {
 	CourseDeg  int          `json:"course_deg"`
 	Route      [][2]float64 `json:"route"`
 	Note       string       `json:"note,omitempty"`
-	Error      string       `json:"error,omitempty"`
+	// Error is the full sentence, "no passage distance for A to B: <reason>".
+	// Reason is the router's own words alone.
+	Error  string `json:"error,omitempty"`
+	Reason string `json:"reason,omitempty"`
 	// ErrorKind and ErrorStop are structured forms of Error for the page's
 	// own wording: "on_land" and the stop whose end is off the water.
 	ErrorKind string `json:"error_kind,omitempty"`
@@ -660,56 +756,8 @@ type planLegMoved struct {
 // when it passes fails its leg, and every leg after it, with that reason.
 var planLegsDeadline = 60 * time.Second
 
-// planFailureTTL is how long a failed segment is remembered, so a plan table
-// refetched every few seconds does not repeat a search that just failed.
-var planFailureTTL = 30 * time.Second
-
-const planRouteCacheMax = 256
-
-// planSegmentKey names a segment on one state of the coastline: the stamp
-// changes when a square is downloaded, replaced or removed.
-type planSegmentKey struct {
-	pts   [4]float64
-	stamp string
-}
-
-type planSegmentEntry struct {
-	route   waterRoute
-	err     error
-	expires time.Time // zero for a success: its stamp keeps it honest
-}
-
-type planRouteCache struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	entries map[planSegmentKey]planSegmentEntry
-}
-
-var planRoutes = &planRouteCache{now: time.Now}
-
-func (c *planRouteCache) lookup(key planSegmentKey) (planSegmentEntry, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e, ok := c.entries[key]
-	if ok && !e.expires.IsZero() && !c.now().Before(e.expires) {
-		delete(c.entries, key)
-		return planSegmentEntry{}, false
-	}
-	return e, ok
-}
-
-func (c *planRouteCache) store(key planSegmentKey, route waterRoute, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.entries == nil || len(c.entries) >= planRouteCacheMax {
-		c.entries = map[planSegmentKey]planSegmentEntry{}
-	}
-	e := planSegmentEntry{route: route, err: err}
-	if err != nil {
-		e.expires = c.now().Add(planFailureTTL)
-	}
-	c.entries[key] = e
-}
+// planRoutes remembers the plan legs' routed segments.
+var planRoutes = newWaterRouteCache()
 
 // planCoastline is the on-board shoreline, wired as the route_distance tool
 // wires it (offlineCoastlineReaderFor). A variable so a test can stand in.
@@ -717,69 +765,53 @@ var planCoastline = func() *offlineCoastlineReader {
 	return offlineCoastlineReaderFor(getEnv("SETTINGS_FILE", "../settings.yaml"))()
 }
 
-// planCoastlineStamp identifies the squares held and ready right now.
-func planCoastlineStamp(r *offlineCoastlineReader) (string, error) {
-	recs, err := r.Store.Records()
-	if err != nil {
-		return "", fmt.Errorf("could not read the Offline coastline squares: %w", err)
-	}
-	h := fnv.New64a()
-	for _, rec := range recs {
-		if rec.Status == coastlineStatusReady {
-			fmt.Fprintf(h, "%v,%v,%d,%d;", rec.Square.Lat, rec.Square.Lon, rec.DownloadedAt.Unix(), rec.DataAsOf.Unix())
+// planRouteSegment stands in for the segment router in a test. It is nil in
+// production, where the coastline reader is checked once per request.
+var planRouteSegment func(ctx context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error)
+
+// planSegmentRouter is the router one legs request uses. The install, the
+// switch and the squares are checked once, here, not per segment. When any of
+// them fails, every segment fails with that reason, so each leg says so.
+func planSegmentRouter() segmentRouter {
+	if planRouteSegment != nil {
+		stand := planRouteSegment
+		return func(ctx context.Context, a, b [2]float64) (waterRoute, error) {
+			return stand(ctx, a[0], a[1], b[0], b[1])
 		}
 	}
-	return strconv.FormatUint(h.Sum64(), 16), nil
+	route, err := planCoastline().memoisedRouter(planRoutes)
+	if err != nil {
+		return func(context.Context, [2]float64, [2]float64) (waterRoute, error) { return waterRoute{}, err }
+	}
+	return route
 }
 
-// planRouteSegment routes one point-to-point segment over water. A variable
-// so a test can stand in for the coastline. A result is remembered only for
-// the coastline it was found on: turning the coastline off ends it, a changed
-// set of squares starts afresh, and a failure is kept only briefly.
-var planRouteSegment = func(ctx context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
-	reader := planCoastline()
-	if reader == nil || reader.Store == nil {
-		return waterRoute{}, errors.New("Offline coastline is not available on this install, so the run cannot be routed over water")
-	}
-	enabled, err := reader.Enabled()
-	if err != nil {
-		return waterRoute{}, fmt.Errorf("could not read the Offline coastline setting: %w", err)
-	}
-	if !enabled {
-		return waterRoute{}, errors.New("Offline coastline is off — turn it on in Settings → Offline coastline")
-	}
-	stamp, err := planCoastlineStamp(reader)
-	if err != nil {
-		return waterRoute{}, err
-	}
-	key := planSegmentKey{pts: [4]float64{aLat, aLon, bLat, bLon}, stamp: stamp}
-	if e, ok := planRoutes.lookup(key); ok {
-		return e.route, e.err
-	}
-	r, err := reader.RouteOverWater(ctx, aLat, aLon, bLat, bLon)
-	// A failure caused by this request running out of time says nothing about
-	// the segment.
-	if ctx.Err() == nil {
-		planRoutes.store(key, r, err)
-	}
-	return r, err
-}
+// planLegWorkers is how many legs are routed at once.
+const planLegWorkers = 3
 
-// planLegs routes every leg of the plan. A leg that fails carries its error.
+// planLegs routes every leg of the plan, a few at a time. A leg that fails
+// carries its error.
 func planLegs(ctx context.Context, p plan) []planLeg {
 	ctx, cancel := context.WithTimeout(ctx, planLegsDeadline)
 	defer cancel()
-	var legs []planLeg
-	for i := 0; i+1 < len(p.Stops); i++ {
-		legs = append(legs, planLegFor(ctx, p, i))
+	legs := make([]planLeg, max(len(p.Stops)-1, 0))
+	route := planSegmentRouter()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, planLegWorkers)
+	for i := range legs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			legs[i] = planLegFor(ctx, route, p, i)
+		}()
 	}
-	if legs == nil {
-		legs = []planLeg{}
-	}
+	wg.Wait()
 	return legs
 }
 
-func planLegFor(ctx context.Context, p plan, i int) planLeg {
+func planLegFor(ctx context.Context, route segmentRouter, p plan, i int) planLeg {
 	leg := planLeg{From: i, To: i + 1, Route: [][2]float64{}}
 	from, to := p.Stops[i], p.Stops[i+1]
 	points := [][2]float64{{from.Lat, from.Lon}}
@@ -788,62 +820,43 @@ func planLegFor(ctx context.Context, p plan, i int) planLeg {
 	}
 	points = append(points, [2]float64{to.Lat, to.Lon})
 
-	var total float64
-	var route [][2]float64
-	var notes []string
-	for k := 0; k+1 < len(points); k++ {
-		a, b := points[k], points[k+1]
-		r, err := planRouteSegment(ctx, a[0], a[1], b[0], b[1])
+	// A segment that finishes after the request's time is up has not routed.
+	timed := func(ctx context.Context, a, b [2]float64) (waterRoute, error) {
+		r, err := route(ctx, a, b)
 		if err == nil && ctx.Err() != nil {
 			err = ctx.Err()
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("the plan's legs took longer than %v to route", planLegsDeadline)
 		}
-		if err != nil {
-			leg.Error = fmt.Sprintf("no passage distance for %s to %s: %v", segmentName(p, i, k), segmentName(p, i, k+1), err)
-			var onLand *waterRouteOnLandError
-			if errors.As(err, &onLand) {
-				leg.ErrorKind = "on_land"
-				if onLand.End == "start" {
-					leg.ErrorStop = segmentName(p, i, k)
-				} else {
-					leg.ErrorStop = segmentName(p, i, k+1)
-				}
-			}
-			return leg
-		}
-		total += r.DistanceNm
-		for j, pt := range r.Points {
-			if k > 0 && j == 0 {
-				continue
-			}
-			route = append(route, [2]float64{roundTo5(pt.Lat), roundTo5(pt.Lon)})
-		}
-		if r.StartMovedNm > 0 {
-			leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, k), Nm: r.StartMovedNm})
-		}
-		if r.EndMovedNm > 0 {
-			leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, k+1), Nm: r.EndMovedNm})
-		}
-		if n := routeMovedNote(r); n != "" {
-			notes = append(notes, n)
-		}
+		return r, err
 	}
-	leg.DistanceNm = roundTo1(total)
-	leg.Route = route
-	leg.Note = strings.Join(notes, " ")
-	// The course is the bearing of the longest segment, the same rule the
-	// route_distance tool uses.
-	longest := -1.0
-	for j := 1; j < len(route); j++ {
-		a, b := route[j-1], route[j]
-		nm := haversineMeters(a[0], a[1], b[0], b[1]) / metersPerNauticalMile
-		if nm > longest {
-			longest = nm
-			leg.CourseDeg = int(math.Round(bearingDeg(a[0], a[1], b[0], b[1]))) % 360
+	passage, err := routePassageThrough(ctx, timed, points)
+	if err != nil {
+		var seg *routedPassageError
+		errors.As(err, &seg)
+		leg.Reason = err.Error()
+		leg.Error = fmt.Sprintf("no passage distance for %s to %s: %s", segmentName(p, i, seg.Segment), segmentName(p, i, seg.Segment+1), leg.Reason)
+		var onLand *waterRouteOnLandError
+		if errors.As(err, &onLand) {
+			leg.ErrorKind = "on_land"
+			if onLand.AtStart {
+				leg.ErrorStop = segmentName(p, i, seg.Segment)
+			} else {
+				leg.ErrorStop = segmentName(p, i, seg.Segment+1)
+			}
 		}
+		return leg
 	}
+	for _, pt := range passage.Points {
+		leg.Route = append(leg.Route, [2]float64{roundTo5(pt.Lat), roundTo5(pt.Lon)})
+	}
+	for _, m := range passage.Moved {
+		leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, m.Point), Nm: m.Nm})
+	}
+	leg.DistanceNm = roundTo1(passage.DistanceNm)
+	leg.Note = strings.Join(passage.Notes, " ")
+	leg.CourseDeg = passage.CourseDeg
 	return leg
 }
 
@@ -890,7 +903,7 @@ func listPlansHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	now := plannedStayNow()
+	now := planNow()
 	out := make([]plan, 0, len(plans))
 	for _, p := range plans {
 		d, err := decoratePlan(p, now)
@@ -900,11 +913,11 @@ func listPlansHandler(c echo.Context) error {
 		out = append(out, d)
 	}
 	var current *int64
-	idx, ok, err := selectCurrentPlan(out, now)
+	idx, status, err := selectCurrentPlan(out, now)
 	if err != nil {
 		return planZoneError(c, err)
 	}
-	if ok {
+	if status != "" && status != planStatusPast {
 		id := out[idx].ID
 		current = &id
 	}
@@ -912,7 +925,7 @@ func listPlansHandler(c echo.Context) error {
 }
 
 func respondPlan(c echo.Context, p plan) error {
-	d, err := decoratePlan(p, plannedStayNow())
+	d, err := decoratePlan(p, planNow())
 	if err != nil {
 		return planZoneError(c, err)
 	}

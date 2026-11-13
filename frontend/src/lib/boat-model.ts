@@ -64,10 +64,26 @@ const rad = (d: number) => (d * Math.PI) / 180
 
 /** Mean of compass bearings, correct across north (359 and 1 give 0). */
 export function circularMeanDeg(values: number[]): number {
-  const x = values.reduce((s, v) => s + Math.cos(rad(v)), 0)
-  const y = values.reduce((s, v) => s + Math.sin(rad(v)), 0)
-  return (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360
+  const { x, y } = bearingSums(values)
+  return meanOfSums(x, y)
 }
+
+/**
+ * The same mean, or null when there is no direction to give: no bearings, or
+ * bearings that cancel (0 and 180 point nowhere).
+ */
+export function circularMeanDegOrNull(values: number[]): number | null {
+  const { x, y } = bearingSums(values)
+  if (values.length === 0 || (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9)) return null
+  return meanOfSums(x, y)
+}
+
+const bearingSums = (values: number[]) => ({
+  x: values.reduce((s, v) => s + Math.cos(rad(v)), 0),
+  y: values.reduce((s, v) => s + Math.sin(rad(v)), 0),
+})
+
+const meanOfSums = (x: number, y: number) => (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360
 
 const KNOT_MS = 0.514444
 /** Below this speed over the ground the boat is taken to be stopped. */
