@@ -135,11 +135,11 @@ export function PlanTable({
     }
     return [...byKey.values()];
   }, [rows, plan, legByFrom, today]);
-  const { assessment, updating, error: assessmentError } = usePlanAssessment(plan);
+  const { assessment, error: assessmentError } = usePlanAssessment(plan);
   const assessmentState: AssessmentState = assessment ? "ready" : assessmentError ? "failed" : "loading";
   const rowAssessments = useMemo(
-    () => buildRowAssessments(rows, assessment, assessmentState, updating),
-    [rows, assessment, assessmentState, updating],
+    () => buildRowAssessments(rows, plan, assessment, assessmentState),
+    [rows, plan, assessment, assessmentState],
   );
   const zone = plan.stops[0]?.timezone;
   return (
@@ -166,7 +166,6 @@ export function PlanTable({
         <p data-testid="plan-assessment-asof" className="text-xs text-muted-foreground">
           Verdicts as of {formatTimeOfDay(assessment.asOf, zone)}
           {assessment.forecastAsOf ? ` · forecast fetched ${formatTimeOfDay(assessment.forecastAsOf, zone)}` : ""}
-          {updating ? " · Updating…" : ""}
         </p>
       )}
       <div
@@ -221,20 +220,29 @@ interface RowAssessment {
   nightWarning: PlanStopWarning | undefined;
   /** A passage row's warning at the stop it arrives at, for the night of arrival. */
   arrivalWarning: PlanStopWarning | undefined;
-  /** What is shown is from before an edit and is being asked for again. */
-  stale: boolean;
+}
+
+/**
+ * The day a leg reaches its arrival stop, which is how the server keys that
+ * stop's nights: the assessed arrival in the stop's zone, else the stop's own
+ * arrival date from the plan. A leg that arrives after midnight is not on the
+ * day it leaves.
+ */
+function arrivalDay(leg: PlanLegAssessment | undefined, to: Plan["stops"][number]): string {
+  if (leg?.arrive && zoneKnown(to.timezone)) return formatDayKey(new Date(leg.arrive), to.timezone);
+  return to.arrive;
 }
 
 /**
  * Every row's view of the assessment, built from one pass over its legs and
- * warnings. While the verdicts are being asked for again, a passage row with none
- * carried over reads as loading, not as having none.
+ * warnings. With no assessment (none yet, or the check failed) a row has none
+ * either: nothing from an earlier plan is passed on.
  */
 function buildRowAssessments(
   rows: PlanRow[],
+  plan: Plan,
   assessment: PlanAssessment | null,
   state: AssessmentState,
-  updating: boolean,
 ): Map<string, RowAssessment> {
   const legs = new Map((assessment?.legs ?? []).map((l) => [l.leg, l]));
   const warnings = new Map<string, PlanStopWarning>();
@@ -243,23 +251,12 @@ function buildRowAssessments(
     rows.map((row): [string, RowAssessment] => {
       if (row.kind === "passage") {
         const leg = legs.get(row.legIndex);
-        const arrivalWarning = warnings.get(`${row.legIndex + 1}|${row.dayKey}`);
-        return [
-          row.key,
-          {
-            leg,
-            state: leg === undefined && updating ? "loading" : state,
-            nightWarning: undefined,
-            arrivalWarning,
-            stale: updating && (leg !== undefined || arrivalWarning !== undefined),
-          },
-        ];
+        const to = plan.stops[row.legIndex + 1];
+        const arrivalWarning = to ? warnings.get(`${row.legIndex + 1}|${arrivalDay(leg, to)}`) : undefined;
+        return [row.key, { leg, state, nightWarning: undefined, arrivalWarning }];
       }
       const nightWarning = warnings.get(`${row.stopIndex}|${row.dayKey}`);
-      return [
-        row.key,
-        { leg: undefined, state, nightWarning, arrivalWarning: undefined, stale: updating && nightWarning !== undefined },
-      ];
+      return [row.key, { leg: undefined, state, nightWarning, arrivalWarning: undefined }];
     }),
   );
 }
@@ -442,9 +439,7 @@ const PlanDayRow = memo(function PlanDayRow({
       role="row"
       data-testid="plan-row"
       data-kind={row.kind}
-      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"} ${
-        assessed.stale ? "opacity-60" : ""
-      }`}
+      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"}`}
     >
       <Cell label="Day">{`Day ${row.dayNumber}`}</Cell>
       <Cell label="Date">{`${formatWeekday(row.dayKey)} ${formatDayMonth(row.dayKey)}`}</Cell>

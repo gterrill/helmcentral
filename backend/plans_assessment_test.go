@@ -461,6 +461,37 @@ func TestAssessPlan_ArrivalPastTheLastForecastHourIsNoForecastYet(t *testing.T) 
 	}
 }
 
+// The best departure the ranking found runs past the forecast's end, so the leg
+// has no forecast yet: it shows no suggested time and no current either.
+func TestAssessPlan_ASuggestedLegWithNoForecastShowsNoDepartureAndNoCurrent(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	f := &paFake{
+		fc:         pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
+		departures: func(planDepartureQuery) ([]tidalDeparture, error) { return []tidalDeparture{paDeparture(21, 0, 0.4)}, nil },
+	}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if l.NoteKind != planKindNoForecast || l.Verdict != "" {
+		t.Fatalf("leg = %+v", l)
+	}
+	if l.Depart != "" || l.DepartSuggested || l.Arrive != "" || l.CurrentKn != nil || l.CurrentNote != "" {
+		t.Fatalf("a leg with no forecast shows no suggested departure or current: %+v", l)
+	}
+}
+
+// A departure time that cannot be read is said so, and is not taken as midnight.
+func TestAssessPlan_AnUnreadableDepartureTimeIsSaidNotTakenAsMidnight(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[0].DepartTime = "soon"
+	f := &paFake{}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if l.Verdict != "" || l.Note != "Departure time not readable: soon" {
+		t.Fatalf("leg = %+v", l)
+	}
+	if l.Depart != "" || len(f.currentCalls) != 0 {
+		t.Fatalf("nothing is judged at a time that was never set: %+v", l)
+	}
+}
+
 func TestAssessPlan_AHoleInsideTheForecastIsNoData(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	p.Stops[0].DepartTime = "08:00"
@@ -476,6 +507,20 @@ func TestAssessPlan_AHoleInsideTheForecastIsNoData(t *testing.T) {
 	}}
 	l := paAssess(t, p, legs, &paFake{fc: fc}).Legs[0]
 	if l.Verdict != "no_data" || l.Note != "Forecast missing for part of the leg" || l.NoteKind != planKindGap {
+		t.Fatalf("leg = %+v", l)
+	}
+}
+
+// A point whose forecast came back with no hours at all, for a day inside the
+// forecast's reach, is missing data, not a leg ahead of the forecast.
+func TestAssessPlan_APointWithNoHoursIsAGapNotBeyondTheForecast(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[0].DepartTime = "08:00"
+	fc := forecastSource{Provider: "wx", Fetch: func(context.Context, float64, float64) (passageForecast, error) {
+		return passageForecast{Hours: map[int64]passageHour{}}, nil
+	}}
+	l := paAssess(t, p, legs, &paFake{fc: fc}).Legs[0]
+	if l.Verdict != "no_data" || l.NoteKind != planKindGap || l.Note != "Forecast missing for part of the leg" {
 		t.Fatalf("leg = %+v", l)
 	}
 }
@@ -972,81 +1017,11 @@ func TestPlanAssessmentHandler_ServesTheAssessment(t *testing.T) {
 	}
 }
 
-// A second read of an unchanged plan inside ten minutes is answered from the
-// memo, with no provider asked. A changed plan, changed limits or speed, an old
-// entry and a plan write each ask again.
-func TestPlanAssessmentHandler_MemoisesForTenMinutesAndFollowsTheContent(t *testing.T) {
-	store := withTestDocumentStore(t)
-	planAssessMemoClear()
-	prevSeg, prevDeps := planRouteSegment, planAssessDepsFor
-	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps; planAssessMemoClear() })
-	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
-		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
-	}
-	f := &paFake{}
-	clock := paNow
-	planAssessDepsFor = func() planAssessDeps {
-		d := paDeps(f)
-		d.now = func() time.Time { return clock }
-		return d
-	}
-	saved, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := fmt.Sprint(saved.ID)
-	get := func() string {
-		c, rec := planCtx(http.MethodGet, "/api/plans/"+id+"/assessment", "", id, "")
-		if err := planAssessmentHandler(c); err != nil || rec.Code != http.StatusOK {
-			t.Fatalf("assessment: %v %d %s", err, rec.Code, rec.Body.String())
-		}
-		return rec.Body.String()
-	}
-	first := get()
-	asked := f.fetches
-	if asked == 0 {
-		t.Fatal("the first read must ask the forecast")
-	}
-	clock = clock.Add(9 * time.Minute)
-	if second := get(); second != first || f.fetches != asked {
-		t.Fatalf("an unchanged plan inside ten minutes is the memo's: fetches %d -> %d", asked, f.fetches)
-	}
-
-	// Another speed is another assessment.
-	f.speed = 7
-	get()
-	if f.fetches == asked {
-		t.Fatal("a changed speed must not be answered from the memo")
-	}
-	asked = f.fetches
-
-	// Ten minutes on, the memo has expired.
-	clock = clock.Add(11 * time.Minute)
-	get()
-	if f.fetches == asked {
-		t.Fatal("an entry older than ten minutes must be asked again")
-	}
-	asked = f.fetches
-
-	// A change to the plan is asked again.
-	edited := saved
-	edited.Stops[0].DepartTime = "09:00"
-	if _, _, err := store.UpdatePlan(saved.ID, edited); err != nil {
-		t.Fatal(err)
-	}
-	get()
-	if f.fetches == asked {
-		t.Fatal("a changed plan must not be answered from the memo")
-	}
-}
-
-// The recorded speed is read once for a request, for the memo's key and for the
-// assessment alike, and once on a memo hit too.
+// Every request is assessed afresh, and reads the recorded speed once.
 func TestPlanAssessmentHandler_ReadsTheSpeedOncePerRequest(t *testing.T) {
 	store := withTestDocumentStore(t)
-	planAssessMemoClear()
 	prevSeg, prevDeps := planRouteSegment, planAssessDepsFor
-	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps; planAssessMemoClear() })
+	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps })
 	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
 		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
 	}
@@ -1057,7 +1032,7 @@ func TestPlanAssessmentHandler_ReadsTheSpeedOncePerRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := fmt.Sprint(saved.ID)
-	for i, want := range []int{1, 2} { // a miss, then a hit
+	for i, want := range []int{1, 2} {
 		c, rec := planCtx(http.MethodGet, "/api/plans/"+id+"/assessment", "", id, "")
 		if err := planAssessmentHandler(c); err != nil || rec.Code != http.StatusOK {
 			t.Fatalf("assessment: %v %d %s", err, rec.Code, rec.Body.String())
@@ -1097,51 +1072,6 @@ func TestCachedCruisingSpeed_IsKeptForTenMinutesAndAFailureIsNot(t *testing.T) {
 	fail = false
 	if v, err := c.get(now.Add(12*time.Minute), read); err != nil || v != 6.5 || reads != 4 {
 		t.Fatalf("after a drop: %v %v %d", v, err, reads)
-	}
-}
-
-// A current that failed to read (as against one the model has none of) is a
-// failure a retry may mend, so it is not kept for ten minutes.
-func TestPlanAssessmentHandler_ACurrentThatFailedToReadIsAskedAgain(t *testing.T) {
-	store := withTestDocumentStore(t)
-	planAssessMemoClear()
-	prevSeg, prevDeps := planRouteSegment, planAssessDepsFor
-	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps; planAssessMemoClear() })
-	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
-		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
-	}
-	failing := true
-	f := &paFake{current: func(planDepartureQuery, time.Time) (planCurrentReading, error) {
-		if failing {
-			return planCurrentReading{}, errors.New("the Open-Meteo current request failed")
-		}
-		return planCurrentReading{Have: true, MeanKn: 0.5}, nil
-	}}
-	planAssessDepsFor = func() planAssessDeps { return paDeps(f) }
-	in := plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)}
-	in.Stops[0].DepartTime = "08:00"
-	saved, err := store.CreatePlan(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := fmt.Sprint(saved.ID)
-	get := func() planAssessment {
-		c, rec := planCtx(http.MethodGet, "/api/plans/"+id+"/assessment", "", id, "")
-		if err := planAssessmentHandler(c); err != nil || rec.Code != http.StatusOK {
-			t.Fatalf("assessment: %v %d %s", err, rec.Code, rec.Body.String())
-		}
-		var out planAssessment
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-	if first := get(); first.Legs[0].CurrentKn != nil {
-		t.Fatalf("first = %+v", first.Legs[0])
-	}
-	failing = false
-	if second := get(); second.Legs[0].CurrentKn == nil {
-		t.Fatalf("a failed current read was kept: %+v", second.Legs[0])
 	}
 }
 

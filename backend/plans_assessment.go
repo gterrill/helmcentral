@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -93,9 +92,6 @@ type planLegAssessment struct {
 	CurrentKn   *float64 `json:"current_kn"`
 	CurrentNote string   `json:"current_note"`
 	NotChecked  []string `json:"not_checked"`
-	// currentFailed is set when the current read itself failed, as against the
-	// model having none: a retry may mend it, so the assessment is not kept.
-	currentFailed bool
 }
 
 // planStopNight is an official warning in force the night the boat is at a stop.
@@ -200,7 +196,6 @@ func (w *planLegWork) setCurrent(r planCurrentReading, err error) {
 	case err != nil:
 		log.Printf("plans: current not read for %s to %s: %v", w.from.Name, w.to.Name, err)
 		w.res.CurrentNote = err.Error()
-		w.res.currentFailed = true
 	case !r.Have:
 		w.res.CurrentNote = r.Why
 	default:
@@ -342,7 +337,10 @@ func (w *planLegWork) setOperatorDeparture(now time.Time) (planNoteKind, string)
 		return planKindOther, "The date is not readable: " + err.Error()
 	}
 	if w.from.DepartTime != "" {
-		h, m, _ := passageClock(w.from.DepartTime)
+		h, m, ok := passageClock(w.from.DepartTime)
+		if !ok {
+			return planKindOther, "Departure time not readable: " + w.from.DepartTime
+		}
 		y, mo, dd := day.Date()
 		w.depart = time.Date(y, mo, dd, h, m, 0, 0, w.fromLoc)
 		w.res.Depart = fmtLeg(w.depart, w.fromLoc)
@@ -561,13 +559,9 @@ func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork) {
 func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *planLegWork) {
 	var cell passageWindowCell
 	var err error
+	var chosen tidalDeparture
 	if w.depart.IsZero() {
-		var chosen tidalDeparture
 		chosen, cell, err = chooseDeparture(ctx, as, w)
-		if err == nil {
-			w.setDeparture(chosen.Depart, true)
-			w.setCurrent(chosen.Current, nil)
-		}
 	} else {
 		cell, err = as.cell(ctx, w.i, w.plan, w.depart, w.toLoc)
 	}
@@ -576,6 +570,13 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 		w.fail(planKindOther, err.Error())
 		return
 	}
+	beyond := cell.State == "no_data" && cell.noData == passageNoDataBeyondForecast
+	// A suggested departure and its current are shown only for a leg that has a
+	// verdict or a gap to explain; one with no forecast yet shows neither.
+	if w.depart.IsZero() && !beyond {
+		w.setDeparture(chosen.Depart, true)
+		w.setCurrent(chosen.Current, nil)
+	}
 	if cell.Limiting != nil {
 		w.res.Limiting = cell.Limiting.Short
 	}
@@ -583,7 +584,7 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 	switch {
 	case cell.State != "no_data":
 		w.res.Verdict = cell.State
-	case cell.noData == passageNoDataBeyondForecast:
+	case beyond:
 		// The forecast stamps every hour; a leg that runs past the last one has no
 		// forecast yet.
 		w.fail(planKindNoForecast, planNoteNoForecast)
@@ -790,106 +791,6 @@ func planAssessmentHandler(c echo.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), planAssessmentDeadline)
 	defer cancel()
-	// The speed is read once for the request: the memo's key and the assessment
-	// both use it.
-	speed, speedErr := deps.speed(ctx)
-	deps.speed = func(context.Context) (float64, error) { return speed, speedErr }
-	key, keyed := planAssessMemoKey(ctx, p, deps)
-	if keyed {
-		if out, ok := planAssessMemoGet(p.ID, key, deps.now()); ok {
-			return c.JSON(http.StatusOK, out)
-		}
-	}
 	legs := planLegs(ctx, d)
-	out := assessPlan(ctx, d, legs, deps)
-	if keyed && planAssessmentSettled(out) {
-		planAssessMemoPut(p.ID, key, deps.now(), out)
-	}
-	return c.JSON(http.StatusOK, out)
-}
-
-// ── the memo ────────────────────────────────────────────────────────────
-
-// planAssessMemoTTL is how long an assessment is kept. The table reads it on
-// every open and after every edit, and the forecast it rests on moves slowly.
-const planAssessMemoTTL = 10 * time.Minute
-
-type planAssessMemoEntry struct {
-	key string
-	at  time.Time
-	out planAssessment
-}
-
-var planAssessMemo = struct {
-	sync.Mutex
-	byPlan map[int64]planAssessMemoEntry
-}{byPlan: map[int64]planAssessMemoEntry{}}
-
-// planAssessMemoKey is what an assessment depends on besides the clock: the
-// plan's stops (places, dates, nights, vias, departure times), the passage
-// limits and the recorded speed. A limits or speed that cannot be read makes no
-// key: that assessment says so and is never kept.
-func planAssessMemoKey(ctx context.Context, p plan, d planAssessDeps) (string, bool) {
-	limits, err := d.limits()
-	if err != nil {
-		return "", false
-	}
-	speed, err := d.speed(ctx)
-	if err != nil {
-		return "", false
-	}
-	b, err := json.Marshal(struct {
-		Stops  []planStop
-		Limits passageLimits
-		Speed  float64
-	}{p.Stops, limits, speed})
-	if err != nil {
-		return "", false
-	}
-	return string(b), true
-}
-
-func planAssessMemoGet(id int64, key string, now time.Time) (planAssessment, bool) {
-	planAssessMemo.Lock()
-	defer planAssessMemo.Unlock()
-	e, ok := planAssessMemo.byPlan[id]
-	if !ok || e.key != key || now.Sub(e.at) >= planAssessMemoTTL || now.Before(e.at) {
-		return planAssessment{}, false
-	}
-	return e.out, true
-}
-
-func planAssessMemoPut(id int64, key string, now time.Time, out planAssessment) {
-	planAssessMemo.Lock()
-	defer planAssessMemo.Unlock()
-	planAssessMemo.byPlan[id] = planAssessMemoEntry{key: key, at: now, out: out}
-}
-
-// planAssessMemoDrop forgets a plan's assessment: its plan was written or
-// deleted.
-func planAssessMemoDrop(id int64) {
-	planAssessMemo.Lock()
-	defer planAssessMemo.Unlock()
-	delete(planAssessMemo.byPlan, id)
-}
-
-func planAssessMemoClear() {
-	planAssessMemo.Lock()
-	defer planAssessMemo.Unlock()
-	planAssessMemo.byPlan = map[int64]planAssessMemoEntry{}
-}
-
-// planAssessmentSettled is true when nothing in the assessment was a failure that
-// a retry may mend: a provider that was down, a ranking that gave nothing, a
-// warning read that failed. Those are asked again at the next read, not kept.
-func planAssessmentSettled(out planAssessment) bool {
-	if out.Problem != "" || out.WarningsError != "" {
-		return false
-	}
-	for _, l := range out.Legs {
-		if l.currentFailed || l.NoteKind == planKindOther || l.NoteKind == planKindNoDeparture || l.NoteKind == planKindNotRouted {
-			return false
-		}
-	}
-	return true
+	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps))
 }

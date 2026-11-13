@@ -52,11 +52,10 @@ const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
   ...over,
 });
 
-function show(a: PlanAssessment | null, opts: { error?: string | null; updating?: boolean } = {}) {
+function show(a: PlanAssessment | null, opts: { error?: string | null } = {}) {
   vi.mocked(usePlanAssessment).mockReturnValue({
     assessment: a,
-    loading: a === null,
-    updating: opts.updating ?? false,
+    loading: a === null && !opts.error,
     error: opts.error ?? null,
   });
   return render(
@@ -193,23 +192,51 @@ describe("PlanTable verdicts", () => {
     expect(rows()[0]).toHaveTextContent("Forecast missing for part of the leg");
   });
 
-  it("marks verdicts from before an edit as updating, and shows a leg with no carried verdict as loading", () => {
-    show(
-      assessment({ legs: [legAssessment({ verdict: "go" })] }),
-      { updating: true },
-    );
-    expect(screen.getByTestId("plan-assessment-asof")).toHaveTextContent("Updating…");
-    expect(rows()[0]).toHaveClass("opacity-60");
-    // Leg 1 has no verdict carried over: it is being worked out, not "—".
-    const second = rows().find((r) => r.textContent?.includes("Charlie"));
-    expect(second).toHaveTextContent("…");
-    expect(second).not.toHaveClass("opacity-60");
+  it("shows … in the verdict-dependent cells while the check runs, with nothing dimmed or stale", () => {
+    show(null);
+    const first = rows()[0];
+    expect(first).toHaveTextContent("…");
+    expect(first).not.toHaveClass("opacity-60");
+    expect(screen.queryByTestId("plan-assessment-asof")).toBeNull();
+    expect(document.body).not.toHaveTextContent("Updating");
+    // The Current and Verdict cells of a leg are waiting, not empty.
+    const cells = Array.from(first.querySelectorAll('[role="cell"]'));
+    const current = cells.find((c) => c.textContent?.startsWith("Current"));
+    const verdict = cells.find((c) => c.textContent?.startsWith("Verdict"));
+    expect(current).toHaveTextContent("…");
+    expect(verdict).toHaveTextContent("…");
   });
 
-  it("does not say Updating once the assessment is current", () => {
-    show(assessment());
-    expect(screen.getByTestId("plan-assessment-asof")).not.toHaveTextContent("Updating");
-    expect(rows()[0]).not.toHaveClass("opacity-60");
+  it("looks a leg's arrival-night warning up under the day it arrives, not the day it leaves", () => {
+    // Leaves Alpha at 8 PM on the 14th, reaches Bravo at 1 AM on the 15th: the
+    // server keys Bravo's nights by its arrival date.
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T20:00:00+10:00", arrive: "2026-11-15T01:00:00+10:00",
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+        stops: [{ stop: 1, nights: [{ date: "2026-11-15", warning: "Gale Warning", url: "https://example.test/b" }] }],
+      }),
+    );
+    expect(rows()[0]).toHaveTextContent("Bravo tonight: Gale Warning");
+  });
+
+  it("does not put an arrival-night warning for the departure day on a leg that arrives after midnight", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T20:00:00+10:00", arrive: "2026-11-15T01:00:00+10:00",
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+        stops: [{ stop: 1, nights: [{ date: "2026-11-14", warning: "Strong Wind Warning", url: "" }] }],
+      }),
+    );
+    expect(rows()[0]).not.toHaveTextContent("Strong Wind Warning");
   });
 
   it("names what could not be checked in the words the Mate card uses", () => {

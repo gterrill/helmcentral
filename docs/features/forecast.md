@@ -375,7 +375,9 @@ Here's what the table shows:
 - **As of.** Above the table a line says when the verdicts were worked out and
   when the forecast behind them was fetched. They're worked out again each time
   the forecast refreshes, which is about every ten minutes, and whenever you
-  change the plan.
+  change the plan. While the new answer is being worked out, the verdict and
+  current read "…", and Helmcentral never leaves an answer from before your
+  change on screen. If the check fails, the page says why.
 
 Where the table is too narrow for its columns, on a phone or a tablet held
 upright, each row becomes a card.

@@ -31,20 +31,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   **+1 night** moves every later date. Days past the ten-day forecast say "No
   forecast yet". A leg that can't be routed says why and shows no distance. If
   the charted shoreline closes off the water between two stops, the row says so
-  and tells you to move a stop or add a via place. On a phone each row is a card. There's no lightning column, because the
-  lightning forecast is only worked out for the boat's own position.
+  and tells you to move a stop or add a via place. On a phone each row is a
+  card. There's no lightning column, because the lightning forecast is only
+  worked out for the boat's own position.
 - **Each leg of a plan now says Go, Marginal or No-Go, with when to leave and
   when you'll arrive.** The last column judges a passage against your passage
   limits and names what decided it, like "No-Go: gusts 32 kn ahead". If you
   didn't set **Leave at**, Helmcentral suggests a time in italics. It's the Go
-  time with the fairest stream between first light and the last departure that
-  still arrives in daylight, never a No-Go unless every time is one, and it never
-  changes a time you set. The arrival comes from the speed your boat made on the
+  time with the fairest stream, never a No-Go unless every time is one, and it
+  never changes a time you set. It looks from first light to the last departure
+  that still arrives in daylight when your passage limits ask for a daylight
+  arrival, and to sunset where you leave when they don't. The arrival comes
+  from the speed your boat made on the
   passages Helmcentral recorded over the last twelve months, and says so when
   there are none yet. A new **Current** column shows the modelled current along
   the leg as helping or hindering. A lay day shows an official warning that
   covers that night. A line above the table says when the verdicts were worked
-  out, and they update each time the forecast refreshes. Set your limits under
+  out, and they update each time the forecast refreshes. After you change the
+  plan, the verdict and current show "…" until the new answer arrives, and a
+  check that fails says why. Set your limits under
   **Settings → Mate → Passage limits**, or the page says they aren't set. A leg
   that runs past a day, or a day past the forecast, gets no verdict.
 

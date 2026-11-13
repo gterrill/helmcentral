@@ -968,7 +968,6 @@ func updatePlanHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
-	planAssessMemoDrop(id)
 	return respondPlan(c, saved)
 }
 
@@ -1001,7 +1000,6 @@ func patchPlanStopHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
-	planAssessMemoDrop(id)
 	return respondPlan(c, saved)
 }
 
@@ -1017,7 +1015,6 @@ func deletePlanHandler(c echo.Context) error {
 	if !found {
 		return planNotFound(c)
 	}
-	planAssessMemoDrop(id)
 	return c.JSON(http.StatusOK, map[string]bool{"deleted": true})
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -206,7 +207,7 @@ func TestRecordedCruisingSpeed_IsTheMedianOfTheLastTwelveMonthsOfPassages(t *tes
 	recordPassage(t, store, now, 400, 120, 5, false) // 24 kn, 13 months ago
 	recordPassage(t, store, now, 20, 1, 0.2, false)  // a marina move
 	recordPassage(t, store, now, 25, 100, 5, true)   // hidden by the operator
-	got, err := recordedCruisingSpeed(store, now)
+	got, err := recordedCruisingSpeed(context.Background(), store, now)
 	if err != nil || got != 7 {
 		t.Fatalf("speed = %v, %v; want 7 kn, the median of 6, 7 and 8", got, err)
 	}
@@ -217,14 +218,75 @@ func TestRecordedCruisingSpeed_NoPassagesIsAnErrorNotADefault(t *testing.T) {
 	now := time.Date(2026, 11, 14, 4, 30, 0, 0, time.UTC)
 	recordPassage(t, store, now, 400, 30, 5, false)
 	recordPassage(t, store, now, 5, 0.5, 0.1, false)
-	got, err := recordedCruisingSpeed(store, now)
+	got, err := recordedCruisingSpeed(context.Background(), store, now)
 	if err == nil || !strings.Contains(err.Error(), "no recorded passages yet") {
 		t.Fatalf("speed = %v, err = %v; want the no-recorded-passages error", got, err)
 	}
 }
 
 func TestRecordedCruisingSpeed_NoPassageStoreIsAnError(t *testing.T) {
-	if _, err := recordedCruisingSpeed(nil, time.Now()); err == nil {
+	if _, err := recordedCruisingSpeed(context.Background(), nil, time.Now()); err == nil {
 		t.Fatal("no store, no speed")
+	}
+}
+
+// Wall time of one assessment of a four-leg plan when every provider call takes
+// 200 ms (forecast per point, ranking per leg, warnings per place), cold and
+// then with the point forecasts kept. Skipped under -short: it sleeps.
+func TestPlanAssessmentLatency_ColdAndWarm(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sleeps; run without -short to measure")
+	}
+	const delay = 200 * time.Millisecond
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0, 1, 0)
+	f := &paFake{
+		fc: func() forecastSource {
+			base := pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(24, 23, 0))
+			inner := base.Fetch
+			base.Fetch = func(ctx context.Context, lat, lon float64) (passageForecast, error) {
+				time.Sleep(delay)
+				return inner(ctx, lat, lon)
+			}
+			return base
+		}(),
+		departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+			time.Sleep(delay)
+			return []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}}}, nil
+		},
+		warnings: func(lat, lon float64) (forecastWarningsBundle, error) {
+			time.Sleep(delay)
+			return forecastWarningsBundle{}, nil
+		},
+	}
+	d := paDeps(f)
+	points := newPlanForecastMemo(planForecastMemoTTL)
+	inner := d.sources
+	d.sources = func(zone func() (string, error), now time.Time) (passageSources, error) {
+		src, err := inner(zone, now)
+		if err != nil {
+			return src, err
+		}
+		src.fc = points.wrap(src.fc, "Australia/Brisbane", now)
+		return src, nil
+	}
+	for _, run := range []string{"cold", "warm"} {
+		start := time.Now()
+		out := assessPlan(context.Background(), p, legs, d)
+		t.Logf("%s: %s for %d legs (%d forecast reads so far)", run, time.Since(start).Round(10*time.Millisecond), len(out.Legs), f.fetches)
+	}
+}
+
+// A request that is over stops the walk through the passages: no speed, and the
+// error is the context's.
+func TestRecordedCruisingSpeed_ACancelledContextStopsTheLoop(t *testing.T) {
+	store := newTestPassageStore(t)
+	now := time.Date(2026, 11, 14, 4, 30, 0, 0, time.UTC)
+	recordPassage(t, store, now, 10, 30, 5, false)
+	recordPassage(t, store, now, 40, 35, 5, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := recordedCruisingSpeed(ctx, store, now)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("speed = %v, err = %v; want the context's error", got, err)
 	}
 }

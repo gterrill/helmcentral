@@ -181,11 +181,33 @@ no warnings.
 The page asks again on the forecast refresh interval (`FORECAST_REFRESH_SECONDS`,
 ten minutes) and whenever a place, via, date, night count or departure time
 changes. A change is acted on half a second after the plan stops changing, so a
-run of edits is one question, and the last assessment stays on screen while the
-next one is worked out. `as_of` is when the verdicts were worked out and `forecast_as_of` the
-fetch time of the oldest forecast they read. The page shows both above the table.
-Providers cache, so a refresh that finds an unchanged forecast shows an
-unchanged `forecast_as_of`. There are no change marks yet.
+run of edits is one question. From the edit until the answer for the edited plan
+lands, the page shows no assessment: the verdict and current cells read "…", and
+a failed check shows its error. It never carries an earlier answer over, because
+a verdict on screen must be true of the plan on screen. A refetch of an
+unchanged plan keeps the current answer until the new one lands, since that
+answer is still the plan's. `as_of` is when the verdicts were worked out and
+`forecast_as_of` the fetch time of the oldest forecast they read. The page shows
+both above the table. Providers cache, so a refresh that finds an unchanged
+forecast shows an unchanged `forecast_as_of`. There are no change marks yet.
+
+### What the server keeps
+
+Every request recomputes the whole assessment. The server keeps two things
+between requests, both for ten minutes and neither one a failure:
+
+- **The forecast at each point.** A point is keyed by its provider, zone and
+  place, so an edit to one stop asks the provider again only for the places it
+  moved. A failed read is never kept.
+- **The cruising speed** from the recorded passages. Only its age invalidates
+  it, since no single place writes a passage.
+
+Nothing keeps the assessment as a whole. A whole-plan memo would have to know
+everything a verdict depends on (the clock, the provider, the limits, the
+speed), and a key that missed one would serve a wrong verdict. The point cache
+holds the slow part, the provider calls, and what is recomputed from it is
+cheap. A cold first read is still slow, about twenty seconds against the live
+providers, and that is accepted for now.
 
 ## What it does not know yet
 
@@ -221,6 +243,13 @@ unchanged `forecast_as_of`. There are no change marks yet.
   distance and time under way.
 - **Assuming a speed.** A boat with no recorded passage has no ETA. The reason
   shows.
+- **Keeping the whole assessment for ten minutes.** The key would need the
+  clock, the limits, the speed and the provider, and any it missed would show a
+  stale verdict. The per-point forecast cache gets the saving without that risk.
+- **Showing the last assessment, marked "Updating…", while a changed plan is
+  checked.** Its legs would have to be matched to the edited plan by stop name,
+  and a verdict could sit on a leg it was never judged for. The cells read "…"
+  instead.
 - **Showing the stop row's warning only.** It would hide a gale warning on the
   night of arrival.
 - **A second ranking written for plans.** `plan_tidal_departure` already ranks,
@@ -234,7 +263,7 @@ unchanged `forecast_as_of`. There are no change marks yet.
 
 - A plan open on the Forecast page makes one assessment request per refresh.
   Each does the leg routing (cached), one forecast fetch per distinct sample
-  point, one ranking per leg without a set time (its current comes with it), one
+  point (answered from the point cache when it is fresh), one ranking per leg without a set time (its current comes with it), one
   current read per leg with a set time, and one warnings read per distinct place
   with nights in the next week.
 - Assessment and suggestion run on the server, so the verdict is the same on the

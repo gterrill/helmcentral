@@ -87,10 +87,10 @@ func productionPlanAssessDeps(settingsPath string) planAssessDeps {
 			src.fc = planForecastPoints.wrap(src.fc, zoneName, now)
 			return src, nil
 		},
-		speed: func(context.Context) (float64, error) {
+		speed: func(ctx context.Context) (float64, error) {
 			now := d.now()
 			return planCruisingSpeed.get(now, func() (float64, error) {
-				return recordedCruisingSpeed(globalPassageStore, now)
+				return recordedCruisingSpeed(ctx, globalPassageStore, now)
 			})
 		},
 		sun:          sunTimes,
@@ -175,7 +175,7 @@ func (c *cruisingSpeedCache) drop() {
 // 3 nm and 30 minutes under way, of each passage's distance over its time under
 // way. It reads Helmcentral's own passage record, not the engine history. With
 // no such passage there is no speed, and no default is made up.
-func recordedCruisingSpeed(store *passageStore, now time.Time) (float64, error) {
+func recordedCruisingSpeed(ctx context.Context, store *passageStore, now time.Time) (float64, error) {
 	if store == nil {
 		return 0, fmt.Errorf("the passage record is not available")
 	}
@@ -188,6 +188,11 @@ func recordedCruisingSpeed(store *passageStore, now time.Time) (float64, error) 
 	for _, r := range records {
 		if r.Start.Before(since) || r.Start.After(now) {
 			continue
+		}
+		// A passage with no stored figures is worked out from its track, which is
+		// slow: stop once the request is over.
+		if err := ctx.Err(); err != nil {
+			return 0, fmt.Errorf("the passage record was not read: %w", err)
 		}
 		stats, err := store.PassageStatsFor(r)
 		if err != nil {

@@ -136,25 +136,7 @@ describe("usePlanAssessment", () => {
     }
   });
 
-  it("keeps showing the last assessment while the next one loads", async () => {
-    vi.useFakeTimers();
-    try {
-      const fetchMock = vi.fn().mockResolvedValueOnce(reply(API_ASSESSMENT)).mockReturnValue(new Promise(() => {}));
-      vi.stubGlobal("fetch", fetchMock);
-      const plan = mapPlan(API_PLAN as never);
-      const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
-      await tick(10);
-      expect(result.current.assessment?.legs).toHaveLength(2);
-      rerender({ p: { ...plan, stops: [{ ...plan.stops[0], departTime: "08:00" }, ...plan.stops.slice(1)] } });
-      await tick(700);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(result.current.assessment?.legs).toHaveLength(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("marks the carried-over assessment as updating from the edit until the new one lands", async () => {
+  it("shows no assessment from the edit until the answer for the edited plan lands", async () => {
     vi.useFakeTimers();
     try {
       let answer: (v: unknown) => void = () => {};
@@ -166,25 +148,27 @@ describe("usePlanAssessment", () => {
       const plan = mapPlan(API_PLAN as never);
       const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
       await tick(10);
-      expect(result.current.updating).toBe(false);
+      expect(result.current.assessment?.legs).toHaveLength(2);
       rerender({ p: { ...plan, stops: [{ ...plan.stops[0], departTime: "08:00" }, ...plan.stops.slice(1)] } });
-      // At once, while the plan is still being edited, the old verdicts are not current.
-      expect(result.current.updating).toBe(true);
+      // At once, while the plan is still being edited, the old verdicts are not shown.
+      expect(result.current.assessment).toBeNull();
+      expect(result.current.loading).toBe(true);
       await tick(700);
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(result.current.updating).toBe(true);
-      expect(result.current.assessment?.legs).toHaveLength(2);
+      expect(result.current.assessment).toBeNull();
+      expect(result.current.loading).toBe(true);
       await act(async () => {
         answer(reply(API_ASSESSMENT));
         await vi.advanceTimersByTimeAsync(10);
       });
-      expect(result.current.updating).toBe(false);
+      expect(result.current.assessment?.legs).toHaveLength(2);
+      expect(result.current.loading).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("carries a leg over only while its from and to stops are the same, so no verdict lands on another row", async () => {
+  it("shows nothing for a plan whose stops changed, so no verdict lands on another leg", async () => {
     vi.useFakeTimers();
     try {
       const fetchMock = vi.fn().mockResolvedValueOnce(reply(API_ASSESSMENT)).mockReturnValue(new Promise(() => {}));
@@ -193,17 +177,49 @@ describe("usePlanAssessment", () => {
       const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
       await tick(10);
       expect(result.current.assessment?.legs).toHaveLength(2);
-      // A stop added at the end leaves the two legs as they were.
+      // Even a stop added at the end leaves nothing on screen until it is asked about.
       const d = { ...plan.stops[2], name: "D", arrive: "2026-11-16", departTime: "" };
       rerender({ p: { ...plan, stops: [...plan.stops, d] } });
       await tick(700);
-      expect(result.current.assessment?.legs.map((l) => l.leg)).toEqual([0, 1]);
-      // A stop inserted after A moves every leg: A -> B is now A -> X.
-      const x = { ...plan.stops[1], name: "X" };
-      rerender({ p: { ...plan, stops: [plan.stops[0], x, ...plan.stops.slice(1)] } });
-      await tick(700);
-      expect(result.current.assessment?.legs).toEqual([]);
-      expect(result.current.assessment?.stops).toEqual([]);
+      expect(result.current.assessment).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says why a check for an edited plan failed, and shows nothing from before", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(reply(API_ASSESSMENT))
+        .mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: "forecast provider down" }) });
+      vi.stubGlobal("fetch", fetchMock);
+      const plan = mapPlan(API_PLAN as never);
+      const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
+      await tick(10);
+      rerender({ p: { ...plan, stops: [{ ...plan.stops[0], departTime: "08:00" }, ...plan.stops.slice(1)] } });
+      await tick(5000);
+      expect(result.current.assessment).toBeNull();
+      expect(result.current.error).toContain("forecast provider down");
+      // A further edit clears the old error until the new check has an answer.
+      rerender({ p: { ...plan, stops: [{ ...plan.stops[0], departTime: "09:00" }, ...plan.stops.slice(1)] } });
+      expect(result.current.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the current answer while the same plan is refetched on the interval", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockResolvedValueOnce(reply(API_ASSESSMENT)).mockReturnValue(new Promise(() => {}));
+      vi.stubGlobal("fetch", fetchMock);
+      const { result } = renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+      await tick(10);
+      await tick(600_000 + 10);
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(result.current.assessment?.legs).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }

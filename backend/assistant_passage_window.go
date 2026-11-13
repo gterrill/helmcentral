@@ -816,8 +816,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		h, ok := point.hours[t.Unix()]
 		if !ok {
 			// An hour past the last the forecast has is a leg further ahead than
-			// it reaches; one before it is a hole in the data.
-			missing, gap = true, gap || t.Unix() <= point.last
+			// it reaches; one before it is a hole in the data, and so is every
+			// hour of a point whose forecast came back with none.
+			missing, gap = true, gap || point.last == 0 || t.Unix() <= point.last
 			tally.gap(t, depart, arrive)
 			continue
 		}

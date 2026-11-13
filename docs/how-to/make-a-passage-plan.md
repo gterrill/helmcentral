@@ -75,15 +75,19 @@ page says the limits aren't set and shows no verdicts.
    a time you set. The arrival comes from the speed your boat made on the
    passages Helmcentral recorded over the last twelve months. With none recorded
    yet, the row says there's no ETA.
-3. If the row says "No daylight window", no departure between first light and
-   the last one that arrives in daylight fits the leg. Set a **Leave at** if you
-   want to see how the leg judges at a time you pick.
+3. If the row says "No daylight window", no departure fits the leg's daylight.
+   When your passage limits ask for a daylight arrival, Helmcentral looks from
+   first light to the last departure that still arrives in daylight. When they
+   don't, it looks to sunset where you leave. Set a **Leave at** if you want to
+   see how the leg judges at a time you pick.
 4. Look at **Current**. "0.8 kn hindering" means the modelled current runs
    against you at that time. A dash means the model has no figure for the leg,
    and hovering over it says why.
 5. Read the line above the table. It says when the verdicts were worked out and
    when the forecast behind them was fetched. They update on their own each
-   time the forecast refreshes.
+   time the forecast refreshes. After you change the plan, the verdict and the
+   current read "…" until the new answer arrives, and a check that fails says
+   why.
 
 A leg further out than the forecast says "No forecast yet" and has no verdict.
 A leg that would run past a day says it isn't judged yet. On a lay day, the
