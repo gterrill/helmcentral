@@ -126,7 +126,9 @@ for result in $results; do
 		counts "$name"
 		# The nested summary printed above already lists their FAIL lines.
 		case $name in
-		backend | frontend) ;;
+		backend | frontend)
+			grep -q '^== summary' "$logdir/$target-$name.log" || failures "$name"
+			;;
 		*) failures "$name" ;;
 		esac
 	fi

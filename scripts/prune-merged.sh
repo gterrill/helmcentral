@@ -66,7 +66,7 @@ for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
   [ "$branch" = main ] && continue
   [ "$branch" = "$current" ] && continue
   # Another session may have deleted the branch since the list was taken.
-  tip="$(git rev-parse --verify --quiet "refs/heads/$branch")" || { echo "skip $branch: deleted while this ran"; continue; }
+  tip="$(git rev-parse --verify --quiet "refs/heads/$branch")" || { echo "skip $branch: deleted while this ran"; skipped=$((skipped + 1)); continue; }
   is_merged "$branch" "$tip" || continue
 
   wt="$(worktree_for "$branch")"
@@ -89,7 +89,7 @@ for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
 
   # Another session may have deleted the branch since the checks above. Any
   # failure from the removals below stops the run.
-  git show-ref --verify --quiet "refs/heads/$branch" || { echo "skip $branch: deleted while this ran"; continue; }
+  git show-ref --verify --quiet "refs/heads/$branch" || { echo "skip $branch: deleted while this ran"; skipped=$((skipped + 1)); continue; }
 
   echo "$branch (merged)"
   if [ -n "$wt" ]; then

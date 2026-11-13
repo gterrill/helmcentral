@@ -8,7 +8,6 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
 sh scripts/check-adr-numbers.sh
-command -v vale >/dev/null || { echo "docs-lint: vale not installed (brew install vale)"; exit 1; }
 
 base=$(git merge-base origin/main HEAD)
 changed=$(git diff --name-only --diff-filter=d "$base" -- docs)
@@ -19,6 +18,7 @@ if [ -z "$files" ]; then
 	echo "docs-lint-changed: no changed Markdown files under docs/"
 	exit 0
 fi
+command -v vale >/dev/null || { echo "docs-lint: vale not installed (brew install vale)"; exit 1; }
 
 # One file per line; names here hold no spaces.
 set -f
