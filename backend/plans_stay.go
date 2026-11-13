@@ -49,26 +49,22 @@ func (s *documentStore) GetPlannedStay(now time.Time) (plannedStay, bool, error)
 	}
 	idx, _ := selectCurrentPlan(decorated)
 	p := decorated[idx]
-	today, err := planToday(p, now)
-	if err != nil {
-		return plannedStay{}, false, fmt.Errorf("get planned stay: %w", err)
-	}
 	// The stop the boat spends tonight at: the first whose departure is after
 	// today. On a passage day that is the destination, not the stop being left
 	// (and a stop passed through the same day is skipped). After the last
-	// departure, the last stop.
-	stop := p.Stops[len(p.Stops)-1]
-	for _, st := range p.Stops {
-		if today < st.Depart {
-			stop = st
+	// departure, the last stop. A stop's dates are its own place's, so each is
+	// compared with today in that stop's zone.
+	var stop planStop
+	var zone placeZone
+	for i, st := range p.Stops {
+		z, err := stayZoneAt(st.Lat, st.Lon)
+		if err != nil {
+			return plannedStay{}, false, fmt.Errorf("get planned stay: the stop's time zone is not known: %w", err)
+		}
+		stop, zone = st, z
+		if i == len(p.Stops)-1 || dayAt(z, now) < st.Depart {
 			break
 		}
-	}
-	// "Today" for the stay is the date at the stop itself, which may not be
-	// the first stop's zone.
-	zone, err := stayZoneAt(stop.Lat, stop.Lon)
-	if err != nil {
-		return plannedStay{}, false, fmt.Errorf("get planned stay: the stop's time zone is not known: %w", err)
 	}
 	return plannedStay{
 		Name:      stop.Name,

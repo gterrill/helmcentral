@@ -88,7 +88,7 @@ export function legErrorText(leg: Pick<PlanLeg, "error" | "reason" | "errorKind"
 /** The operator's wording for stops charted behind the shoreline. */
 export function legNoteText(leg: Pick<PlanLeg, "moved">): string {
   return leg.moved
-    .map((m) => `${m.stop} is ${m.nm.toFixed(1)} nm up a river; the distance starts at the nearest water.`)
+    .map((m) => `${m.stop} is ${m.nm.toFixed(1)} nm inside the charted shoreline; the distance starts at the nearest water.`)
     .join(" ");
 }
 

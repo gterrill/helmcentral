@@ -57,7 +57,16 @@ export function dayForecast(feed: PlaceFeed, dayKey: string, span: DayWindow = "
       ? summariseOvernightWind(day.hourlyWind, nextDay?.hourlyWind)
       : summariseDayWind(day.hourlyWind, day);
   const waveDay = waves.days.find((d) => d.dayKey === dayKey);
-  const waveHeights = (waveDay?.hourlyWave ?? [])
+  const waveHours =
+    span === "overnight"
+      ? [
+          ...(waveDay?.hourlyWave ?? []).filter((h) => h.hourOfDay >= 18 && h.hourOfDay <= 23),
+          ...(waves.days.find((d) => d.dayKey === addDaysISO(dayKey, 1))?.hourlyWave ?? []).filter(
+            (h) => h.hourOfDay >= 0 && h.hourOfDay < 6,
+          ),
+        ]
+      : (waveDay?.hourlyWave ?? []);
+  const waveHeights = waveHours
     .map((h) => h.waveHeightM)
     .filter((m) => Number.isFinite(m) && m >= 0);
   return {

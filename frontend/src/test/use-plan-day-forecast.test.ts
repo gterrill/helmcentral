@@ -39,6 +39,38 @@ describe("dayForecast overnight window", () => {
   });
 });
 
+describe("dayForecast overnight waves", () => {
+  const pts = (m: number, hourOfDay: number[]) => hourOfDay.map((h) => ({ hourOfDay: h, waveHeightM: m }));
+  const waveFeed = (): PlaceFeed =>
+    ({
+      weather: { forecast: [], loading: false, error: null },
+      waves: {
+        days: [
+          { dayKey: "2026-11-15", hourlyWave: [...pts(2.5, [9, 14]), ...pts(0.8, [19, 22])] },
+          { dayKey: "2026-11-16", hourlyWave: [...pts(0.6, [2, 4]), ...pts(3, [10, 15])] },
+        ],
+        loading: false,
+        error: null,
+      },
+    }) as unknown as PlaceFeed;
+
+  it("reads the night's waves for a stop row", () => {
+    const day = dayForecast(waveFeed(), "2026-11-15", "overnight");
+    expect(day.waveMinM).toBe(0.6);
+    expect(day.waveMaxM).toBe(0.8);
+  });
+  it("reads the whole day's waves for a passage row", () => {
+    const day = dayForecast(waveFeed(), "2026-11-15");
+    expect(day.waveMinM).toBe(0.8);
+    expect(day.waveMaxM).toBe(2.5);
+  });
+  it("has no wave reading when the night has no hours", () => {
+    const day = dayForecast(waveFeed(), "2026-11-16", "overnight");
+    expect(day.waveMinM).toBeNull();
+    expect(day.waveMaxM).toBeNull();
+  });
+});
+
 describe("dayForecast waves state", () => {
   it("says the waves are still loading rather than showing no reading", () => {
     const day = dayForecast(feed({ loading: true, error: null }), "2026-11-15");

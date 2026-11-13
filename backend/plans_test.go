@@ -296,7 +296,7 @@ func TestSelectCurrentPlan(t *testing.T) {
 	}
 }
 
-func TestPlanStatus_IsJudgedAtTheFirstStop(t *testing.T) {
+func TestPlanStatus_OneZonePlanIsJudgedAtThePlace(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 0) // 14-16 Nov, UTC+10
 	at := func(v string) time.Time { x, _ := time.Parse(time.RFC3339, v); return x }
 	cases := map[string]string{
@@ -684,6 +684,78 @@ func TestPlanLegs_AnEndOnLandNamesTheStopAndKeepsTheRouterMessage(t *testing.T) 
 	if !strings.HasPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") ||
 		legs[0].Reason != strings.TrimPrefix(legs[0].Error, "no passage distance for Great Sandy Straits Marina to Pelican Bay: ") {
 		t.Fatalf("the reason is the router's words without the sentence round them: %q / %q", legs[0].Error, legs[0].Reason)
+	}
+}
+
+func TestPlanLegs_AViaThatEndsOneSegmentAndStartsTheNextIsReportedOnce(t *testing.T) {
+	prev := planRouteSegment
+	t.Cleanup(func() { planRouteSegment = prev })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		r := routeOf(2, [2]float64{aLat, aLon}, [2]float64{bLat, bLon})
+		r.StartMovedNm = 0.3
+		r.EndMovedNm = 0.3
+		return r, nil
+	}
+	p := planAt(t, "2026-11-14", 1, 1, 0)
+	p.Stops[0].Vias = []planVia{{Name: "Cape Moreton", Lat: -27.0, Lon: 153.5}}
+	legs := planLegs(context.Background(), p)
+	byStop := map[string]int{}
+	for _, m := range legs[0].Moved {
+		byStop[m.Stop]++
+	}
+	if byStop["Cape Moreton"] != 1 || len(legs[0].Moved) != 3 {
+		t.Fatalf("each point once, got %+v", legs[0].Moved)
+	}
+}
+
+func TestNormalisePlan_AViaNameHasTheStopNameLimit(t *testing.T) {
+	p := validPlan()
+	p.Stops[0].Vias = []planVia{{Name: strings.Repeat("x", planNameMax+1), Lat: -26, Lon: 153}}
+	if _, verr := normalisePlan(p); verr == nil || verr.Field != "vias" || !strings.Contains(verr.Message, "longer than 120 characters") {
+		t.Fatalf("a 121-character via name must be refused, got %v", verr)
+	}
+	p.Stops[0].Vias[0].Name = strings.Repeat("x", planNameMax)
+	if _, verr := normalisePlan(p); verr != nil {
+		t.Fatalf("120 characters is fine: %v", verr)
+	}
+}
+
+// A plan from Sydney (UTC+11 in November) to Brisbane (UTC+10) and on to the
+// Gold Coast. At 13:30Z on the 15th it is already the 16th in Sydney and still
+// the 15th in Brisbane, where the boat is.
+func twoZonePlan() plan {
+	return plan{Name: "North", Stops: []planStop{
+		{Name: "Sydney", Lat: -33.86, Lon: 151.21, Arrive: "2026-11-14", Nights: 1},
+		{Name: "Brisbane", Lat: -27.47, Lon: 153.03, Nights: 1},
+		{Name: "Gold Coast", Lat: -27.95, Lon: 153.43, Nights: 0},
+	}}
+}
+
+func TestGetPlannedStay_JudgesEachStopInItsOwnZone(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if _, err := store.CreatePlan(twoZonePlan()); err != nil {
+		t.Fatal(err)
+	}
+	stay, ok, err := store.GetPlannedStay(time.Date(2026, 11, 15, 13, 30, 0, 0, time.UTC))
+	if err != nil || !ok || stay.Name != "Brisbane" || !stay.Active {
+		t.Fatalf("the boat is in Brisbane on the 15th: %+v ok=%v err=%v", stay, ok, err)
+	}
+}
+
+func TestPlanStatus_PastIsJudgedAtTheLastStop(t *testing.T) {
+	store := newTestDocumentStore(t)
+	saved, err := store.CreatePlan(twoZonePlan())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 23:30 on the 16th in Brisbane, where the plan ends; the 17th in Sydney.
+	d, err := decoratePlan(saved, time.Date(2026, 11, 16, 13, 30, 0, 0, time.UTC))
+	if err != nil || d.Status != planStatusActive {
+		t.Fatalf("still the plan's last day at its last stop: %q (%v)", d.Status, err)
+	}
+	d, err = decoratePlan(saved, time.Date(2026, 11, 16, 14, 30, 0, 0, time.UTC))
+	if err != nil || d.Status != planStatusPast {
+		t.Fatalf("the 17th at the last stop: %q (%v)", d.Status, err)
 	}
 }
 

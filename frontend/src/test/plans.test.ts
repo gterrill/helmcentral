@@ -289,9 +289,9 @@ describe("leg wording", () => {
     expect(text.detail).toContain("no passage distance for A to B");
   });
 
-  it("says how far up a river a stop is, in one decimal", () => {
+  it("says how far inside the charted shoreline a stop is, in one decimal", () => {
     expect(legNoteText({ ...base, moved: [{ stop: "Mooloolaba Marina", nm: 0.22 }] })).toBe(
-      "Mooloolaba Marina is 0.2 nm up a river; the distance starts at the nearest water.",
+      "Mooloolaba Marina is 0.2 nm inside the charted shoreline; the distance starts at the nearest water.",
     );
     expect(legNoteText({ ...base, moved: [] })).toBe("");
   });

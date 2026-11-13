@@ -208,8 +208,11 @@ func normaliseVia(v *planVia, stopNo, viaNo int) *planError {
 	if v.Name == "" {
 		return perr("vias", "stop %d: name via place %d", stopNo, viaNo)
 	}
+	if utf8.RuneCountInString(v.Name) > planNameMax {
+		return perr("vias", "stop %d: via place %d name is longer than %d characters", stopNo, viaNo, planNameMax)
+	}
 	if axis, why := checkLatLon(v.Lat, v.Lon); axis != "" {
-		return perr("vias", "stop %d via %d: %s", stopNo, viaNo, why)
+		return perr("vias","stop %d via %d: %s", stopNo, viaNo, why)
 	}
 	return nil
 }
@@ -337,18 +340,6 @@ func applyStopEdit(stops []planStop, idx int, arrive *string, nights *int) ([]pl
 
 // ── time: status and the current plan ───────────────────────────────────
 
-// planToday is today's date at the plan's first stop.
-func planToday(p plan, now time.Time) (string, error) {
-	if len(p.Stops) == 0 {
-		return "", errors.New("plan has no stops")
-	}
-	zone, err := stayZoneAt(p.Stops[0].Lat, p.Stops[0].Lon)
-	if err != nil {
-		return "", err
-	}
-	return dayAt(zone, now), nil
-}
-
 // dayAt is the calendar day at a place.
 func dayAt(zone placeZone, now time.Time) string {
 	return now.In(zone.Loc).Format(planDateLayout)
@@ -363,14 +354,15 @@ func planDates(p plan) (first, last string) {
 	return p.Stops[0].Arrive, p.Stops[len(p.Stops)-1].Depart
 }
 
-// planStatusOn is "upcoming", "active" (the dates span today) or "past" for a
-// given day.
-func planStatusOn(p plan, today string) string {
+// planStatusOn is "upcoming", "active" (the dates span today) or "past". The
+// plan's first date is a day at its first stop and its last date a day at its
+// last stop, so each is compared with today in that stop's own zone.
+func planStatusOn(p plan, todayAtFirst, todayAtLast string) string {
 	first, last := planDates(p)
 	switch {
-	case today < first:
+	case todayAtFirst < first:
 		return planStatusUpcoming
-	case today > last:
+	case todayAtLast > last:
 		return planStatusPast
 	}
 	return planStatusActive
@@ -441,7 +433,7 @@ func decoratePlan(p plan, now time.Time) (plan, error) {
 	for i, z := range zones {
 		p.Stops[i].Timezone = z.Name
 	}
-	p.Status = planStatusOn(p, dayAt(zones[0], now))
+	p.Status = planStatusOn(p, dayAt(zones[0], now), dayAt(zones[len(zones)-1], now))
 	p.FirstDate, p.LastDate = planDates(p)
 	return p, nil
 }
@@ -840,7 +832,13 @@ func planLegFor(ctx context.Context, route segmentRouter, p plan, i int) planLeg
 	for _, pt := range passage.Points {
 		leg.Route = append(leg.Route, [2]float64{roundTo5(pt.Lat), roundTo5(pt.Lon)})
 	}
+	// A via ends one segment and starts the next, so it can be reported twice.
+	seen := map[int]bool{}
 	for _, m := range passage.Moved {
+		if seen[m.Point] {
+			continue
+		}
+		seen[m.Point] = true
 		leg.Moved = append(leg.Moved, planLegMoved{Stop: segmentName(p, i, m.Point), Nm: m.Nm})
 	}
 	leg.DistanceNm = roundTo1(passage.DistanceNm)
