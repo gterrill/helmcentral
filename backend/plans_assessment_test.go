@@ -62,6 +62,7 @@ type paFake struct {
 	limits        passageLimits
 	speed         float64
 	speedErr      error
+	speedReads    int
 	fc            forecastSource
 }
 
@@ -88,7 +89,12 @@ func paDeps(f *paFake) planAssessDeps {
 		sources: func(zone func() (string, error), now time.Time) (passageSources, error) {
 			return passageSources{fc: f.fc, tides: pwNoTides, fallbackModel: func() string { return "" }}, nil
 		},
-		speed: func(context.Context) (float64, error) { return f.speed, f.speedErr },
+		speed: func(context.Context) (float64, error) {
+			f.mu.Lock()
+			f.speedReads++
+			f.mu.Unlock()
+			return f.speed, f.speedErr
+		},
 		sun:   pwSun,
 		dawn: func(date time.Time, lat, lon float64) (time.Time, bool) {
 			y, m, d := date.Date()
@@ -320,6 +326,31 @@ func TestAssessPlan_WhenEveryDepartureIsNoGoTheLeastBadIsShownAsNoGo(t *testing.
 	}
 	if l.Verdict != "no_go" || l.Limiting != "wind 22 kn ahead" {
 		t.Fatalf("leg = %+v: the No-Go is shown, never hidden", l)
+	}
+}
+
+func TestAssessPlan_ANoGoBeatsADepartureThatRunsPastTheForecast(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	// 25 kn dead ahead until noon, 10 kn after, and a forecast that ends at 11 PM.
+	hours := map[int64]passageHour{}
+	for h := paAt(14, 0, 0); !h.After(paAt(14, 23, 0)); h = h.Add(time.Hour) {
+		w := 10.0
+		if h.Before(paAt(14, 12, 0)) {
+			w = 25
+		}
+		hours[h.Unix()] = passageHour{WindMS: kn(w), GustMS: kn(w), WindDirDeg: 190}
+	}
+	fc := forecastSource{Provider: "wx", Fetch: func(context.Context, float64, float64) (passageForecast, error) {
+		return passageForecast{Hours: hours}, nil
+	}}
+	// The 8.00 departure is judged a No-Go; the 9.00 PM one would arrive at 2 AM,
+	// past the last forecast hour, and cannot be judged yet.
+	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+		return []tidalDeparture{paDeparture(8, 0, 0.5), paDeparture(21, 0, 0.9)}, nil
+	}}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if l.Verdict != "no_go" || !paParse(t, l.Depart).Equal(paAt(14, 8, 0)) {
+		t.Fatalf("leg = %+v: the No-Go the forecast shows is not hidden as No forecast yet", l)
 	}
 }
 
@@ -582,6 +613,22 @@ func TestAssessPlan_ADayThatHasPassedIsNotJudged(t *testing.T) {
 	}
 }
 
+func TestAssessPlan_ALeaveAtTimeEarlierTodayThatHasPassedIsNotJudged(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	p.Stops[0].DepartTime = "04:00" // it is 4.30 AM
+	f := &paFake{}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if l.Note != "Departure time has passed" || l.NoteKind != planKindPast || l.Verdict != "" {
+		t.Fatalf("leg = %+v", l)
+	}
+	if len(f.currentCalls) != 0 || f.fetches != 0 || len(f.rankings) != 0 {
+		t.Fatalf("a time that has gone buys nothing: current %d, fetched %d, ranked %d", len(f.currentCalls), f.fetches, len(f.rankings))
+	}
+	if !paParse(t, l.Depart).Equal(paAt(14, 4, 0)) {
+		t.Fatalf("the operator's time still shows: %s", l.Depart)
+	}
+}
+
 func TestAssessPlan_AnOvernightLegIsNotAssessedYet(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	legs[0].DistanceNm = 200
@@ -683,7 +730,8 @@ func paWarning(day, kind string) forecastWarningsBundle {
 func TestAssessPlan_AWarningCoveringTheNightIsOnTheStopRow(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	// B is reached on the 14th and left on the 15th: its one night is the 14th.
-	night := time.Date(2026, 11, 14, 0, 0, 0, 0, paLoc).Weekday().String()
+	// The BOM labels a section "Saturday 14 November".
+	night := time.Date(2026, 11, 14, 0, 0, 0, 0, paLoc).Format("Monday 2 January")
 	f := &paFake{warnings: func(lat, lon float64) (forecastWarningsBundle, error) { return paWarning(night, "Gale Warning"), nil }}
 	got := paAssess(t, p, legs, f)
 	var b *planStopAssessment
@@ -703,13 +751,38 @@ func TestAssessPlan_AWarningCoveringTheNightIsOnTheStopRow(t *testing.T) {
 
 func TestAssessPlan_AWarningForAnotherDayLeavesTheStopRowEmpty(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	other := time.Date(2026, 11, 17, 0, 0, 0, 0, paLoc).Weekday().String()
+	other := time.Date(2026, 11, 17, 0, 0, 0, 0, paLoc).Format("Monday 2 January")
 	f := &paFake{warnings: func(lat, lon float64) (forecastWarningsBundle, error) { return paWarning(other, "Gale Warning"), nil }}
 	for _, s := range paAssess(t, p, legs, f).Stops {
 		for _, n := range s.Nights {
 			if n.Warning != "" {
 				t.Fatalf("night = %+v", n)
 			}
+		}
+	}
+}
+
+// The same weekday a week on is another night: "Saturday 21 November" is not the
+// 14th. A bare weekday, as other providers write it, still names the next one.
+func TestWarningOn_MatchesTheWeekdayAndTheDateWhenTheSectionGivesBoth(t *testing.T) {
+	night := time.Date(2026, 11, 14, 0, 0, 0, 0, paLoc)
+	today := "2026-11-14"
+	for _, c := range []struct {
+		day  string
+		want bool
+	}{
+		{"Saturday 14 November", true},
+		{"Saturday 21 November", false},
+		{"Saturday 14 December", false},
+		{"saturday 14 november", true},
+		{"Saturday", true},
+		{"Sunday 15 November", false},
+		{"Today", true},
+		{"Tonight", true},
+	} {
+		got, _ := warningOn(paWarning(c.day, "Gale Warning"), night, today)
+		if (got != "") != c.want {
+			t.Errorf("section %q on the night of 14 November: warning %q, want match %v", c.day, got, c.want)
 		}
 	}
 }
@@ -964,6 +1037,111 @@ func TestPlanAssessmentHandler_MemoisesForTenMinutesAndFollowsTheContent(t *test
 	get()
 	if f.fetches == asked {
 		t.Fatal("a changed plan must not be answered from the memo")
+	}
+}
+
+// The recorded speed is read once for a request, for the memo's key and for the
+// assessment alike, and once on a memo hit too.
+func TestPlanAssessmentHandler_ReadsTheSpeedOncePerRequest(t *testing.T) {
+	store := withTestDocumentStore(t)
+	planAssessMemoClear()
+	prevSeg, prevDeps := planRouteSegment, planAssessDepsFor
+	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps; planAssessMemoClear() })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
+	}
+	f := &paFake{}
+	planAssessDepsFor = func() planAssessDeps { return paDeps(f) }
+	saved, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprint(saved.ID)
+	for i, want := range []int{1, 2} { // a miss, then a hit
+		c, rec := planCtx(http.MethodGet, "/api/plans/"+id+"/assessment", "", id, "")
+		if err := planAssessmentHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("assessment: %v %d %s", err, rec.Code, rec.Body.String())
+		}
+		if f.speedReads != want {
+			t.Fatalf("request %d: %d speed reads in all, want %d", i+1, f.speedReads, want)
+		}
+	}
+}
+
+// The speed is kept for ten minutes in the process, a failed read never.
+func TestCachedCruisingSpeed_IsKeptForTenMinutesAndAFailureIsNot(t *testing.T) {
+	var c cruisingSpeedCache
+	reads, fail := 0, false
+	read := func() (float64, error) {
+		reads++
+		if fail {
+			return 0, errors.New("the passage record could not be read")
+		}
+		return 6.5, nil
+	}
+	now := paNow
+	if v, err := c.get(now, read); err != nil || v != 6.5 || reads != 1 {
+		t.Fatalf("first: %v %v %d", v, err, reads)
+	}
+	if v, _ := c.get(now.Add(9*time.Minute), read); v != 6.5 || reads != 1 {
+		t.Fatalf("inside ten minutes the read is reused: reads %d", reads)
+	}
+	fail = true
+	if _, err := c.get(now.Add(11*time.Minute), read); err == nil || reads != 2 {
+		t.Fatalf("after ten minutes it reads again: %v %d", err, reads)
+	}
+	if _, err := c.get(now.Add(11*time.Minute), read); err == nil || reads != 3 {
+		t.Fatalf("a failure is not kept: %d", reads)
+	}
+	c.drop()
+	fail = false
+	if v, err := c.get(now.Add(12*time.Minute), read); err != nil || v != 6.5 || reads != 4 {
+		t.Fatalf("after a drop: %v %v %d", v, err, reads)
+	}
+}
+
+// A current that failed to read (as against one the model has none of) is a
+// failure a retry may mend, so it is not kept for ten minutes.
+func TestPlanAssessmentHandler_ACurrentThatFailedToReadIsAskedAgain(t *testing.T) {
+	store := withTestDocumentStore(t)
+	planAssessMemoClear()
+	prevSeg, prevDeps := planRouteSegment, planAssessDepsFor
+	t.Cleanup(func() { planRouteSegment, planAssessDepsFor = prevSeg, prevDeps; planAssessMemoClear() })
+	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
+		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
+	}
+	failing := true
+	f := &paFake{current: func(planDepartureQuery, time.Time) (planCurrentReading, error) {
+		if failing {
+			return planCurrentReading{}, errors.New("the Open-Meteo current request failed")
+		}
+		return planCurrentReading{Have: true, MeanKn: 0.5}, nil
+	}}
+	planAssessDepsFor = func() planAssessDeps { return paDeps(f) }
+	in := plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)}
+	in.Stops[0].DepartTime = "08:00"
+	saved, err := store.CreatePlan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprint(saved.ID)
+	get := func() planAssessment {
+		c, rec := planCtx(http.MethodGet, "/api/plans/"+id+"/assessment", "", id, "")
+		if err := planAssessmentHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("assessment: %v %d %s", err, rec.Code, rec.Body.String())
+		}
+		var out planAssessment
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if first := get(); first.Legs[0].CurrentKn != nil {
+		t.Fatalf("first = %+v", first.Legs[0])
+	}
+	failing = false
+	if second := get(); second.Legs[0].CurrentKn == nil {
+		t.Fatalf("a failed current read was kept: %+v", second.Legs[0])
 	}
 }
 

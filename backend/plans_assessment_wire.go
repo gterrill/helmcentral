@@ -88,7 +88,10 @@ func productionPlanAssessDeps(settingsPath string) planAssessDeps {
 			return src, nil
 		},
 		speed: func(context.Context) (float64, error) {
-			return recordedCruisingSpeed(globalPassageStore, d.now())
+			now := d.now()
+			return planCruisingSpeed.get(now, func() (float64, error) {
+				return recordedCruisingSpeed(globalPassageStore, now)
+			})
 		},
 		sun:          sunTimes,
 		dawn:         civilDawn,
@@ -125,6 +128,47 @@ const (
 	planSpeedMinNm       = 3.0
 	planSpeedMinUnderway = 30 * time.Minute
 )
+
+// planCruisingSpeedTTL is how long the recorded speed is reused. It moves only
+// when a passage is recorded or edited, and a few minutes' lag is harmless.
+const planCruisingSpeedTTL = 10 * time.Minute
+
+// planCruisingSpeed is the recorded speed the plan assessment reads.
+var planCruisingSpeed cruisingSpeedCache
+
+// cruisingSpeedCache keeps the recorded speed for planCruisingSpeedTTL, so a
+// read of the passage record does not run on every request. A failed read is
+// never kept.
+type cruisingSpeedCache struct {
+	mu    sync.Mutex
+	at    time.Time
+	speed float64
+	have  bool
+}
+
+func (c *cruisingSpeedCache) get(now time.Time, read func() (float64, error)) (float64, error) {
+	c.mu.Lock()
+	if c.have && now.Sub(c.at) < planCruisingSpeedTTL && !now.Before(c.at) {
+		v := c.speed
+		c.mu.Unlock()
+		return v, nil
+	}
+	c.mu.Unlock()
+	v, err := read()
+	if err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	c.at, c.speed, c.have = now, v, true
+	c.mu.Unlock()
+	return v, nil
+}
+
+func (c *cruisingSpeedCache) drop() {
+	c.mu.Lock()
+	c.have = false
+	c.mu.Unlock()
+}
 
 // recordedCruisingSpeed is the speed a plan's ETA is worked out at: the median,
 // over the visible passages that began in the last twelve months and ran at least

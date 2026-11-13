@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ const (
 	planNoteNoForecast = "No forecast yet"
 	planNoteNotRouted  = "Not routed"
 	planNotePast       = "Date has passed"
+	planNoteDepartPast = "Departure time has passed"
 	planNoteOvernight  = "Overnight legs are not assessed yet"
 	planNoteGap        = "Forecast missing for part of the leg"
 )
@@ -91,6 +93,9 @@ type planLegAssessment struct {
 	CurrentKn   *float64 `json:"current_kn"`
 	CurrentNote string   `json:"current_note"`
 	NotChecked  []string `json:"not_checked"`
+	// currentFailed is set when the current read itself failed, as against the
+	// model having none: a retry may mend it, so the assessment is not kept.
+	currentFailed bool
 }
 
 // planStopNight is an official warning in force the night the boat is at a stop.
@@ -195,6 +200,7 @@ func (w *planLegWork) setCurrent(r planCurrentReading, err error) {
 	case err != nil:
 		log.Printf("plans: current not read for %s to %s: %v", w.from.Name, w.to.Name, err)
 		w.res.CurrentNote = err.Error()
+		w.res.currentFailed = true
 	case !r.Have:
 		w.res.CurrentNote = r.Why
 	default:
@@ -340,6 +346,9 @@ func (w *planLegWork) setOperatorDeparture(now time.Time) (planNoteKind, string)
 		y, mo, dd := day.Date()
 		w.depart = time.Date(y, mo, dd, h, m, 0, 0, w.fromLoc)
 		w.res.Depart = fmtLeg(w.depart, w.fromLoc)
+		if w.depart.Before(now) {
+			return planKindPast, planNoteDepartPast
+		}
 	}
 	return planKindNone, ""
 }
@@ -585,14 +594,19 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 }
 
 // departureOrder ranks a cell for choosing a departure: Go, then Marginal, then a
-// time the forecast cannot judge, then No-Go.
-func departureOrder(state string) int {
-	switch state {
+// gap inside the forecast, then a judged No-Go, then a run that goes past the
+// forecast's end. A No-Go the forecast shows is never hidden behind a time it
+// cannot yet judge.
+func departureOrder(cell passageWindowCell) int {
+	switch cell.State {
 	case "go":
 		return 0
 	case "marginal":
 		return 1
 	case "no_data":
+		if cell.noData == passageNoDataBeyondForecast {
+			return 4
+		}
 		return 2
 	}
 	return 3
@@ -611,7 +625,7 @@ func chooseDeparture(ctx context.Context, as *passageAssessor, w *planLegWork) (
 		if err != nil {
 			return tidalDeparture{}, passageWindowCell{}, err
 		}
-		better := !found || departureOrder(cell.State) < departureOrder(bestCell.State) ||
+		better := !found || departureOrder(cell) < departureOrder(bestCell) ||
 			(cell.State == "no_go" && bestCell.State == "no_go" && cell.ratio < bestCell.ratio)
 		if better {
 			best, bestCell, found = c, cell, true
@@ -703,15 +717,37 @@ func dayPlus(day string, n int) string {
 	return t.AddDate(0, 0, n).Format(planDateLayout)
 }
 
+// sectionDayIsNight is true when a warnings section's day names the night: a bare
+// weekday ("Sunday"), or the weekday with its date as the BOM writes it ("Sunday 5
+// July"), in which case the date must be the night's too, so the same weekday a
+// week on is not matched.
+func sectionDayIsNight(day string, night time.Time) bool {
+	f := strings.Fields(day)
+	if len(f) == 0 || !strings.EqualFold(f[0], night.Weekday().String()) {
+		return false
+	}
+	if len(f) == 1 {
+		return true
+	}
+	if len(f) != 3 {
+		return false
+	}
+	dom, err := strconv.Atoi(f[1])
+	month := night.Month().String()
+	return err == nil && dom == night.Day() &&
+		(strings.EqualFold(f[2], month) || strings.EqualFold(f[2], month[:3]))
+}
+
 // warningOn is the warning types in force on a night, joined, and the first
-// bulletin's link. A section names its day as a weekday, or today.
+// bulletin's link. A section names its day as a weekday (with its date when the
+// provider gives one), or today.
 func warningOn(b forecastWarningsBundle, night time.Time, today string) (warning, url string) {
 	var kinds []string
 	seen := map[string]bool{}
 	for _, bulletin := range b.Bulletins {
 		for _, sec := range bulletin.Sections {
 			day := strings.TrimSpace(sec.Day)
-			match := strings.EqualFold(day, night.Weekday().String()) ||
+			match := sectionDayIsNight(day, night) ||
 				(night.Format(planDateLayout) == today && (strings.EqualFold(day, "today") || strings.EqualFold(day, "tonight")))
 			if !match || seen[sec.WarningType] {
 				continue
@@ -754,6 +790,10 @@ func planAssessmentHandler(c echo.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), planAssessmentDeadline)
 	defer cancel()
+	// The speed is read once for the request: the memo's key and the assessment
+	// both use it.
+	speed, speedErr := deps.speed(ctx)
+	deps.speed = func(context.Context) (float64, error) { return speed, speedErr }
 	key, keyed := planAssessMemoKey(ctx, p, deps)
 	if keyed {
 		if out, ok := planAssessMemoGet(p.ID, key, deps.now()); ok {
@@ -847,7 +887,7 @@ func planAssessmentSettled(out planAssessment) bool {
 		return false
 	}
 	for _, l := range out.Legs {
-		if l.NoteKind == planKindOther || l.NoteKind == planKindNoDeparture || l.NoteKind == planKindNotRouted {
+		if l.currentFailed || l.NoteKind == planKindOther || l.NoteKind == planKindNoDeparture || l.NoteKind == planKindNotRouted {
 			return false
 		}
 	}

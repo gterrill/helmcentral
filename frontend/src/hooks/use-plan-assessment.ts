@@ -9,7 +9,8 @@ import type { LegVerdict, Plan, PlanAssessment, PlanLegAssessment, PlanNoteKind 
 // the operator's passage limits (ADR 0286). Asked again on the forecast's own
 // refresh interval, so the "as of" time moves with the forecast, and again half
 // a second after the plan stops changing. The last assessment stays on screen
-// while the next one is worked out.
+// while the next one is worked out, marked as updating, and only for the legs
+// that still run between the same stops.
 
 /** How long the plan must hold still before the verdicts are asked for again. */
 export const ASSESSMENT_DEBOUNCE_MS = 500;
@@ -116,13 +117,50 @@ export function usePlanAssessment(plan: Plan | null) {
     select: mapAssessment,
   });
   // The last answer for this plan stays until the next lands: a question for a
-  // changed plan has no answer yet, and the table must not blank in between.
-  const last = useRef<{ planId: number; assessment: PlanAssessment } | null>(null);
-  if (data) last.current = { planId, assessment: data };
-  const assessment = data ?? (last.current?.planId === planId ? last.current.assessment : null);
+  // changed plan has no answer yet, and the table must not blank in between. Its
+  // legs are kept only where they still line up with the plan, and it is marked
+  // as updating until the answer for the plan as it now stands arrives.
+  const last = useRef<{ planId: number; assessment: PlanAssessment; shape: string } | null>(null);
+  if (data) last.current = { planId, assessment: data, shape: settled };
+  const source = last.current?.planId === planId ? last.current : null;
+  const sourceAssessment = source?.assessment ?? null;
+  const sourceShape = source?.shape ?? "";
+  const assessment = useMemo(
+    () => (sourceAssessment ? carryOver(sourceAssessment, sourceShape, shape) : null),
+    [sourceAssessment, sourceShape, shape],
+  );
   return {
     assessment,
     loading: isLoading,
+    /** The verdicts on screen are for the plan as it was before an edit. */
+    updating: assessment !== null && (data === undefined || settled !== shape),
     error: error ? error.message || "Failed to check the plan against the forecast" : null,
+  };
+}
+
+/** The stop names of a plan's shape, in order. */
+function stopNames(shape: string): string[] {
+  try {
+    return (JSON.parse(shape) as unknown[][]).map((s) => String(s[0]));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The part of an assessment still true of the plan as it now stands: a leg stays
+ * only while it runs between the same two stops at the same index, a stop's
+ * warnings only while the same place is at that index. An assessment for the
+ * plan as it is comes back whole.
+ */
+function carryOver(a: PlanAssessment, fromShape: string, toShape: string): PlanAssessment {
+  if (fromShape === toShape) return a;
+  const was = stopNames(fromShape);
+  const now = stopNames(toShape);
+  const same = (i: number) => was[i] !== undefined && was[i] === now[i];
+  return {
+    ...a,
+    legs: a.legs.filter((l) => same(l.leg) && same(l.leg + 1)),
+    stops: a.stops.filter((s) => same(s.stop)),
   };
 }

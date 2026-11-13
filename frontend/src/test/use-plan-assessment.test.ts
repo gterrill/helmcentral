@@ -154,6 +154,61 @@ describe("usePlanAssessment", () => {
     }
   });
 
+  it("marks the carried-over assessment as updating from the edit until the new one lands", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer: (v: unknown) => void = () => {};
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(reply(API_ASSESSMENT))
+        .mockReturnValue(new Promise((r) => (answer = r)));
+      vi.stubGlobal("fetch", fetchMock);
+      const plan = mapPlan(API_PLAN as never);
+      const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
+      await tick(10);
+      expect(result.current.updating).toBe(false);
+      rerender({ p: { ...plan, stops: [{ ...plan.stops[0], departTime: "08:00" }, ...plan.stops.slice(1)] } });
+      // At once, while the plan is still being edited, the old verdicts are not current.
+      expect(result.current.updating).toBe(true);
+      await tick(700);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result.current.updating).toBe(true);
+      expect(result.current.assessment?.legs).toHaveLength(2);
+      await act(async () => {
+        answer(reply(API_ASSESSMENT));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(result.current.updating).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("carries a leg over only while its from and to stops are the same, so no verdict lands on another row", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockResolvedValueOnce(reply(API_ASSESSMENT)).mockReturnValue(new Promise(() => {}));
+      vi.stubGlobal("fetch", fetchMock);
+      const plan = mapPlan(API_PLAN as never);
+      const { result, rerender } = renderHook(({ p }) => usePlanAssessment(p), { initialProps: { p: plan } });
+      await tick(10);
+      expect(result.current.assessment?.legs).toHaveLength(2);
+      // A stop added at the end leaves the two legs as they were.
+      const d = { ...plan.stops[2], name: "D", arrive: "2026-11-16", departTime: "" };
+      rerender({ p: { ...plan, stops: [...plan.stops, d] } });
+      await tick(700);
+      expect(result.current.assessment?.legs.map((l) => l.leg)).toEqual([0, 1]);
+      // A stop inserted after A moves every leg: A -> B is now A -> X.
+      const x = { ...plan.stops[1], name: "X" };
+      rerender({ p: { ...plan, stops: [plan.stops[0], x, ...plan.stops.slice(1)] } });
+      await tick(700);
+      expect(result.current.assessment?.legs).toEqual([]);
+      expect(result.current.assessment?.stops).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not show one plan's assessment for another", async () => {
     vi.useFakeTimers();
     try {

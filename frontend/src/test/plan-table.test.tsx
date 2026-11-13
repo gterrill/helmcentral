@@ -52,8 +52,13 @@ const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
   ...over,
 });
 
-function show(a: PlanAssessment | null, opts: { error?: string | null } = {}) {
-  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: a, loading: a === null, error: opts.error ?? null });
+function show(a: PlanAssessment | null, opts: { error?: string | null; updating?: boolean } = {}) {
+  vi.mocked(usePlanAssessment).mockReturnValue({
+    assessment: a,
+    loading: a === null,
+    updating: opts.updating ?? false,
+    error: opts.error ?? null,
+  });
   return render(
     <PlanTable
       plan={PLAN}
@@ -173,6 +178,38 @@ describe("PlanTable verdicts", () => {
     vi.mocked(usePlanDayForecast).mockReturnValue({ loading: false, error: null, coverage: "beyond", wind: null, waveMinM: null, waveMaxM: null } as never);
     show(assessment({ legs: [legAssessment({ note: "No forecast yet", noteKind: "no_forecast" }), legAssessment({ leg: 1, date: "2026-11-16" })] }));
     expect((rows()[0].textContent ?? "").match(/No forecast yet/g)).toHaveLength(1);
+  });
+
+  it("gives the reason under No data for a hole in the forecast", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({ verdict: "no_data", note: "Forecast missing for part of the leg", noteKind: "gap" }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+      }),
+    );
+    expect(rows()[0]).toHaveTextContent("No data");
+    expect(rows()[0]).toHaveTextContent("Forecast missing for part of the leg");
+  });
+
+  it("marks verdicts from before an edit as updating, and shows a leg with no carried verdict as loading", () => {
+    show(
+      assessment({ legs: [legAssessment({ verdict: "go" })] }),
+      { updating: true },
+    );
+    expect(screen.getByTestId("plan-assessment-asof")).toHaveTextContent("Updating…");
+    expect(rows()[0]).toHaveClass("opacity-60");
+    // Leg 1 has no verdict carried over: it is being worked out, not "—".
+    const second = rows().find((r) => r.textContent?.includes("Charlie"));
+    expect(second).toHaveTextContent("…");
+    expect(second).not.toHaveClass("opacity-60");
+  });
+
+  it("does not say Updating once the assessment is current", () => {
+    show(assessment());
+    expect(screen.getByTestId("plan-assessment-asof")).not.toHaveTextContent("Updating");
+    expect(rows()[0]).not.toHaveClass("opacity-60");
   });
 
   it("names what could not be checked in the words the Mate card uses", () => {

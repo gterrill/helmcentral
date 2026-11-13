@@ -135,11 +135,11 @@ export function PlanTable({
     }
     return [...byKey.values()];
   }, [rows, plan, legByFrom, today]);
-  const { assessment, error: assessmentError } = usePlanAssessment(plan);
+  const { assessment, updating, error: assessmentError } = usePlanAssessment(plan);
   const assessmentState: AssessmentState = assessment ? "ready" : assessmentError ? "failed" : "loading";
   const rowAssessments = useMemo(
-    () => buildRowAssessments(rows, assessment, assessmentState),
-    [rows, assessment, assessmentState],
+    () => buildRowAssessments(rows, assessment, assessmentState, updating),
+    [rows, assessment, assessmentState, updating],
   );
   const zone = plan.stops[0]?.timezone;
   return (
@@ -166,6 +166,7 @@ export function PlanTable({
         <p data-testid="plan-assessment-asof" className="text-xs text-muted-foreground">
           Verdicts as of {formatTimeOfDay(assessment.asOf, zone)}
           {assessment.forecastAsOf ? ` · forecast fetched ${formatTimeOfDay(assessment.forecastAsOf, zone)}` : ""}
+          {updating ? " · Updating…" : ""}
         </p>
       )}
       <div
@@ -220,29 +221,46 @@ interface RowAssessment {
   nightWarning: PlanStopWarning | undefined;
   /** A passage row's warning at the stop it arrives at, for the night of arrival. */
   arrivalWarning: PlanStopWarning | undefined;
+  /** What is shown is from before an edit and is being asked for again. */
+  stale: boolean;
 }
 
-/** Every row's view of the assessment, built from one pass over its legs and warnings. */
+/**
+ * Every row's view of the assessment, built from one pass over its legs and
+ * warnings. While the verdicts are being asked for again, a passage row with none
+ * carried over reads as loading, not as having none.
+ */
 function buildRowAssessments(
   rows: PlanRow[],
   assessment: PlanAssessment | null,
   state: AssessmentState,
+  updating: boolean,
 ): Map<string, RowAssessment> {
   const legs = new Map((assessment?.legs ?? []).map((l) => [l.leg, l]));
   const warnings = new Map<string, PlanStopWarning>();
   for (const s of assessment?.stops ?? []) for (const n of s.nights) warnings.set(`${s.stop}|${n.date}`, n);
   return new Map(
-    rows.map((row) => [
-      row.key,
-      row.kind === "passage"
-        ? {
-            leg: legs.get(row.legIndex),
-            state,
+    rows.map((row): [string, RowAssessment] => {
+      if (row.kind === "passage") {
+        const leg = legs.get(row.legIndex);
+        const arrivalWarning = warnings.get(`${row.legIndex + 1}|${row.dayKey}`);
+        return [
+          row.key,
+          {
+            leg,
+            state: leg === undefined && updating ? "loading" : state,
             nightWarning: undefined,
-            arrivalWarning: warnings.get(`${row.legIndex + 1}|${row.dayKey}`),
-          }
-        : { leg: undefined, state, nightWarning: warnings.get(`${row.stopIndex}|${row.dayKey}`), arrivalWarning: undefined },
-    ]),
+            arrivalWarning,
+            stale: updating && (leg !== undefined || arrivalWarning !== undefined),
+          },
+        ];
+      }
+      const nightWarning = warnings.get(`${row.stopIndex}|${row.dayKey}`);
+      return [
+        row.key,
+        { leg: undefined, state, nightWarning, arrivalWarning: undefined, stale: updating && nightWarning !== undefined },
+      ];
+    }),
   );
 }
 
@@ -363,6 +381,9 @@ function VerdictText({
       >
         {text}
       </p>
+      {a.verdict === "no_data" && a.noteKind === "gap" && a.note !== "" && (
+        <p className="text-xs text-muted-foreground">{a.note}</p>
+      )}
       {notChecked.length > 0 && (
         <p className="text-xs text-muted-foreground">Not checked: {notChecked.join(", ")}</p>
       )}
@@ -421,7 +442,9 @@ const PlanDayRow = memo(function PlanDayRow({
       role="row"
       data-testid="plan-row"
       data-kind={row.kind}
-      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"}`}
+      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"} ${
+        assessed.stale ? "opacity-60" : ""
+      }`}
     >
       <Cell label="Day">{`Day ${row.dayNumber}`}</Cell>
       <Cell label="Date">{`${formatWeekday(row.dayKey)} ${formatDayMonth(row.dayKey)}`}</Cell>

@@ -109,7 +109,7 @@ function plansState(plans: unknown[], currentId: number | null, legs: unknown[] 
     refetch: vi.fn(),
   } as never);
   vi.mocked(usePlanLegs).mockReturnValue({ legs, loading: false, error: null } as never);
-  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: null, loading: false, error: null });
+  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: null, loading: false, updating: false, error: null });
 }
 
 const LEGS = [

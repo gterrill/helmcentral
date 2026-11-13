@@ -576,12 +576,19 @@ type passageAssessor struct {
 
 	// cache holds every sample point's hours, fetched up front and read-only
 	// after. fetchedAt is the oldest source time among them.
-	cache     map[string]map[int64]passageHour
+	cache     map[string]passagePointHours
 	fetchedAt time.Time
 	// tideCache holds what each tide start point's one fetch returned. A
 	// provider returns the station's own predicted window, not a span asked for.
 	tideCache map[string]passageTideResult
 	tideGaps  map[string]bool
+}
+
+// passagePointHours is a point's forecast hours with the latest of them, found
+// once when the forecast is fetched.
+type passagePointHours struct {
+	hours map[int64]passageHour
+	last  int64
 }
 
 func passagePointKey(pt passageRoutePoint) string { return fmt.Sprintf("%.2f,%.2f", pt.Lat, pt.Lon) }
@@ -591,7 +598,7 @@ func passagePointKey(pt passageRoutePoint) string { return fmt.Sprintf("%.2f,%.2
 // days are read in.
 func newPassageAssessor(limits passageLimits, fc forecastSource, tides tideSource, sun func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)) *passageAssessor {
 	return &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun,
-		cache: map[string]map[int64]passageHour{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
+		cache: map[string]passagePointHours{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
 }
 
 // prefetchLegs fetches the forecast at every distinct sample point of the legs.
@@ -666,7 +673,7 @@ launch:
 		if r.err != nil {
 			return r.err
 		}
-		as.cache[passagePointKey(pts[i])] = r.f.Hours
+		as.cache[passagePointKey(pts[i])] = passagePointHours{hours: r.f.Hours, last: lastHour(r.f.Hours)}
 		if !r.f.FetchedAt.IsZero() && (as.fetchedAt.IsZero() || r.f.FetchedAt.Before(as.fetchedAt)) {
 			as.fetchedAt = r.f.FetchedAt
 		}
@@ -674,10 +681,10 @@ launch:
 	return nil
 }
 
-func (as *passageAssessor) hoursAt(pt passageRoutePoint) (map[int64]passageHour, error) {
+func (as *passageAssessor) hoursAt(pt passageRoutePoint) (passagePointHours, error) {
 	h, ok := as.cache[passagePointKey(pt)]
 	if !ok {
-		return nil, fmt.Errorf("no forecast was fetched at %.2f, %.2f", pt.Lat, pt.Lon)
+		return passagePointHours{}, fmt.Errorf("no forecast was fetched at %.2f, %.2f", pt.Lat, pt.Lon)
 	}
 	return h, nil
 }
@@ -802,15 +809,15 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			frac = float64(t.Sub(depart)) / float64(arrive.Sub(depart))
 		}
 		lat, lon, seg := plan.at(frac)
-		hours, err := as.hoursAt(plan.nearestSample(lat, lon))
+		point, err := as.hoursAt(plan.nearestSample(lat, lon))
 		if err != nil {
 			return cell, err
 		}
-		h, ok := hours[t.Unix()]
+		h, ok := point.hours[t.Unix()]
 		if !ok {
 			// An hour past the last the forecast has is a leg further ahead than
 			// it reaches; one before it is a hole in the data.
-			missing, gap = true, gap || t.Unix() <= lastHour(hours)
+			missing, gap = true, gap || t.Unix() <= point.last
 			tally.gap(t, depart, arrive)
 			continue
 		}

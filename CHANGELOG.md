@@ -29,8 +29,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   where the route needs steering. The table has one row per day with the
   distance by water, the wind against your course, the gusts and the waves, and
   **+1 night** moves every later date. Days past the ten-day forecast say "No
-  forecast yet". A leg that can't be routed says why and shows no distance. On
-  a phone each row is a card. There's no lightning column, because the
+  forecast yet". A leg that can't be routed says why and shows no distance. If
+  the charted shoreline closes off the water between two stops, the row says so
+  and tells you to move a stop or add a via place. On a phone each row is a card. There's no lightning column, because the
   lightning forecast is only worked out for the boat's own position.
 - **Each leg of a plan now says Go, Marginal or No-Go, with when to leave and
   when you'll arrive.** The last column judges a passage against your passage
