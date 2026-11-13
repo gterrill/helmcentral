@@ -27,10 +27,12 @@ import { formatDayMonth, formatStayRange, formatWeekday, isStayDay, pendingStayD
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { calendarDayLabel, formatDayKey, formatHourMinute, formatTimeOfDay, selectTimeZone, zonedWallInstant } from '@/lib/vessel-time'
 import { LegendSwatch } from '@/components/legend-swatch'
-import { LIGHTNING_BAND_HEIGHT, LightningBand, LightningKey } from '@/components/lightning-band'
+import { DayLightningStrip, LIGHTNING_BAND_HEIGHT, LightningBand, LightningKey } from '@/components/lightning-band'
 import {
+  dayLightning as layDayLightning,
   lightningLabel,
   lightningNoDataBand,
+  lightningPercent,
   lightningStatus,
   lightningTip,
   placeLightningOnSamples,
@@ -630,7 +632,8 @@ export function ForecastDrawer({
   const tempUnit = unit === 'metric' ? '°C' : '°F'
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
-  const days = forecast.slice(0, 10)
+  // Stable while the forecast is, so the per-day lightning below is worked out once.
+  const days = useMemo(() => forecast.slice(0, 10), [forecast])
   // Stay days the forecast does not reach yet. Listed, never estimated.
   const stayPendingDays = useMemo(
     () => (stay ? pendingStayDays(days.map((d) => d.dayKey), stay) : []),
@@ -1326,6 +1329,19 @@ export function ForecastDrawer({
   const lightningStale = lightningState.kind === 'ready' && isForecastStale(lightningAgeSeconds, lightning?.ttlSeconds)
   const lightningStaleLabel = lightningStale ? formatDataAge(lightningAgeSeconds) : undefined
   const lightningProvider = lightning?.provider ?? null
+  // Each day card's strip and summary sentence, laid over the day in the
+  // forecast's zone. Ready means the zone is a known one; day keys were
+  // checked when the forecast was read.
+  const dayLightning = useMemo(
+    () =>
+      new Map(
+        lightningState.kind === 'ready'
+          ? days.map((day) => [day.dayKey, layDayLightning(lightningWindows, day.dayKey, forecastZone as string)] as const)
+          : [],
+      ),
+    [lightningState.kind, lightningWindows, days, forecastZone],
+  )
+  const selectedDayLightningSentence = dayLightning.get(selectedDay.dayKey)?.sentence ?? null
 
   // Cloud chart: the windows placed on the selected day's own hourly points,
   // in the day's zone. Ready means the zone is a known one.
@@ -1560,13 +1576,15 @@ export function ForecastDrawer({
               // display slot's own reasoning applies here too), condition,
               // high/low, precipitation chance, and the trough flag.
               const isStaySelected = stay ? isStayDay(day.dayKey, stay) : false
-              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}`
+              const lightningDay = dayLightning.get(day.dayKey)
+              const lightningPeak = lightningDay?.peak ?? null
+              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}`
 
               return (
                 <button
                   key={day.dayKey}
                   type="button"
-                  className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                  className={`relative min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${
                     isSelected
                       ? 'border-primary/40 bg-card'
                       : isStaySelected
@@ -1641,6 +1659,7 @@ export function ForecastDrawer({
                     <span>/</span>
                     <span className="font-semibold">{Math.round(displayTemp(day.low))}</span>
                   </p>
+                  {lightningDay && lightningDay.segments.length > 0 ? <DayLightningStrip testId="forecast-day-lightning" segments={lightningDay.segments} stale={lightningStale} /> : null}
                 </button>
               )
             })}
@@ -1735,9 +1754,7 @@ export function ForecastDrawer({
                       const sunSentence = uvProtectionStart && uvProtectionEnd
                         ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
                         : 'No sun protection needed.'
-                      return selectedDay.precipitationSummary
-                        ? `${selectedDay.precipitationSummary} ${sunSentence}`
-                        : sunSentence
+                      return [selectedDay.precipitationSummary, selectedDayLightningSentence, sunSentence].filter(Boolean).join(' ')
                     })()}
                   </p>
                   <div className="relative">

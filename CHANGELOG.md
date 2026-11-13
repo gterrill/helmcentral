@@ -30,6 +30,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   draws nothing. Hours the forecast doesn't cover, such as the days past its
   14.5-day reach, are hatched instead of left blank. The key says what the
   shades mean, and the tooltip gives the chance for the hour you're reading.
+  Each card in the day strip carries the same shades as a thin line along its
+  bottom edge, and the day's summary says when lightning is likely, possible
+  or a slight chance.
   It's for the boat's position only, so a planned stay shows no band and says
   so. Once the lightning plugin has answered, a failed update is shown in the
   key, even beside a band that's still drawn. Until it has answered, the key

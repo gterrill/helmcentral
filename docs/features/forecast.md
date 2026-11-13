@@ -218,6 +218,14 @@ boat. You can see a thundery spell coming and pick your day before it arrives.
   is the chance of at least one lightning flash within about 20 kilometres of
   the boat in that window. Touch or hover a chart and the tooltip adds the
   chance, such as "Lightning 40%", for the hour you're reading.
+- **On the day cards too:** Each card in the day strip gets a thin violet
+  line along its bottom edge, a small copy of the Cloud chart's band. You can
+  see which part of which day is stormy before you open it. A quiet day has no
+  line. Hours past the end of the forecast are hatched, as on the charts.
+  Today's card leaves out the hours already gone, which the chart hatches.
+- **In the day summary:** The summary above the Cloud, Temperature & Rain
+  chart adds a sentence, such as "Lightning likely from 3 PM to 9 PM". It says
+  "likely" from 60%, "possible" from 30%, and "slight chance" from 10%.
 - **Four steps, not a gradient:** Under 10% draws nothing, so a quiet stretch
   is an empty slot. From 10% to 30% is a pale block, 30% to 60% is stronger, and
   60% or more is solid. The key under each chart, "Lightning chance", shows

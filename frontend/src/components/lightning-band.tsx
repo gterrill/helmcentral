@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   LIGHTNING_STEP_LABELS,
   lightningOpacity,
+  type DayLightningSegment,
   type LightningBlock,
   type LightningGap,
   type LightningStatus,
@@ -88,6 +89,40 @@ export function LightningBand({ testId, blockTestId, gapTestId, chartWidth, char
         />
       ))}
     </svg>
+  )
+}
+
+/** The band's hatch as a CSS fill, for a strip too small to carry an SVG pattern. */
+const NO_DATA_HATCH = 'repeating-linear-gradient(45deg, hsl(var(--chart-lightning) / 0.45) 0 1px, transparent 1px 3px)'
+
+/**
+ * The lightning band shrunk onto a day card: the chart band's blocks across
+ * the card's bottom edge, in the chart's steps, hatched where
+ * there is no data and grey when the feed is stale, as the band is. The card's
+ * own label carries the peak, so the strip is hidden from assistive technology.
+ */
+export function DayLightningStrip({ testId, segments, stale = false }: { testId: string; segments: DayLightningSegment[]; stale?: boolean }) {
+  return (
+    <span
+      data-testid={testId}
+      aria-hidden="true"
+      className={cn('pointer-events-none absolute inset-x-2.5 bottom-1 h-[3px] overflow-hidden rounded-full', stale && 'grayscale')}
+    >
+      {segments.map((seg, idx) => (
+        <span
+          key={idx}
+          data-step={seg.step ?? 'none'}
+          className="absolute inset-y-0"
+          style={{
+            left: `${seg.from * 100}%`,
+            width: `${(seg.to - seg.from) * 100}%`,
+            ...(seg.step === null
+              ? { backgroundImage: NO_DATA_HATCH }
+              : { backgroundColor: `hsl(var(--chart-lightning) / ${lightningOpacity(seg.step)})` }),
+          }}
+        />
+      ))}
+    </span>
   )
 }
 
