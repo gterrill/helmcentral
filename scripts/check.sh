@@ -124,7 +124,11 @@ for result in $results; do
 		failed=1
 		echo "FAIL  $name  exit $code  ($logdir/$target-$name.log)"
 		counts "$name"
-		failures "$name"
+		# The nested summary printed above already lists their FAIL lines.
+		case $name in
+		backend | frontend) ;;
+		*) failures "$name" ;;
+		esac
 	fi
 done
 

@@ -17,8 +17,9 @@ set -eu
 
 # A Co-Authored-By trailer naming Claude or Anthropic (this covers
 # noreply@anthropic.com), or the "Generated with Claude Code" footer with or
-# without brackets or the robot emoji before it.
-patterns='Co-Authored-By:.*(Claude|Anthropic)|Generated with \[?Claude Code\]?'
+# without brackets or the robot emoji before it. Both must start a line, so a
+# body that only mentions the rule is not rejected.
+patterns='^Co-Authored-By:.*(Claude|Anthropic)|^[^[:alnum:]]*Generated with \[?Claude Code'
 
 if [ "${1:-}" = "--file" ]; then
   file="${2:?usage: check-commit-messages.sh --file FILE}"

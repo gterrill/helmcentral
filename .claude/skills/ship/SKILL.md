@@ -11,7 +11,10 @@ policies in `AGENTS.md`, including findings applied with `--fix`.
 
 `git rev-parse --show-toplevel` must be your own worktree, not the main
 checkout, and `git status` must hold only your changes. Run `git fetch
-origin` and rebase onto `origin/main`; local `main` often lags.
+origin` and rebase onto `origin/main`; local `main` often lags. Run `make
+hooks` once: it turns on the commit-msg hook, is safe to repeat, and the
+setting is shared by every checkout, so existing worktrees and the main
+checkout get it too.
 
 `/code-review` reviews the path you give it, so step 5 passes the worktree's
 path.
@@ -134,7 +137,9 @@ findings.
 
 ## 6. Commit and open the PR
 
-Stage by path and commit. Push the branch. Open the PR with `gh pr create
+Stage by path and commit. Run `sh scripts/check-commit-messages.sh`, since
+step 4 ran before these commits existed; a hit means reword the commit before
+pushing. Push the branch. Open the PR with `gh pr create
 --body-file <path>`, or, when the branch already has one, the push updates it.
 Write the body to a file in the session's scratchpad: the worktree guard
 refuses inline bodies. The body says what the operator will notice, then gives
