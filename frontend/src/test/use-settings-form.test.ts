@@ -3,6 +3,8 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { deepMergeSettings, useSettingsForm } from '@/hooks/use-settings-form'
 import { useOfflineCoastline } from '@/hooks/use-offline-coastline'
 import { useTideSettings } from '@/hooks/use-tide-settings'
+import { usePlanAssessment } from '@/hooks/use-plan-assessment'
+import { mapPlan } from '@/hooks/use-plans'
 import { stubApi, type StubRequest } from '@/test/helpers/stub-api'
 
 describe('useSettingsForm', () => {
@@ -42,6 +44,32 @@ describe('useSettingsForm', () => {
 
     await act(async () => { await form.result.current.save({ offline_coastline: { enabled: true } }) })
     await waitFor(() => expect(coast.result.current.status?.state).toBe('idle'))
+  })
+
+  it('saving passage limits asks a mounted plan assessment again at once, not at the next poll', async () => {
+    let assessments = 0
+    stubApi({
+      'GET /api/settings': { assistant: {} },
+      'POST /api/settings': (req: StubRequest) => req.body,
+      'GET /api/plans/7/assessment': () => {
+        assessments += 1
+        return { as_of: 'x', forecast_as_of: '', problem: '', warnings_error: '', legs: [], stops: [] }
+      },
+    })
+    const plan = mapPlan({
+      id: 7, name: 'P', status: 'active', first_date: '2026-11-14', last_date: '2026-11-15',
+      stops: [
+        { name: 'A', lat: -25.5, lon: 152.9, arrive: '2026-11-14', nights: 0, depart: '2026-11-14', vias: [], depart_time: '', timezone: 'Australia/Brisbane' },
+        { name: 'B', lat: -26, lon: 153, arrive: '2026-11-15', nights: 0, depart: '2026-11-15', vias: [], depart_time: '', timezone: 'Australia/Brisbane' },
+      ],
+    } as never)
+    renderHook(() => usePlanAssessment(plan))
+    const form = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(assessments).toBe(1))
+    await waitFor(() => expect(form.result.current.loading).toBe(false))
+
+    await act(async () => { await form.result.current.save({ assistant: { passage_limits: { ahead: { wind_kn_no_go: 20 } } } }) })
+    await waitFor(() => expect(assessments).toBe(2))
   })
 
   it('reports loaded only when a settings read succeeded', async () => {

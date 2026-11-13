@@ -322,10 +322,65 @@ Here's what the table shows:
   fill the gap.
 - **Times at the place.** Dates are the place's own. When a place's clock
   differs from the boat's, a note under the table says so once you've opened it.
-- **Departure time.** If you set **Leave at** on a leg, the row shows it. Helmcentral
-  never changes a time you set.
+- **Depart and ETA.** A passage row shows when you leave and when you should
+  arrive. The arrival comes from the speed your boat has actually made. That's
+  the middle value of the passages Helmcentral recorded over the last twelve
+  months. It leaves out any passage shorter than 3 nautical miles or 30 minutes
+  under way, such as a move inside a marina. The speed comes from your recorded
+  passages, not the engine log, so it's a different source from the speed Mate
+  uses for its own estimate. If no recorded passage qualifies yet, the row says
+  "No ETA: no recorded passages yet" and shows no arrival and no verdict.
+  Helmcentral doesn't make up a speed. If you set **Leave at** on a leg, the row
+  shows that time and Helmcentral never changes it.
+- **A suggested departure.** If you didn't set a time, Helmcentral suggests one
+  and shows it in italics, like "Suggested 6.40 AM", so you never mistake it for
+  a time you chose. It looks between first light and the last time you can leave
+  and still arrive in daylight, when your passage limits ask for a daylight
+  arrival. Without that limit the last time is sunset. It judges every quarter
+  hour in that window against your passage limits, the same way it judges a time
+  you set, and then picks like this:
+  - Never a No-Go: it only considers times that aren't a No-Go.
+  - Go before Marginal: a Go time beats a Marginal one, even when the Marginal
+    one has the fairer stream.
+  - The fairest stream: among times with the same verdict, it takes the one with
+    the fairest stream along the route, ranked the way Mate ranks departures.
+  - Every time a No-Go: it shows the least bad one, and its verdict says No-Go.
+    It never hides a bad time.
 
-On a phone each row becomes a card.
+  If no time fits the daylight, the row says "No daylight window" and shows no
+  time and no verdict. If the departures can't be ranked, for example because
+  the current model has no figures near the shore, the row says no departure was
+  suggested and why. It doesn't pick a time for you.
+- **Current.** The current along your course when you leave, as "0.8 kn
+  hindering" or "1.2 kn helping". It's the Open-Meteo model's total current,
+  tide and ocean current together. Near the shore the model often has no
+  figures, and then the cell shows a dash with the reason when you hover over
+  it. A missing reading is never shown as zero. The model covers about sixteen
+  days, and the figure is read for the time you leave.
+- **Verdict.** Each passage row ends with Go, Marginal, No-Go or No data, and
+  names what decided it, like "No-Go: gusts 32 kn ahead". Helmcentral works it
+  out with the same rules as Mate's passage window check, against the limits you
+  set under [Passage limits](../how-to/set-passage-limits.md). A Marginal reading
+  starts at 70 percent of a no-go figure. Nothing asks Mate for it. It's judged
+  hour by hour along the leg, at your departure time or the suggested one. A
+  measure it couldn't check, such as waves with no wave forecast, is listed
+  under the verdict as not checked. If the limits aren't set, the page says so
+  once above the table.
+- **Warnings on a stop.** A lay day's verdict column shows an official wind or
+  sea warning that covers that night at the stop. The night you arrive at a stop
+  is shown under the passage row that gets you there. A warning names its day as
+  a weekday, so only nights within the next week are matched. If the warnings
+  can't be read, the page says so, and an empty column then doesn't mean none are
+  in force.
+- **As of.** Above the table a line says when the verdicts were worked out and
+  when the forecast behind them was fetched. They're worked out again each time
+  the forecast refreshes, which is about every ten minutes, and whenever you
+  change the plan. While the new answer is being worked out, the verdict and
+  current read "…", and Helmcentral never leaves an answer from before your
+  change on screen. If the check fails, the page says why.
+
+Where the table is too narrow for its columns, on a phone or a tablet held
+upright, each row becomes a card.
 
 The full forecast for a place, once you open it, works as it always has for a
 place away from the boat:
@@ -353,12 +408,16 @@ place away from the boat:
   a river or beside a lake, the card says "No wave forecast for this spot". It
   doesn't borrow the open water's sea state.
 
-Here's where it stops. The table has no Current column yet, and the ETA is
-blank. There's no Go or No-Go verdict, no suggested departure time, and no mark
-when a forecast changes. A leg is one day, so a passage that runs overnight
-isn't modelled. Mate can't make or change a plan, though it can read the stop
-your current plan has you at or heading for when you talk about "the marina".
-See [Make a passage plan](../how-to/make-a-passage-plan.md) for the steps.
+Here's where it stops. There's no Lightning column, because the lightning
+forecast is only worked out for the boat's own position. There's no mark yet
+when a verdict changes, and a leg isn't marked done when you record the passage.
+A leg is one day, so a passage that runs overnight isn't judged, and its row
+says so. A bar crossing isn't checked, so a leg across a bar is judged on the
+wind and waves along the route alone. Wind against tide isn't checked either,
+because a plan doesn't know which way the flood sets. Mate can't make or change
+a plan, though it can read the stop your current plan has you at or heading for
+when you talk about "the marina". See
+[Make a passage plan](../how-to/make-a-passage-plan.md) for the steps.
 
 Helmcentral doesn't notify you when a plan day comes inside the forecast. Look
 at the rows, which say "No forecast yet" until it does.

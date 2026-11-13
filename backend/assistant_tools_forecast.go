@@ -801,10 +801,10 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 // (it did not run, or the log is short) and the mapping is not blamed.
 func (d assistantToolDeps) silentEnginePathError(engine vesselEngineSetting, path string, days int) error {
 	if d.engineSignature(engine.Instance) == signatureMissing {
-		return fmt.Errorf("estimate_passage: nothing logged for %s in the last %d days; the engine %q is set to propulsion.%s, which has never reported RPM - check its source in Settings > SignalK",
+		return fmt.Errorf("nothing logged for %s in the last %d days; the engine %q is set to propulsion.%s, which has never reported RPM - check its source in Settings > SignalK",
 			path, days, engine.Name, engine.Instance)
 	}
-	return fmt.Errorf("estimate_passage: the engine %q logged nothing for %s in the last %d days (it may not have run in that time)",
+	return fmt.Errorf("the engine %q logged nothing for %s in the last %d days (it may not have run in that time)",
 		engine.Name, path, days)
 }
 
@@ -840,94 +840,17 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	}
 	distanceNm := routed.rawDistanceNm
 
-	days := clampAssistantDays(args.Days, assistantEstimatePassageDefaultHistoryDays, assistantEstimatePassageMaxHistoryDays)
-	if days < assistantEstimatePassageMinHistoryDays {
-		days = assistantEstimatePassageMinHistoryDays
-	}
-
-	stop := d.now()
-	start := stop.AddDate(0, 0, -days)
-
-	engines, instErr := d.fuelRateInstances()
-	if instErr != nil {
-		return "", fmt.Errorf("estimate_passage: the vessel settings could not be read, so the engines are unknown: %w", instErr)
-	}
-	if len(engines) == 0 {
-		return "", fmt.Errorf("estimate_passage: engines are not set up (no engine item is assigned to a propulsion source in Settings > SignalK), so there is no per-engine fuel history to estimate from")
-	}
-
-	instances := make([]string, 0, len(engines))
-	for _, engine := range engines {
-		instances = append(instances, engine.Instance)
-	}
-
-	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)
+	perf, err := d.loggedPerformance(ctx, args.SpeedKts, args.Days)
 	if err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return "", cerr
+		}
 		return "", fmt.Errorf("estimate_passage: %w", err)
 	}
 
-	fuelRates := make([][]telemetryPoint, 0, len(engines))
-	for _, engine := range engines {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		path := fmt.Sprintf("propulsion.%s.fuel.rate", engine.Instance)
-		series, ferr := d.influxRange(path, start, stop, assistantPerformanceQueryEvery)
-		if ferr != nil {
-			return "", fmt.Errorf("estimate_passage: %w", ferr)
-		}
-		if len(series) == 0 {
-			return "", d.silentEnginePathError(engine, path, days)
-		}
-		fuelRates = append(fuelRates, series)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
-	// rpm comes from one representative instance rather than an average
-	// across every engine: this boat's twin engines run matched revs under
-	// way, and averaging would need its own timestamp join - with its own
-	// "one instance missing" question - for a figure that is illustrative
-	// context, not the thing estimate_passage is actually estimating.
-	rpmPath := fmt.Sprintf("propulsion.%s.revolutions", engines[0].Instance)
-	rpm, err := d.influxRange(rpmPath, start, stop, assistantPerformanceQueryEvery)
-	if err != nil {
-		return "", fmt.Errorf("estimate_passage: %w", err)
-	}
-	if len(rpm) == 0 {
-		return "", d.silentEnginePathError(engines[0], rpmPath, days)
-	}
-
-	table := buildPerformanceTable(sog, fuelRates, rpm, assistantPerformanceMinSOGKts)
-	if len(table) == 0 {
-		return "", fmt.Errorf("estimate_passage: no underway history in the last %d days", days)
-	}
-
-	speedKts := 0.0
-	speedSource := "requested"
-	if args.SpeedKts != nil {
-		speedKts = *args.SpeedKts
-	} else {
-		band, _ := mostSampledBand(table)
-		speedKts = band.SOGKtsMean
-		speedSource = "most_sampled_band"
-	}
-
-	lPerH, rpmAtSpeed, ok := estimateAtSpeed(table, speedKts)
-	if !ok {
-		return "", fmt.Errorf("estimate_passage: no underway history in the last %d days", days)
-	}
-
-	hours := distanceNm / speedKts
-	litres := hours * lPerH
+	hours := distanceNm / perf.speedKts
+	litres := hours * perf.lPerH
 	litresRounded := math.Round(litres)
-
-	totalSamples := 0
-	for _, band := range table {
-		totalSamples += band.Samples
-	}
 
 	// Fuel aboard (helmcentral.fuel.volume, ADR 0084 - the same figure the
 	// Tanks tile shows) turns the burn estimate into a margin. Absent
@@ -950,16 +873,16 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 
 	result := assistantEstimatePassageResult{
 		assistantRoutedPassage: routed,
-		SpeedKts:               roundTo1(speedKts),
-		SpeedSource:            speedSource,
+		SpeedKts:               roundTo1(perf.speedKts),
+		SpeedSource:            perf.speedSource,
 		Hours:                  roundTo1(hours),
 		Litres:                 litresRounded,
-		LPerH:                  roundTo1(lPerH),
-		RPM:                    math.Round(rpmAtSpeed),
-		HistoryDays:            days,
-		Samples:                totalSamples,
-		Instances:              instances,
-		Table:                  table,
+		LPerH:                  roundTo1(perf.lPerH),
+		RPM:                    math.Round(perf.rpm),
+		HistoryDays:            perf.days,
+		Samples:                perf.samples,
+		Instances:              perf.instances,
+		Table:                  perf.table,
 		FuelAboardL:            fuelAboardL,
 		FuelAfterL:             fuelAfterL,
 		Note:                   note,
@@ -988,6 +911,110 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 		return true
 	}
 	return capToolResultJSON(&result, shrink)
+}
+
+// loggedPerformance is the boat's own speed-to-burn history, and the speed read
+// off it, for estimate_passage. requested is the planned speed, nil for the
+// most-sampled cruising band. Its errors carry no tool name.
+func (d assistantToolDeps) loggedPerformance(ctx context.Context, requested *float64, historyDays int) (loggedPerformance, error) {
+	days := clampAssistantDays(historyDays, assistantEstimatePassageDefaultHistoryDays, assistantEstimatePassageMaxHistoryDays)
+	if days < assistantEstimatePassageMinHistoryDays {
+		days = assistantEstimatePassageMinHistoryDays
+	}
+
+	stop := d.now()
+	start := stop.AddDate(0, 0, -days)
+
+	none := loggedPerformance{}
+	engines, instErr := d.fuelRateInstances()
+	if instErr != nil {
+		return none, fmt.Errorf("the vessel settings could not be read, so the engines are unknown: %w", instErr)
+	}
+	if len(engines) == 0 {
+		return none, fmt.Errorf("engines are not set up (no engine item is assigned to a propulsion source in Settings > SignalK), so there is no per-engine fuel history to estimate from")
+	}
+
+	instances := make([]string, 0, len(engines))
+	for _, engine := range engines {
+		instances = append(instances, engine.Instance)
+	}
+
+	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)
+	if err != nil {
+		return none, err
+	}
+
+	fuelRates := make([][]telemetryPoint, 0, len(engines))
+	for _, engine := range engines {
+		if err := ctx.Err(); err != nil {
+			return none, err
+		}
+		path := fmt.Sprintf("propulsion.%s.fuel.rate", engine.Instance)
+		series, ferr := d.influxRange(path, start, stop, assistantPerformanceQueryEvery)
+		if ferr != nil {
+			return none, ferr
+		}
+		if len(series) == 0 {
+			return none, d.silentEnginePathError(engine, path, days)
+		}
+		fuelRates = append(fuelRates, series)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return none, err
+	}
+
+	// rpm comes from one representative instance rather than an average
+	// across every engine: this boat's twin engines run matched revs under
+	// way, and averaging would need its own timestamp join - with its own
+	// "one instance missing" question - for a figure that is illustrative
+	// context, not the thing estimate_passage is actually estimating.
+	rpmPath := fmt.Sprintf("propulsion.%s.revolutions", engines[0].Instance)
+	rpm, err := d.influxRange(rpmPath, start, stop, assistantPerformanceQueryEvery)
+	if err != nil {
+		return none, err
+	}
+	if len(rpm) == 0 {
+		return none, d.silentEnginePathError(engines[0], rpmPath, days)
+	}
+
+	table := buildPerformanceTable(sog, fuelRates, rpm, assistantPerformanceMinSOGKts)
+	if len(table) == 0 {
+		return none, fmt.Errorf("no underway history in the last %d days", days)
+	}
+
+	speedKts := 0.0
+	speedSource := "requested"
+	if requested != nil {
+		speedKts = *requested
+	} else {
+		band, _ := mostSampledBand(table)
+		speedKts = band.SOGKtsMean
+		speedSource = "most_sampled_band"
+	}
+
+	lPerH, rpmAtSpeed, ok := estimateAtSpeed(table, speedKts)
+	if !ok {
+		return none, fmt.Errorf("no underway history in the last %d days", days)
+	}
+
+	totalSamples := 0
+	for _, band := range table {
+		totalSamples += band.Samples
+	}
+	return loggedPerformance{days: days, instances: instances, table: table, speedKts: speedKts, speedSource: speedSource, lPerH: lPerH, rpm: rpmAtSpeed, samples: totalSamples}, nil
+}
+
+// loggedPerformance is what loggedPerformance reads off the boat's history: the
+// speed-to-burn table and the speed, burn and rpm at the speed asked for.
+type loggedPerformance struct {
+	days        int
+	instances   []string
+	table       []performanceBand
+	speedKts    float64
+	speedSource string
+	lPerH, rpm  float64
+	samples     int
 }
 
 // roundTo5 rounds a coordinate to five decimals, about a metre.

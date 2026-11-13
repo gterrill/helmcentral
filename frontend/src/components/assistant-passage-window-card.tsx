@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { PassageDecisionControl } from '@/components/passage-decision-control'
 import { formatRowDate } from '@/lib/passage-dates'
+import { notCheckedWords } from '@/lib/passage-measures'
 import type { PassageDecision, PassageMeasure, PassageState, PassageWindowCard, PassageWindowCell } from '@/lib/mate-cards'
 import { formatTimeOfDay } from '@/lib/vessel-time'
 
@@ -23,17 +24,6 @@ const STATE_CHIP: Record<PassageState, string> = {
   no_go: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
   no_data: 'bg-muted text-muted-foreground',
 }
-
-const MEASURE_WORDS: Record<PassageMeasure, string> = {
-  // Only on cards saved by v0.49.0 chats; marginal is worked out now and never listed.
-  wind_marginal: 'marginal wind limit',
-  gust: 'gusts',
-  wave: 'wave height',
-  wave_direction: 'wave direction',
-  wind_against_tide: 'wind against tide',
-  daylight: 'daylight arrival',
-}
-const MEASURE_ORDER: PassageMeasure[] = ['wind_marginal', 'gust', 'wave', 'wave_direction', 'wind_against_tide', 'daylight']
 
 export function StateChip({ state }: { state: PassageState }) {
   return (
@@ -107,7 +97,7 @@ export function AssistantPassageWindowCard({
 
   const notChecked = new Set<PassageMeasure>()
   for (const row of card.rows) for (const cell of row.cells) for (const m of cell.notChecked) notChecked.add(m)
-  const notCheckedWords = MEASURE_ORDER.filter((m) => notChecked.has(m)).map((m) => MEASURE_WORDS[m])
+  const notCheckedList = notCheckedWords(notChecked)
 
   return (
     <section
@@ -200,8 +190,8 @@ export function AssistantPassageWindowCard({
         </div>
       )}
 
-      {notCheckedWords.length > 0 && (
-        <p className="min-w-0 text-xs text-muted-foreground">Not checked: {notCheckedWords.join(', ')}</p>
+      {notCheckedList.length > 0 && (
+        <p className="min-w-0 text-xs text-muted-foreground">Not checked: {notCheckedList.join(', ')}</p>
       )}
     </section>
   )

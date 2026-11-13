@@ -26,6 +26,25 @@ import (
 // if it never sets, polar night if it never rises), and there is nothing to
 // report either way.
 func sunTimes(date time.Time, lat, lon float64) (sunrise, sunset time.Time, ok bool) {
+	return sunTimesAtZenith(date, lat, lon, sunHorizonZenithDeg)
+}
+
+// sunHorizonZenithDeg is the zenith of sunrise and sunset; civilTwilightZenithDeg
+// is the sun 6 degrees below the horizon, first and last light.
+const (
+	sunHorizonZenithDeg    = 90.833
+	civilTwilightZenithDeg = 96.0
+)
+
+// civilDawn is first light on the civil day date represents: the morning the
+// sun is 6 degrees below the horizon. ok is false when it never gets that far
+// on the day.
+func civilDawn(date time.Time, lat, lon float64) (time.Time, bool) {
+	dawn, _, ok := sunTimesAtZenith(date, lat, lon, civilTwilightZenithDeg)
+	return dawn, ok
+}
+
+func sunTimesAtZenith(date time.Time, lat, lon, zenithDeg float64) (sunrise, sunset time.Time, ok bool) {
 	loc := date.Location()
 	localNoon := time.Date(date.Year(), date.Month(), date.Day(), 12, 0, 0, 0, loc)
 	noonUTC := localNoon.UTC()
@@ -57,7 +76,6 @@ func sunTimes(date time.Time, lat, lon float64) (sunrise, sunset time.Time, ok b
 		0.00148*math.Sin(3*gamma)
 
 	latRad := lat * math.Pi / 180
-	const zenithDeg = 90.833
 	zenithRad := zenithDeg * math.Pi / 180
 
 	cosHA := math.Cos(zenithRad)/(math.Cos(latRad)*math.Cos(decl)) - math.Tan(latRad)*math.Tan(decl)

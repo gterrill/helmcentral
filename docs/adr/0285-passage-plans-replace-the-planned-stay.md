@@ -5,7 +5,8 @@
 Accepted (2026-11-13). Supersedes [ADR 0208](0208-forecast-planned-stay.md).
 This is the first of four steps: the store, the editor and the table with the
 forecast columns. The verdict, suggested departures, change marks and progress
-tracking, Mate's plan tools, and bar crossings follow.
+tracking, Mate's plan tools, and bar crossings follow. The verdict, ETA,
+suggested departures and Current column are [ADR 0286](0286-passage-plan-verdicts-and-suggested-departures.md).
 
 ## Context
 

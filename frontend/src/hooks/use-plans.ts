@@ -60,6 +60,7 @@ interface PlanLegApi {
   reason?: string;
   error_kind?: string;
   error_stop?: string;
+  error_to?: string;
   moved?: Array<{ stop: string; nm: number }>;
 }
 
@@ -117,6 +118,7 @@ export function mapLeg(l: PlanLegApi): PlanLeg {
     reason: l.reason ?? "",
     errorKind: l.error_kind ?? "",
     errorStop: l.error_stop ?? "",
+    errorTo: l.error_to ?? "",
     moved: l.moved ?? [],
   };
 }
