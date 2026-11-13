@@ -138,6 +138,8 @@ function mockFeeds() {
     windDirection: "E",
     waveMinM: 0.8,
     waveMaxM: 1.4,
+    wavesLoading: false,
+    wavesError: null,
   }));
   vi.mocked(useWaveForecast).mockImplementation(
     () =>

@@ -18,6 +18,9 @@ export interface PlanDayForecast {
   windDirection: string | null;
   waveMinM: number | null;
   waveMaxM: number | null;
+  /** The wave feed is separate from the weather: it loads and fails on its own. */
+  wavesLoading: boolean;
+  wavesError: string | null;
 }
 
 const WAITING: PlanDayForecast = {
@@ -28,11 +31,13 @@ const WAITING: PlanDayForecast = {
   windDirection: null,
   waveMinM: null,
   waveMaxM: null,
+  wavesLoading: true,
+  wavesError: null,
 };
 
-const NO_PLACE: PlanDayForecast = { ...WAITING, loading: false };
+const NO_PLACE: PlanDayForecast = { ...WAITING, loading: false, wavesLoading: false };
 
-function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
+export function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
   const { weather, waves } = feed;
   const coverage = dayCoverage(
     weather.forecast.map((d) => d.dayKey),
@@ -51,6 +56,8 @@ function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
     windDirection: day ? day.windDirection : null,
     waveMinM: waveHeights.length > 0 ? Math.min(...waveHeights) : null,
     waveMaxM: waveHeights.length > 0 ? Math.max(...waveHeights) : null,
+    wavesLoading: waves.loading,
+    wavesError: waves.error,
   };
 }
 

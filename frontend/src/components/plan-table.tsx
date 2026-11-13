@@ -298,7 +298,11 @@ const PlanDayRow = memo(function PlanDayRow({
           <Cell label="Waves">
             {forecast.waveMinM !== null && forecast.waveMaxM !== null
               ? formatWaveRange(forecast.waveMinM, forecast.waveMaxM)
-              : "—"}
+              : forecast.wavesError
+                ? <span className="text-destructive" title={forecast.wavesError}>Failed</span>
+                : forecast.wavesLoading
+                  ? "…"
+                  : "—"}
           </Cell>
         </>
       )}
