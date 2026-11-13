@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { ForecastPage } from "@/components/forecast-page";
 import { usePlanLegs, usePlans } from "@/hooks/use-plans";
@@ -197,6 +197,99 @@ describe("ForecastPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFeeds();
+    // The forecast horizon is counted from today.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 13, 9, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const readerPlaces = () =>
+    vi
+      .mocked(useWeatherForecast)
+      .mock.calls.map((c) => c[1])
+      .filter((o) => o?.place && o.enabled)
+      .map((o) => `${o?.place?.lat},${o?.place?.lon}`);
+
+  it("holds back the feed of a place whose days are all past the forecast", () => {
+    vi.setSystemTime(new Date(2026, 9, 1, 9, 0, 0));
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(readerPlaces()).toEqual([]);
+    // The rows still say so.
+    expect(screen.getAllByTestId("plan-row")[0]).toBeInTheDocument();
+  });
+
+  it("reads a place with any day inside the forecast, once", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(new Set(readerPlaces()).size).toBeGreaterThan(0);
+  });
+
+  it("opens a passage row at the place its wind is read, mid-leg, and says so", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    fireEvent.click(screen.getByRole("button", { name: "Great Sandy Straits Marina → Pelican Bay" }));
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
+      "Forecast mid-way from Great Sandy Straits Marina to Pelican Bay — not the boat's position",
+    );
+    expect(drawerStay()).toMatchObject({ lat: -26.9, lon: 153.2, arrive: "2026-11-16", depart: "2026-11-16" });
+    const optionsSeen = vi.mocked(useWeatherForecast).mock.calls.map((c) => c[1]);
+    expect(optionsSeen).toContainEqual({ place: { lat: -26.9, lon: 153.2 }, enabled: true });
+  });
+
+  it("does not open a leg that did not route", () => {
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const button = screen.getByRole("button", { name: "Pelican Bay → Mooloolaba" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(drawerStay()).toBeNull();
+    expect(screen.getByTestId("forecast-place-label")).toHaveTextContent("Forecast for the boat's position");
+  });
+
+  it("calls the last stop's departure day 'leave', not a lay day, and keeps +1 night on it", () => {
+    const plan = {
+      ...PLAN,
+      lastDate: "2026-11-16",
+      stops: [stop("Alpha", "2026-11-14", 0), stop("Bravo", "2026-11-14", 2)],
+    };
+    plansState([plan], 1, [LEGS[0]]);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const rows = screen.getAllByTestId("plan-row");
+    expect(rows.map((r) => r.querySelector("button")?.textContent)).toEqual([
+      "Alpha → Bravo",
+      "Bravo · lay day",
+      "Bravo · leave",
+    ]);
+    expect(rows[2]).toHaveTextContent("+1 night");
+  });
+
+  it("calls a single stop's final day 'leave' too", () => {
+    const plan = { ...PLAN, lastDate: "2026-11-15", stops: [stop("Alpha", "2026-11-14", 1)] };
+    plansState([plan], 1, []);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getAllByTestId("plan-row").map((r) => r.querySelector("button")?.textContent)).toEqual([
+      "Alpha · lay day",
+      "Alpha · leave",
+    ]);
+  });
+
+  it("sends one night while the first is still in flight, and disables +1 night until it lands", async () => {
+    plansState([PLAN], 1, LEGS);
+    let resolve!: (p: unknown) => void;
+    patchStop.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    const button = screen.getAllByRole("button", { name: "+1 night" })[0];
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(patchStop).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("button", { name: "+1 night" })[0]).toBeDisabled();
+    await act(async () => {
+      resolve(PLAN);
+    });
+    expect(screen.getAllByRole("button", { name: "+1 night" })[0]).toBeEnabled();
   });
 
   it("with no plan, shows the boat's forecast and offers a new plan", () => {
@@ -261,7 +354,7 @@ describe("ForecastPage", () => {
     expect(leg2).toHaveTextContent("start is on land");
     expect(leg2).toHaveTextContent("No forecast: the leg is not routed");
     expect(leg2).not.toHaveTextContent(/ kn/);
-    expect(vi.mocked(usePlanDayForecast)).toHaveBeenCalledWith(null, "2026-11-17");
+    expect(vi.mocked(usePlanDayForecast)).toHaveBeenCalledWith(null, "2026-11-17", "day");
   });
 
   it("keeps a row's drawer on the plan's current dates after a night is added", () => {

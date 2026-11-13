@@ -39,11 +39,16 @@ func (s *documentStore) GetPlannedStay(now time.Time) (plannedStay, bool, error)
 	if len(plans) == 0 {
 		return plannedStay{}, false, nil
 	}
-	idx, _, err := selectCurrentPlan(plans, now)
-	if err != nil {
-		return plannedStay{}, false, fmt.Errorf("get planned stay: %w", err)
+	decorated := make([]plan, 0, len(plans))
+	for _, p := range plans {
+		d, err := decoratePlan(p, now)
+		if err != nil {
+			return plannedStay{}, false, fmt.Errorf("get planned stay: %w", err)
+		}
+		decorated = append(decorated, d)
 	}
-	p := plans[idx]
+	idx, _ := selectCurrentPlan(decorated)
+	p := decorated[idx]
 	today, err := planToday(p, now)
 	if err != nil {
 		return plannedStay{}, false, fmt.Errorf("get planned stay: %w", err)

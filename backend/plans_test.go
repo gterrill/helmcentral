@@ -268,18 +268,30 @@ func TestSelectCurrentPlan(t *testing.T) {
 	later := planAt(t, "2026-12-01", 1, 0)
 	soon := planAt(t, "2026-11-20", 1, 0)
 
-	idx, st, err := selectCurrentPlan([]plan{past, later, spans, soon}, now)
-	if err != nil || st != planStatusActive || idx != 2 {
-		t.Fatalf("a plan spanning today wins: idx=%d status=%q err=%v", idx, st, err)
+	decorated := func(plans ...plan) []plan {
+		out := make([]plan, 0, len(plans))
+		for _, p := range plans {
+			d, err := decoratePlan(p, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, d)
+		}
+		return out
 	}
-	idx, st, _ = selectCurrentPlan([]plan{past, later, soon}, now)
+
+	idx, st := selectCurrentPlan(decorated(past, later, spans, soon))
+	if st != planStatusActive || idx != 2 {
+		t.Fatalf("a plan spanning today wins: idx=%d status=%q", idx, st)
+	}
+	idx, st = selectCurrentPlan(decorated(past, later, soon))
 	if st != planStatusUpcoming || idx != 2 {
 		t.Fatalf("else the next upcoming (20 Nov, not 1 Dec): idx=%d", idx)
 	}
-	if _, st, _ := selectCurrentPlan([]plan{past}, now); st != planStatusPast {
+	if _, st := selectCurrentPlan(decorated(past)); st != planStatusPast {
 		t.Fatalf("only a past plan: it is named as past, got %q", st)
 	}
-	if idx, st, _ := selectCurrentPlan(nil, now); idx != -1 || st != "" {
+	if idx, st := selectCurrentPlan(nil); idx != -1 || st != "" {
 		t.Fatal("no plans, no current plan")
 	}
 }
@@ -294,7 +306,8 @@ func TestPlanStatus_IsJudgedAtTheFirstStop(t *testing.T) {
 		"2026-11-16T15:00:00Z": "past",   // 17 Nov at the place
 	}
 	for now, want := range cases {
-		got, err := planStatus(p, at(now))
+		d, err := decoratePlan(p, at(now))
+		got := d.Status
 		if err != nil || got != want {
 			t.Errorf("%s: %q (%v), want %q", now, got, err, want)
 		}

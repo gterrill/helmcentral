@@ -376,26 +376,15 @@ func planStatusOn(p plan, today string) string {
 	return planStatusActive
 }
 
-// planStatus is the plan's status, judged at the first stop.
-func planStatus(p plan, now time.Time) (string, error) {
-	today, err := planToday(p, now)
-	if err != nil {
-		return "", err
-	}
-	return planStatusOn(p, today), nil
-}
-
 // selectCurrentPlan picks the plan the table opens on: the one whose dates
 // span today, else the next upcoming, else, when every plan is past, the one
 // that ended most recently. status says which of the three it is; idx is -1
-// and status "" when there are no plans.
-func selectCurrentPlan(plans []plan, now time.Time) (idx int, status string, err error) {
+// and status "" when there are no plans. The plans come from decoratePlan, so
+// each already carries its status.
+func selectCurrentPlan(plans []plan) (idx int, status string) {
 	best := map[string]int{}
 	for i, p := range plans {
-		st, err := planStatus(p, now)
-		if err != nil {
-			return -1, "", err
-		}
+		st := p.Status
 		cur, seen := best[st]
 		if !seen || planComesFirst(st, p, plans[cur]) {
 			best[st] = i
@@ -403,10 +392,10 @@ func selectCurrentPlan(plans []plan, now time.Time) (idx int, status string, err
 	}
 	for _, st := range []string{planStatusActive, planStatusUpcoming, planStatusPast} {
 		if i, ok := best[st]; ok {
-			return i, st, nil
+			return i, st
 		}
 	}
-	return -1, "", nil
+	return -1, ""
 }
 
 // planComesFirst says whether a beats b among plans of one status: the
@@ -913,10 +902,7 @@ func listPlansHandler(c echo.Context) error {
 		out = append(out, d)
 	}
 	var current *int64
-	idx, status, err := selectCurrentPlan(out, now)
-	if err != nil {
-		return planZoneError(c, err)
-	}
+	idx, status := selectCurrentPlan(out)
 	if status != "" && status != planStatusPast {
 		id := out[idx].ID
 		current = &id

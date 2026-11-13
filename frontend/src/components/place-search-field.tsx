@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FieldDescription, FieldError } from "@/components/ui/field";
@@ -39,21 +39,27 @@ export function PlaceSearchField({
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
 
+  // Only the latest search may write: a slower, earlier answer is dropped.
+  const latest = useRef(0);
+
   const run = async () => {
     const q = query.trim();
     if (q === "") return;
+    const mine = ++latest.current;
     setSearching(true);
     setError(null);
     setNote(null);
     try {
       const found = await searchPlaces(q);
+      if (mine !== latest.current) return;
       setCandidates(found.candidates);
       setNote(found.candidates.length === 0 ? `No places found matching "${q}".` : null);
     } catch (err) {
+      if (mine !== latest.current) return;
       setCandidates(null);
       setError(errorMessage(err));
     } finally {
-      setSearching(false);
+      if (mine === latest.current) setSearching(false);
     }
   };
 
@@ -94,6 +100,8 @@ export function PlaceSearchField({
                 className="flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/40"
                 onClick={() => {
                   onPick(candidate);
+                  latest.current += 1;
+                  setSearching(false);
                   setCandidates(null);
                   setQuery("");
                 }}

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 import { searchPlaces } from "@/hooks/use-place-search";
-import { mapLeg, mapPlan, planToApi, usePlans } from "@/hooks/use-plans";
+import { mapLeg, mapPlan, planToApi, usePlanLegs, usePlans } from "@/hooks/use-plans";
 import { resetQueryStore } from "@/lib/api-query";
 
 const reply = (body: unknown, ok = true, status = 200) => ({ ok, status, json: async () => body });
@@ -52,6 +52,33 @@ describe("usePlans", () => {
     await waitFor(() => expect(result.current.plans).toHaveLength(1));
     expect(result.current.currentId).toBe(7);
     expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/api\/plans$/);
+  });
+});
+
+describe("usePlanLegs", () => {
+  beforeEach(() => resetQueryStore());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("asks again when a stop is renamed, because the leg messages carry the names", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply({ legs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const plan = mapPlan(API_PLAN as never);
+    const { rerender } = renderHook(({ p }) => usePlanLegs(p), { initialProps: { p: plan } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const renamed = { ...plan, stops: [{ ...plan.stops[0], name: "A renamed" }, plan.stops[1]] };
+    rerender({ p: renamed });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not ask again when only the nights change", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply({ legs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const plan = mapPlan(API_PLAN as never);
+    const { rerender } = renderHook(({ p }) => usePlanLegs(p), { initialProps: { p: plan } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    rerender({ p: { ...plan, stops: [{ ...plan.stops[0], nights: 2 }, plan.stops[1]] } });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

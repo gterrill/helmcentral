@@ -157,7 +157,7 @@ export function windRelation(courseDeg: number, windFromDeg: number): WindRelati
 }
 
 /** Mean of compass bearings, so 350 and 10 average to 0 and not 180. Null for none. */
-export function circularMeanDeg(degrees: number[]): number | null {
+export function meanForecastBearing(degrees: number[]): number | null {
   // The forecast sends a negative bearing for a reading it does not have.
   const mean = circularMeanDegOrNull(degrees.filter((d) => Number.isFinite(d) && d >= 0));
   return mean === null ? null : Math.round(mean) % 360;
@@ -193,8 +193,47 @@ export function summariseDayWind(
     minKts: Math.min(...speeds),
     maxKts: Math.max(...speeds),
     gustKts: gustOrNull(Math.max(day.windGust, ...hourly.map((h) => h.windGust))),
-    fromDeg: circularMeanDeg(hourly.map((h) => h.windDirectionDeg)),
+    fromDeg: meanForecastBearing(hourly.map((h) => h.windDirectionDeg)),
   };
+}
+
+export interface HourlyWindPoint {
+  hourOfDay: number;
+  windSpeed: number;
+  windGust: number;
+  windDirectionDeg: number;
+}
+
+/**
+ * The night's wind for a stop row on day D: the hours from 18:00 on D to
+ * 06:00 on D+1, as the forecast gives them at the place. When D+1 is past the
+ * forecast only the evening is used. With no hour in the window there is no
+ * wind: the day's own figures are daytime ones and would be wrong here.
+ */
+export function summariseOvernightWind(
+  evening: HourlyWindPoint[],
+  morning: HourlyWindPoint[] | undefined,
+): DayWind | null {
+  const night = [
+    ...evening.filter((h) => h.hourOfDay >= 18 && h.hourOfDay <= 23),
+    ...(morning ?? []).filter((h) => h.hourOfDay >= 0 && h.hourOfDay < 6),
+  ].filter((h) => h.windSpeed >= 0);
+  if (night.length === 0) return null;
+  const speeds = night.map((h) => h.windSpeed);
+  return {
+    minKts: Math.min(...speeds),
+    maxKts: Math.max(...speeds),
+    gustKts: gustOrNull(Math.max(...night.map((h) => h.windGust))),
+    fromDeg: meanForecastBearing(night.map((h) => h.windDirectionDeg)),
+  };
+}
+
+/** How far ahead the forecast reaches: about ten days. */
+export const FORECAST_HORIZON_DAYS = 10;
+
+/** Whether a plan day is inside the forecast's reach, counting from today (YYYY-MM-DD). */
+export function withinForecastHorizon(dayKey: string, todayKey: string): boolean {
+  return dayKey <= addDaysISO(todayKey, FORECAST_HORIZON_DAYS);
 }
 
 /** "12–18 kn", or "12 kn" when the range is one number. */

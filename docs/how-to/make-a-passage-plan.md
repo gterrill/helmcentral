@@ -43,12 +43,16 @@ never draws a straight line.
    up. Choose another plan from the buttons above the table.
 2. Each row is a day. A passage row shows the leg, its distance, your departure
    time if you set one, the wind with where it sits against your course
-   (ahead, abeam or astern), the gusts and the waves. A lay day shows the wind
-   overnight.
+   (ahead, abeam or astern), the gusts and the waves, all read at the middle of
+   the leg. A lay day shows the wind from 6 PM that day to 6 AM the next
+   morning. The last stop's final row says **leave** and is the day you sail from
+   it; **+1 night** is still there.
 3. A day the forecast doesn't reach yet says "No forecast yet". Nothing is
    guessed for it.
-4. Choose the name in a row to see the full forecast for that place. The heading
-   says it isn't the boat's position. Choose **Boat** to go back.
+4. Choose the name in a row to see the full forecast for that place. For a
+   passage row that's the middle of the leg, and the heading says so. A leg that
+   couldn't be routed can't be opened. The heading says it isn't the boat's
+   position. Choose **Boat** to go back.
 
 ## Change or delete a plan
 

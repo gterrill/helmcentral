@@ -16,6 +16,7 @@ import {
   formatWindRange,
   legForecastPlace,
   windRelation,
+  withinForecastHorizon,
   type Plan,
   type PlanLeg,
   legErrorText,
@@ -23,6 +24,7 @@ import {
   type PlanRow,
 } from "@/lib/plans";
 import { formatDayMonth, formatWeekday } from "@/lib/stay";
+import { formatDayKey, zoneKnown } from "@/lib/vessel-time";
 
 // The columns, widest screen first. Below md each row is a card and each cell
 // carries its own label. The Verdict column joins the end of this template
@@ -47,11 +49,26 @@ interface PlanTableProps {
   legsError: string | null;
   canWrite: boolean;
   selectedRowKey: string | null;
+  /** A night is being added: +1 night waits so a quick second tap can't skip one. */
+  addingNight: boolean;
   /** Stable between renders, so rows that did not change do not re-render. */
   onSelect: (rowKey: string) => void;
   /** Stable between renders. */
   onAddNight: (stopIndex: number) => void;
 }
+
+/**
+ * Today at the plan's first place, whose clock its dates keep. Null when this
+ * browser doesn't know the zone; the page already says so, and no day is then
+ * held back as past the forecast.
+ */
+const todayAtPlan = (plan: Plan): string | null => {
+  const zone = plan.stops[0]?.timezone;
+  return zone && zoneKnown(zone) ? formatDayKey(new Date(), zone) : null;
+};
+
+const inHorizon = (dayKey: string, today: string | null) =>
+  today === null || withinForecastHorizon(dayKey, today);
 
 /** Where a row's forecast is read: a stop's own place, a leg's mid-route; null for an unrouted leg. */
 const rowPlace = (row: PlanRow, plan: Plan, leg: PlanLeg | undefined): ForecastPlace | null => {
@@ -68,6 +85,8 @@ function PlaceFeedReader({ place, store }: { place: ForecastPlace; store: PlanFo
   useEffect(() => {
     store.set(key, { weather, waves });
   }, [store, key, weather, waves]);
+  // Nothing else reads this place once its reader goes, so its feed goes too.
+  useEffect(() => () => store.remove(key), [store, key]);
   return null;
 }
 
@@ -78,21 +97,25 @@ export function PlanTable({
   legsError,
   canWrite,
   selectedRowKey,
+  addingNight,
   onSelect,
   onAddNight,
 }: PlanTableProps) {
   const rows = useMemo(() => buildPlanRows(plan), [plan]);
   const legByFrom = useMemo(() => new Map(legs.map((l) => [l.from, l])), [legs]);
   const store = useMemo(() => new PlanForecastStore(), []);
-  // Each distinct place is read once, however many rows sit at it.
+  const today = todayAtPlan(plan);
+  // Each distinct place is read once, however many rows sit at it. A place
+  // whose rows all fall past the forecast is not read: its rows say so.
   const places = useMemo(() => {
     const byKey = new Map<string, ForecastPlace>();
     for (const row of rows) {
+      if (!inHorizon(row.dayKey, today)) continue;
       const place = rowPlace(row, plan, row.kind === "passage" ? legByFrom.get(row.legIndex) : undefined);
       if (place && !byKey.has(placeKey(place))) byKey.set(placeKey(place), place);
     }
     return [...byKey.values()];
-  }, [rows, plan, legByFrom]);
+  }, [rows, plan, legByFrom, today]);
   return (
     <div role="table" aria-label={`${plan.name} day by day`} className="space-y-2">
       {legsError && (
@@ -127,6 +150,7 @@ export function PlanTable({
               legsLoading={legsLoading}
               canWrite={canWrite}
               selected={selectedRowKey === row.key}
+              addingNight={addingNight}
               onSelect={onSelect}
               onAddNight={onAddNight}
             />
@@ -163,6 +187,7 @@ const PlanDayRow = memo(function PlanDayRow({
   legsLoading,
   canWrite,
   selected,
+  addingNight,
   onSelect,
   onAddNight,
 }: {
@@ -172,6 +197,7 @@ const PlanDayRow = memo(function PlanDayRow({
   legsLoading: boolean;
   canWrite: boolean;
   selected: boolean;
+  addingNight: boolean;
   onSelect: (rowKey: string) => void;
   onAddNight: (stopIndex: number) => void;
 }) {
@@ -182,7 +208,8 @@ const PlanDayRow = memo(function PlanDayRow({
   // A leg that did not route has no place to read a forecast at.
   const place = rowPlace(row, plan, leg);
   const unrouted = passage && place === null;
-  const forecast = usePlanDayForecast(place, row.dayKey);
+  // A stop row is read for the night that follows it; a passage row for the day.
+  const forecast = usePlanDayForecast(place, row.dayKey, passage ? "day" : "overnight");
 
   const course = leg?.courseDeg ?? null;
   const relation =
@@ -190,7 +217,10 @@ const PlanDayRow = memo(function PlanDayRow({
       ? windRelation(course, forecast.wind.fromDeg)
       : null;
 
-  const noForecast = forecast.coverage === "beyond";
+  // A day past the horizon has no feed read for it at all.
+  const noForecast = forecast.coverage === "beyond" || !inHorizon(row.dayKey, todayAtPlan(plan));
+  // The last stop's final row is the day the boat leaves it, not a lay day.
+  const leaving = !passage && row.dayKey === from.depart;
   const hasMap = passage && leg !== undefined && leg.error === "" && leg.route.length > 1 && to !== null;
 
   return (
@@ -208,9 +238,11 @@ const PlanDayRow = memo(function PlanDayRow({
           type="button"
           className="block w-full min-w-0 truncate text-left text-sm font-medium hover:underline"
           aria-pressed={selected}
+          // A leg that did not route has no place to open the forecast at.
+          disabled={unrouted}
           onClick={() => onSelect(row.key)}
         >
-          {passage && to ? `${from.name} → ${to.name}` : `${from.name} · lay day`}
+          {passage && to ? `${from.name} → ${to.name}` : `${from.name} · ${leaving ? "leave" : "lay day"}`}
         </button>
         {passage && from.vias.length > 0 && (
           <p className="truncate text-xs text-muted-foreground">
@@ -234,6 +266,7 @@ const PlanDayRow = memo(function PlanDayRow({
               size="sm"
               variant="ghost"
               className="h-7 px-2 text-xs"
+              disabled={addingNight}
               onClick={() => onAddNight(row.stopIndex)}
             >
               <Plus size={12} aria-hidden className="mr-1" />

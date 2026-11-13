@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -21,7 +21,7 @@ import {
   type ForecastBoatProps,
 } from "@/lib/forecast-drawer-props";
 import { errorMessage } from "@/lib/errors";
-import { findPlanRow, type Plan } from "@/lib/plans";
+import { findPlanRow, legForecastPlace, type Plan } from "@/lib/plans";
 import { formatStayRange } from "@/lib/stay";
 import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
 
@@ -73,18 +73,38 @@ export function ForecastPage({
       ? findPlanRow(plan, selection.rowKey)
       : null;
   if (selection && !selectedRow) setSelection(null);
-  const selected = selectedRow && plan
-    ? {
-        kind: selectedRow.kind,
+  // A stop row opens at the stop. A passage row opens where its wind is read,
+  // mid-leg, and a leg that did not route has no such place: nothing opens.
+  const selected = (() => {
+    if (!selectedRow || !plan) return null;
+    if (selectedRow.kind === "stop") {
+      const stop = plan.stops[selectedRow.stopIndex];
+      return {
+        kind: "stop" as const,
         dayKey: selectedRow.dayKey,
-        stop: plan.stops[selectedRow.kind === "stop" ? selectedRow.stopIndex : selectedRow.legIndex],
-      }
-    : null;
+        stop,
+        place: { lat: stop.lat, lon: stop.lon },
+        label: `Forecast for ${stop.name}`,
+        placeName: stop.name,
+      };
+    }
+    const from = plan.stops[selectedRow.legIndex];
+    const to = plan.stops[selectedRow.legIndex + 1];
+    const midLeg = legForecastPlace(legs.find((l) => l.from === selectedRow.legIndex));
+    if (!midLeg || !to) return null;
+    const placeName = `mid-way from ${from.name} to ${to.name}`;
+    return {
+      kind: "passage" as const,
+      dayKey: selectedRow.dayKey,
+      stop: from,
+      place: midLeg,
+      label: `Forecast ${placeName}`,
+      placeName: `Mid-way from ${from.name} to ${to.name}`,
+    };
+  })();
   const selectedRowKey = selection?.rowKey ?? null;
 
-  const place = selected
-    ? { lat: selected.stop.lat, lon: selected.stop.lon }
-    : undefined;
+  const place = selected ? selected.place : undefined;
   const showingPlace = selected !== null;
 
   const weather = useWeatherForecast(FORECAST_REFRESH_SECONDS, {
@@ -115,9 +135,9 @@ export function ForecastPage({
             unit: boat.unit,
           }),
           stay: {
-            placeName: selected.stop.name,
-            lat: selected.stop.lat,
-            lon: selected.stop.lon,
+            placeName: selected.placeName,
+            lat: selected.place.lat,
+            lon: selected.place.lon,
             arrive: selected.kind === "stop" ? selected.stop.arrive : selected.dayKey,
             depart: selected.kind === "stop" ? selected.stop.depart : selected.dayKey,
             timezone: selected.stop.timezone,
@@ -148,13 +168,23 @@ export function ForecastPage({
     [planId],
   );
 
+  // The new count is the plan's count plus one, so a second tap before the
+  // refetched plan arrives would send the same number and lose a night. +1
+  // night waits until the first has landed.
+  const addingRef = useRef(false);
+  const [addingNight, setAddingNight] = useState(false);
   const addNight = useCallback(
     (stopIndex: number) => {
-      if (!plan) return;
+      if (!plan || addingRef.current) return;
+      addingRef.current = true;
+      setAddingNight(true);
       setActionError(null);
-      patchStop(plan.id, stopIndex, { nights: plan.stops[stopIndex].nights + 1 }).catch((err) =>
-        setActionError(errorMessage(err)),
-      );
+      patchStop(plan.id, stopIndex, { nights: plan.stops[stopIndex].nights + 1 })
+        .catch((err) => setActionError(errorMessage(err)))
+        .finally(() => {
+          addingRef.current = false;
+          setAddingNight(false);
+        });
     },
     [plan, patchStop],
   );
@@ -289,6 +319,7 @@ export function ForecastPage({
               legsError={legsError}
               canWrite={canWrite}
               selectedRowKey={selectedRowKey}
+              addingNight={addingNight}
               onSelect={selectRow}
               onAddNight={addNight}
             />
@@ -321,7 +352,7 @@ export function ForecastPage({
           className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
         >
           {selected
-            ? `Forecast for ${selected.stop.name} — not the boat's position`
+            ? `${selected.label} — not the boat's position`
             : "Forecast for the boat's position"}
         </h2>
         {showingPlace && (
@@ -340,7 +371,7 @@ export function ForecastPage({
       <ForecastDrawer
         key={
           selected && plan
-            ? `${plan.id}-${selected.kind}-${selected.stop.name}-${selected.dayKey}-${selected.stop.arrive}-${selected.stop.depart}`
+            ? `${plan.id}-${selected.kind}-${selected.placeName}-${selected.dayKey}-${selected.stop.arrive}-${selected.stop.depart}`
             : "boat"
         }
         {...(placeProps ?? boat)}

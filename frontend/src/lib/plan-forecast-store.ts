@@ -30,11 +30,25 @@ export class PlanForecastStore {
     this.listeners.get(key)?.forEach((notify) => notify());
   }
 
+  /** Forget a place's feed when nothing reads it any more, and tell the rows still listening. */
+  remove(key: string): void {
+    if (!this.feeds.delete(key)) return;
+    this.listeners.get(key)?.forEach((notify) => notify());
+  }
+
   subscribe(key: string, notify: () => void): () => void {
     const set = this.listeners.get(key) ?? new Set<() => void>();
     set.add(notify);
     this.listeners.set(key, set);
-    return () => set.delete(notify);
+    return () => {
+      set.delete(notify);
+      if (set.size === 0 && this.listeners.get(key) === set) this.listeners.delete(key);
+    };
+  }
+
+  /** The places that have a listener; for tests. */
+  listenerKeys(): string[] {
+    return [...this.listeners.keys()];
   }
 }
 

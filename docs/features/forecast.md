@@ -294,9 +294,11 @@ another. A plan whose last day has passed moves under **Past** and stays there
 until you delete it.
 
 The page always opens on the boat. Choose a place name in a row to look at that
-place's full forecast, and choose **Boat** to come back. The heading says which
-you're looking at, and while it's a plan stop the heading adds that this isn't
-the boat's position. Nothing on the dashboard changes. The tiles, the clock's
+place's full forecast, and choose **Boat** to come back. On a passage row that
+place is the middle of the leg, the same spot its wind and waves are read at,
+and a leg that couldn't be routed can't be opened. The heading says which
+you're looking at, and while it's a plan stop or a leg's middle the heading adds
+that this isn't the boat's position. Nothing on the dashboard changes. The tiles, the clock's
 sunrise and sunset, the day and night theme, the anchor rode planner and the
 alarms all keep reading from the boat's own position.
 
@@ -312,7 +314,9 @@ Here's what the table shows:
 - **Wind against your course.** A passage row gives the day's wind range, then
   whether it sits ahead, abeam or astern of the leg's course, the gusts and the
   wave height. They're read at the middle of the leg. A lay day shows the wind
-  overnight and its direction. There's no shelter label.
+  from 6 PM that day to 6 AM the next morning, and its direction. If the next
+  morning is past the forecast, only the evening is used. The last stop's final
+  row is the day you leave it, and says **leave**. There's no shelter label.
 - **No forecast yet.** The forecast reaches about ten days ahead, so a day
   further out says "No forecast yet" and shows nothing. Nothing is guessed to
   fill the gap.

@@ -195,14 +195,20 @@ export function usePlans() {
 }
 
 /**
- * The routed legs of one plan. The key carries the stops' places so an edit
- * to a stop or a via asks again; dates and nights do not change a route.
+ * The routed legs of one plan. The key carries the stops' places and names so
+ * an edit to a stop or a via asks again; dates and nights do not change a route.
  */
 const selectLegs = (raw: { legs: PlanLegApi[] }) => raw.legs.map(mapLeg);
 
-/** The stops' places and their vias, as one string: the part of a plan a route depends on. */
+/**
+ * The stops' places and their vias, with their names, as one string: the part
+ * of a plan a route and its messages depend on. The messages name the stops,
+ * so a rename asks again.
+ */
 const routeShape = (plan: Plan) =>
-  plan.stops.map((s) => `${s.lat},${s.lon}${s.vias.map((v) => `;${v.lat},${v.lon}`).join("")}`).join("|");
+  JSON.stringify(
+    plan.stops.map((s) => [s.name, s.lat, s.lon, s.vias.map((v) => [v.name, v.lat, v.lon])]),
+  );
 
 export function usePlanLegs(plan: Plan | null) {
   const shape = useMemo(() => (plan ? routeShape(plan) : ""), [plan]);

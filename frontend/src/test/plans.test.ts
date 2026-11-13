@@ -7,7 +7,8 @@ import {
   draftToInput,
   previewArrivals,
   dayCoverage,
-  circularMeanDeg,
+  meanForecastBearing,
+  summariseOvernightWind,
   clearMovedLegs,
   findPlanRow,
   formatWaveRange,
@@ -136,14 +137,43 @@ describe("windRelation", () => {
   });
 });
 
-describe("circularMeanDeg", () => {
+describe("meanForecastBearing", () => {
   it("averages across north", () => {
-    expect(circularMeanDeg([350, 10])).toBe(0);
+    expect(meanForecastBearing([350, 10])).toBe(0);
   });
   it("is null with nothing usable, and ignores the -1 sentinel", () => {
-    expect(circularMeanDeg([])).toBeNull();
-    expect(circularMeanDeg([-1])).toBeNull();
-    expect(circularMeanDeg([-1, 90])).toBe(90);
+    expect(meanForecastBearing([])).toBeNull();
+    expect(meanForecastBearing([-1])).toBeNull();
+    expect(meanForecastBearing([-1, 90])).toBe(90);
+  });
+});
+
+describe("summariseOvernightWind", () => {
+  const hr = (hourOfDay: number, windSpeed: number, windDirectionDeg = 90, windGust = windSpeed + 5) => ({
+    hourOfDay,
+    windSpeed,
+    windGust,
+    windDirectionDeg,
+  });
+  it("reads 18:00 on the night's day to 06:00 the next morning, and nothing of the daytime", () => {
+    const evening = [hr(9, 30), hr(17, 28), hr(18, 10), hr(23, 12)];
+    const morning = [hr(0, 14), hr(5, 16), hr(6, 25), hr(12, 30)];
+    expect(summariseOvernightWind(evening, morning)).toEqual({ minKts: 10, maxKts: 16, gustKts: 21, fromDeg: 90 });
+  });
+  it("uses the evening alone when the next day is past the forecast, without inventing a morning", () => {
+    expect(summariseOvernightWind([hr(9, 30), hr(20, 11), hr(22, 13)], undefined)).toEqual({
+      minKts: 11,
+      maxKts: 13,
+      gustKts: 18,
+      fromDeg: 90,
+    });
+  });
+  it("has no wind rather than the day's figures when no overnight hour exists", () => {
+    expect(summariseOvernightWind([hr(9, 30)], [hr(12, 30)])).toBeNull();
+    expect(summariseOvernightWind([], undefined)).toBeNull();
+  });
+  it("skips hours the forecast has no reading for", () => {
+    expect(summariseOvernightWind([hr(19, -1), hr(20, 8)], [])).toMatchObject({ minKts: 8, maxKts: 8 });
   });
 });
 

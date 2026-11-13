@@ -1,9 +1,12 @@
 import { useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 
 import type { ForecastPlace } from "@/lib/forecast-place";
+import { compassPointFor } from "@/lib/format";
+import { addDaysISO } from "@/lib/stay";
 import {
   dayCoverage,
   summariseDayWind,
+  summariseOvernightWind,
   type DayCoverage,
   type DayWind,
 } from "@/lib/plans";
@@ -37,13 +40,22 @@ const WAITING: PlanDayForecast = {
 
 const NO_PLACE: PlanDayForecast = { ...WAITING, loading: false, wavesLoading: false };
 
-export function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
+/** A passage row reads the whole day; a stop row reads the night that follows it. */
+export type DayWindow = "day" | "overnight";
+
+export function dayForecast(feed: PlaceFeed, dayKey: string, span: DayWindow = "day"): PlanDayForecast {
   const { weather, waves } = feed;
   const coverage = dayCoverage(
     weather.forecast.map((d) => d.dayKey),
     dayKey,
   );
   const day = coverage === "inside" ? weather.forecast.find((d) => d.dayKey === dayKey) : undefined;
+  const nextDay = span === "overnight" ? weather.forecast.find((d) => d.dayKey === addDaysISO(dayKey, 1)) : undefined;
+  const wind = !day
+    ? null
+    : span === "overnight"
+      ? summariseOvernightWind(day.hourlyWind, nextDay?.hourlyWind)
+      : summariseDayWind(day.hourlyWind, day);
   const waveDay = waves.days.find((d) => d.dayKey === dayKey);
   const waveHeights = (waveDay?.hourlyWave ?? [])
     .map((h) => h.waveHeightM)
@@ -52,8 +64,16 @@ export function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
     loading: weather.loading,
     error: weather.error,
     coverage,
-    wind: day ? summariseDayWind(day.hourlyWind, day) : null,
-    windDirection: day ? day.windDirection : null,
+    wind,
+    // The night's direction is the night's own mean, named as the day's is.
+    windDirection:
+      span === "overnight"
+        ? wind?.fromDeg != null
+          ? compassPointFor(wind.fromDeg)
+          : null
+        : day
+          ? day.windDirection
+          : null,
     waveMinM: waveHeights.length > 0 ? Math.min(...waveHeights) : null,
     waveMaxM: waveHeights.length > 0 ? Math.max(...waveHeights) : null,
     wavesLoading: waves.loading,
@@ -67,7 +87,11 @@ export function dayForecast(feed: PlaceFeed, dayKey: string): PlanDayForecast {
  * does not reach has no figures: the row says "No forecast yet". With no place
  * there is nothing to read.
  */
-export function usePlanDayForecast(place: ForecastPlace | null, dayKey: string): PlanDayForecast {
+export function usePlanDayForecast(
+  place: ForecastPlace | null,
+  dayKey: string,
+  span: DayWindow = "day",
+): PlanDayForecast {
   const store = useContext(PlanForecastContext);
   if (store === null) throw new Error("usePlanDayForecast needs a plan table above it");
   const key = place === null ? null : placeKey(place);
@@ -79,6 +103,6 @@ export function usePlanDayForecast(place: ForecastPlace | null, dayKey: string):
   return useMemo(() => {
     if (key === null) return NO_PLACE;
     // The feed is written just after the table first renders.
-    return feed ? dayForecast(feed, dayKey) : WAITING;
-  }, [key, feed, dayKey]);
+    return feed ? dayForecast(feed, dayKey, span) : WAITING;
+  }, [key, feed, dayKey, span]);
 }
