@@ -16,7 +16,9 @@ early, delay a passage or pick a different anchorage.
   in stretches, not just its start and end. If the wind turns by 90 degrees or
   more within about three hours, the line says which way and when. A slower
   swing over the day shows as "turning X ... and settling Y" or "from X to Y",
-  so check the hourly graph for when it gets there. For example, "NNW to NW 3 to 5 kts, going light around 4 AM, then turning SSE around 5 AM and settling E 3 to 8 kts. Gusts to 20 kts around 5 PM."
+  so check the hourly graph for when it gets there. For example, "NNW to NW 3
+  to 5 kts, going light around 4 AM, then turning SSE around 5 AM and settling
+  E 3 to 8 kts. Gusts to 20 kts around 5 PM."
   Hours under 2 knots count as calm, so the line says the wind goes light
   rather than quoting a direction that isn't there. When the wind comes back
   after a calm, the line says so and gives the new speeds. An odd hour or two
@@ -32,7 +34,7 @@ early, delay a passage or pick a different anchorage.
 - **Separate providers:** Weather, waves and tides each come from their own
   provider plugin. If one is down, you get an explicit failure for that section
   rather than a stale number. The card says which provider answered, whether
-  the data was cached and how long ago it refreshed.
+  the data is cached and how long ago it refreshed.
 - **Tides anywhere:** Until you choose a tide provider, tides come from a
   worldwide model that follows the boat's position, so there's no station to
   pick. Its heights are measured from mean sea level, not chart datum. They're
@@ -147,8 +149,8 @@ book's method uses chart interpretation and gives no numeric thresholds. Also,
 latitudes, so a fixed threshold wouldn't apply across regions.
 
 A day with upper-air data but nothing notable still shows its height and the
-jet strength overhead. A day with no data shows no section, to avoid implying
-an all-clear without measurements.
+strength of the jet stream overhead. A day with no data shows no section, to
+avoid implying an all-clear without measurements.
 
 ### The trace
 
@@ -410,8 +412,9 @@ GFS-Wave, so Helmcentral leaves it off until you ask for it. To turn it on:
 3. Switch on **Use Open-Meteo's blend where GFS-Wave has no data**, then tap
    **Save**.
 
-The change applies from the next forecast fetch. The blend is used only for a spot where GFS-Wave has no figures at all.
-Everywhere else you still get GFS-Wave.
+The change applies from the next forecast fetch. The blend is used only for a
+spot where GFS-Wave has no figures at all. Everywhere else you still get
+GFS-Wave.
 
 None of the indicators here are predictions of severe weather. They are the
 warning signs a seamanship text says to watch for, evaluated automatically so
