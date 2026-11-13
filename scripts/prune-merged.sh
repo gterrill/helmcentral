@@ -65,7 +65,8 @@ skipped=0
 for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
   [ "$branch" = main ] && continue
   [ "$branch" = "$current" ] && continue
-  tip="$(git rev-parse "refs/heads/$branch")"
+  # Another session may have deleted the branch since the list was taken.
+  tip="$(git rev-parse --verify --quiet "refs/heads/$branch")" || { echo "skip $branch: deleted while this ran"; skipped=$((skipped + 1)); continue; }
   is_merged "$branch" "$tip" || continue
 
   wt="$(worktree_for "$branch")"
@@ -86,6 +87,10 @@ for branch in $(git for-each-ref --format='%(refname:short)' refs/heads); do
     fi
   fi
 
+  # Another session may have deleted the branch since the checks above. Any
+  # failure from the removals below stops the run.
+  git show-ref --verify --quiet "refs/heads/$branch" || { echo "skip $branch: deleted while this ran"; skipped=$((skipped + 1)); continue; }
+
   echo "$branch (merged)"
   if [ -n "$wt" ]; then
     # The node_modules link points at this checkout's real install. Remove the
@@ -105,7 +110,8 @@ for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); 
   branch="${ref#origin/}"
   case "$branch" in main | HEAD | origin) continue ;; esac
   git show-ref --verify --quiet "refs/heads/$branch" && continue
-  is_merged "$branch" "$(git rev-parse "$ref")" || continue
+  tip="$(git rev-parse --verify --quiet "$ref")" || { echo "skip $branch: deleted while this ran"; continue; }
+  is_merged "$branch" "$tip" || continue
   echo "$branch (merged, remote only)"
   run git push --quiet origin --delete "$branch"
   removed=$((removed + 1))

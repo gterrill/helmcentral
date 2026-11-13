@@ -1,0 +1,5 @@
+#!/bin/sh
+# Rejects a commit message that carries Claude attribution. The patterns live in
+# scripts/check-commit-messages.sh, which CI runs over the whole PR. Turned on by
+# `make hooks` (and by `make worktree`).
+exec sh "$(dirname "$0")/../scripts/check-commit-messages.sh" --file "$1"

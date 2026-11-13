@@ -11,7 +11,10 @@ policies in `AGENTS.md`, including findings applied with `--fix`.
 
 `git rev-parse --show-toplevel` must be your own worktree, not the main
 checkout, and `git status` must hold only your changes. Run `git fetch
-origin` and rebase onto `origin/main`; local `main` often lags.
+origin` and rebase onto `origin/main`; local `main` often lags. Run `make
+hooks` once: it turns on the commit-msg hook, is safe to repeat, and the
+setting is shared by every checkout, so existing worktrees and the main
+checkout get it too.
 
 `/code-review` reviews the path you give it, so step 5 passes the worktree's
 path.
@@ -48,14 +51,18 @@ claims against the code.
 
 ## 4. Test
 
-Run every suite the change touches:
+Run `make check`: it is the one command a builder runs before reporting done.
+It runs these, in order, and carries on past a failure:
 
 - Backend: `make check-backend`
 - Frontend: `make check-frontend`
 - Help pages under `docs/`: `make docs-lint-changed`
-- A change under `.github/workflows/`: `make workflow-lint`
 - `CHANGELOG.md`: `sh scripts/check-changelog.sh`. A rebase merges this file
   without a conflict, so this is what catches an entry left in a released section.
+- Commit messages: `sh scripts/check-commit-messages.sh`, which rejects Claude
+  attribution.
+
+A change under `.github/workflows/` also needs `make workflow-lint`.
 
 Any new or changed Flux runs once through `scripts/flux.sh` against the box
 (`INFLUX_URL=http://<reachable-host>:8086` if the settings address is
@@ -65,7 +72,7 @@ A UI change is previewed now, before review, following "Preview from a
 worktree" in the `run-dashboard` skill, at desktop and phone widths. Fixes the
 preview prompts go through this step again.
 
-Run the two check targets as they are, with no `tail` or `grep` on the end:
+Run the check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
 non-zero on any failure. A failure under load needs confirming by rerunning
 that test file alone before you call it a flake. Reproduce a failure this way:
@@ -102,7 +109,7 @@ and seen failing on the unfixed code; a builder subagent's brief asks for that
 run and its hand-back shows it.
 
 A builder's brief is self-contained and says: run tests only through `make
-check-frontend` and `make check-backend`, or `npx vitest run <file>` from
+check` (or `make check-frontend` and `make check-backend`), or `npx vitest run <file>` from
 `<worktree>/frontend` and `go -C <worktree>/backend test -short ./...`; edit
 with the Edit tool only. Start a fresh builder for each review round; never
 `SendMessage` to the old one.
@@ -130,7 +137,9 @@ findings.
 
 ## 6. Commit and open the PR
 
-Stage by path and commit. Push the branch. Open the PR with `gh pr create
+Stage by path and commit. Run `sh scripts/check-commit-messages.sh`, since
+step 4 ran before these commits existed; a hit means reword the commit before
+pushing. Push the branch. Open the PR with `gh pr create
 --body-file <path>`, or, when the branch already has one, the push updates it.
 Write the body to a file in the session's scratchpad: the worktree guard
 refuses inline bodies. The body says what the operator will notice, then gives

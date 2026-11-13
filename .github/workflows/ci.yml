@@ -317,6 +317,24 @@ jobs:
       - name: Check released sections
         run: sh scripts/check-changelog.sh
 
+  # See scripts/check-commit-messages.sh. Pull requests only. The range ends at
+  # the PR's own head commit: the checkout is GitHub's synthetic merge commit,
+  # whose message is not the author's.
+  commit-messages:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for Claude attribution
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: sh scripts/check-commit-messages.sh "origin/${BASE_REF}..${HEAD_SHA}"
+
   # PRs build linux/amd64 only, unless they touch the release config,
   # dependencies, workflows or platform-specific Go (an OS/arch file suffix or
   # a //go:build line), when they build every published target. Pushes to main
