@@ -309,7 +309,7 @@ describe('ForecastDrawer lightning band on the Cloud, Temperature & Rain chart',
 
     expect(screen.queryAllByTestId('forecast-cloud-lightning-block')).toHaveLength(0)
     expect(screen.getByTestId('forecast-cloud-lightning-key')).toHaveTextContent(
-      "Lightning is for the boat's position, not the stay.",
+      "Lightning is for the boat's position, not this place.",
     )
     expect(screen.getByTestId('forecast-cloud-lightning-key')).not.toHaveTextContent(/Met Office/)
   })
@@ -664,7 +664,7 @@ describe('ForecastDrawer lightning band on the Upper Air chart', () => {
 
     expect(screen.queryAllByTestId('forecast-upper-air-lightning-block')).toHaveLength(0)
     expect(screen.getByTestId('forecast-upper-air-lightning-key')).toHaveTextContent(
-      "Lightning is for the boat's position, not the stay.",
+      "Lightning is for the boat's position, not this place.",
     )
   })
 
