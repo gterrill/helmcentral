@@ -388,10 +388,11 @@ Here's what the table shows:
 - **A plan that's fallen behind.** If the next leg should have left on a day
   that's already gone, the page counts from today. It moves every leg you
   haven't done forward by the days you're behind, and works out the slack on
-  those dates. A leg you've already left on and are still sailing isn't behind;
-  the count starts from the leg after it. The line says so first, for example
-  "Behind plan by 4 days. Late by 1 day". The slips below are measured from the same moved plan, so none of
-  them lands on a day that has passed. Your saved dates don't change.
+  those dates. A leg you've already left on and are still sailing isn't behind.
+  The count starts from the leg after it. The line says so first, for example
+  "Behind plan by 4 days. Late by 1 day". The slips below are measured from
+  the same moved plan, so none of them lands on a day that has passed. Your
+  saved dates don't change.
 - **What a slip would meet.** When there's slack, the page works out what
   slipping the plan would do, one day at a time, up to one day past your slack.
   Every leg you haven't done moves later by that many days, the plan is judged
