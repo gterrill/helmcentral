@@ -116,10 +116,10 @@ func (m *planForecastMemo) keep(key string, now time.Time, f passageForecast) {
 	m.m[key] = planForecastMemoEntry{at: now, f: f}
 }
 
-// productionPlanAssessDeps wires the configured providers, the boat's recorded
-// speed, the fair-tide ranking and the modelled current.
-func productionPlanAssessDeps(settingsPath string) planAssessDeps {
-	d := assistantProductionToolDeps(settingsPath)
+// planAssessDepsFromTool wires the providers and the clock d carries, the boat's
+// recorded speed, the fair-tide ranking and the modelled current. A run whose
+// tool deps are pinned or replayed assesses on that clock and those providers.
+func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssessDeps {
 	return planAssessDeps{
 		now:    d.now,
 		limits: d.passageLimits,

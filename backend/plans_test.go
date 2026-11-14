@@ -498,42 +498,42 @@ func TestPlanHandlers_LegsEndpointReportsDistancesAndErrors(t *testing.T) {
 	}
 }
 
-// --- what Mate and the watch report still read ---
+// --- what the vessel status and the watch report still read ---
 
-func TestGetPlannedStay_IsTheStopOfTheCurrentPlan(t *testing.T) {
+func TestGetPlanNextStop_IsTheStopOfTheCurrentPlan(t *testing.T) {
 	store := newTestDocumentStore(t)
 	at := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
-	if _, ok, err := store.GetPlannedStay(at(2026, 10, 24)); err != nil || ok {
+	if _, ok, err := store.GetPlanNextStop(at(2026, 10, 24)); err != nil || ok {
 		t.Fatalf("no plans, no stay: ok=%v err=%v", ok, err)
 	}
 	// 24 Oct: the plan has not started, so the stay is its first stop.
 	if _, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-10-27", 4, 1, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	stay, ok, err := store.GetPlannedStay(at(2026, 10, 24))
+	stay, ok, err := store.GetPlanNextStop(at(2026, 10, 24))
 	if err != nil || !ok || stay.Name != "Great Sandy Straits Marina" || stay.Arrive != "2026-10-27" || stay.Depart != "2026-10-31" || stay.Timezone != "Australia/Brisbane" || !stay.Active {
 		t.Fatalf("stay = %+v ok=%v err=%v", stay, ok, err)
 	}
 	// Mid-plan, the stop the boat is at (or sailing from) today: a lay day at
 	// the first stop.
-	stay, _, _ = store.GetPlannedStay(at(2026, 10, 29))
+	stay, _, _ = store.GetPlanNextStop(at(2026, 10, 29))
 	if stay.Name != "Great Sandy Straits Marina" || stay.Depart != "2026-10-31" {
 		t.Fatalf("lay-day stay = %+v", stay)
 	}
 	// 1 Nov is the day the boat sails Pelican Bay to Mooloolaba: it spends the
 	// night at the destination.
-	stay, _, _ = store.GetPlannedStay(at(2026, 11, 1))
+	stay, _, _ = store.GetPlanNextStop(at(2026, 11, 1))
 	if stay.Name != "Mooloolaba" || stay.Arrive != "2026-11-01" {
 		t.Fatalf("passage-day stay must be the destination, got %+v", stay)
 	}
 	// After the plan, the last stop, which Active reads as ended.
-	stay, ok, _ = store.GetPlannedStay(at(2026, 12, 1))
+	stay, ok, _ = store.GetPlanNextStop(at(2026, 12, 1))
 	if !ok || stay.Name != "Mooloolaba" || stay.Active {
 		t.Fatalf("past plan: %+v ok=%v", stay, ok)
 	}
 }
 
-func TestGetPlannedStay_AllPastIsTheLastStopOfTheMostRecentlyEndedPlan(t *testing.T) {
+func TestGetPlanNextStop_AllPastIsTheLastStopOfTheMostRecentlyEndedPlan(t *testing.T) {
 	store := newTestDocumentStore(t)
 	// Saved in an order where the latest-ending plan is neither first nor last.
 	for _, c := range []struct{ arrive, lastStop string }{
@@ -547,14 +547,14 @@ func TestGetPlannedStay_AllPastIsTheLastStopOfTheMostRecentlyEndedPlan(t *testin
 			t.Fatal(err)
 		}
 	}
-	stay, ok, err := store.GetPlannedStay(time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC))
+	stay, ok, err := store.GetPlanNextStop(time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC))
 	if err != nil || !ok || stay.Name != "ended May" || stay.Active {
 		t.Fatalf("the plan that ended most recently, over: %+v ok=%v err=%v", stay, ok, err)
 	}
 }
 
-// setStayForTest saves a one-stop plan standing for the old planned stay.
-func setStayForTest(store *documentStore, s plannedStay) (plan, error) {
+// setStayForTest saves a one-stop plan: a stay at one place.
+func setStayForTest(store *documentStore, s planNextStop) (plan, error) {
 	a, _ := time.Parse(planDateLayout, s.Arrive)
 	d, _ := time.Parse(planDateLayout, s.Depart)
 	return store.CreatePlan(plan{Name: s.Name, Stops: []planStop{{Name: s.Name, Lat: s.Lat, Lon: s.Lon, Arrive: s.Arrive, Nights: planDaysBetween(a, d)}}})
@@ -748,12 +748,12 @@ func twoZonePlan() plan {
 	}}
 }
 
-func TestGetPlannedStay_JudgesEachStopInItsOwnZone(t *testing.T) {
+func TestGetPlanNextStop_JudgesEachStopInItsOwnZone(t *testing.T) {
 	store := newTestDocumentStore(t)
 	if _, err := store.CreatePlan(twoZonePlan()); err != nil {
 		t.Fatal(err)
 	}
-	stay, ok, err := store.GetPlannedStay(time.Date(2026, 11, 15, 13, 30, 0, 0, time.UTC))
+	stay, ok, err := store.GetPlanNextStop(time.Date(2026, 11, 15, 13, 30, 0, 0, time.UTC))
 	if err != nil || !ok || stay.Name != "Brisbane" || !stay.Active {
 		t.Fatalf("the boat is in Brisbane on the 15th: %+v ok=%v err=%v", stay, ok, err)
 	}

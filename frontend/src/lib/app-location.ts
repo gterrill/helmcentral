@@ -132,6 +132,10 @@ export type WatchesRoute =
 export type AppLocation =
   | { panel: null; pageId: string | null }
   | { panel: PlainPanelId }
+  /** The Forecast page with one plan chosen, `/forecast?plan=<id>`: the link a
+   * Mate card gives once it has made a plan. Without `planId` it is the plain
+   * panel above. */
+  | { panel: 'forecast'; planId: number }
   | { panel: 'assistant'; conversationId: string | null }
   | { panel: 'settings'; route: SettingsRoute }
   | { panel: 'documents'; route: DocumentsRoute }
@@ -400,6 +404,13 @@ export function parseAppLocation(pathname: string): AppLocation {
     return { panel: 'inventory', route: { view: 'index', section: 'equipment', ...withList(parseInventoryList(params, EQUIPMENT_LIST_KEYS)) } }
   }
 
+  // A plan named in the address is a whole number above zero; anything else is
+  // no plan chosen, and the page opens on the current one.
+  if (first === 'forecast') {
+    const planId = Number(new URLSearchParams(search).get('plan'))
+    return Number.isInteger(planId) && planId > 0 ? { panel: 'forecast', planId } : { panel: 'forecast' }
+  }
+
   if (PANEL_ID_SET.has(first)) {
     return { panel: first as PlainPanelId }
   }
@@ -582,6 +593,9 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
       if (loc.route.view === 'details') return withQuery(`/watches/${encodeURIComponent(loc.route.id)}`, params)
       return withQuery('/watches', params)
     }
+
+    case 'forecast':
+      return 'planId' in loc ? `/forecast?plan=${loc.planId}` : '/forecast'
 
     case 'wall-displays': {
       if (loc.route.view === 'index') return '/wall-displays'

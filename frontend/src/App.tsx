@@ -371,6 +371,13 @@ function AppShell() {
   const router = useAppRouter()
   const appLocation = useAppLocation()
   const navigate = useNavigate()
+  // The Forecast page follows a plan link once, then drops its ?plan from the
+  // address (replacing the entry, not adding one), so a reload or back does not
+  // jump to the plan again.
+  const forecastLinkNamesPlan = appLocation.panel === 'forecast' && 'planId' in appLocation
+  const clearForecastPlanLink = useCallback(() => {
+    if (forecastLinkNamesPlan) navigate({ panel: 'forecast' }, { replace: true })
+  }, [forecastLinkNamesPlan, navigate])
   const initialLocation = router.initialLocation
   const activePanel: PanelId | null = appLocation.panel
   // ADR 0142: /patterns is deliberately NOT a PanelId - it never needs
@@ -1479,6 +1486,8 @@ function AppShell() {
         return (
           <LiveForecastPage
             canWrite={canWrite}
+            focusPlanId={appLocation.panel === 'forecast' && 'planId' in appLocation ? appLocation.planId : undefined}
+            onPlanLinkFollowed={clearForecastPlanLink}
             unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
           />
         )

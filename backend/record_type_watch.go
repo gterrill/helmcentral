@@ -58,7 +58,7 @@ func watchRecordType() *recordType {
 		Update:   updateWatchRecord,
 		Delete:   deleteWatchRecord,
 		Describe: describeWatch,
-		Display:  displayWatchFields,
+		Display:  perSideDisplay(displayWatchFields),
 		Href:     func(recordSnapshot) string { return "/watches" },
 	}
 }

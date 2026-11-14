@@ -443,22 +443,22 @@ func pinPlannedStayClock(t *testing.T) {
 	t.Cleanup(func() { planNow = prev })
 }
 
-func plannedStayStoreForTest(t *testing.T, stay plannedStay) func() *documentStore {
+func plannedStayStoreForTest(t *testing.T, stay planNextStop) func() *documentStore {
 	t.Helper()
 	pinPlannedStayClock(t)
 	store := newTestDocumentStore(t)
 	if _, err := setStayForTest(store, stay); err != nil {
-		t.Fatalf("SetPlannedStay: %v", err)
+		t.Fatalf("save the plan: %v", err)
 	}
 	return func() *documentStore { return store }
 }
 
-func TestVesselStatus_PlannedStayWithDistanceFromTheBoat(t *testing.T) {
+func TestVesselStatus_NextStopWithDistanceFromTheBoat(t *testing.T) {
 	d := statusTestDeps(t)
-	stay := plannedStay{Name: "Magnetic Island Marina", Lat: -19.1585, Lon: 146.8508, Arrive: "2026-10-30", Depart: "2026-11-03"}
+	stay := planNextStop{Name: "Magnetic Island Marina", Lat: -19.1585, Lon: 146.8508, Arrive: "2026-10-30", Depart: "2026-11-03"}
 	d.documents = plannedStayStoreForTest(t, stay)
 	res := runStatus(t, d)
-	s := res.PlannedStay
+	s := res.NextStop
 	if s.Missing != "" || s.Name != stay.Name || s.Arrive != "2026-10-30" || s.Depart != "2026-11-03" {
 		t.Fatalf("stay: %+v", s)
 	}
@@ -474,37 +474,37 @@ func TestVesselStatus_PlannedStayWithDistanceFromTheBoat(t *testing.T) {
 	}
 }
 
-func TestVesselStatus_PlannedStayWithoutABoatPosition(t *testing.T) {
+func TestVesselStatus_NextStopWithoutABoatPosition(t *testing.T) {
 	d := statusTestDeps(t)
-	d.documents = plannedStayStoreForTest(t, plannedStay{Name: "Magnetic Island Marina", Lat: -19.1585, Lon: 146.8508, Arrive: "2026-10-30", Depart: "2026-11-03"})
+	d.documents = plannedStayStoreForTest(t, planNextStop{Name: "Magnetic Island Marina", Lat: -19.1585, Lon: 146.8508, Arrive: "2026-10-30", Depart: "2026-11-03"})
 	d.vesselState = func() (vesselStateData, error) {
 		return vesselStateData{Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -1, Longitude: -1, PositionLastUpdateAge: -1, WindSpeedTrueKts: -1}, nil
 	}
 	res := runStatus(t, d)
-	s := res.PlannedStay
+	s := res.NextStop
 	if s.Name == "" || s.DistanceFromBoatM != nil || s.DistanceMissing == "" {
 		t.Errorf("stay: %+v", s)
 	}
 }
 
-func TestVesselStatus_NoPlannedStayOrAnEndedOne(t *testing.T) {
+func TestVesselStatus_NoPlanOrAnEndedOne(t *testing.T) {
 	d := statusTestDeps(t)
 	pinPlannedStayClock(t)
 	store := newTestDocumentStore(t)
 	d.documents = func() *documentStore { return store }
 	res := runStatus(t, d)
-	if res.PlannedStay.Missing != "no stay is planned" {
-		t.Errorf("none: %+v", res.PlannedStay)
+	if res.NextStop.Missing != "no plan is saved" {
+		t.Errorf("none: %+v", res.NextStop)
 	}
-	// A stay whose last day has passed is no stay at all (plannedStayActive):
+	// A plan whose last day has passed has no next stop (Active is false):
 	// save it while it is current, then let the clock move past it.
-	if _, err := setStayForTest(store, plannedStay{Name: "Old", Lat: -19.1, Lon: 146.8, Arrive: "2026-10-28", Depart: "2026-10-28"}); err != nil {
+	if _, err := setStayForTest(store, planNextStop{Name: "Old", Lat: -19.1, Lon: 146.8, Arrive: "2026-10-28", Depart: "2026-10-28"}); err != nil {
 		t.Fatal(err)
 	}
 	d.now = func() time.Time { return vesselStatusTestNow.Add(72 * time.Hour) }
 	res = runStatus(t, d)
-	if res.PlannedStay.Missing != "the last planned stay ended before today" || res.PlannedStay.Name != "" {
-		t.Errorf("ended: %+v", res.PlannedStay)
+	if res.NextStop.Missing != "the last plan ended before today" || res.NextStop.Name != "" {
+		t.Errorf("ended: %+v", res.NextStop)
 	}
 }
 

@@ -1053,7 +1053,7 @@ func TestPlanAssessmentHandler_ServesTheAssessment(t *testing.T) {
 		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
 	}
 	f := &paFake{}
-	planAssessDepsFor = func() planAssessDeps {
+	planAssessDepsFor = func(assistantToolDeps) planAssessDeps {
 		d := paDeps(f)
 		d.now = func() time.Time { return paNow }
 		return d
@@ -1094,7 +1094,7 @@ func TestPlanAssessmentHandler_ReadsTheSpeedOncePerRequest(t *testing.T) {
 		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
 	}
 	f := &paFake{}
-	planAssessDepsFor = func() planAssessDeps { return paDeps(f) }
+	planAssessDepsFor = func(assistantToolDeps) planAssessDeps { return paDeps(f) }
 	saved, err := store.CreatePlan(plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)})
 	if err != nil {
 		t.Fatal(err)

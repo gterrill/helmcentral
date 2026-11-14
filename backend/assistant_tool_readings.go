@@ -21,7 +21,7 @@ const (
 	ruleWindForecast = "This is a model forecast, not observed: figures are model output for the grid point, not measurements at the place. " +
 		ruleForecastHorizon + " Label what comes from it as forecast."
 
-	rulePlannedStay = ruleForecastHorizon + " Use its lat and lon for get_wind_forecast and get_tides."
+	rulePlans = ruleForecastHorizon + " Use a stop's lat and lon for get_wind_forecast and get_tides."
 
 	ruleTides = "These are predicted, not observed: weather and air pressure move the real tide. Heights are metres on the provider's tide-table datum, " +
 		"which is not charted depth. The result's height_datum says what they are measured from, and when it is mean_sea_level its datum_note applies: say so, " +

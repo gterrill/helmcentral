@@ -88,6 +88,9 @@ type plan struct {
 	LastDate  string     `json:"last_date"`
 	CreatedAt *time.Time `json:"created_at"`
 	UpdatedAt *time.Time `json:"updated_at"`
+	// Revision counts the writes to the plan. updated_at is whole seconds, so two
+	// writes in one second need this to tell them apart (planVersion).
+	Revision int64 `json:"-"`
 }
 
 // planError names the one field a write failed on, in the {field, message}
@@ -129,6 +132,9 @@ func createPlansSchema(db *sql.DB) error {
 		}
 	}
 	if err := ensureColumn(db, "plan_stops", "arrive_by", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "plans", "revision", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := createPlanSeenSchema(db); err != nil {
@@ -278,8 +284,8 @@ func normaliseStop(s *planStop, i, last int) *planError {
 	return nil
 }
 
-// normalisePlan is the one rule the Forecast page's writes and a later Mate
-// changeset share: names are trimmed, every field is checked, and each
+// normalisePlan is the one rule the Forecast page's writes and Mate's changeset
+// (record_type_plan.go, ADR 0289) share: names are trimmed, every field is checked, and each
 // arrival after the first is recomputed from the stop before it.
 func normalisePlan(p plan) (plan, *planError) {
 	p.Name = strings.TrimSpace(p.Name)
@@ -482,7 +488,7 @@ func checkPlanZones(p plan) *planError {
 func loadPlan(q sqlQueryer, id int64) (plan, bool, error) {
 	p := plan{ID: id}
 	var created, updated int64
-	err := q.QueryRow(`SELECT name, created_at, updated_at FROM plans WHERE id = ?`, id).Scan(&p.Name, &created, &updated)
+	err := q.QueryRow(`SELECT name, created_at, updated_at, revision FROM plans WHERE id = ?`, id).Scan(&p.Name, &created, &updated, &p.Revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return plan{}, false, nil
 	}
@@ -558,24 +564,33 @@ func (s *documentStore) CreatePlan(in plan) (plan, error) {
 	defer s.mu.Unlock()
 	var saved plan
 	err := s.runTxLocked("create plan", func(tx *sql.Tx, now time.Time) error {
-		res, err := tx.Exec(`INSERT INTO plans (name, created_at, updated_at) VALUES (?, ?, ?)`, in.Name, now.Unix(), now.Unix())
-		if err != nil {
-			return fmt.Errorf("create plan: %w", err)
-		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("create plan: %w", err)
-		}
-		if err := writePlanStops(tx, id, in.Stops); err != nil {
-			return err
-		}
-		saved, _, err = loadPlan(tx, id)
+		var err error
+		saved, err = createPlanTx(tx, now, in)
 		return err
 	})
 	if err != nil {
 		return plan{}, err
 	}
 	return saved, nil
+}
+
+// createPlanTx writes a plan that normalisePlan and checkPlanZones have passed,
+// in the caller's transaction. The Forecast page's create and a Mate changeset's
+// both come through here.
+func createPlanTx(tx *sql.Tx, now time.Time, in plan) (plan, error) {
+	res, err := tx.Exec(`INSERT INTO plans (name, created_at, updated_at) VALUES (?, ?, ?)`, in.Name, now.Unix(), now.Unix())
+	if err != nil {
+		return plan{}, fmt.Errorf("create plan: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return plan{}, fmt.Errorf("create plan: %w", err)
+	}
+	if err := writePlanStops(tx, id, in.Stops); err != nil {
+		return plan{}, err
+	}
+	saved, _, err := loadPlan(tx, id)
+	return saved, err
 }
 
 func (s *documentStore) GetPlan(id int64) (plan, bool, error) {
@@ -590,7 +605,7 @@ func (s *documentStore) ListPlans() ([]plan, error) {
 	defer s.mu.Unlock()
 	// One query: each plan's stops follow it in position order. A plan with no
 	// stops has one row with a NULL position.
-	rows, err := s.db.Query(`SELECT p.id, p.name, p.created_at, p.updated_at, s.position,
+	rows, err := s.db.Query(`SELECT p.id, p.name, p.created_at, p.updated_at, p.revision, s.position,
 			COALESCE(s.name, ''), COALESCE(s.lat, 0), COALESCE(s.lon, 0), COALESCE(s.arrive, ''),
 			COALESCE(s.nights, 0), COALESCE(s.vias, '[]'), COALESCE(s.depart_time, ''), COALESCE(s.arrive_by, '')
 		FROM plans p LEFT JOIN plan_stops s ON s.plan_id = p.id
@@ -601,18 +616,18 @@ func (s *documentStore) ListPlans() ([]plan, error) {
 	defer rows.Close()
 	out := []plan{}
 	for rows.Next() {
-		var id, created, updated int64
+		var id, created, updated, revision int64
 		var name string
 		var position sql.NullInt64
 		var st planStop
 		var vias string
-		if err := rows.Scan(&id, &name, &created, &updated, &position,
+		if err := rows.Scan(&id, &name, &created, &updated, &revision, &position,
 			&st.Name, &st.Lat, &st.Lon, &st.Arrive, &st.Nights, &vias, &st.DepartTime, &st.ArriveBy); err != nil {
 			return nil, fmt.Errorf("list plans: %w", err)
 		}
 		if len(out) == 0 || out[len(out)-1].ID != id {
 			c, u := time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
-			out = append(out, plan{ID: id, Name: name, Stops: []planStop{}, CreatedAt: &c, UpdatedAt: &u})
+			out = append(out, plan{ID: id, Name: name, Stops: []planStop{}, CreatedAt: &c, UpdatedAt: &u, Revision: revision})
 		}
 		if !position.Valid {
 			continue
@@ -648,24 +663,32 @@ func (s *documentStore) UpdatePlan(id int64, in plan) (plan, bool, error) {
 	var saved plan
 	found := true
 	err := s.runTxLocked("update plan", func(tx *sql.Tx, now time.Time) error {
-		res, err := tx.Exec(`UPDATE plans SET name = ?, updated_at = ? WHERE id = ?`, in.Name, now.Unix(), id)
-		if err != nil {
-			return fmt.Errorf("update plan: %w", err)
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			found = false
-			return nil
-		}
-		if err := writePlanStops(tx, id, in.Stops); err != nil {
-			return err
-		}
-		saved, _, err = loadPlan(tx, id)
+		var err error
+		saved, found, err = updatePlanTx(tx, now, id, in)
 		return err
 	})
 	if err != nil || !found {
 		return plan{}, false, err
 	}
 	return saved, true, nil
+}
+
+// updatePlanTx replaces a plan whole, in the caller's transaction, with one that
+// normalisePlan and checkPlanZones have passed. found is false when there is no
+// such plan.
+func updatePlanTx(tx *sql.Tx, now time.Time, id int64, in plan) (saved plan, found bool, err error) {
+	res, err := tx.Exec(`UPDATE plans SET name = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`, in.Name, now.Unix(), id)
+	if err != nil {
+		return plan{}, false, fmt.Errorf("update plan: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return plan{}, false, nil
+	}
+	if err := writePlanStops(tx, id, in.Stops); err != nil {
+		return plan{}, false, err
+	}
+	saved, _, err = loadPlan(tx, id)
+	return saved, true, err
 }
 
 // PatchPlanStop changes one stop's arrival or nights and shifts every later
@@ -698,7 +721,7 @@ func (s *documentStore) PatchPlanStop(id int64, idx int, arrive *string, nights 
 		if verr != nil {
 			return verr
 		}
-		if _, err := tx.Exec(`UPDATE plans SET updated_at = ? WHERE id = ?`, now.Unix(), id); err != nil {
+		if _, err := tx.Exec(`UPDATE plans SET updated_at = ?, revision = revision + 1 WHERE id = ?`, now.Unix(), id); err != nil {
 			return fmt.Errorf("edit plan stop: %w", err)
 		}
 		if err := writePlanStops(tx, id, norm.Stops); err != nil {

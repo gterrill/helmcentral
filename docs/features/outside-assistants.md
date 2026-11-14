@@ -20,7 +20,8 @@ so it works when Mate is switched off.
 - **The sea, the tides and the neighbours:** The assistant can also look up the
   wind and wave forecast, the tides and the distance by water between two
   places. It can assess an anchorage for a stay, look over a marina, look
-  up place names, see the nearby vessels and read the stay you've planned. Your
+  up place names, see the nearby vessels and read your passage plans. It reads
+  the plans' verdicts but can't make or change a plan. Your
   [saved places](place-names.md#places-you-give-mate) come back first in a
   place-name lookup. It can read Helmcentral's own help pages too. Each tool tells the assistant how to read what it returns. A forecast
   says it's a model and not an observation. A tide says which station it came
@@ -57,7 +58,7 @@ A new token can use these:
 - The boat's particulars and the boat context.
 - Wind and wave forecast, tides, and the distance by water between two places.
 - Anchorage details, marina details, place names and nearby vessels.
-- The planned stay, and Helmcentral's help pages.
+- Your passage plans, and Helmcentral's help pages.
 
 These start switched off, and you switch them on for a token when you want them:
 

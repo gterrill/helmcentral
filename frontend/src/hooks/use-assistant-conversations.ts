@@ -38,6 +38,7 @@ interface ProposalOpResultApi {
   id: string
   label?: string
   href?: string
+  href_label?: string
 }
 
 export interface ProposalApi {
@@ -112,7 +113,9 @@ export interface AssistantMessageAttachment {
  * ("Generator · Oil and filter: every 250 h ..."); the client shows it as
  * given and never rebuilds it. `before` and `after` hold the fields the change
  * names, as they were and as they will be (a delete has only `before`).
- * `href` is the page that shows the record, set once the proposal is applied. */
+ * `href` is the page that shows the record, set once the proposal is applied;
+ * `hrefLabel`, when the type names one, is the words of a link to it shown
+ * beside the description instead of making the description the link. */
 export interface AssistantProposalOp {
   type: string
   action: AssistantProposalAction
@@ -122,6 +125,7 @@ export interface AssistantProposalOp {
   before?: Record<string, unknown>
   after?: Record<string, unknown>
   href?: string
+  hrefLabel?: string
   /** The id of the record an applied operation wrote, from the stored result. */
   resultId?: string
 }
@@ -216,6 +220,7 @@ export function mapProposal(api: ProposalApi): AssistantProposal {
       before: o.before,
       after: o.after,
       href: api.result?.ops[i]?.href,
+      hrefLabel: api.result?.ops[i]?.href_label,
       resultId: api.result?.ops[i]?.id,
     })),
     staleReason: api.stale_reason,

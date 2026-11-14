@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
+import { ApiError, apiRequest, invalidateQueries, refetchQuery } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type AssistantProposalOp, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
@@ -10,6 +10,7 @@ import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/ho
 import { openJobRecordApplied } from '@/hooks/use-open-jobs'
 import { documentRecordApplied } from '@/hooks/use-documents'
 import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
+import { PLANS_PATH } from '@/hooks/use-plans'
 
 const reads = (path: string) => () => void invalidateQueries([path])
 
@@ -35,6 +36,10 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   open_job: openJobRecordApplied,
   vessel_particulars: vesselParticularsRecordApplied,
   document: (op) => documentRecordApplied(op.id),
+  // Only the list: a prefix read would also fire the assessment, the slips and
+  // the legs under /api/plans, which are keyed by the plan's shape and follow
+  // the refreshed list.
+  plan: () => void refetchQuery([PLANS_PATH], PLANS_PATH),
 }
 
 function refreshPagesFor(proposal: AssistantProposal | undefined): void {

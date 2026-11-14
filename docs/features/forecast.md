@@ -475,9 +475,10 @@ Here's where it stops. There's no Lightning column, because the lightning
 forecast is only worked out for the boat's own position. A leg is one day, so a passage that runs overnight isn't judged, and its row
 says so. A bar crossing isn't checked, so a leg across a bar is judged on the
 wind and waves along the route alone. Wind against tide isn't checked either,
-because a plan doesn't know which way the flood sets. Mate can't make or change
-a plan, though it can read the stop your current plan has you at or heading for
-when you talk about "the marina". See
+because a plan doesn't know which way the flood sets. Mate can read your plans,
+make one from a description or a pasted list, and change one, and it gives the
+same verdict for a leg that the table does. It only does so when you ask, and you
+choose **Apply** on its card. It can't delete a plan. See
 [Make a passage plan](../how-to/make-a-passage-plan.md) for the steps.
 
 Helmcentral doesn't notify you when a plan day comes inside the forecast. Look

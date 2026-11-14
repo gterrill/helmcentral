@@ -43,6 +43,10 @@ const (
 	kindStringList fieldKind = "string_list"
 	kindID         fieldKind = "id"      // the id of another record; Ref names its type
 	kindPolygon    fieldKind = "polygon" // a list of [x, y] points
+	// kindObjectList is a list of objects, such as a plan's stops. The changeset
+	// layer checks only that each entry is an object; the type's own command
+	// checks the keys and the values.
+	kindObjectList fieldKind = "object_list"
 )
 
 // recordField is one registered field.
@@ -160,6 +164,10 @@ type recordType struct {
 	Describe func(d describeInput) string
 	// Href is the page that shows a record, once it exists.
 	Href func(r recordSnapshot) string
+	// HrefLabel, when set, is the words of a link to Href that the card shows
+	// beside the description, instead of making the description the link.
+	// Optional.
+	HrefLabel string
 	// Renames maps a command's field name to the name Mate used for it (a
 	// meter reading is what the operator's form calls hours).
 	Renames map[string]string
@@ -172,9 +180,28 @@ type recordType struct {
 	// Pin reads the facts an operation's numbers depend on, to be stored with
 	// the proposal and read again at Apply (changeOp.Pins). Optional.
 	Pin func(q sqlQueryer, op changeOp) (map[string]string, error)
-	// Display rewrites the Before and After values a card shows (a number
-	// with its unit). It gets the record's snapshot for the unit. Optional.
-	Display func(snap recordSnapshot, fields map[string]any) map[string]any
+	// Display writes the Before and After a card shows for an operation. It gets
+	// the operation with its Before and After as picked from the snapshots, and
+	// the snapshots themselves (before is nil for a create, after for a delete).
+	// Its return replaces op.Before and op.After, so a nil map shows no fields
+	// for that side; an error fails the preparation. Optional; perSideDisplay
+	// adapts a function that rewrites one side's values (a number with its unit).
+	Display func(op changeOp, before, after *recordSnapshot) (shownBefore, shownAfter map[string]any, err error)
+}
+
+// perSideDisplay is a Display that rewrites each side's picked values from that
+// side's snapshot, leaving a side with no snapshot or no values as it is.
+func perSideDisplay(rewrite func(snap recordSnapshot, fields map[string]any) map[string]any) func(op changeOp, before, after *recordSnapshot) (map[string]any, map[string]any, error) {
+	return func(op changeOp, before, after *recordSnapshot) (map[string]any, map[string]any, error) {
+		shownBefore, shownAfter := op.Before, op.After
+		if before != nil && shownBefore != nil {
+			shownBefore = rewrite(*before, shownBefore)
+		}
+		if after != nil && shownAfter != nil {
+			shownAfter = rewrite(*after, shownAfter)
+		}
+		return shownBefore, shownAfter, nil
+	}
 }
 
 func (t *recordType) field(name string) (recordField, bool) {

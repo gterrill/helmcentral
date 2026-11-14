@@ -398,6 +398,72 @@ describe("ForecastPage", () => {
     expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
   });
 
+  it("opens the plan a link names, even when another is current (Open plan on a Mate card)", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} />);
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+  });
+
+  it("falls back to the current plan when the plan a link names is gone", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={99} />);
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+  });
+
+  it("follows a new link while it is open", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const { rerender } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} />);
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+  });
+
+  it("selects the plan a link names once, then asks the app to drop ?plan from the address", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const onPlanLinkFollowed = vi.fn();
+    const page = (focusPlanId?: number) => (
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={focusPlanId} onPlanLinkFollowed={onPlanLinkFollowed} />
+    );
+    const { rerender } = render(page(2));
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+    expect(onPlanLinkFollowed).toHaveBeenCalledTimes(1);
+    // The app has dropped ?plan. The operator's own pick stands, and the same
+    // address coming back (back or forward) is not a link to follow again.
+    rerender(page(undefined));
+    fireEvent.click(screen.getByRole("button", { name: /Home run/ }));
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    rerender(page(undefined));
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    expect(onPlanLinkFollowed).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes an open plan editor before a link switches plan, so Save cannot write one plan over another", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const page = (focusPlanId?: number) => (
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={focusPlanId} onPlanLinkFollowed={vi.fn()} />
+    );
+    const { rerender } = render(page());
+    fireEvent.click(screen.getByRole("button", { name: /Change plan/ }));
+    expect(screen.getByTestId("plan-editor")).toHaveAttribute("data-plan", "Home run");
+    rerender(page(2));
+    expect(screen.queryByTestId("plan-editor")).toBeNull();
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+    rerender(page());
+    expect(screen.queryByTestId("plan-editor")).toBeNull();
+  });
+
+  it("closes a pending delete confirmation when a link switches plan", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const page = (focusPlanId?: number) => (
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={focusPlanId} onPlanLinkFollowed={vi.fn()} />
+    );
+    const { rerender } = render(page());
+    fireEvent.click(screen.getByRole("button", { name: /Delete plan/ }));
+    expect(screen.getByText("Delete Home run?")).toBeInTheDocument();
+    rerender(page(2));
+    expect(screen.queryByText(/^Delete .*\?$/)).toBeNull();
+  });
+
   it("adds a night to a stop through the server's shifting rule", () => {
     plansState([PLAN], 1, LEGS);
     patchStop.mockResolvedValue(PLAN);

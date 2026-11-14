@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { AssistantProposalOp } from '@/hooks/use-assistant-conversations'
+import { formatPositionDM } from '@/lib/coordinates'
 import { documentContentUrl } from '@/lib/document-download'
 import { channelLabel, WATCH_SEND_LABELS } from '@/lib/watches'
 
@@ -75,8 +76,48 @@ export function formatFieldValue(value: unknown, ops: AssistantProposalOp[], typ
 
 type FieldView = (value: unknown) => ReactNode
 
+interface PlanStopRow {
+  arrive_label: string
+  nights: number
+  name: string
+  lat: number
+  lon: number
+  source?: string
+}
+
+function isPlanStopRow(v: unknown): v is PlanStopRow {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  return typeof r.arrive_label === 'string' && typeof r.nights === 'number' && typeof r.name === 'string' && typeof r.lat === 'number' && typeof r.lon === 'number'
+}
+
+/** A new plan's stops, one small block each: the place, then the day and nights,
+ * then where its position came from and the position. The last stop has no
+ * nights to say. No map. */
+function PlanStopRows({ rows }: { rows: PlanStopRow[] }) {
+  return (
+    <ol className="flex min-w-0 flex-1 flex-col gap-2">
+      {rows.map((row, index) => {
+        const nights = index === rows.length - 1 && row.nights === 0 ? '' : row.nights === 1 ? '1 night' : `${row.nights} nights`
+        const position = formatPositionDM(row.lat, row.lon)
+        return (
+          <li key={index} data-plan-stop="" className="flex min-w-0 flex-col gap-0.5">
+            <span className="min-w-0 break-words font-medium text-foreground">{row.name}</span>
+            <span className="min-w-0 break-words tabular-nums text-muted-foreground">{nights ? `${row.arrive_label} · ${nights}` : row.arrive_label}</span>
+            <span className="min-w-0 break-words tabular-nums text-muted-foreground">{row.source ? `${row.source} · ${position}` : position}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+/** Fields whose view fills the card's width and needs no label, keyed `type.field`. */
+const FULL_WIDTH_VIEWS = new Set(['plan.stops'])
+
 /** Views keyed `type.field`. */
 const FIELD_VIEWS: Record<string, FieldView> = {
+  'plan.stops': (value) => (Array.isArray(value) && value.length > 0 && value.every(isPlanStopRow) ? <PlanStopRows rows={value} /> : null),
   'deck.plan_document_id': (value) =>
     typeof value === 'string' && value !== '' ? (
       <img
@@ -86,6 +127,12 @@ const FIELD_VIEWS: Record<string, FieldView> = {
         className="max-h-40 max-w-full rounded-sm border border-border object-contain"
       />
     ) : null,
+}
+
+/** True when the field's view is shown across the card with no label column,
+ * as long as the value has a view. */
+export function fieldViewFillsWidth(type: string, field: string, value: unknown): boolean {
+  return FULL_WIDTH_VIEWS.has(`${type}.${field}`) && fieldView(type, field, value) !== null
 }
 
 export function fieldView(type: string, field: string, value: unknown): ReactNode | null {

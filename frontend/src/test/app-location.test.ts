@@ -228,6 +228,16 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/forecast/extra')).toEqual({ panel: 'forecast' })
   })
 
+  it('parses /forecast?plan=<id> as the Forecast page with that plan chosen', () => {
+    expect(parseAppLocation('/forecast?plan=12')).toEqual({ panel: 'forecast', planId: 12 })
+  })
+
+  it('reads a plan id that is not a whole number as no plan chosen', () => {
+    expect(parseAppLocation('/forecast?plan=abc')).toEqual({ panel: 'forecast' })
+    expect(parseAppLocation('/forecast?plan=0')).toEqual({ panel: 'forecast' })
+    expect(parseAppLocation('/forecast?plan=1.5')).toEqual({ panel: 'forecast' })
+  })
+
   it('parses /settings as settings, General section', () => {
     expect(parseAppLocation('/settings')).toEqual(settings('general'))
   })
@@ -351,6 +361,10 @@ describe('formatAppLocation', () => {
       expect(formatAppLocation({ panel }, ctx)).toBe(`/${panel}`)
     },
   )
+
+  it('formats a Forecast page with a plan chosen as /forecast?plan=<id>', () => {
+    expect(formatAppLocation({ panel: 'forecast', planId: 12 }, ctx)).toBe('/forecast?plan=12')
+  })
 
   it('formats the display panel with no slug as /display', () => {
     expect(formatAppLocation({ panel: 'display', slug: null, options: NO_OPTIONS }, ctx)).toBe('/display')
@@ -546,6 +560,7 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/settings', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/settings/signalk', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/forecast', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/forecast?plan=12', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/mate', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/mate/12345', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/display', baseCtx)).toBe(true)

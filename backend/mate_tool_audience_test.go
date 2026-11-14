@@ -18,7 +18,7 @@ var (
 	pinnedReviewReadTools = []string{
 		"check_signalk_paths", "get_active_alarms", "get_alarm_context",
 		"get_cruise_summary", "get_last_recorded", "get_path_history",
-		"get_planned_stay", "get_tides", "get_unusual_readings",
+		"get_plans", "get_tides", "get_unusual_readings",
 		"get_vessel_particulars", "get_vessel_status", "get_wind_forecast",
 		"list_alarm_rules", "list_passages",
 	}

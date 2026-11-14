@@ -112,7 +112,7 @@ func alarmRuleRecordType() *recordType {
 		Update:          updateAlarmRuleRecord,
 		Delete:          deleteAlarmRuleRecord,
 		Describe:        describeAlarmRule,
-		Display:         displayAlarmRuleFields,
+		Display:         perSideDisplay(displayAlarmRuleFields),
 		Href:            func(recordSnapshot) string { return "/alarms" },
 		Pin:             pinAlarmRuleUnit,
 		AfterCommitOnce: true,

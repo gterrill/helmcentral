@@ -105,6 +105,13 @@ describe('navigate: push or replace', () => {
     expect(history.entries).toEqual(['/forecast'])
   })
 
+  it('drops a link\'s ?plan from the address by replacing the entry, not adding one', () => {
+    const { router, history } = setup('/forecast?plan=2')
+    router.navigate({ panel: 'forecast' }, { replace: true })
+    expect(history.entries).toEqual(['/forecast'])
+    expect(router.getSnapshot().location).toEqual({ panel: 'forecast' })
+  })
+
   it('does nothing for a move to where the app already is', () => {
     const { router, history } = setup('/forecast')
     expect(router.navigate({ panel: 'forecast' })).toBe(true)
