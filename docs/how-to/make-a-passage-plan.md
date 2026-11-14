@@ -48,6 +48,16 @@ between two places, the row names them. Move a stop or add a via place.
    course. A lay day shows the wind and waves from 6 PM that day to 6 AM the
    next morning. The last stop's final row says **leave**: it is the day you
    sail from it, and **+1 night** is still there.
+   If the wind turns during a day, the Wind column shows the turn instead of an
+   average, for example "NNW→SE 7 AM" with "astern → ahead" under it. The speed
+   range above it has no single direction then, since the day had more than
+   one. On a passage row only the turns between your exact departure and your
+   arrival count, followed by the turns in the night you arrive, and a lay day
+   shows the turns between 6 PM and 6 AM. It's amber when the new wind is at or
+   past your marginal wind for that side of the leg. If a row says "changes not
+   checked", for example because your passage limits aren't set, hover over it
+   for the reason. Read [Wind changes](../features/wind-changes.md) for how
+   it's judged.
 3. A day the forecast doesn't reach yet says "No forecast yet". Nothing is
    guessed for it.
 4. Choose the name in a row to see the full forecast for that place. For a

@@ -37,12 +37,15 @@ const API_ASSESSMENT = {
       leg: 0, date: "2026-11-14", verdict: "no_go", limiting: "gusts 32 kn ahead", note: "", note_kind: "",
       depart: "2026-11-14T06:30:00+10:00", depart_suggested: false, arrive: "2026-11-14T11:30:00+10:00",
       hours: 5, speed_kn: 6, current_kn: -0.8, current_note: "", not_checked: ["wave"],
+      wind_changes: { changes: [], not_checked: "" },
     },
     {
       leg: 1, date: "2026-11-15", verdict: "", limiting: "", note: "No daylight window", note_kind: "no_window",
       depart: "", depart_suggested: false, arrive: "", hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
+      wind_changes: { changes: [], not_checked: "" },
     },
   ],
+  night_winds: [],
   stops: [{ stop: 1, nights: [{ date: "2026-11-14", warning: "Gale Warning", url: "https://example.test/w" }] }],
 };
 
@@ -69,6 +72,47 @@ describe("mapAssessment progress, slack and keys", () => {
   it("reads the slack, or null when no stop has an arrive-by", () => {
     expect(mapAssessment(withProgress as never).slack).toEqual({ days: 2, stop: 2, behindDays: 1 });
     expect(mapAssessment({ ...withProgress, slack: null } as never).slack).toBeNull();
+  });
+
+  it("reads each leg's wind changes with their sectors, and what could not be checked", () => {
+    const changes = {
+      changes: [
+        { label: "Sun 2 AM", from: "N", to: "SE", speed_min_kn: 15, speed_max_kn: 20, lower_confidence: true, prominent: true, from_sector: "astern", sector: "ahead" },
+      ],
+      not_checked: "Wind changes were only checked to Sun 15 Nov 2.00 AM",
+    };
+    const a = mapAssessment({ ...withProgress, legs: [{ ...withProgress.legs[0], wind_changes: changes }, withProgress.legs[1]] } as never);
+    expect(a.legs[0].windChanges).toEqual({
+      changes: [
+        { label: "Sun 2 AM", from: "N", to: "SE", speedMinKn: 15, speedMaxKn: 20, lowerConfidence: true, prominent: true, fromSector: "astern", sector: "ahead" },
+      ],
+      notChecked: "Wind changes were only checked to Sun 15 Nov 2.00 AM",
+    });
+    // An empty reason is no reason at all, and an empty list stays empty.
+    expect(a.legs[1].windChanges).toEqual({ changes: [], notChecked: null });
+  });
+
+  it("reads a night's changes by stop and date, with no sector", () => {
+    const night = {
+      stop: 1,
+      date: "2026-11-14",
+      changes: [{ label: "Mon 4 AM", from: "N", to: "SE", speed_min_kn: 15, speed_max_kn: 20, lower_confidence: false, prominent: false, from_sector: "", sector: "" }],
+      not_checked: "Wind changes weren't checked because your passage limits aren't set (Settings → Mate → Passage limits).",
+    };
+    const a = mapAssessment({ ...withProgress, night_winds: [night] } as never);
+    expect(a.nightWinds).toEqual([
+      {
+        stop: 1,
+        date: "2026-11-14",
+        changes: [{ label: "Mon 4 AM", from: "N", to: "SE", speedMinKn: 15, speedMaxKn: 20, lowerConfidence: false, prominent: false, fromSector: null, sector: null }],
+        notChecked: "Wind changes weren't checked because your passage limits aren't set (Settings → Mate → Passage limits).",
+      },
+    ]);
+  });
+
+  it("refuses a sector it does not know rather than showing a wrong relation", () => {
+    const bad = { changes: [{ label: "2 PM", from: "N", to: "SE", speed_min_kn: 1, speed_max_kn: 2, lower_confidence: false, prominent: false, from_sector: "ahead", sector: "sideways" }], not_checked: "" };
+    expect(() => mapAssessment({ ...withProgress, legs: [{ ...withProgress.legs[0], wind_changes: bad }] } as never)).toThrow(/sideways/);
   });
 
   it("carries the reason the recorded passages could not be read", () => {
@@ -100,7 +144,8 @@ describe("mapAssessment", () => {
 describe("verdictText and currentText", () => {
   const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
     leg: 0, date: "2026-11-14", key: "k", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
-    hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [], ...over,
+    hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
+    windChanges: { changes: [], notChecked: null }, ...over,
   });
 
   it("names the limiting factor on a marginal or no-go leg", () => {

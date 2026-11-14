@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -401,7 +404,7 @@ func TestDetectWindChangesFindsTuesdaysChangeInTheLiveMooloolabaForecast(t *test
 	loc := queenslandLoc(t)
 	hourly := mooloolabaForecastHourly(t, loc)
 	now := time.Date(2026, 11, 14, 9, 0, 0, 0, loc)
-	scan := forecastWindChanges(hourly, time.Time{}, now, loc, passageLimits{}, nil)
+	scan := forecastWindChanges(hourly, time.Time{}, now, loc, passageLimits{Ahead: passageSectorLimits{WindKnNoGo: pwF(20)}}, nil)
 	got := scan.Changes
 	if scan.Problem != "" {
 		t.Fatalf("problem = %q", scan.Problem)
@@ -728,5 +731,134 @@ func TestWeatherForecast_CountsAChangeWithNoDayCard(t *testing.T) {
 	}
 	if p.WindChangesUnplaced != 1 {
 		t.Errorf("unplaced = %d, want 1", p.WindChangesUnplaced)
+	}
+}
+
+// ── get_wind_forecast carries the changes (Mate) ──
+
+// mateChangeTool runs get_wind_forecast over a north-to-south-east forecast at
+// Brisbane. now is 2026-11-14 10.00 AM there. limits is the operator's passage
+// limits, nil for a install that wires none.
+func mateChangeTool(t *testing.T, days int, limits func() (passageLimits, error)) assistantWindForecastResult {
+	t.Helper()
+	loc := queenslandLoc(t)
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, loc)
+	stub := &capturingWeatherProvider{bundle: weatherForecastBundle{Hourly: windChangeHourly(now, 60, 8), CachedAt: now}}
+	deps := assistantToolDeps{
+		now:           func() time.Time { return now },
+		weather:       func() (weatherProvider, string, error) { return stub, "capturing-weather", nil },
+		passageLimits: limits,
+	}
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":-27.4,"lon":153.0,"days":%d}`, days)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("%v: %s", err, raw)
+	}
+	return out
+}
+
+func TestGetWindForecast_ReturnsTheWindChangesFromTheSharedDetector(t *testing.T) {
+	limits := func() (passageLimits, error) {
+		return passageLimits{Ahead: passageSectorLimits{WindKnNoGo: pwF(20)}}, nil
+	}
+	got := mateChangeTool(t, 3, limits)
+	if len(got.WindChanges) != 1 {
+		t.Fatalf("changes = %+v, want the one north-to-south-east change", got.WindChanges)
+	}
+	c := got.WindChanges[0]
+	if c.From != "N" || c.To != "SE" || c.SpeedMinKn != 18 || c.SpeedMaxKn != 18 {
+		t.Errorf("change = %+v, want N to SE at 18 kn", c)
+	}
+	if !strings.HasPrefix(c.Time, "Sun 15 Nov ") {
+		t.Errorf("time = %q, want a boat-clock label on Sun 15 Nov", c.Time)
+	}
+	// 18 kn is past the 14 kn marginal wind (70% of the 20 kn no-go).
+	if !c.Prominent || c.LowerConfidence {
+		t.Errorf("change = %+v, want prominent and not lower confidence", c)
+	}
+	if got.WindChangesProblem != "" {
+		t.Errorf("problem = %q", got.WindChangesProblem)
+	}
+}
+
+func TestGetWindForecast_NoWindChangeIsAnEmptyListNotAMissingField(t *testing.T) {
+	loc := queenslandLoc(t)
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, loc)
+	var steady []weatherHourPoint
+	for h := 0; h < 48; h++ {
+		steady = append(steady, weatherHourPoint{Time: now.Add(time.Duration(h) * time.Hour), WindSpeedMS: 5, WindDirectionDeg: 0})
+	}
+	stub := &capturingWeatherProvider{bundle: weatherForecastBundle{Hourly: steady, CachedAt: now}}
+	deps := assistantToolDeps{now: func() time.Time { return now }, weather: func() (weatherProvider, string, error) { return stub, "w", nil }}
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-27.4,"lon":153.0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(raw, `"wind_changes":[]`) {
+		t.Fatalf("the field must say none were found: %s", raw)
+	}
+}
+
+func TestGetWindForecast_ChangesAreKeptWhenTheLimitsCannotBeReadAndNoneIsProminent(t *testing.T) {
+	unreadable := func() (passageLimits, error) {
+		return passageLimits{}, errors.New("assistant.passage_limits is unreadable")
+	}
+	got := mateChangeTool(t, 3, unreadable)
+	if len(got.WindChanges) != 1 || got.WindChanges[0].Prominent {
+		t.Fatalf("changes = %+v, want the change listed and not prominent", got.WindChanges)
+	}
+	if got.WindChangesProblem != "assistant.passage_limits is unreadable" {
+		t.Errorf("problem = %q: Mate must be told the changes were not judged", got.WindChangesProblem)
+	}
+	// An install that wires no limits reader says so as well.
+	if none := mateChangeTool(t, 3, nil); none.WindChangesProblem == "" || none.WindChanges[0].Prominent {
+		t.Errorf("no limits reader: problem %q changes %+v", none.WindChangesProblem, none.WindChanges)
+	}
+}
+
+func TestGetWindForecast_SaysSoWhenReadableLimitsSetNoWindNoGo(t *testing.T) {
+	unset := func() (passageLimits, error) { return passageLimits{}, nil }
+	got := mateChangeTool(t, 3, unset)
+	if len(got.WindChanges) != 1 || got.WindChanges[0].Prominent {
+		t.Fatalf("changes = %+v, want the change listed and not prominent", got.WindChanges)
+	}
+	if got.WindChangesProblem != "your passage limits aren't set (Settings → Mate → Passage limits)" {
+		t.Errorf("problem = %q: Mate must be told the changes were not judged", got.WindChangesProblem)
+	}
+}
+
+func TestGetWindForecast_SaysHowFarTheChangesWereCheckedWhenTheForecastStopsBeingHourly(t *testing.T) {
+	loc := queenslandLoc(t)
+	hourly := hourlyThenCoarse(loc)
+	now := hourly[0].Time
+	stub := &capturingWeatherProvider{bundle: weatherForecastBundle{Hourly: hourly, CachedAt: now}}
+	deps := assistantToolDeps{now: func() time.Time { return now }, weather: func() (weatherProvider, string, error) { return stub, "w", nil }}
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-27.4,"lon":153.0,"days":10}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.WindChangesCheckedTo == "" || out.WindChangesCheckedReason != windChangeCutNotHourly {
+		t.Fatalf("checked to %q because %q", out.WindChangesCheckedTo, out.WindChangesCheckedReason)
+	}
+	// Mate quotes the label as given, so it is the full form tools hand Mate
+	// ("Mon 16 Nov 11.00 PM"), not the chart axis's "Mon 16 11 PM".
+	if !regexp.MustCompile(`^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} \d{1,2}\.\d{2} [AP]M$`).MatchString(out.WindChangesCheckedTo) {
+		t.Fatalf("checked to %q, want the full day-and-clock form", out.WindChangesCheckedTo)
+	}
+}
+
+func TestGetWindForecastDefinition_DescribesTheWindChanges(t *testing.T) {
+	d := mateToolGetWindForecast.function.Description
+	for _, want := range []string{"wind_changes", "wind_changes_problem", "wind_changes_checked_to", "prominent", "lower_confidence"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("description does not mention %q", want)
+		}
 	}
 }

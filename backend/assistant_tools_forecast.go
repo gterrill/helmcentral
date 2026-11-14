@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -23,7 +24,15 @@ var mateToolGetWindForecast = mateTool{
 			"carries shelter (sheltered, partial, exposed or reef) for the direction the wind comes FROM, each day carries " +
 			"shelter_prevailing, and shelter_summary gives the sheltered and exposed arcs. " + ruleShelter + " If shelter_unavailable is " +
 			"set and your answer judges an anchorage's shelter, say shelter could not be checked and why; for an offshore or " +
-			"passage point, ignore it. " + ruleWindForecast,
+			"passage point, ignore it. wind_changes lists where one settled wind gives way to another over the " +
+			"hours read, earliest first: date, time (a finished label, quote it as given), from and to (compass " +
+			"points), speed_min_kn and speed_max_kn (the wind after the change), lower_confidence (more than about " +
+			"three days out, so say it is less certain) and prominent (the wind after reaches the operator's lowest " +
+			"marginal passage wind). An empty list means no change was found, not that the forecast is steady. " +
+			"Name a change by its two directions and time, for example N to SE around 2 PM, never as a front. If " +
+			"wind_changes_problem is set the changes were not judged against the operator's limits, so say that and " +
+			"do not call any prominent or not. If wind_changes_checked_to is set the changes were read only up to that " +
+			"time (wind_changes_checked_reason says why), so say later days were not checked. " + ruleWindForecast,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -170,6 +179,26 @@ type assistantDaySummary struct {
 	ShelterPrevailing *string `json:"shelter_prevailing,omitempty"`
 }
 
+// assistantWindChange is one wind change as Mate reads it: the shared detector's
+// output (forecastWindChanges), with the time worded on the place's clock.
+type assistantWindChange struct {
+	// Date is the place's calendar day the new wind sets in, YYYY-MM-DD; Time is
+	// the finished label, "Sun 15 Nov 6.00 AM". Quote the label as given.
+	Date string `json:"date"`
+	Time string `json:"time"`
+	windChangeFigures
+}
+
+func assistantWindChanges(changes []windChange, loc *time.Location) []assistantWindChange {
+	out := make([]assistantWindChange, 0, len(changes))
+	for _, c := range changes {
+		out = append(out, assistantWindChange{
+			Date: c.DayKey, Time: boatDayClock(c.At, loc), windChangeFigures: c.figures(),
+		})
+	}
+	return out
+}
+
 type assistantWindForecastResult struct {
 	Name string  `json:"name"`
 	Lat  float64 `json:"lat"`
@@ -191,8 +220,19 @@ type assistantWindForecastResult struct {
 	Cached            bool                  `json:"cached"`
 	CachedAt          *string               `json:"cached_at"`
 	Days              []assistantDaySummary `json:"days"`
-	Hourly            []assistantWindHour   `json:"hourly"`
-	Truncated         bool                  `json:"truncated,omitempty"`
+	// WindChanges are the forecast's wind changes from now, earliest first; [] is
+	// "none found" over the hours that were read (see WindChangesCheckedTo).
+	WindChanges []assistantWindChange `json:"wind_changes"`
+	// WindChangesProblem is why the changes were not judged against the operator's
+	// passage limits, so none is marked prominent. Empty when they were.
+	WindChangesProblem string `json:"wind_changes_problem,omitempty"`
+	// WindChangesCheckedTo and WindChangesCheckedReason say where the reading
+	// stopped when the hourly forecast ends early; both are empty when the whole
+	// forecast was read.
+	WindChangesCheckedTo     string              `json:"wind_changes_checked_to,omitempty"`
+	WindChangesCheckedReason string              `json:"wind_changes_checked_reason,omitempty"`
+	Hourly                   []assistantWindHour `json:"hourly"`
+	Truncated                bool                `json:"truncated,omitempty"`
 	// ShelterSummary and ShelterReading come from the Offline coastline
 	// around lat/lon, present only when some bearing is not open water.
 	// ShelterUnavailable is why the coastline could not be read, verbatim.
@@ -761,6 +801,22 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		cachedAt = &s
 	}
 
+	// The one detector the forecast page and the watch report use, judged against
+	// the operator's passage limits. Limits that cannot be read leave the changes
+	// listed and unmarked, and the problem rides in the result.
+	var limits passageLimits
+	limitsErr := errors.New("passage limits are not available on this install")
+	if d.passageLimits != nil {
+		limits, limitsErr = d.passageLimits()
+	}
+	scan := forecastWindChanges(bundle.Hourly, lastDayStart(bundle.Days), d.now(), place.Loc, limits, limitsErr)
+	// Mate quotes a label as given, so the point the reading stopped at is worded
+	// as every other time in a tool result, not as the chart axis words it.
+	checkedTo := ""
+	if scan.CheckedTo != "" {
+		checkedTo = boatDayClock(scan.ReadTo, place.Loc)
+	}
+
 	result := assistantWindForecastResult{
 		Name:              strings.TrimSpace(args.Name),
 		Lat:               args.Lat,
@@ -776,6 +832,11 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		CachedAt:          cachedAt,
 		Days:              win.days,
 		Hourly:            win.hourly,
+
+		WindChanges:              assistantWindChanges(scan.Changes, place.Loc),
+		WindChangesProblem:       scan.Problem,
+		WindChangesCheckedTo:     checkedTo,
+		WindChangesCheckedReason: scan.CheckedReason,
 
 		ShelterUnavailable: shelterUnavailable,
 	}

@@ -14,7 +14,7 @@ import { WindBarb, WaveDirectionArrow } from '@/components/forecast/direction-gl
 import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint, WindChange } from '@/hooks/use-weather-forecast'
-import { buildWindChangeSentence, windChangeChipText, windChangesCheckedToText } from '@/lib/forecast-wind-changes'
+import { buildWindChangeSentence, leadWindChange, windChangeChipText, windChangesCheckedToText } from '@/lib/forecast-wind-changes'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 import type { UpperAirDay, UpperAirSample, UpperAirWindow } from '@/hooks/use-upper-air'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
@@ -1626,7 +1626,7 @@ export function ForecastDrawer({
               const changes = day.windChanges
               // The chip is amber when any change that day is prominent, so it shows
               // the first prominent one, else the first.
-              const firstChange = changes.find((c) => c.prominent) ?? changes[0]
+              const firstChange = leadWindChange(changes)
               const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}${changes.map((c) => `, wind change ${c.from} to ${c.to} around ${c.label}${c.prominent ? ', reaches your marginal wind' : ''}${c.lowerConfidence ? ', less certain' : ''}`).join('')}`
 
               return (

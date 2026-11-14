@@ -155,8 +155,8 @@ type forecastSource struct {
 type tideSource func(ctx context.Context, lat, lon float64) ([]tideExtremePoint, error)
 
 const (
-	passageWindowMaxLegs        = 6
-	passageWindowMaxStayNights  = 14
+	passageWindowMaxLegs       = 6
+	passageWindowMaxStayNights = 14
 	// passageWindowMaxRoutePoints is how many points of a route the wind check
 	// is given. It judges the wind against each segment's bearing and reads one
 	// forecast per segment, so planPassageLeg keeps no more than this.
@@ -631,11 +631,51 @@ const passageWindowFetchWorkers = 4
 // ctx is checked before every provider call: once it is done no further call
 // is made and its error is returned.
 func (as *passageAssessor) prefetch(ctx context.Context, pts []passageRoutePoint) error {
-	type result struct {
-		f   passageForecast
-		err error
+	out, err := as.fetchPoints(ctx, pts)
+	if err != nil {
+		return err
 	}
-	out := make([]result, len(pts))
+	for i, r := range out {
+		if r.err != nil {
+			return r.err
+		}
+		as.cache[passagePointKey(pts[i])] = passagePointHours{hours: r.f.Hours, last: lastHour(r.f.Hours)}
+		if !r.f.FetchedAt.IsZero() && (as.fetchedAt.IsZero() || r.f.FetchedAt.Before(as.fetchedAt)) {
+			as.fetchedAt = r.f.FetchedAt
+		}
+	}
+	return nil
+}
+
+// prefetchStops fetches the forecast at stops the verdicts do not read, as
+// prefetch does. A point that cannot be fetched is left out and named in the
+// returned map, by passagePointKey; the rest are kept. Their fetch time is not
+// folded into fetchedAt, which stamps the verdicts, so a stop's older forecast
+// cannot make a leg's look older. The error is the request's, which ends them all.
+func (as *passageAssessor) prefetchStops(ctx context.Context, pts []passageRoutePoint) (map[string]error, error) {
+	out, err := as.fetchPoints(ctx, pts)
+	if err != nil {
+		return nil, err
+	}
+	failed := map[string]error{}
+	for i, r := range out {
+		if r.err != nil {
+			failed[passagePointKey(pts[i])] = r.err
+			continue
+		}
+		as.cache[passagePointKey(pts[i])] = passagePointHours{hours: r.f.Hours, last: lastHour(r.f.Hours)}
+	}
+	return failed, nil
+}
+
+type passageFetched struct {
+	f   passageForecast
+	err error
+}
+
+// fetchPoints is the fetch itself, results by index. Its error is the context's.
+func (as *passageAssessor) fetchPoints(ctx context.Context, pts []passageRoutePoint) ([]passageFetched, error) {
+	out := make([]passageFetched, len(pts))
 	sem := make(chan struct{}, passageWindowFetchWorkers)
 	var wg sync.WaitGroup
 launch:
@@ -667,18 +707,9 @@ launch:
 	}
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	for i, r := range out {
-		if r.err != nil {
-			return r.err
-		}
-		as.cache[passagePointKey(pts[i])] = passagePointHours{hours: r.f.Hours, last: lastHour(r.f.Hours)}
-		if !r.f.FetchedAt.IsZero() && (as.fetchedAt.IsZero() || r.f.FetchedAt.Before(as.fetchedAt)) {
-			as.fetchedAt = r.f.FetchedAt
-		}
-	}
-	return nil
+	return out, nil
 }
 
 func (as *passageAssessor) hoursAt(pt passageRoutePoint) (passagePointHours, error) {
