@@ -136,6 +136,26 @@ func TestSlipPlan_ADoneLegIsLeftOutAndTheShiftStartsAtTheFirstLegToDo(t *testing
 	}
 }
 
+// A passage recording from the stop leg 0 leaves means leg 0 is under way: a slip
+// adds its nights at the stop after it, leg 0 keeps its date, and it is never
+// named as the worst leg.
+func TestSlipPlan_ALegUnderWayIsNotSlippedOrNamed(t *testing.T) {
+	p, legs := slipPlan2(t, "2026-11-16T12:00") // slack 1
+	f := &paFake{fc: slipWind(), underway: &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon}}
+	got := slipsOf(context.Background(), p, legs, paDeps(f))
+	if got.Problem != "" || got.SlackDays != 1 || len(got.Slips) != 2 {
+		t.Fatalf("slips = %+v", got)
+	}
+	// Slip 1: leg 1 leaves on the 16th in 25 kn.
+	if s := got.Slips[0]; s.Leg != 1 || s.Date != "2026-11-16" || s.Verdict != "no_go" {
+		t.Fatalf("slip 1 = %+v", s)
+	}
+	// Slip 2: leg 1 leaves on the 17th. Leg 0 stays on the 14th, so it is not the worst.
+	if s := got.Slips[1]; s.Leg != 1 || s.Date != "2026-11-17" || s.LateByDays != 1 {
+		t.Fatalf("slip 2 = %+v", s)
+	}
+}
+
 func TestSlipPlan_EverythingDoneHasNothingToSlip(t *testing.T) {
 	p, legs := slipPlan2(t, "2026-11-16T12:00")
 	got := slipsOf(context.Background(), p, legs, paDeps(&paFake{progress: []string{planProgressDone, planProgressDone}}))
@@ -404,7 +424,7 @@ func TestWorstSlipLeg_NoGoThenNoDataThenMarginalThenGo(t *testing.T) {
 		for i := range c.legs {
 			c.legs[i].Leg = i
 		}
-		if got := worstSlipLeg(c.legs); got.Leg != c.want {
+		if got := worstSlipLeg(c.legs, 0); got.Leg != c.want {
 			t.Errorf("%s: leg %d, want %d", c.name, got.Leg, c.want)
 		}
 	}

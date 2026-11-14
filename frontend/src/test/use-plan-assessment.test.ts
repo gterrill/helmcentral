@@ -363,6 +363,24 @@ describe("usePlanAssessment", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
+  it("is fresh only once this mount's own read has answered, and never when that read failed", async () => {
+    let fail = false;
+    const fetchMock = vi.fn(async () => (fail ? { ok: false, status: 500, json: async () => ({ error: "boom" }) } : reply(API_ASSESSMENT)));
+    vi.stubGlobal("fetch", fetchMock);
+    const first = renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+    await waitFor(() => expect(first.result.current.fresh).toBe(true));
+    first.unmount();
+    // Back inside the cache window with the box failing: the cached verdicts are
+    // still shown, but they are not this visit's.
+    fail = true;
+    const second = renderHook(() => usePlanAssessment(mapPlan(API_PLAN as never)));
+    expect(second.result.current.fresh).toBe(false);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(second.result.current.assessment).not.toBeNull();
+    expect(second.result.current.fresh).toBe(false);
+  });
+
   it("does not ask for a plan of one stop", async () => {
     const fetchMock = vi.fn().mockResolvedValue(reply(API_ASSESSMENT));
     vi.stubGlobal("fetch", fetchMock);
