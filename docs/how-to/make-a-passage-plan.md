@@ -94,6 +94,50 @@ A leg that would run past a day says it isn't judged yet. On a lay day, the
 verdict column shows an official warning that covers that night, and stays empty
 when there isn't one.
 
+## Set an arrive-by
+
+Use this when you have to be somewhere by a certain time, such as a haul-out or
+a booking, and you want to know how much the run can slip.
+
+1. Choose **Change plan**.
+2. On the stop you have to reach, set **Arrive by** to the date and time. Any
+   stop can have one except the first, because the plan starts where the boat
+   already is. If you move or remove stops so one with an arrive-by becomes the
+   first, its row says the arrive-by will be removed when you save. Move the stop
+   back to keep it.
+3. Choose **Save plan**.
+
+A line above the table now says "Slack 1 day", which is the whole days between
+when the plan has you arriving and the day you set. If the plan already has you
+arriving later, it says "Late by 1 day" in red. If you've fallen behind, the
+line says that first, for example "Behind plan by 4 days. Late by 1 day". The
+page then works out your arrival as if the rest of the plan starts from today,
+not from the dates you saved, so a plan you haven't kept up with doesn't claim
+slack you've already used. A long leg you left on time and are still sailing isn't
+counted as late. Below the slack, the page lists
+what slipping the plan would meet, one day at a time, and names the worst leg
+for each, for example "Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
+ahead, No-Go (late by 1 day)". The slips take a little longer than the table, so
+they turn up after it. To clear an arrive-by, empty the field and save.
+
+## Follow the plan as you sail it
+
+You don't mark anything off. Helmcentral reads the passages it records.
+
+1. A leg reads **Done** once a recorded passage ends within one and a half
+   nautical miles of its destination, any time after the plan's first day, so a
+   leg you sail early counts. The passage has to start at the last stop you
+   reached, and a passage still being recorded counts once it ends. If you sail past a stop and end at a later one, that stop and the legs into it read
+   **Skipped**. Done and Skipped rows are dimmed and left out of the slips.
+2. If it's a leg's sailing day, an hour has gone by since the time you set to
+   leave, and the boat is still at the stop, the row says "Planned to leave
+   today" and names the stop you're still at. Choose **Slip a day** to add a night at that stop and
+   move every later date. If you'd rather stay as planned, ignore it. Nothing
+   moves on its own.
+3. When you open a plan, a leg whose verdict is different from last time reads
+   "was Go, now Marginal" under its verdict. The marks stay until you leave the
+   page, and then the next visit starts from what you saw this time.
+
 ## Change or delete a plan
 
 1. Choose **Change plan** to edit it, or **Delete plan** to remove it.

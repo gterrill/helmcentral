@@ -15,7 +15,7 @@ const API_PLAN = {
   last_date: "2026-11-15",
   stops: [
     { name: "A", lat: -25.5, lon: 152.9, arrive: "2026-11-14", nights: 1, depart: "2026-11-15", vias: null, depart_time: "06:30", timezone: "Australia/Brisbane" },
-    { name: "B", lat: -26, lon: 153, arrive: "2026-11-15", nights: 0, depart: "2026-11-15", vias: [], depart_time: "", timezone: "Australia/Brisbane" },
+    { name: "B", lat: -26, lon: 153, arrive: "2026-11-15", nights: 0, depart: "2026-11-15", vias: [], depart_time: "", arrive_by: "2026-11-16T17:00", timezone: "Australia/Brisbane" },
   ],
 };
 
@@ -26,12 +26,18 @@ describe("plan mapping", () => {
     expect(plan.stops[0]).toMatchObject({ vias: [], departTime: "06:30", depart: "2026-11-15" });
   });
 
+  it("reads an arrive-by, and a stop with none as the empty string", () => {
+    const plan = mapPlan(API_PLAN as never);
+    expect(plan.stops[1].arriveBy).toBe("2026-11-16T17:00");
+    expect(plan.stops[0].arriveBy).toBe("");
+  });
+
   it("sends the editor's fields in the wire shape and no server-owned ones", () => {
     const body = planToApi({
       name: "Run",
-      stops: [{ name: "A", lat: 1, lon: 2, arrive: "2026-11-14", nights: 1, vias: [], departTime: "06:30" }],
+      stops: [{ name: "A", lat: 1, lon: 2, arrive: "2026-11-14", nights: 1, vias: [], departTime: "06:30", arriveBy: "2026-11-20T17:00" }],
     });
-    expect(body.stops[0]).toEqual({ name: "A", lat: 1, lon: 2, arrive: "2026-11-14", nights: 1, vias: [], depart_time: "06:30" });
+    expect(body.stops[0]).toEqual({ name: "A", lat: 1, lon: 2, arrive: "2026-11-14", nights: 1, vias: [], depart_time: "06:30", arrive_by: "2026-11-20T17:00" });
   });
 
   it("gives a leg that could not be routed no distance and no course, only its error", () => {

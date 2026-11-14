@@ -56,6 +56,7 @@ const toDraft = (plan: Plan): EditorStop[] =>
     nights: s.nights,
     vias: s.vias,
     departTime: s.departTime,
+    arriveBy: s.arriveBy,
   }));
 
 /**
@@ -219,7 +220,25 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
                         />
                       </Field>
                     )}
+                    {i > 0 && (
+                      <Field className="w-52">
+                        <FieldLabel htmlFor={`plan-arrive-by-${i}`}>Arrive by</FieldLabel>
+                        <Input
+                          id={`plan-arrive-by-${i}`}
+                          type="datetime-local"
+                          value={stop.arriveBy}
+                          onChange={(e) => patchStop(i, { arriveBy: e.target.value })}
+                        />
+                      </Field>
+                    )}
                   </div>
+
+                  {i === 0 && stop.arriveBy !== "" && (
+                    <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+                      The first stop can&apos;t have an arrive-by, so this one will be removed when you
+                      save. Move the stop back to keep it.
+                    </p>
+                  )}
 
                   {!last && (
                     <div className="space-y-1.5">
@@ -261,12 +280,13 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
               id="plan-add-stop"
               placeholder="A marina, harbour or bay"
               onPick={(c) =>
-                setStops((all) => [...all, { id: newStopId(), name: c.name, lat: c.lat, lon: c.lon, nights: all.length === 0 ? 1 : 0, vias: [], departTime: "" }])
+                setStops((all) => [...all, { id: newStopId(), name: c.name, lat: c.lat, lon: c.lon, nights: all.length === 0 ? 1 : 0, vias: [], departTime: "", arriveBy: "" }])
               }
             />
             <FieldDescription>
               Dates are local to each place. The forecast reaches about ten days ahead; later
-              days read &ldquo;No forecast yet&rdquo;.
+              days read &ldquo;No forecast yet&rdquo;. An arrive-by is the latest you want to be
+              at a stop; the plan then shows its slack.
             </FieldDescription>
           </Field>
 

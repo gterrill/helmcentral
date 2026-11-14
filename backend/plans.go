@@ -71,6 +71,9 @@ type planStop struct {
 	// DepartTime is the operator's departure time for the leg leaving this
 	// stop, "HH:MM" at this stop, or "" when none is set. Empty on the last stop.
 	DepartTime string `json:"depart_time"`
+	// ArriveBy is the latest the operator wants to be here, "YYYY-MM-DDTHH:MM" at
+	// this stop, or "" when there is none (ADR 0288). Any stop may carry one.
+	ArriveBy string `json:"arrive_by"`
 	// Depart and Timezone are worked out on every read and ignored on a write.
 	Depart   string `json:"depart"`
 	Timezone string `json:"timezone"`
@@ -125,7 +128,13 @@ func createPlansSchema(db *sql.DB) error {
 			return fmt.Errorf("create plans schema: %w", err)
 		}
 	}
-	return nil
+	if err := ensureColumn(db, "plan_stops", "arrive_by", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := createPlanSeenSchema(db); err != nil {
+		return err
+	}
+	return createPlanFirstSuggestionSchema(db)
 }
 
 // ── dates ───────────────────────────────────────────────────────────────
@@ -248,6 +257,12 @@ func normaliseStop(s *planStop, i, last int) *planError {
 	}
 	if s.DepartTime != "" && !planTimePattern.MatchString(s.DepartTime) {
 		return perr("depart_time", "stop %d: departure time must be HH:MM", n)
+	}
+	if i == 0 && s.ArriveBy != "" {
+		return perr("arrive_by", "the plan starts where the boat is, so the first stop has no arrive-by")
+	}
+	if e := checkArriveBy(s.ArriveBy, n); e != nil {
+		return e
 	}
 	if i == last {
 		if len(s.Vias) > 0 {
@@ -415,6 +430,21 @@ func planZones(p plan) (zones []placeZone, stop int, err error) {
 	return zones, -1, nil
 }
 
+// planStopZone is the zone decoratePlan worked out for stop i, read from the
+// stop. A plan that was not decorated, or a zone that cannot be loaded, is an
+// error: a stop's day is never worked out in a guessed zone.
+func planStopZone(p plan, i int) (placeZone, error) {
+	s := p.Stops[i]
+	if s.Timezone == "" {
+		return placeZone{}, fmt.Errorf("the time zone at %s was not worked out", s.Name)
+	}
+	z, err := zoneAtName(s.Timezone)
+	if err != nil {
+		return placeZone{}, fmt.Errorf("the time zone at %s could not be loaded: %w", s.Name, err)
+	}
+	return z, nil
+}
+
 // decoratePlan adds what is worked out on every read: status, first and last
 // dates, each stop's departure date and its zone. A position with no zone is
 // an error, not UTC.
@@ -461,7 +491,7 @@ func loadPlan(q sqlQueryer, id int64) (plan, bool, error) {
 	}
 	c, u := time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
 	p.CreatedAt, p.UpdatedAt = &c, &u
-	rows, err := q.Query(`SELECT name, lat, lon, arrive, nights, vias, depart_time FROM plan_stops WHERE plan_id = ? ORDER BY position`, id)
+	rows, err := q.Query(`SELECT name, lat, lon, arrive, nights, vias, depart_time, arrive_by FROM plan_stops WHERE plan_id = ? ORDER BY position`, id)
 	if err != nil {
 		return plan{}, false, fmt.Errorf("get plan stops: %w", err)
 	}
@@ -470,7 +500,7 @@ func loadPlan(q sqlQueryer, id int64) (plan, bool, error) {
 	for rows.Next() {
 		var s planStop
 		var vias string
-		if err := rows.Scan(&s.Name, &s.Lat, &s.Lon, &s.Arrive, &s.Nights, &vias, &s.DepartTime); err != nil {
+		if err := rows.Scan(&s.Name, &s.Lat, &s.Lon, &s.Arrive, &s.Nights, &vias, &s.DepartTime, &s.ArriveBy); err != nil {
 			return plan{}, false, fmt.Errorf("scan plan stop: %w", err)
 		}
 		if err := decodeStopVias(id, &s, vias); err != nil {
@@ -507,8 +537,8 @@ func writePlanStops(tx *sql.Tx, id int64, stops []planStop) error {
 		if err != nil {
 			return fmt.Errorf("encode via places: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO plan_stops (plan_id, position, name, lat, lon, arrive, nights, vias, depart_time)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, i, s.Name, s.Lat, s.Lon, s.Arrive, s.Nights, string(vias), s.DepartTime); err != nil {
+		if _, err := tx.Exec(`INSERT INTO plan_stops (plan_id, position, name, lat, lon, arrive, nights, vias, depart_time, arrive_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, i, s.Name, s.Lat, s.Lon, s.Arrive, s.Nights, string(vias), s.DepartTime, s.ArriveBy); err != nil {
 			return fmt.Errorf("save plan stop: %w", err)
 		}
 	}
@@ -562,7 +592,7 @@ func (s *documentStore) ListPlans() ([]plan, error) {
 	// stops has one row with a NULL position.
 	rows, err := s.db.Query(`SELECT p.id, p.name, p.created_at, p.updated_at, s.position,
 			COALESCE(s.name, ''), COALESCE(s.lat, 0), COALESCE(s.lon, 0), COALESCE(s.arrive, ''),
-			COALESCE(s.nights, 0), COALESCE(s.vias, '[]'), COALESCE(s.depart_time, '')
+			COALESCE(s.nights, 0), COALESCE(s.vias, '[]'), COALESCE(s.depart_time, ''), COALESCE(s.arrive_by, '')
 		FROM plans p LEFT JOIN plan_stops s ON s.plan_id = p.id
 		ORDER BY p.id, s.position`)
 	if err != nil {
@@ -577,7 +607,7 @@ func (s *documentStore) ListPlans() ([]plan, error) {
 		var st planStop
 		var vias string
 		if err := rows.Scan(&id, &name, &created, &updated, &position,
-			&st.Name, &st.Lat, &st.Lon, &st.Arrive, &st.Nights, &vias, &st.DepartTime); err != nil {
+			&st.Name, &st.Lat, &st.Lon, &st.Arrive, &st.Nights, &vias, &st.DepartTime, &st.ArriveBy); err != nil {
 			return nil, fmt.Errorf("list plans: %w", err)
 		}
 		if len(out) == 0 || out[len(out)-1].ID != id {
@@ -690,6 +720,12 @@ func (s *documentStore) DeletePlan(id int64) (bool, error) {
 	found := false
 	err := s.runTxLocked("delete plan", func(tx *sql.Tx, _ time.Time) error {
 		if _, err := tx.Exec(`DELETE FROM plan_stops WHERE plan_id = ?`, id); err != nil {
+			return fmt.Errorf("delete plan: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM plan_verdicts_seen WHERE plan_id = ?`, id); err != nil {
+			return fmt.Errorf("delete plan: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM plan_first_suggestions WHERE plan_id = ?`, id); err != nil {
 			return fmt.Errorf("delete plan: %w", err)
 		}
 		res, err := tx.Exec(`DELETE FROM plans WHERE id = ?`, id)
@@ -1035,6 +1071,27 @@ func planLegsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"legs": planLegs(c.Request().Context(), p)})
 }
 
+// loadDecoratedPlan finds the plan named in the request and dates it as at now,
+// or answers for it: ok is false and err is what the handler returns.
+func loadDecoratedPlan(c echo.Context, now time.Time) (d plan, ok bool, err error) {
+	id, ok := planIDParam(c)
+	if !ok {
+		return plan{}, false, planNotFound(c)
+	}
+	p, found, err := globalDocumentStore.GetPlan(id)
+	if err != nil {
+		return plan{}, false, writeDocumentError(c, err)
+	}
+	if !found {
+		return plan{}, false, planNotFound(c)
+	}
+	d, err = decoratePlan(p, now)
+	if err != nil {
+		return plan{}, false, planZoneError(c, err)
+	}
+	return d, true, nil
+}
+
 // plansRoutes returns the /api routes for passage plans. Each row carries its
 // own auth tier (docs/adr/0177).
 func plansRoutes() []apiRoute {
@@ -1047,5 +1104,8 @@ func plansRoutes() []apiRoute {
 		{http.MethodPatch, "/api/plans/:id/stops/:index", tierWrite, patchPlanStopHandler},
 		{http.MethodGet, "/api/plans/:id/legs", tierRead, planLegsHandler},
 		{http.MethodGet, "/api/plans/:id/assessment", tierRead, planAssessmentHandler},
+		{http.MethodGet, "/api/plans/:id/slips", tierRead, planSlipsHandler},
+		{http.MethodGet, "/api/plans/:id/seen", tierRead, planSeenGetHandler},
+		{http.MethodPut, "/api/plans/:id/seen", tierWrite, planSeenPutHandler},
 	}
 }

@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
+import { ASSESSMENT_DEBOUNCE_MS, assessmentShape, useSettledShape } from "@/hooks/use-plan-shape";
 import { PLANS_PATH } from "@/hooks/use-plans";
 import { invalidateQueries, useApiQuery } from "@/lib/api-query";
-import type { LegVerdict, Plan, PlanAssessment, PlanLegAssessment, PlanNoteKind } from "@/lib/plans";
+import { mapLegResult, type LegResultApi, type Plan, type PlanAssessment, type PlanLegAssessment } from "@/lib/plans";
+
+export { ASSESSMENT_DEBOUNCE_MS };
 
 // The plan's verdicts, worked out on the server with Mate's passage rules and
 // the operator's passage limits (ADR 0286). Asked again on the forecast's own
@@ -12,16 +15,10 @@ import type { LegVerdict, Plan, PlanAssessment, PlanLegAssessment, PlanNoteKind 
 // until the answer for the edited plan lands there is no assessment, and the
 // table reads "…" where a verdict goes.
 
-/** How long the plan must hold still before the verdicts are asked for again. */
-export const ASSESSMENT_DEBOUNCE_MS = 500;
-
-interface PlanLegAssessmentApi {
-  leg: number;
-  date: string;
-  verdict: string;
-  limiting: string;
-  note: string;
-  note_kind: string;
+interface PlanLegAssessmentApi extends LegResultApi {
+  key?: string;
+  progress?: string;
+  still_in_port?: boolean;
   depart: string;
   depart_suggested: boolean;
   arrive: string;
@@ -37,24 +34,18 @@ interface PlanAssessmentApi {
   forecast_as_of: string;
   problem: string;
   warnings_error: string;
+  progress_error?: string;
+  slack?: { days: number; stop: number; behind_days: number } | null;
   legs: PlanLegAssessmentApi[] | null;
   stops: Array<{ stop: number; nights: Array<{ date: string; warning: string; url: string }> | null }> | null;
 }
 
-const VERDICTS: readonly string[] = ["go", "marginal", "no_go", "no_data"];
-const NOTE_KINDS: readonly string[] = [
-  "problem", "no_forecast", "not_routed", "past", "overnight", "no_window", "window_passed", "no_departure", "gap", "other",
-];
-
 function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
   return {
-    leg: l.leg,
-    date: l.date,
-    verdict: VERDICTS.includes(l.verdict) ? (l.verdict as LegVerdict) : null,
-    limiting: l.limiting,
-    note: l.note,
-    // A kind this page does not know is still a note to read, as "other".
-    noteKind: l.note_kind === "" ? "" : NOTE_KINDS.includes(l.note_kind) ? (l.note_kind as PlanNoteKind) : "other",
+    ...mapLegResult(l),
+    key: l.key ?? "",
+    progress: l.progress === "done" || l.progress === "skipped" ? l.progress : "",
+    stillInPort: l.still_in_port === true,
     depart: l.depart === "" ? null : l.depart,
     departSuggested: l.depart_suggested,
     arrive: l.arrive === "" ? null : l.arrive,
@@ -72,46 +63,20 @@ export function mapAssessment(raw: PlanAssessmentApi): PlanAssessment {
     forecastAsOf: raw.forecast_as_of === "" ? null : raw.forecast_as_of,
     problem: raw.problem,
     warningsError: raw.warnings_error,
+    progressError: raw.progress_error ?? "",
+    slack: raw.slack ? { days: raw.slack.days, stop: raw.slack.stop, behindDays: raw.slack.behind_days } : null,
     legs: (raw.legs ?? []).map(mapLegAssessment),
     stops: (raw.stops ?? []).map((s) => ({ stop: s.stop, nights: s.nights ?? [] })),
   };
 }
 
 /**
- * Everything about a plan that changes a verdict: places, vias, dates, nights
- * and departure times. A change to any of them asks again; the forecast's
- * refresh interval asks again on its own.
- */
-const assessmentShape = (plan: Plan) =>
-  JSON.stringify(
-    plan.stops.map((s) => [s.name, s.lat, s.lon, s.arrive, s.nights, s.departTime, s.vias.map((v) => [v.name, v.lat, v.lon])]),
-  );
-
-/**
- * The plan's shape once it has held still for `delayMs`. Another plan is not an
- * edit and is taken at once.
- */
-function useSettledShape(planId: number, shape: string, delayMs: number): string {
-  const [settled, setSettled] = useState({ planId, shape });
-  useEffect(() => {
-    if (settled.planId === planId && settled.shape === shape) return;
-    if (settled.planId !== planId) {
-      setSettled({ planId, shape });
-      return;
-    }
-    const timer = setTimeout(() => setSettled({ planId, shape }), delayMs);
-    return () => clearTimeout(timer);
-  }, [planId, shape, settled, delayMs]);
-  return settled.planId === planId ? settled.shape : shape;
-}
-
-/**
- * Asks every mounted plan assessment again, whatever its plan: the verdicts
- * depend on the passage limits, which are saved outside the plan. The plan
- * queries that are not an assessment are left alone.
+ * Asks every mounted plan assessment, and every mounted slip price, again,
+ * whatever its plan: the verdicts depend on the passage limits, which are saved
+ * outside the plan. The plan queries that are neither are left alone.
  */
 export function invalidatePlanAssessments(): Promise<void> {
-  return invalidateQueries([PLANS_PATH], (key) => key[2] !== "assessment");
+  return invalidateQueries([PLANS_PATH], (key) => key[2] !== "assessment" && key[2] !== "slips");
 }
 
 export function usePlanAssessment(plan: Plan | null) {
@@ -138,6 +103,8 @@ export function usePlanAssessment(plan: Plan | null) {
   const failure = current && error ? error.message || "Failed to check the plan against the forecast" : null;
   return {
     assessment,
+    /** The plan's shape the answer is for: what the slips are asked for too. */
+    shape: settled,
     /** The check for the plan as it stands has not answered yet. */
     loading: plan !== null && assessment === null && failure === null,
     error: failure,

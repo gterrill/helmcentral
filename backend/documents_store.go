@@ -279,6 +279,9 @@ type documentStore struct {
 	path string
 	// lockWaitHook is a test seam: nil in production (store_tx.go).
 	lockWaitHook func()
+	// firstSuggestionsPrunedOn is the day the old first suggestions were last
+	// cleared, so a request does not clear them again (plans_firstsuggest.go).
+	firstSuggestionsPrunedOn string
 }
 
 // createDocumentsSchema creates every documents-store table, index and FTS5

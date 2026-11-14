@@ -4,6 +4,7 @@ import { deepMergeSettings, useSettingsForm } from '@/hooks/use-settings-form'
 import { useOfflineCoastline } from '@/hooks/use-offline-coastline'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { usePlanAssessment } from '@/hooks/use-plan-assessment'
+import { usePlanSlips } from '@/hooks/use-plan-slips'
 import { mapPlan } from '@/hooks/use-plans'
 import { stubApi, type StubRequest } from '@/test/helpers/stub-api'
 
@@ -70,6 +71,25 @@ describe('useSettingsForm', () => {
 
     await act(async () => { await form.result.current.save({ assistant: { passage_limits: { ahead: { wind_kn_no_go: 20 } } } }) })
     await waitFor(() => expect(assessments).toBe(2))
+  })
+
+  it('saving passage limits prices a mounted plan slips again too', async () => {
+    let slips = 0
+    stubApi({
+      'GET /api/settings': { assistant: {} },
+      'POST /api/settings': (req: StubRequest) => req.body,
+      'GET /api/plans/7/slips': () => {
+        slips += 1
+        return { problem: '', capped: false, slips: [] }
+      },
+    })
+    renderHook(() => usePlanSlips(7, 'shape'))
+    const form = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(slips).toBe(1))
+    await waitFor(() => expect(form.result.current.loading).toBe(false))
+
+    await act(async () => { await form.result.current.save({ assistant: { passage_limits: { ahead: { wind_kn_no_go: 20 } } } }) })
+    await waitFor(() => expect(slips).toBe(2))
   })
 
   it('reports loaded only when a settings read succeeded', async () => {

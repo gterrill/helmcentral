@@ -1,6 +1,6 @@
 import { circularMeanDegOrNull } from "@/lib/boat-model";
 import { shortTurn } from "@/lib/replay-camera";
-import { addDaysISO, daysBetweenISO } from "@/lib/stay";
+import { addDaysISO, daysBetweenISO, formatWeekday } from "@/lib/stay";
 
 // Passage plans: the operator's intended run, stop by stop. The server owns
 // the date rule (every arrival after the first is the stop before's arrival
@@ -26,6 +26,8 @@ export interface PlanStop {
   vias: PlanVia[];
   /** Operator's departure time for the leg leaving this stop, HH:MM; "" when none. */
   departTime: string;
+  /** Latest the operator wants to be here, "YYYY-MM-DDTHH:MM" at the stop; "" when none. */
+  arriveBy: string;
   /** IANA zone at the stop; the server works it out. */
   timezone: string;
 }
@@ -48,7 +50,7 @@ export interface Plan {
 export interface PlanInput {
   name: string;
   stops: Array<
-    Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias" | "departTime"> & { arrive?: string }
+    Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias" | "departTime" | "arriveBy"> & { arrive?: string }
   >;
 }
 
@@ -73,36 +75,85 @@ export interface PlanLeg {
   moved: Array<{ stop: string; nm: number }>;
 }
 
-export type LegVerdict = "go" | "marginal" | "no_go" | "no_data";
+export const VERDICTS = ["go", "marginal", "no_go", "no_data"] as const;
+export type LegVerdict = (typeof VERDICTS)[number];
+
+/** The verdict a wire string names, null for none (or one this page does not know). */
+export const parseVerdict = (v: string): LegVerdict | null =>
+  (VERDICTS as readonly string[]).includes(v) ? (v as LegVerdict) : null;
+
+/** How bad a verdict is, for ranking and for the direction of a change. */
+export const VERDICT_ORDER: Record<LegVerdict, number> = { go: 0, marginal: 1, no_data: 2, no_go: 3 };
+
+/** The operator's name for each verdict. */
+export const VERDICT_LABEL: Record<LegVerdict, string> = {
+  go: "Go",
+  marginal: "Marginal",
+  no_go: "No-Go",
+  no_data: "No data",
+};
+
+/** Whether a verdict is stated with the figure that decided it. */
+const namesLimit = (v: LegVerdict) => v === "marginal" || v === "no_go";
+
+const NOTE_KINDS = [
+  "problem", "no_forecast", "not_routed", "past", "overnight", "no_window", "window_passed", "no_departure", "gap", "other",
+] as const;
 
 /**
  * What sort of reason a leg's note is, sent by the server so the table never
  * reads the words. "problem" is the one thing said above the table for the
  * whole plan; "no_forecast" is a day past the forecast; "" is no note.
  */
-export type PlanNoteKind =
-  | ""
-  | "problem"
-  | "no_forecast"
-  | "not_routed"
-  | "past"
-  | "overnight"
-  | "no_window"
-  | "window_passed"
-  | "no_departure"
-  | "gap"
-  | "other";
+export type PlanNoteKind = "" | (typeof NOTE_KINDS)[number];
+
+/** The note kind a wire string names; one this page does not know is still a note to read, as "other". */
+export const parseNoteKind = (v: string): PlanNoteKind =>
+  v === "" ? "" : (NOTE_KINDS as readonly string[]).includes(v) ? (v as PlanNoteKind) : "other";
+
+/** What the recorded passages say of a leg: "" still to do. */
+export type LegProgress = "" | "done" | "skipped";
+
+/** The operator's word for a leg the boat has done or passed by. */
+export const PROGRESS_LABEL: Record<Exclude<LegProgress, "">, string> = { done: "Done", skipped: "Skipped" };
+
+/** The wire fields a leg's result is read from, in an assessment and in a slip alike. */
+export interface LegResultApi {
+  leg: number;
+  date: string;
+  verdict: string;
+  limiting: string;
+  note: string;
+  note_kind: string;
+}
+
+/** A leg's result from the wire: where, what verdict, why. */
+export function mapLegResult(l: LegResultApi): Pick<PlanLegAssessment, "leg" | "date" | "verdict" | "limiting" | "note" | "noteKind"> {
+  return {
+    leg: l.leg,
+    date: l.date,
+    verdict: parseVerdict(l.verdict),
+    limiting: l.limiting,
+    note: l.note,
+    noteKind: parseNoteKind(l.note_kind),
+  };
+}
 
 /**
  * A leg's verdict and the figures beside it, from the server's assessment
  * (ADR 0286). `verdict` is null when the leg has none and `note` says why.
  * `depart` and `arrive` are instants; `departSuggested` marks a departure the
  * operator did not set. `currentKn` is positive when the current helps the boat,
- * null when it could not be read.
+ * null when it could not be read. `key` names the leg across edits for the change
+ * marks, `progress` is Done or Skipped from the recorded passages, and
+ * `stillInPort` says the boat should have left by now (ADR 0288).
  */
 export interface PlanLegAssessment {
   leg: number;
   date: string;
+  key: string;
+  progress: LegProgress;
+  stillInPort: boolean;
   verdict: LegVerdict | null;
   limiting: string;
   note: string;
@@ -133,8 +184,104 @@ export interface PlanAssessment {
   problem: string;
   /** Why warnings could not be read; empty when they could. */
   warningsError: string;
+  /** Why the recorded passages could not be read; empty when they could. */
+  progressError: string;
+  /** Room before the tightest arrive-by still ahead; null when no stop has one. */
+  slack: PlanSlack | null;
   legs: PlanLegAssessment[];
   stops: Array<{ stop: number; nights: PlanStopWarning[] }>;
+}
+
+/**
+ * Whole days between a stop's arrival and its arrive-by; negative when late. A
+ * plan that has fallen behind is counted on its dates moved forward to today.
+ */
+export interface PlanSlack {
+  days: number;
+  /** The stop whose arrive-by sets it. */
+  stop: number;
+  /** How many days the plan has fallen behind its dates; 0 when it is on time. */
+  behindDays: number;
+}
+
+const plural = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+
+/**
+ * "Slack 1 day", or "Late by 2 days" once the plan is past its arrive-by. A plan
+ * that has fallen behind says so first: "Behind plan by 4 days. Late by 1 day".
+ */
+export function slackText(slack: PlanSlack): { text: string; late: boolean } {
+  const behind = slack.behindDays > 0 ? `Behind plan by ${plural(slack.behindDays)}. ` : "";
+  if (slack.days < 0) return { text: `${behind}Late by ${plural(-slack.days)}`, late: true };
+  return { text: `${behind}Slack ${plural(slack.days)}`, late: false };
+}
+
+/**
+ * What slipping the plan N days meets: the worst leg after the shift. `verdict`
+ * is null when that leg has none and `note` says why.
+ */
+export type PlanSlip = Pick<PlanLegAssessment, "leg" | "date" | "verdict" | "limiting" | "note" | "noteKind"> & {
+  days: number;
+  /** Days past the arrive-by the slip puts the plan; 0 while it still makes it. */
+  lateByDays: number;
+};
+
+export interface PlanSlips {
+  /** The one thing that stopped the slips being priced. */
+  problem: string;
+  /** The slack runs past the forecast's reach and the slips stop there. */
+  capped: boolean;
+  slips: PlanSlip[];
+}
+
+/**
+ * "Slip 1 day: Manly → Boat Works Wed, Go." or "Slip 2 days: Mooloolaba → Manly
+ * Thu meets wind 18 kn ahead, No-Go (late by 1 day)."
+ */
+export function slipText(slip: PlanSlip, plan: { stops: Array<Pick<PlanStop, "name">> }): string {
+  const from = plan.stops[slip.leg];
+  const to = plan.stops[slip.leg + 1];
+  const late = slip.lateByDays > 0 ? ` (late by ${plural(slip.lateByDays)})` : "";
+  const lead = `Slip ${plural(slip.days)}: `;
+  if (!from || !to) return `${lead}${slip.note || "Not checked"}${late}.`;
+  const where = `${from.name} → ${to.name} ${formatWeekday(slip.date)}`;
+  if (slip.verdict === null) return `${lead}${where}: ${slip.note || "Not checked"}${late}.`;
+  const meets = slip.limiting && namesLimit(slip.verdict) ? ` meets ${slip.limiting}` : "";
+  return `${lead}${where}${meets}, ${VERDICT_LABEL[slip.verdict]}${late}.`;
+}
+
+/** A leg's verdict level as it was last seen and as it is now. */
+export interface ChangeMark {
+  was: LegVerdict;
+  now: LegVerdict;
+}
+
+/** "was Go, now Marginal". */
+export function changeMarkText(mark: ChangeMark): string {
+  return `was ${VERDICT_LABEL[mark.was]}, now ${VERDICT_LABEL[mark.now]}`;
+}
+
+/**
+ * The legs whose verdict level differs from the one last seen, by leg key. Only
+ * the level counts: a moved limiting factor under the same verdict is no change,
+ * and a leg with no earlier or no current verdict has none to compare.
+ */
+export function changeMarks(
+  previous: Array<{ key: string; verdict: LegVerdict }>,
+  legs: PlanLegAssessment[],
+): Map<string, ChangeMark> {
+  const was = new Map(previous.map((p) => [p.key, p.verdict]));
+  const marks = new Map<string, ChangeMark>();
+  for (const l of legs) {
+    const before = was.get(l.key);
+    if (before && l.verdict && before !== l.verdict) marks.set(l.key, { was: before, now: l.verdict });
+  }
+  return marks;
+}
+
+/** The verdicts to save as the ones last seen: only legs that have one. */
+export function currentVerdicts(legs: PlanLegAssessment[]): Array<{ key: string; verdict: LegVerdict }> {
+  return legs.flatMap((l) => (l.verdict ? [{ key: l.key, verdict: l.verdict }] : []));
 }
 
 /**
@@ -143,18 +290,9 @@ export interface PlanAssessment {
  * has neither.
  */
 export function verdictText(leg: Pick<PlanLegAssessment, "verdict" | "limiting" | "note">): string | null {
-  switch (leg.verdict) {
-    case "go":
-      return "Go";
-    case "marginal":
-      return leg.limiting ? `Marginal: ${leg.limiting}` : "Marginal";
-    case "no_go":
-      return leg.limiting ? `No-Go: ${leg.limiting}` : "No-Go";
-    case "no_data":
-      return "No data";
-    default:
-      return leg.note === "" ? null : leg.note;
-  }
+  if (leg.verdict === null) return leg.note === "" ? null : leg.note;
+  const label = VERDICT_LABEL[leg.verdict];
+  return leg.limiting && namesLimit(leg.verdict) ? `${label}: ${leg.limiting}` : label;
 }
 
 /** "0.8 kn hindering", "1.0 kn helping", "0.0 kn" when it rounds to nothing. */
@@ -395,7 +533,7 @@ export function previewArrivals(firstArrive: string, nights: number[]): string[]
 }
 
 /** A stop as the editor holds it, before it is saved. */
-export type DraftStop = Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias" | "departTime">;
+export type DraftStop = Pick<PlanStop, "name" | "lat" | "lon" | "nights" | "vias" | "departTime" | "arriveBy">;
 
 /**
  * The draft as the server takes it. No leg leaves the last stop, so it carries
@@ -415,6 +553,8 @@ export function draftToInput(name: string, firstArrive: string, stops: DraftStop
         nights: s.nights,
         vias: last ? [] : s.vias,
         departTime: last ? "" : s.departTime,
+        // The plan starts where the boat is: the first stop has no arrive-by.
+        arriveBy: i === 0 ? "" : s.arriveBy,
       };
     }),
   };

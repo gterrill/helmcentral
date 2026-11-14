@@ -1,22 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { PlanTable } from "@/components/plan-table";
 import { usePlanAssessment } from "@/hooks/use-plan-assessment";
+import { usePlanChangeMarks } from "@/hooks/use-plan-change-marks";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
+import { usePlanSlips } from "@/hooks/use-plan-slips";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
 import type { Plan, PlanAssessment, PlanLeg, PlanLegAssessment } from "@/lib/plans";
 
 vi.mock("@/hooks/use-plan-assessment");
 vi.mock("@/hooks/use-plan-day-forecast");
+vi.mock("@/hooks/use-plan-slips");
+vi.mock("@/hooks/use-plan-change-marks");
 vi.mock("@/hooks/use-weather-forecast");
 vi.mock("@/hooks/use-wave-forecast");
 vi.mock("@/components/plan-leg-map", () => ({ PlanLegMap: () => <div data-testid="leg-map" /> }));
 
 const zone = "Australia/Brisbane";
 const stop = (name: string, arrive: string, nights: number, depart: string, extra = {}) => ({
-  name, lat: -27, lon: 153, arrive, nights, depart, vias: [], departTime: "", timezone: zone, ...extra,
+  name, lat: -27, lon: 153, arrive, nights, depart, vias: [], departTime: "", arriveBy: "", timezone: zone, ...extra,
 });
 
 // A on the 14th, two nights at B (the 14th and 15th), C on the 16th.
@@ -38,7 +42,7 @@ const leg = (from: number): PlanLeg => ({
 });
 
 const legAssessment = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
-  leg: 0, date: "2026-11-14", verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
+  leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
   hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [], ...over,
 });
 
@@ -47,14 +51,20 @@ const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
   forecastAsOf: "2026-11-13T19:12:00Z",
   problem: "",
   warningsError: "",
-  legs: [legAssessment({}), legAssessment({ leg: 1, date: "2026-11-16" })],
+  progressError: "",
+  slack: null,
+  legs: [legAssessment({}), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })],
   stops: [],
   ...over,
 });
 
-function show(a: PlanAssessment | null, opts: { error?: string | null } = {}) {
+function show(
+  a: PlanAssessment | null,
+  opts: { error?: string | null; canWrite?: boolean; onAddNight?: (i: number) => void } = {},
+) {
   vi.mocked(usePlanAssessment).mockReturnValue({
     assessment: a,
+    shape: "shape",
     loading: a === null && !opts.error,
     error: opts.error ?? null,
   });
@@ -64,11 +74,11 @@ function show(a: PlanAssessment | null, opts: { error?: string | null } = {}) {
       legs={[leg(0), leg(1)]}
       legsLoading={false}
       legsError={null}
-      canWrite
+      canWrite={opts.canWrite ?? true}
       selectedRowKey={null}
       addingNight={false}
       onSelect={() => {}}
-      onAddNight={() => {}}
+      onAddNight={opts.onAddNight ?? (() => {})}
     />,
   );
 }
@@ -86,6 +96,8 @@ describe("PlanTable verdicts", () => {
     } as never);
     vi.mocked(useWeatherForecast).mockReturnValue({ loading: false } as never);
     vi.mocked(useWaveForecast).mockReturnValue({ loading: false } as never);
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: false, error: null });
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map(), error: null });
   });
   afterEach(() => vi.useRealTimers());
 
@@ -219,6 +231,7 @@ describe("PlanTable verdicts", () => {
       ],
     };
     vi.mocked(usePlanAssessment).mockReturnValue({
+      shape: "shape",
       assessment: assessment({
         legs: [
           legAssessment({ date: "2026-11-10", verdict: "go", depart: "2026-11-10T18:00:00+10:00", arrive: "2026-11-11T02:00:00+10:00" }),
@@ -293,5 +306,172 @@ describe("PlanTable verdicts", () => {
   it("says warnings could not be read, instead of reading as none", () => {
     show(assessment({ warningsError: 'forecast warnings provider "bom" unavailable' }));
     expect(screen.getByText(/Warnings not checked/)).toBeInTheDocument();
+  });
+});
+
+describe("PlanTable progress, slack, slips and change marks", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T20:00:00Z"));
+    vi.mocked(usePlanDayForecast).mockReturnValue({
+      loading: false, error: null, coverage: "inside",
+      wind: { minKts: 12, maxKts: 18, gustKts: 26, fromDeg: 190 }, windDirection: "S",
+      waveMinM: 0.8, waveMaxM: 1.4, wavesLoading: false, wavesError: null,
+    } as never);
+    vi.mocked(useWeatherForecast).mockReturnValue({ loading: false } as never);
+    vi.mocked(useWaveForecast).mockReturnValue({ loading: false } as never);
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: false, error: null });
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map(), error: null });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const slipOf = (over = {}) => ({
+    days: 1, lateByDays: 0, leg: 1, date: "2026-11-16", verdict: "go" as const, limiting: "", note: "", noteKind: "" as const, ...over,
+  });
+
+  it("states the slack above the table, and nothing when no stop has an arrive-by", () => {
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
+    expect(screen.getByTestId("plan-slack")).toHaveTextContent("Slack 1 day");
+    expect(screen.getByTestId("plan-slack")).not.toHaveClass("text-destructive");
+    cleanup();
+    show(assessment());
+    expect(screen.queryByTestId("plan-slack")).toBeNull();
+  });
+
+  it("says Late by in red once the plan is past its arrive-by, and prices no slips", () => {
+    vi.mocked(usePlanSlips).mockClear();
+    show(assessment({ slack: { days: -2, stop: 2, behindDays: 0 } }));
+    expect(screen.getByTestId("plan-slack")).toHaveTextContent("Late by 2 days");
+    expect(screen.getByTestId("plan-slack")).toHaveClass("text-destructive");
+    expect(usePlanSlips).not.toHaveBeenCalled();
+  });
+
+  it("lists what each slip meets, worded from the worst leg", () => {
+    vi.mocked(usePlanSlips).mockReturnValue({
+      slips: {
+        problem: "", capped: false,
+        slips: [
+          slipOf(),
+          slipOf({ days: 2, leg: 0, date: "2026-11-17", verdict: "no_go", limiting: "wind 18 kn ahead", lateByDays: 1 }),
+        ],
+      },
+      loading: false,
+      error: null,
+    });
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
+    const items = screen.getAllByTestId("plan-slip").map((i) => i.textContent);
+    expect(items).toEqual([
+      "Slip 1 day: Bravo → Charlie Mon, Go.",
+      "Slip 2 days: Alpha → Bravo Tue meets wind 18 kn ahead, No-Go (late by 1 day).",
+    ]);
+  });
+
+  it("says the slips are being priced, and why they could not be, without holding up the rows", () => {
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: true, error: null });
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
+    expect(screen.getByText("Pricing the slips…")).toBeInTheDocument();
+    expect(rows()).toHaveLength(3);
+    cleanup();
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: false, error: "router down" });
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
+    expect(screen.getByText(/Slips could not be priced: router down/)).toBeInTheDocument();
+  });
+
+  it("says when the slips stop at the forecast's reach, and a problem that stopped them", () => {
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: { problem: "", capped: true, slips: [slipOf()] }, loading: false, error: null });
+    show(assessment({ slack: { days: 12, stop: 2, behindDays: 0 } }));
+    expect(screen.getByText(/Slips are checked as far as the forecast reaches/)).toBeInTheDocument();
+    cleanup();
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: { problem: "Progress could not be read: disk", capped: false, slips: [] }, loading: false, error: null });
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
+    expect(screen.getByText("Progress could not be read: disk")).toBeInTheDocument();
+  });
+
+  it("shows a done leg as Done, with no verdict, suggestion or operator time", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({ progress: "done" }),
+          legAssessment({ leg: 1, date: "2026-11-16", key: "k1", verdict: "go" }),
+        ],
+      }),
+    );
+    const done = rows()[0];
+    expect(done).toHaveTextContent("Done");
+    expect(done).not.toHaveTextContent(/Go|Marginal|No-Go/);
+    expect(done).not.toHaveTextContent("6.30 AM");
+    expect(done).toHaveClass("opacity-60");
+    expect(rows().find((r) => r.textContent?.includes("Charlie"))).not.toHaveClass("opacity-60");
+  });
+
+  it("shows a skipped leg, and its stop's lay-day rows, as Skipped", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({ progress: "skipped" }),
+          legAssessment({ leg: 1, date: "2026-11-16", key: "k1", progress: "done" }),
+        ],
+      }),
+    );
+    expect(rows()[0]).toHaveTextContent("Skipped");
+    const bravoLay = rows().filter((r) => r.getAttribute("data-kind") === "stop" && r.textContent?.includes("Bravo"));
+    expect(bravoLay.length).toBeGreaterThan(0);
+    for (const r of bravoLay) expect(r).toHaveTextContent("Skipped");
+  });
+
+  it("marks a leg whose verdict changed since the last visit", () => {
+    vi.mocked(usePlanChangeMarks).mockReturnValue({
+      marks: new Map([["k0", { was: "go", now: "marginal" }]]),
+      error: null,
+    });
+    show(assessment({ legs: [legAssessment({ verdict: "marginal", limiting: "wind 15 kn ahead" }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }));
+    expect(rows()[0]).toHaveTextContent("was Go, now Marginal");
+    expect(rows()[1]).not.toHaveTextContent("was ");
+  });
+
+  it.each([
+    ["go", "marginal", "text-amber-600"],
+    ["go", "no_go", "text-red-600"],
+    ["marginal", "no_go", "text-red-600"],
+    ["marginal", "go", "text-emerald-600"],
+    ["no_go", "go", "text-emerald-600"],
+    ["no_go", "marginal", "text-muted-foreground"],
+    ["no_data", "marginal", "text-muted-foreground"],
+    ["marginal", "no_data", "text-muted-foreground"],
+    ["no_go", "no_data", "text-muted-foreground"],
+  ] as const)("colours a change from %s to %s as %s", (was, now, cls) => {
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map([["k0", { was, now }]]), error: null });
+    show(assessment({ legs: [legAssessment({ verdict: now }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }));
+    expect(screen.getAllByTestId("change-mark")[0]).toHaveClass(cls);
+  });
+
+  it("says when the change marks could not be read", () => {
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map(), error: "boom" });
+    show(assessment());
+    expect(screen.getByText(/Changes since your last visit not shown: boom/)).toBeInTheDocument();
+  });
+
+  it("asks the change marks hook for this plan's legs and whether the viewer can save", () => {
+    show(assessment(), { canWrite: false });
+    expect(usePlanChangeMarks).toHaveBeenCalledWith(1, expect.any(Array), false);
+  });
+
+  it("prompts on a leg the boat should have left, with Slip a day adding a night at that stop", () => {
+    const onAddNight = vi.fn();
+    show(assessment({ legs: [legAssessment({ stillInPort: true, verdict: "go" }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }), { onAddNight });
+    expect(rows()[0]).toHaveTextContent("Planned to leave today — still at Alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Slip a day" }));
+    expect(onAddNight).toHaveBeenCalledWith(0);
+  });
+
+  it("shows the prompt but no button to a viewer who cannot write", () => {
+    show(assessment({ legs: [legAssessment({ stillInPort: true, verdict: "go" }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }), { canWrite: false });
+    expect(rows()[0]).toHaveTextContent("Planned to leave today — still at Alpha");
+    expect(screen.queryByRole("button", { name: "Slip a day" })).toBeNull();
+  });
+
+  it("says the recorded passages could not be read, instead of leaving every leg to do silently", () => {
+    show(assessment({ progressError: "the passage record could not be read: disk" }));
+    expect(screen.getByText(/Progress not checked: the passage record could not be read: disk/)).toBeInTheDocument();
   });
 });
