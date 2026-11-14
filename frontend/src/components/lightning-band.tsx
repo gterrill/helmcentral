@@ -142,11 +142,11 @@ const UKMO_PROVIDER = 'ukmo-lightning'
 /**
  * The key line under a chart's lightning band: the three steps, then an info
  * button holding what the band measures and the data credit, as a map keeps
- * its attribution behind one. It also says why
- * the forecast is not drawn (it is for the boat, not a place from a plan, or the chart's
- * times will not read), and, whenever the feed has failed, one line saying
- * so, even beside a band that is drawn from windows already held. A boat with
- * no lightning plugin gets nothing at all.
+ * its attribution behind one. It also says why the forecast is not drawn (it
+ * is for the boat, not a place from a plan, or the chart's times will not
+ * read), and, whenever the feed has failed, one line saying so, even beside a
+ * band that is drawn from windows already held. A boat with no lightning
+ * plugin gets nothing at all.
  */
 export function LightningKey({ testId, status, provider, held, staleBadge }: LightningKeyProps) {
   if (status.kind === 'none') return null

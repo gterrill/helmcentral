@@ -239,8 +239,9 @@ boat. You can see a thundery spell coming and pick your day before it arrives.
   stretch means there's no forecast there, and an empty stretch means the
   forecast says it's quiet.
 - **It's the boat's position only:** Lightning is worked out for the grid
-  square the boat is in, roughly 20 by 30 kilometres. When you choose a row of
-  a [passage plan](#passage-plans), the bands aren't drawn and the key says
+  square the boat is in, roughly 20 by 30 kilometres. When you choose a place
+  name in a [passage plan](#passage-plans), the forecast shows no lightning:
+  no bands, no strip on the day cards and no lightning sentence. The key says
   "Lightning is for the boat's position, not this place."
 
 A probability over a square that size says nothing about the next ten minutes
