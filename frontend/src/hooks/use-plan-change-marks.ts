@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PLANS_PATH } from "@/hooks/use-plans";
-import { apiRequest, useApiQuery } from "@/lib/api-query";
+import { apiRequest, fetchQuery, useApiQuery } from "@/lib/api-query";
 import { errorMessage } from "@/lib/errors";
 import {
   changeMarks,
@@ -27,10 +27,25 @@ const sameVerdicts = (a: SeenVerdicts["legs"], b: SeenVerdicts["legs"]) =>
 export function usePlanChangeMarks(planId: number, legs: PlanLegAssessment[] | null, canWrite: boolean) {
   // The store reads this once per mount and has no refresh for it: no interval, and
   // the saving below does not invalidate it.
-  const { data: seen, error: readError } = useApiQuery<SeenVerdicts>({
-    queryKey: [PLANS_PATH, planId, "seen"],
-    path: `${PLANS_PATH}/${planId}/seen`,
-  });
+  const queryKey = [PLANS_PATH, planId, "seen"];
+  const path = `${PLANS_PATH}/${planId}/seen`;
+  const { data: cached, error: readError } = useApiQuery<SeenVerdicts>({ queryKey, path });
+  // On a return to the page inside the query cache window, `cached` is the answer
+  // from the last visit, and the box has moved on since (that visit saved its own
+  // snapshot). Marks and the save are decided only once a read made in this mount
+  // has settled, so they never rest on the stale answer. The read is shared with
+  // the one the query makes on mount.
+  const [freshFor, setFreshFor] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    void fetchQuery([PLANS_PATH, planId, "seen"], `${PLANS_PATH}/${planId}/seen`).then(() => {
+      if (live) setFreshFor(planId);
+    });
+    return () => {
+      live = false;
+    };
+  }, [planId]);
+  const seen = freshFor === planId && !readError ? cached : undefined;
   const marks = useMemo(() => (seen && legs ? changeMarks(seen.legs, legs) : NO_MARKS), [seen, legs]);
 
   const savedFor = useRef<number | null>(null);

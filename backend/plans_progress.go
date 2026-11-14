@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"slices"
+	"strconv"
 	"time"
 )
 
@@ -11,9 +14,10 @@ import (
 // from the recorded passages. Nothing in the plan is rewritten.
 //
 // A leg is Done when a recorded passage ends within planArrivedNm of the leg's
-// destination on or after the day the leg leaves. A passage that ends at a
-// later stop than a leg's destination marks that stop, and the legs into and
-// out of it that no passage ended at, Skipped: the boat went by.
+// destination any time after the plan's first day and after the passage that
+// reached the previous stop, so leaving early still counts. A passage that ends
+// at a later stop than a leg's destination marks that stop, and the legs into
+// and out of it that no passage ended at, Skipped: the boat went by.
 
 const (
 	planProgressDone    = "done"
@@ -44,19 +48,28 @@ func planProgressOf(p plan, ends []planPassageEnd) ([]string, error) {
 		return nil, fmt.Errorf("stop %d (%s): %w", bad+1, p.Stops[bad].Name, err)
 	}
 	legs := max(len(p.Stops)-1, 0)
-	// reached[j] says a passage ended at stop j on or after the day the leg into it
-	// leaves, judged on that day at the stop it leaves.
+	// reached[j] says a passage ended at stop j. Passages are taken in time order,
+	// each counting for the first stop after the last one reached that it ends
+	// within planArrivedNm of, and only from the plan's first day on.
 	reached := make([]bool, len(p.Stops))
 	last := 0
-	for j := 1; j < len(p.Stops); j++ {
-		for _, e := range ends {
-			if !withinArrivedNm(e.Lat, e.Lon, p.Stops[j].Lat, p.Stops[j].Lon) {
+	if len(p.Stops) > 0 {
+		first, err := dayStart(p.Stops[0].Arrive, zones[0].Loc)
+		if err != nil {
+			return nil, fmt.Errorf("first stop arrival %q: %w", p.Stops[0].Arrive, err)
+		}
+		ordered := slices.Clone(ends)
+		slices.SortStableFunc(ordered, func(a, b planPassageEnd) int { return a.At.Compare(b.At) })
+		for _, e := range ordered {
+			if e.At.Before(first) {
 				continue
 			}
-			if dayAt(zones[j-1], e.At) >= p.Stops[j-1].Depart {
-				reached[j] = true
-				last = j
-				break
+			for j := last + 1; j < len(p.Stops); j++ {
+				if withinArrivedNm(e.Lat, e.Lon, p.Stops[j].Lat, p.Stops[j].Lon) {
+					reached[j] = true
+					last = j
+					break
+				}
 			}
 		}
 	}
@@ -90,10 +103,19 @@ func (d planAssessDeps) readProgress(ctx context.Context, p plan, out *planAsses
 	return res
 }
 
-// planLegKey is how a leg is named across edits: its two stops and the day it
-// leaves. A change to any of them is a different leg to the change marks.
+// planLegKey is how a leg is named across edits: its two stops and which trip
+// between that pair it is (the first, the second on the way back). The date is
+// not part of it, so a slipped leg keeps its baseline. Each part is escaped so
+// a name holding the separator cannot make two legs share a key.
 func planLegKey(p plan, i int) string {
-	return p.Stops[i].Name + " → " + p.Stops[i+1].Name + "|" + p.Stops[i].Depart
+	from, to := p.Stops[i].Name, p.Stops[i+1].Name
+	n := 0
+	for j := 0; j < i; j++ {
+		if p.Stops[j].Name == from && p.Stops[j+1].Name == to {
+			n++
+		}
+	}
+	return url.QueryEscape(from) + "|" + url.QueryEscape(to) + "|" + strconv.Itoa(n)
 }
 
 // planStillInPortAfter is how long past a leg's departure the boat may stay at

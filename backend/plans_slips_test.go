@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -237,6 +238,62 @@ func TestSlipPlan_LimitsNotSetIsTheProblemOnceAndNoSlips(t *testing.T) {
 	}
 }
 
+func TestSlipPlan_LimitsAndSpeedAreReadOnceForAllTheSlips(t *testing.T) {
+	p, legs := slipPlan2(t, "2026-11-20T12:00") // slack 5: six slips
+	d := paDeps(&paFake{})
+	var mu sync.Mutex
+	limits, speeds := 0, 0
+	innerLimits, innerSpeed := d.limits, d.speed
+	d.limits = func() (passageLimits, error) { mu.Lock(); limits++; mu.Unlock(); return innerLimits() }
+	d.speed = func(ctx context.Context) (float64, error) { mu.Lock(); speeds++; mu.Unlock(); return innerSpeed(ctx) }
+	got := slipsOf(context.Background(), p, legs, d)
+	if len(got.Slips) != 6 {
+		t.Fatalf("slips = %d", len(got.Slips))
+	}
+	if limits != 1 || speeds != 1 {
+		t.Fatalf("%d limits reads and %d speed reads for 6 slips, want 1 each", limits, speeds)
+	}
+}
+
+func TestSlipPlan_OneSlipThatCannotBeCheckedKeepsTheOthers(t *testing.T) {
+	p, legs := slipPlan2(t, "2026-11-20T12:00") // six slips
+	d := paDeps(&paFake{})
+	var mu sync.Mutex
+	calls := 0
+	inner := d.sources
+	d.sources = func(zone func() (string, error), now time.Time) (passageSources, error) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 3 { // the first call warms the forecast; this is one slip's
+			return passageSources{}, fmt.Errorf("provider down")
+		}
+		return inner(zone, now)
+	}
+	got := slipsOf(context.Background(), p, legs, d)
+	if got.Problem != "" || len(got.Slips) != 6 {
+		t.Fatalf("slips = %+v", got)
+	}
+	failed := 0
+	for i, s := range got.Slips {
+		if s.Days != i+1 {
+			t.Fatalf("slip %d is for %d days", i+1, s.Days)
+		}
+		if strings.Contains(s.Note, "could not be checked") {
+			failed++
+			if !strings.Contains(s.Note, "provider down") || s.Verdict != "" {
+				t.Fatalf("failed slip = %+v", s)
+			}
+		} else if s.Verdict == "" {
+			t.Fatalf("slip %d lost its verdict: %+v", s.Days, s)
+		}
+	}
+	if failed != 1 {
+		t.Fatalf("%d slips could not be checked, want 1", failed)
+	}
+}
+
 func TestSlipPlan_SlipsAreAssessedAFewAtATime(t *testing.T) {
 	// No operator times, so every leg of every slip is ranked.
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
@@ -277,6 +334,10 @@ func TestWorstSlipLeg_NoGoThenNoDataThenMarginalThenGo(t *testing.T) {
 		{"no forecast ranks with no data", []planLegAssessment{leg("marginal"), {NoteKind: planKindNoForecast, Note: planNoteNoForecast}}, 1},
 		{"a no-go beats no forecast", []planLegAssessment{{NoteKind: planKindNoForecast}, leg("no_go")}, 1},
 		{"a leg with only a note is named when nothing else is", []planLegAssessment{{NoteKind: planKindOvernight, Note: planNoteOvernight}}, 0},
+		{"an unsailable leg is named over a go", []planLegAssessment{leg("go"), {NoteKind: planKindNoWindow, Note: planNoteNoWindow}}, 1},
+		{"an unsailable leg is named over a marginal", []planLegAssessment{leg("marginal"), {NoteKind: planKindGap, Note: planNoteGap}}, 1},
+		{"a no-go still beats an unsailable leg", []planLegAssessment{{NoteKind: planKindNoWindow, Note: planNoteNoWindow}, leg("no_go")}, 1},
+		{"a done leg's empty note is not a leg to name", []planLegAssessment{{Progress: planProgressDone}, leg("go")}, 1},
 	}
 	for _, c := range cases {
 		for i := range c.legs {

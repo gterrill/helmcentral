@@ -122,8 +122,8 @@ they turn up after it. To clear an arrive-by, empty the field and save.
 You don't mark anything off. Helmcentral reads the passages it records.
 
 1. A leg reads **Done** once a recorded passage ends within one and a half
-   nautical miles of its destination, on or after the day it was planned. If you
-   sail past a stop and end at a later one, that stop and the legs into it read
+   nautical miles of its destination, any time after the plan's first day, so a
+   leg you sail early counts. If you sail past a stop and end at a later one, that stop and the legs into it read
    **Skipped**. Done and Skipped rows are dimmed and left out of the slips.
 2. If it's a leg's sailing day, an hour has gone by since the time you set to
    leave, and the boat is still at the stop, the row says "Planned to leave

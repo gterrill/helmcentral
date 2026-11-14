@@ -103,6 +103,39 @@ describe("usePlanChangeMarks", () => {
     expect(calls(fetchMock as never)).toEqual(["GET /api/plans/7/seen"]);
   });
 
+  it("on a remount waits for this mount's own read before it marks or saves anything", async () => {
+    const first = { legs: [{ key: "A → B|2026-11-14", verdict: "go" }, { key: "B → C|2026-11-15", verdict: "go" }] };
+    // What the first visit saved: the verdicts it showed.
+    const second = { legs: [{ key: "A → B|2026-11-14", verdict: "marginal" }, { key: "B → C|2026-11-15", verdict: "go" }] };
+    let gets = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return reply({ saved: true });
+      gets += 1;
+      if (gets === 1) return reply(first);
+      await held;
+      return reply(second);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const one = renderHook(() => usePlanChangeMarks(7, LEGS, true));
+    await waitFor(() => expect(calls(fetchMock as never)).toEqual(["GET /api/plans/7/seen", "PUT /api/plans/7/seen"]));
+    one.unmount();
+
+    // Back on the page inside the cache window: the cached answer is the old one.
+    const two = renderHook(() => usePlanChangeMarks(7, LEGS, true));
+    await waitFor(() => expect(gets).toBe(2));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(two.result.current.marks.size).toBe(0);
+    expect(calls(fetchMock as never)).toEqual(["GET /api/plans/7/seen", "PUT /api/plans/7/seen", "GET /api/plans/7/seen"]);
+
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+    // The fresh read says the box already holds what is shown: no marks, no save.
+    expect(two.result.current.marks.size).toBe(0);
+    expect(calls(fetchMock as never)).toEqual(["GET /api/plans/7/seen", "PUT /api/plans/7/seen", "GET /api/plans/7/seen"]);
+  });
+
   it("starts again for another plan, with none of the first plan's marks", async () => {
     stubFetch();
     const { result, rerender } = renderHook(({ id }) => usePlanChangeMarks(id, LEGS, true), { initialProps: { id: 7 } });

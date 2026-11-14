@@ -79,20 +79,23 @@ func planBehindDays(p plan, progress []string, now time.Time) (int, error) {
 // skipped), nil when none is known: a stop the boat has reached or passed no
 // longer binds. behind is how many days the plan has fallen behind: every stop
 // after the first leg still to do arrives that many days later than stored. ok
-// is false when no such stop has an arrive-by.
-func planSlackOf(p plan, progress []string, behind int) (s planSlack, ok bool) {
+// is false when no such stop has an arrive-by. A stored arrive-by or arrival
+// that cannot be read is an error: it was checked on the way in, so it says the
+// stored plan is damaged.
+func planSlackOf(p plan, progress []string, behind int) (s planSlack, ok bool, err error) {
 	first := max(slices.Index(progress, ""), 0)
 	for i, stop := range p.Stops {
 		if stop.ArriveBy == "" || stopReached(progress, i) {
 			continue
 		}
-		by, err := time.Parse(planDateLayout, stop.ArriveBy[:len(planDateLayout)])
+		byAt, err := time.Parse(planArriveByLayout, stop.ArriveBy)
 		if err != nil {
-			continue // checkArriveBy refused it on the way in
+			return planSlack{}, false, fmt.Errorf("the arrive-by at %s, %q, is not a date and time: %w", stop.Name, stop.ArriveBy, err)
 		}
+		by := time.Date(byAt.Year(), byAt.Month(), byAt.Day(), 0, 0, 0, 0, time.UTC)
 		arrive, err := time.Parse(planDateLayout, stop.Arrive)
 		if err != nil {
-			continue
+			return planSlack{}, false, fmt.Errorf("the arrival at %s, %q, is not a date: %w", stop.Name, stop.Arrive, err)
 		}
 		if i > first {
 			arrive = arrive.AddDate(0, 0, behind)
@@ -102,7 +105,7 @@ func planSlackOf(p plan, progress []string, behind int) (s planSlack, ok bool) {
 			s, ok = planSlack{Days: days, Stop: i, BehindDays: behind}, true
 		}
 	}
-	return s, ok
+	return s, ok, nil
 }
 
 // planOutlook is what the plan has left to do: its tightest slack on the plan
@@ -113,7 +116,10 @@ func planOutlook(p plan, progress []string, now time.Time) (slack planSlack, hav
 	if err != nil {
 		return slack, false, -1, err
 	}
-	slack, haveSlack = planSlackOf(p, progress, behind)
+	slack, haveSlack, err = planSlackOf(p, progress, behind)
+	if err != nil {
+		return slack, false, -1, err
+	}
 	first = slices.Index(progress, "")
 	return slack, haveSlack, first, nil
 }

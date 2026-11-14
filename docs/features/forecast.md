@@ -403,8 +403,9 @@ Here's what the table shows:
   It checks no more than ten days of slip, which is as far as the forecast
   reaches.
 - **Done and Skipped.** A leg is Done when a passage Helmcentral recorded ends
-  within one and a half nautical miles of the leg's destination, on or after the
-  day the leg was planned. If a passage ends at a later stop, the stops it went
+  within one and a half nautical miles of the leg's destination, any time after
+  the plan's first day and after the passage that reached the stop before it. So a
+  leg you sail early is Done too. If a passage ends at a later stop, the stops it went
   by are Skipped, along with the legs into them. Done and Skipped rows are
   dimmed, have no verdict or suggested time, and are left out of the slips. Your
   plan isn't changed. If Helmcentral can't read the recorded passages, the page
@@ -427,8 +428,8 @@ Here's what the table shows:
   were shown last time, and they hold for as long as the plan is open. Helmcentral
   then remembers what you were shown, on the boat, so the next visit compares
   against it, from any device. A
-  leg you move to another day, or whose stops you rename, is a new leg and has no
-  mark. Someone who can't make changes sees the marks but doesn't update what was
+  leg you move to another day keeps its place, so slipping the plan doesn't wipe
+  the marks. A leg whose stops you rename is a new leg and has no mark. Someone who can't make changes sees the marks but doesn't update what was
   last seen.
 
 Where the table is too narrow for its columns, on a phone or a tablet held

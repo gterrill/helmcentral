@@ -68,7 +68,9 @@ func shiftedPlan(p plan, firstToDo, n int) (plan, error) {
 }
 
 // slipRank orders what a leg can say, worst first: a No-Go, then no data (or no
-// forecast yet), then Marginal, then Go. A leg with only a note ranks last.
+// forecast yet, or any other reason the leg has no verdict: no daylight window,
+// a gap in the forecast, an overnight leg), then Marginal, then Go. A leg that
+// cannot be sailed as slipped is at least as bad as one we know nothing about.
 func slipRank(l planLegAssessment) int {
 	switch {
 	case l.Verdict == "no_go":
@@ -79,6 +81,8 @@ func slipRank(l planLegAssessment) int {
 		return 1
 	case l.Verdict == "go":
 		return 0
+	case l.Note != "":
+		return 2
 	}
 	return -1
 }
@@ -115,7 +119,10 @@ type planSlipSetup struct {
 func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetup, out planSlips, done bool) {
 	out = planSlips{Slips: []planSlip{}}
 	// A plan with no arrive-by has nothing to price: the passages are not read.
-	if _, ok := planSlackOf(p, nil, 0); !ok {
+	if _, ok, err := planSlackOf(p, nil, 0); err != nil {
+		out.Problem = "Slack could not be worked out: " + err.Error()
+		return s, out, true
+	} else if !ok {
 		return s, out, true
 	}
 	var scratch planAssessment
@@ -157,11 +164,16 @@ func slipsFor(ctx context.Context, p plan, d planAssessDeps, route func(context.
 // priceSlips assesses the plan slipped one day at a time, a few at once.
 func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s planSlipSetup, out planSlips) planSlips {
 	out.Capped = s.capped
+	// The limits and the boat's speed are the same for every slip: read them once.
+	env := d.readEnv(ctx, d.now(), true)
+	if env.problem != "" {
+		out.Problem = env.problem
+		return out
+	}
 	d.warmForecast(ctx, p, legs, s.progress)
 
-	opts := planAssessOptions{VerdictsOnly: true, Progress: s.progress}
+	opts := planAssessOptions{VerdictsOnly: true, Progress: s.progress, Env: &env}
 	slips := make([]planSlip, s.count)
-	problems := make([]string, s.count)
 	sem := make(chan struct{}, planSlipWorkers)
 	var wg sync.WaitGroup
 	for n := 1; n <= s.count; n++ {
@@ -171,27 +183,30 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 			defer wg.Done()
 			defer func() { <-sem }()
 			// A slip is measured on top of the plan projected from today.
+			late := max(0, n-s.slack.Days)
+			// A slip that cannot be checked says so in its own line and leaves the
+			// others as they were priced.
+			unchecked := func(why string) planSlip {
+				return planSlip{Days: n, LateByDays: late, Leg: -1, Note: "could not be checked: " + why, NoteKind: planKindOther}
+			}
 			sp, err := shiftedPlan(p, s.first, s.slack.BehindDays+n)
 			if err != nil {
-				problems[n-1] = "A slipped plan could not be dated: " + err.Error()
+				slips[n-1] = unchecked("the slipped plan could not be dated: " + err.Error())
 				return
 			}
 			a := assessPlan(ctx, sp, legs, d, opts)
-			problems[n-1] = a.Problem
+			if a.Problem != "" {
+				slips[n-1] = unchecked(a.Problem)
+				return
+			}
 			w := worstSlipLeg(a.Legs)
 			slips[n-1] = planSlip{
-				Days: n, LateByDays: max(0, n-s.slack.Days),
+				Days: n, LateByDays: late,
 				Leg: w.Leg, Date: w.Date, Verdict: w.Verdict, Limiting: w.Limiting, Note: w.Note, NoteKind: w.NoteKind,
 			}
 		}()
 	}
 	wg.Wait()
-	for _, prob := range problems {
-		if prob != "" {
-			out.Problem = prob
-			return out
-		}
-	}
 	out.Slips = slips
 	return out
 }

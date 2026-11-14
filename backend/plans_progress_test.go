@@ -46,17 +46,50 @@ func TestPlanProgress_WithinOneAndAHalfMilesAndNoFurther(t *testing.T) {
 	}
 }
 
-func TestPlanProgress_APassageBeforeTheLegsDateDoesNotCount(t *testing.T) {
+func TestPlanProgress_APassageBeforeThePlansFirstDayDoesNotCount(t *testing.T) {
 	p := progPlan(t)
-	// Leg 0 leaves on the 16th; an earlier visit to the same place is not this leg.
-	got, _ := planProgressOf(p, []planPassageEnd{endAt(p, 1, 0, progAt(15, 15))})
+	// The plan starts on the 14th; an earlier visit to the same place is not this plan.
+	got, _ := planProgressOf(p, []planPassageEnd{endAt(p, 1, 0, progAt(13, 23))})
 	if got[0] != "" {
-		t.Fatalf("progress = %q: a passage on the 15th must not do a leg of the 16th", got)
+		t.Fatalf("progress = %q: a passage on the 13th must not count", got)
 	}
-	// The leg's own day counts, judged at the stop the leg leaves.
-	got, _ = planProgressOf(p, []planPassageEnd{endAt(p, 1, 0, progAt(16, 0))})
+	// The first day counts from its first minute, in the first stop's zone.
+	got, _ = planProgressOf(p, []planPassageEnd{endAt(p, 1, 0, progAt(14, 0))})
 	if got[0] != planProgressDone {
-		t.Fatalf("progress = %q: a passage on the leg's day is on or after it", got)
+		t.Fatalf("progress = %q: a passage on the plan's first day counts", got)
+	}
+}
+
+func TestPlanProgress_LeavingEarlyStillMarksTheLegDone(t *testing.T) {
+	p := progPlan(t)
+	// Leg 0 is planned for the 16th; the boat arrived at stop 1 on the 15th.
+	got, _ := planProgressOf(p, []planPassageEnd{endAt(p, 1, 0.3, progAt(15, 15))})
+	want := []string{planProgressDone, "", "", ""}
+	if !sameProgress(got, want) {
+		t.Fatalf("progress = %q, want %q", got, want)
+	}
+}
+
+func TestPlanProgress_AShortcutOnTheFirstDaySkipsTheStopBetween(t *testing.T) {
+	p := progPlan(t)
+	got, _ := planProgressOf(p, []planPassageEnd{endAt(p, 2, 0.2, progAt(14, 16))})
+	want := []string{planProgressSkipped, planProgressDone, "", ""}
+	if !sameProgress(got, want) {
+		t.Fatalf("progress = %q, want %q", got, want)
+	}
+}
+
+func TestPlanProgress_APassageToAnEarlierStopAfterALaterOneDoesNotCount(t *testing.T) {
+	p := progPlan(t)
+	// Stop 2 is reached on the 15th, then the boat is back at stop 1 on the 16th:
+	// stop 1 was passed over, not reached after the previous stop.
+	got, _ := planProgressOf(p, []planPassageEnd{
+		endAt(p, 1, 0, progAt(16, 9)),
+		endAt(p, 2, 0, progAt(15, 9)),
+	})
+	want := []string{planProgressSkipped, planProgressDone, "", ""}
+	if !sameProgress(got, want) {
+		t.Fatalf("progress = %q, want %q", got, want)
 	}
 }
 

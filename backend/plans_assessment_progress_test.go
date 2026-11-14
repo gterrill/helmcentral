@@ -27,6 +27,15 @@ func TestAssessPlan_ADoneLegHasNoVerdictNoSuggestionAndIsNotRead(t *testing.T) {
 	}
 }
 
+func TestAssessPlan_SlackIsLeftOutWhenTheProgressCouldNotBeRead(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[2].ArriveBy = "2026-11-20T12:00"
+	got := paAssess(t, p, legs, &paFake{progressErr: errors.New("disk")})
+	if got.ProgressError == "" || got.Slack != nil {
+		t.Fatalf("progress error %q, slack %+v: slack must not be computed from unread progress", got.ProgressError, got.Slack)
+	}
+}
+
 func TestAssessPlan_ASkippedLegIsMarkedSkipped(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	l := paAssess(t, p, legs, &paFake{progress: []string{planProgressSkipped, ""}}).Legs[0]
@@ -49,7 +58,7 @@ func TestAssessPlan_ProgressThatCannotBeReadIsSaidAndNothingIsMarkedDone(t *test
 func TestAssessPlan_EachLegHasAKeyThatSurvivesAnEditElsewhere(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	got := paAssess(t, p, legs, &paFake{})
-	if got.Legs[0].Key != "Great Sandy Straits Marina → Pelican Bay|2026-11-14" {
+	if got.Legs[0].Key != "Great+Sandy+Straits+Marina|Pelican+Bay|0" {
 		t.Fatalf("key = %q", got.Legs[0].Key)
 	}
 	if got.Legs[0].Key == got.Legs[1].Key {
@@ -271,7 +280,7 @@ func TestAssessPlan_AWindowThatHasClosedWithTheBoatStillInPortIsPastTheHour(t *t
 }
 
 func TestAssessPlan_AClosedWindowStillWaitsAnHourPastTheDaysFirstSuggestion(t *testing.T) {
-	const key = "Great Sandy Straits Marina → Pelican Bay|2026-11-14"
+	const key = "Great+Sandy+Straits+Marina|Pelican+Bay|0"
 	// The boat was expected away at 5.30 PM; at 6 PM the window has gone, but the
 	// hour is not up.
 	store := newTestDocumentStore(t)

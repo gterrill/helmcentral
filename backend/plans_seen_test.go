@@ -11,6 +11,32 @@ import (
 // The verdict each leg had when the operator last looked is kept on the box, per
 // plan and per leg key, so the Forecast page can mark what changed (ADR 0288).
 
+func TestPlanLegKey_SurvivesASlipAndNamesRepeatedLegsApart(t *testing.T) {
+	a := planAt(t, "2026-11-14", 2, 1, 1, 1, 0)
+	slipped := planAt(t, "2026-11-15", 2, 1, 1, 1, 0)
+	for i := range a.Stops[:len(a.Stops)-1] {
+		if planLegKey(a, i) != planLegKey(slipped, i) {
+			t.Fatalf("leg %d key changed with its date: %q vs %q", i, planLegKey(a, i), planLegKey(slipped, i))
+		}
+	}
+	// There and back between the same two places: the second trip is its own leg.
+	rt := plan{Stops: []planStop{{Name: "A"}, {Name: "B"}, {Name: "A"}, {Name: "B"}}}
+	keys := planLegKeys(rt)
+	if keys[0] == keys[2] || keys[0] == keys[1] {
+		t.Fatalf("repeated legs share a key: %q", keys)
+	}
+}
+
+func TestPlanLegKey_NamesWithSeparatorsDoNotCollide(t *testing.T) {
+	x := plan{Stops: []planStop{{Name: "A → B"}, {Name: "C"}}}
+	y := plan{Stops: []planStop{{Name: "A"}, {Name: "B → C"}}}
+	z := plan{Stops: []planStop{{Name: "A|B"}, {Name: "C"}}}
+	w := plan{Stops: []planStop{{Name: "A"}, {Name: "B|C"}}}
+	if planLegKey(x, 0) == planLegKey(y, 0) || planLegKey(z, 0) == planLegKey(w, 0) {
+		t.Fatalf("keys collide: %q %q / %q %q", planLegKey(x, 0), planLegKey(y, 0), planLegKey(z, 0), planLegKey(w, 0))
+	}
+}
+
 func TestPlanSeen_SavedVerdictsComeBackAndReplaceOlderOnes(t *testing.T) {
 	store := newTestDocumentStore(t)
 	keys := []string{"A → B|2026-11-14", "B → C|2026-11-15"}

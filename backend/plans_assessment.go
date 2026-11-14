@@ -149,6 +149,9 @@ type planAssessOptions struct {
 	// Progress, when not nil, is each leg's progress already read, one entry for
 	// every leg; the assessment does not read the passages again.
 	Progress []string
+	// Env, when not nil, is the limits and speed already read, shared by several
+	// assessments of one request; they are not read again.
+	Env *planEnv
 }
 
 // planDepartureQuery is a leg as the ranking and the current read it: the routed
@@ -198,8 +201,10 @@ type planEnv struct {
 	verdictsOnly  bool
 	limits        passageLimits
 	limitsProblem string
-	speed         float64
-	speedErr      error
+	// problem is the plan's one problem from the limits or the speed, "" when none.
+	problem  string
+	speed    float64
+	speedErr error
 }
 
 // planLegWork is a leg on its way to a verdict.
@@ -267,19 +272,27 @@ func fmtLeg(t time.Time, loc *time.Location) string { return t.In(loc).Format(ti
 // assessPlan judges every leg of a decorated plan and reads the warnings on its
 // stops. legs are the plan's routed legs, in order.
 func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, opts planAssessOptions) planAssessment {
-	now := d.now()
-	out := planAssessment{
-		AsOf:  now.UTC().Format(time.RFC3339),
-		Legs:  make([]planLegAssessment, len(p.Stops)-1),
-		Stops: []planStopAssessment{},
+	var env planEnv
+	if opts.Env != nil {
+		env = *opts.Env
+	} else {
+		env = d.readEnv(ctx, d.now(), len(p.Stops) > 1)
 	}
-	env := d.readEnv(ctx, now, len(out.Legs) > 0, &out)
+	now := env.now
+	out := planAssessment{
+		AsOf:    now.UTC().Format(time.RFC3339),
+		Legs:    make([]planLegAssessment, len(p.Stops)-1),
+		Stops:   []planStopAssessment{},
+		Problem: env.problem,
+	}
 	env.verdictsOnly = opts.VerdictsOnly
 	progress := opts.Progress
 	if progress == nil {
 		progress = d.readProgress(ctx, p, &out)
 	}
-	if !opts.VerdictsOnly {
+	// Slack counts from the legs still to do; with the passages unread it would be
+	// counted from a guess, so it is left out and ProgressError says why.
+	if !opts.VerdictsOnly && out.ProgressError == "" {
 		s, ok, _, err := planOutlook(p, progress, now)
 		switch {
 		case err != nil:
@@ -326,7 +339,7 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 // readEnv reads what every leg shares: the passage limits and the boat's speed.
 // A limits problem is the plan's problem; a speed problem is, when nothing else
 // is.
-func (d planAssessDeps) readEnv(ctx context.Context, now time.Time, anyLeg bool, out *planAssessment) planEnv {
+func (d planAssessDeps) readEnv(ctx context.Context, now time.Time, anyLeg bool) planEnv {
 	env := planEnv{now: now}
 	limits, err := d.limits()
 	switch {
@@ -336,11 +349,11 @@ func (d planAssessDeps) readEnv(ctx context.Context, now time.Time, anyLeg bool,
 		env.limitsProblem = "Passage limits aren't set: Settings → Mate → Passage limits"
 	}
 	env.limits = limits
-	out.Problem = env.limitsProblem
+	env.problem = env.limitsProblem
 	if anyLeg {
 		env.speed, env.speedErr = d.speed(ctx)
-		if env.speedErr != nil && out.Problem == "" {
-			out.Problem = "No ETA: " + env.speedErr.Error()
+		if env.speedErr != nil && env.problem == "" {
+			env.problem = "No ETA: " + env.speedErr.Error()
 		}
 	}
 	return env

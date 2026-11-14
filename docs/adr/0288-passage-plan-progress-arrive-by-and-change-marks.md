@@ -86,11 +86,14 @@ kn ahead, No-Go (late by 1 day)."
 ### Progress from the recorded passages
 
 A leg is Done when a recorded passage ends within 1.5 nm of the leg's destination
-on or after the day the leg leaves. The passage's end is its last track point
-inside the passage, and the day is read in the zone of the
-stop the leg leaves. A stop that no passage ended at, with a later stop that one
-did, is Skipped, and so are the legs into it and out of it that no passage ended
-at: the boat went by. Stop 0 is never skipped.
+any time after the plan's first day, and after the passage that reached the
+previous stop. The passages are taken in time order, and each counts for the
+first stop after the last one reached that it ends within 1.5 nm of. The passage's
+end is its last track point inside the passage, and the first day starts at
+midnight in the zone of the first stop. A boat that leaves a day early, or goes
+straight to a later stop, is therefore marked. A stop that no passage ended at,
+with a later stop that one did, is Skipped, and so are the legs into it and out
+of it that no passage ended at: the boat went by. Stop 0 is never skipped.
 
 - **Recorded passages only.** The operator marks nothing by hand, and the plan is
   never rewritten. Hidden passages are not read, as everywhere else.
@@ -102,8 +105,8 @@ at: the boat went by. Stop 0 is never skipped.
   assessment says so once in `progress_error` and marks no leg. It does not treat
   the failure as "nothing sailed". A passage with no track point near its end
   cannot be placed and is left out, with a log line.
-- **Imported passages** are not told apart from recorded ones. The date rule
-  keeps an old import from marking a new leg.
+- **Imported passages** are not told apart from recorded ones. The first-day rule
+  keeps an import from before the plan from marking a leg.
 
 ### Still in port
 
@@ -137,10 +140,13 @@ Each plan keeps, per leg, the verdict level the operator last looked at
 agrees). Only the level counts: Go, Marginal, No-Go or No data. A moved limiting
 factor under the same verdict is no change.
 
-- **Leg identity** is `From → To|date`, from the stop names and the day the leg
-  leaves (`key` on each assessed leg). The server owns it, so the page never builds
-  one. An edit that renames a stop or moves the leg's day gives it a new key and
-  no mark, which is right: it is not the leg that was looked at. A key the plan no
+- **Leg identity** is the from-stop name, the to-stop name and which trip between
+  that pair it is, counting from 0 (`key` on each assessed leg). Each name is
+  escaped, so a name holding the separator cannot make two legs share a key. The
+  date is not part of it: a leg slipped to another day keeps its baseline. The
+  server owns the key, so the page never builds one. An edit that renames a stop
+  gives the leg a new key and no mark, which is right: it is not the leg that was
+  looked at. A key the plan no
   longer has is gone when the next snapshot is saved, and a plan's snapshot
   goes with the plan. A current leg that has no verdict in a save keeps the one it
   had, so a leg that briefly says nothing is still compared with its last verdict
@@ -160,8 +166,9 @@ factor under the same verdict is no change.
 - **Where a passage started.** Skipped is inferred from which stops passages
   ended at. A passage from the first stop straight to the third marks the second
   Skipped, and a boat that went to the third by an unlogged route reads the same.
-- **A leg slipped by hand.** The operator adding nights changes the dates, and the
-  progress rule reads the new dates. Nothing remembers the old plan.
+- **A leg slipped by hand.** The operator adding nights changes the dates. The
+  progress rule does not read the leg's date, so it is unaffected, and the leg
+  keeps its change-mark baseline. Nothing remembers the old plan.
 - **A prompt for a suggested leg the box never saw suggested.** With no first
   suggestion kept there is no reference, so the prompt waits for one.
 

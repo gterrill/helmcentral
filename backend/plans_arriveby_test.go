@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,20 +73,35 @@ func TestPlanStore_ArriveByRoundTripsAndSurvivesAPatch(t *testing.T) {
 func TestPlanSlack_IsWholeDaysFromPlannedArrivalToArriveBy(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // arrives 14, 16, 17, 18, 19
 	p.Stops[4].ArriveBy = "2026-11-20T17:00"
-	s, ok := planSlackOf(p, nil, 0)
+	s, ok, _ := planSlackOf(p, nil, 0)
 	if !ok || s.Days != 1 || s.Stop != 4 {
 		t.Fatalf("slack = %+v %v, want 1 day at stop 4", s, ok)
 	}
 	// Late: arrive-by is the day before the planned arrival.
 	p.Stops[4].ArriveBy = "2026-11-18T23:00"
-	s, _ = planSlackOf(p, nil, 0)
+	s, _, _ = planSlackOf(p, nil, 0)
 	if s.Days != -1 {
 		t.Fatalf("late slack = %+v, want -1", s)
 	}
 	// With none anywhere there is no slack to speak of.
 	p.Stops[4].ArriveBy = ""
-	if _, ok := planSlackOf(p, nil, 0); ok {
+	if _, ok, _ := planSlackOf(p, nil, 0); ok {
 		t.Fatal("no arrive-by must give no slack")
+	}
+}
+
+func TestPlanSlack_AMalformedStoredArriveByIsAProblemNotAPanic(t *testing.T) {
+	for _, bad := range []string{"2026-1", "x", "2026-13-45T10:00", "not a date at all"} {
+		p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+		p.Stops[2].ArriveBy = bad
+		got := paAssess(t, p, legs, &paFake{})
+		if got.Slack != nil || !strings.Contains(got.Problem, "arrive-by") {
+			t.Fatalf("%q: slack %+v, problem %q", bad, got.Slack, got.Problem)
+		}
+		slips := slipsOf(context.Background(), p, legs, paDeps(&paFake{}))
+		if !strings.Contains(slips.Problem, "arrive-by") || len(slips.Slips) != 0 {
+			t.Fatalf("%q: slips = %+v", bad, slips)
+		}
 	}
 }
 
@@ -92,13 +109,13 @@ func TestPlanSlack_TheTightestStopRulesAndAReachedStopIsLeftOut(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0)
 	p.Stops[2].ArriveBy = "2026-11-18T12:00" // arrives 17: slack 1
 	p.Stops[4].ArriveBy = "2026-11-25T12:00" // arrives 19: slack 6
-	s, _ := planSlackOf(p, nil, 0)
+	s, _, _ := planSlackOf(p, nil, 0)
 	if s.Days != 1 || s.Stop != 2 {
 		t.Fatalf("slack = %+v, want the tighter stop 2", s)
 	}
 	// Legs 0 and 1 done: the boat is at stop 2, whose arrive-by no longer binds.
 	done := []string{planProgressDone, planProgressDone, "", ""}
-	s, _ = planSlackOf(p, done, 0)
+	s, _, _ = planSlackOf(p, done, 0)
 	if s.Days != 6 || s.Stop != 4 {
 		t.Fatalf("slack with stop 2 reached = %+v, want stop 4's 6 days", s)
 	}
@@ -134,14 +151,14 @@ func TestPlanBehindDays_IsTodayPastTheFirstLegToDosDeparture(t *testing.T) {
 func TestPlanSlack_ABehindPlanIsCountedOnTheProjectedArrival(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // arrives 14, 16, 17, 18, 19
 	p.Stops[4].ArriveBy = "2026-11-20T17:00"
-	s, ok := planSlackOf(p, nil, 2) // two days behind: arrives the 21st
+	s, ok, _ := planSlackOf(p, nil, 2) // two days behind: arrives the 21st
 	if !ok || s.Days != -1 || s.Stop != 4 || s.BehindDays != 2 {
 		t.Fatalf("slack = %+v %v, want late by 1 day at stop 4, 2 days behind", s, ok)
 	}
 	// A stop already reached does not move with the plan.
 	p.Stops[2].ArriveBy = "2026-11-17T09:00"
 	done := []string{planProgressDone, planProgressDone, "", ""}
-	s, _ = planSlackOf(p, done, 1)
+	s, _, _ = planSlackOf(p, done, 1)
 	if s.Stop != 4 || s.Days != 0 {
 		t.Fatalf("slack = %+v, want stop 4 on its day (arrives 20 against the 20th)", s)
 	}
