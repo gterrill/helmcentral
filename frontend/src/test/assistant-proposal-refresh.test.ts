@@ -85,6 +85,7 @@ describe('applying a proposal refreshes the pages it changed', () => {
     ['vessel_particulars', '/api/vessel/particulars'],
     ['document', '/api/documents'],
     ['document', '/api/documents/tags'],
+    ['plan', '/api/plans'],
   ])('%s refreshes %s', async (type, path) => {
     reply([type])
     await applyAssistantProposal('p1')

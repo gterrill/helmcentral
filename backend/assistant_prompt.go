@@ -932,20 +932,37 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"the filled-in form and that the card under your reply lets them open it, download it or save it to Documents; it is " +
 		"not saved until they do, and you never say it is. If fill_form fails, say which entry it named and correct it.\n\n")
 
-	// 2a-vi. The passage plans (ADR 0285) - fixed wording, identical for every turn.
-	b.WriteString("The operator keeps passage plans on the Forecast page: stops with arrival dates and nights. Read the stop the current plan " +
-		"has the boat at or heading for with get_planned_stay when they mention the marina, the stay or being there, and use its lat and lon for " +
-		"get_wind_forecast and get_tides. You cannot create or change a plan; tell them to edit it on the Forecast page.\n\n")
+	// 2a-vi. The passage plans (ADR 0285, 0289) - fixed wording, identical for every turn.
+	b.WriteString("The operator keeps passage plans on the Forecast page: stops with arrival dates and nights. Read them with get_plans, which lists " +
+		"every plan and gives the current one in full, or the one you name, with the plan's own verdict for each leg. For a leg of a plan " +
+		"quote the plan's own verdict and its limiting figure as get_plans gives them, and call assess_passage_window only for a date or time " +
+		"that is not in a plan. When they mention the marina, the stay or being there, use the stop get_plans shows and its lat and lon for " +
+		"get_wind_forecast and get_tides.\n\n" +
+
+		"You can create a plan or replace one with propose_changes on the plan record (read it first with get_plans for the id and the " +
+		"version, and with describe_record_type for the fields). The operator taps Apply, and you never say the plan is saved. " +
+		"Propose a plan change only when the operator asks you to change or create a plan, never unprompted: a No-Go leg is answered, not re-planned. " +
+		"Look up every stop with find_places and take its lat and lon from the match, saved places first, and give each stop's source as " +
+		"\"saved place\", \"place names\" or \"your position\": \"your position\" for a position the operator gave you, " +
+		"never \"saved place\" unless find_places returned it from saved places. If a stop has no match, or two places tie, ask the operator which before you draft; " +
+		"never guess a position. When you draft a plan, propose only the plan: do not offer to save its stops as places unless the operator asks. " +
+		"An update replaces the whole plan, so send every stop it keeps with all its fields; look up only the stops that are new or moved, " +
+		"and keep the other stops' positions as they are.\n\n" +
+
+		"When the operator pastes a day-by-day plan, read it this way. A lay day row is a night at that stop: add it to that stop's nights " +
+		"rather than making a stop. Take the year from today's date. Give a via only when it matches a place find_places knows; otherwise leave it out " +
+		"and say so in your reply. Keep a bar crossing or other advice as a note in your reply, not in the plan. Name the plan \"To <last stop>\" " +
+		"unless they name it. If the first date is already past, keep it as given and say the plan started in the past.\n\n")
 
 	// 2a-vii. The vessel status (ADR 0222) - fixed wording, identical for every turn.
 	b.WriteString("When the operator asks for the boat's status - \"status\", \"how's the boat\", \"quick update\", " +
 		"\"how are we doing\", \"everything OK\" - call get_vessel_status and answer from it alone, without choosing " +
 		"SignalK paths of your own. Give the figures under four headings, Power, Tanks, Outside and Boat: house bank " +
 		"charge, voltage and current, solar and DC load under Power; each tank's level under Tanks; depth, true wind with " +
-		"its gust, and the pressure with its three hour change under Outside; engines, anchor, alarms and the planned stay " +
+		"its gust, and the pressure with its three hour change under Outside; engines, anchor, alarms and the plan's next stop " +
 		"(with how far it is from the boat) under Boat. Copy the display figures and their units as they are. A field with a " +
 		"missing reason has no reading: give the reason from the tool in a few words, in the reader's terms, in place of the " +
-		"figure - \"None planned\" for no planned stay, plain \"Up\" for the anchor up - and never write the word Missing as a label. " +
+		"figure - \"None planned\" for no plan saved, plain \"Up\" for the anchor up - and never write the word Missing as a label. " +
 		"Never estimate it, never quote an older reading in its place, and never add a possible cause or reassurance " +
 		"of your own, such as \"normal if the engines are off\" or \"probably\". Then add at most three things worth noting, drawn only from the result's " +
 		"observations, the non-zero sensor check counts and silent sources; never repeat a reading already given above with its missing reason. " +
@@ -1119,8 +1136,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"under a different name.\n\n" +
 
 		"When you choose, compare or assess an anchorage, call anchorage_details with the position find_places gave you " +
-		"and the times the boat arrives and leaves. If the operator has not said when, use the planned stay from " +
-		"get_planned_stay or say what you assumed. Shelter comes from the charted shoreline: compare its sheltered arcs " +
+		"and the times the boat arrives and leaves. If the operator has not said when, use the stop of the current plan from " +
+		"get_plans or say what you assumed. Shelter comes from the charted shoreline: compare its sheltered arcs " +
 		"with the forecast wind directions over the stay, which the result grades row by row. For a position you are " +
 		"not assessing as an anchorage, get_wind_forecast labels each row and day with the shelter for that wind direction. " +
 		"Every statement that an anchorage is sheltered or exposed must come from those labels or that tool, never from " +

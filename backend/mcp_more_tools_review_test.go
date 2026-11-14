@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 // A rule that is the same on every call lives in the tool's description, which
@@ -22,7 +21,7 @@ func TestMCPMoreTools_OnlyFigureDependentTextIsAReading(t *testing.T) {
 		"routed passage": assistantRoutedPassage{},
 		"estimate":       assistantEstimatePassageResult{},
 		"nearby":         assistantGetNearbyVesselsResult{},
-		"planned stay":   assistantPlannedStayResult{},
+		"plans":          getPlansResult{},
 		"window":         passageModelResult{},
 	} {
 		if has(v) {
@@ -108,13 +107,12 @@ func TestFindPlaces_BearingIsNeverACourse(t *testing.T) {
 	}
 }
 
-func TestPlannedStayNote_DoesNotRepeatTheDescription(t *testing.T) {
-	env := newProposalEnv(t)
-	env.deps.now = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
-	if _, err := setStayForTest(env.docs, plannedStay{Name: "Coral Coast Marina", Lat: -27.2, Lon: 153.1, Arrive: "2026-10-27", Depart: "2026-10-31"}); err != nil {
+func TestPlansNote_DoesNotRepeatTheDescription(t *testing.T) {
+	deps, store, _ := plansToolEnv(t)
+	if _, err := setStayForTest(store, planNextStop{Name: "Coral Coast Marina", Lat: -27.2, Lon: 153.1, Arrive: "2026-11-27", Depart: "2026-11-30"}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := runRecordTool(t, env.deps, "get_planned_stay", `{}`)
+	raw, err := runRecordTool(t, deps, "get_plans", `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}

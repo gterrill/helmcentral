@@ -10,6 +10,7 @@ import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/ho
 import { openJobRecordApplied } from '@/hooks/use-open-jobs'
 import { documentRecordApplied } from '@/hooks/use-documents'
 import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
+import { PLANS_PATH } from '@/hooks/use-plans'
 
 const reads = (path: string) => () => void invalidateQueries([path])
 
@@ -35,6 +36,7 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   open_job: openJobRecordApplied,
   vessel_particulars: vesselParticularsRecordApplied,
   document: (op) => documentRecordApplied(op.id),
+  plan: reads(PLANS_PATH),
 }
 
 function refreshPagesFor(proposal: AssistantProposal | undefined): void {

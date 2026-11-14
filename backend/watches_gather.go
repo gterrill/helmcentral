@@ -68,7 +68,7 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 	}
 	if wants[watchSectionWeather] && in.Status != nil {
 		src := resolveWatchForecast(d)
-		in.Stay = watchStayForecastFor(src, in.Status.PlannedStay, now)
+		in.Stay = watchStayForecastFor(src, in.Status.NextStop, now)
 		in.WindChanges = watchWindChangesFor(src, in.Status, now)
 	}
 	// The learned normal's suggestions belong with the instruments. A watch that

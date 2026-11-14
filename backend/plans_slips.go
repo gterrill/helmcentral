@@ -155,19 +155,32 @@ func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetu
 // only once there is something to price. d is the assessment's readers; the slips
 // judge verdicts alone.
 func slipsFor(ctx context.Context, p plan, d planAssessDeps, route func(context.Context) []planLeg) planSlips {
+	return slipsWithEnv(ctx, p, d, nil, route)
+}
+
+// slipsWithEnv is slipsFor for a caller that has just assessed the plan: shared
+// is the limits and speed that assessment read, so they are not read again. Nil
+// reads them.
+func slipsWithEnv(ctx context.Context, p plan, d planAssessDeps, shared *planEnv, route func(context.Context) []planLeg) planSlips {
 	d = d.pinned()
 	setup, out, done := prepareSlips(ctx, p, d)
 	if done {
 		return out
 	}
-	return priceSlips(ctx, p, route(ctx), d, setup, out)
+	return priceSlips(ctx, p, route(ctx), d, shared, setup, out)
 }
 
 // priceSlips assesses the plan slipped one day at a time, a few at once.
-func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s planSlipSetup, out planSlips) planSlips {
+func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, shared *planEnv, s planSlipSetup, out planSlips) planSlips {
 	out.Capped = s.capped
-	// The limits and the boat's speed are the same for every slip: read them once.
-	env := d.readEnv(ctx, d.now(), true)
+	// The limits and the boat's speed are the same for every slip: read them once,
+	// or take what the caller's own assessment read.
+	var env planEnv
+	if shared != nil {
+		env = *shared
+	} else {
+		env = d.readEnv(ctx, d.now(), true)
+	}
 	if env.problem != "" {
 		out.Problem = env.problem
 		return out
@@ -241,7 +254,7 @@ func (d planAssessDeps) warmForecast(ctx context.Context, p plan, legs []planLeg
 // time up to its slack plus one would meet. Asked apart from the assessment so
 // the table does not wait for it.
 func planSlipsHandler(c echo.Context) error {
-	deps := planAssessDepsFor().pinned()
+	deps := pageAssessDeps().pinned()
 	d, ok, err := loadDecoratedPlan(c, deps.now())
 	if !ok {
 		return err

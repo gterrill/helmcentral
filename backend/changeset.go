@@ -61,6 +61,9 @@ type changeOpResult struct {
 	Label  string `json:"label,omitempty"`
 	// Href is the page that shows the record, empty for a delete.
 	Href string `json:"href,omitempty"`
+	// HrefLabel is the words of a link to Href, when the type names one; the
+	// card then shows that link beside the description.
+	HrefLabel string `json:"href_label,omitempty"`
 }
 
 // changeResult is what Apply stores: one entry per operation, in order.
@@ -309,6 +312,23 @@ func normalizeFieldValue(f recordField, v any, ops []changeOp, i int) (any, erro
 				return nil, errors.New("must be a list of [x, y] points")
 			}
 			out = append(out, [2]float64{x, y})
+		}
+		return out, nil
+	case kindObjectList:
+		list, ok := v.([]any)
+		if !ok {
+			if objects, isObjects := v.([]map[string]any); isObjects {
+				return objects, nil
+			}
+			return nil, errors.New("must be a list of objects")
+		}
+		out := make([]map[string]any, 0, len(list))
+		for _, e := range list {
+			object, ok := e.(map[string]any)
+			if !ok {
+				return nil, errors.New("must be a list of objects")
+			}
+			out = append(out, object)
 		}
 		return out, nil
 	}
@@ -594,11 +614,9 @@ func (r *recordRegistry) describe(i int, op *changeOp, run opRun) error {
 	}
 	d := describeInput{Op: *op, Type: t, Before: run.before, After: run.after, Effects: run.effects, Extra: run.extra}
 	if t.Display != nil {
-		if run.before != nil && op.Before != nil {
-			op.Before = t.Display(*run.before, op.Before)
-		}
-		if run.after != nil && op.After != nil {
-			op.After = t.Display(*run.after, op.After)
+		var err error
+		if op.Before, op.After, err = t.Display(*op, run.before, run.after); err != nil {
+			return fmt.Errorf("%s: %w", head, err)
 		}
 	}
 	var line string
@@ -689,7 +707,7 @@ func (r *recordRegistry) apply(tx *sql.Tx, now, today time.Time, ops []changeOp)
 		}
 		res := changeOpResult{Type: op.Type, Action: op.Action, ID: runs[i].id, Label: label}
 		if t := r.types[op.Type]; runs[i].after != nil && t.Href != nil {
-			res.Href = t.Href(*runs[i].after)
+			res.Href, res.HrefLabel = t.Href(*runs[i].after), t.HrefLabel
 		}
 		results[i] = res
 	}

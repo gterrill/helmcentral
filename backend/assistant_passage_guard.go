@@ -159,6 +159,9 @@ func judgesAnchorageShelter(sentences []string) bool {
 //     neither assess_passage_window nor a get_wind_forecast that returned
 //     rel_wind or rel_wave labels ran this run.
 //
+// A get_plans result that carries a verdict for a leg is the same check run by
+// the same code (ADR 0289), and satisfies both.
+//
 // The passage triggers are off when assess_passage_window is not on offer.
 // Unreadable limits skip the claim check (it would be a guess) and log why.
 //
@@ -296,7 +299,7 @@ func readOwnDepth(c mateRunCall) bool {
 // somewhere other than the boat's own position, so a depth in the draft may be
 // that place's. The calls chosen: the place and marina lookups, the anchorage
 // check, saving a place, tidal departures, route distance, the passage tools,
-// the documents, web search and planned stay (they bring in other places'
+// the documents, web search and the plans (they bring in other places'
 // depths), and the tide and wind forecasts when the call names coordinates (without them
 // they read the boat's own position).
 func askedAboutAnotherPlace(run mateRunRecord) bool {
@@ -307,7 +310,7 @@ func askedAboutAnotherPlace(run mateRunRecord) bool {
 		switch c.call.Function.Name {
 		case mateToolFindPlaces.name, mateToolMarinaDetails.name, mateToolAnchorageDetails.name, mateToolSavePlace.name,
 			mateToolPlanTidalDeparture.name, mateToolRouteDistance.name, mateToolAssessPassageWindow.name, mateToolEstimatePassage.name,
-			mateToolReadDocument.name, mateToolSearchDocuments.name, mateToolSearchWeb.name, mateToolGetPlannedStay.name:
+			mateToolReadDocument.name, mateToolSearchDocuments.name, mateToolSearchWeb.name, mateToolGetPlans.name:
 			return true
 		case mateToolGetTides.name, mateToolGetWindForecast.name:
 			if c.hasNumber("lat") || c.hasNumber("lon") {
@@ -384,13 +387,23 @@ func (d assistantToolDeps) checkPassageDraft(draft string, sentences []string, r
 	if !mateToolAvailable(d, mateToolAssessPassageWindow.name) {
 		return "", ""
 	}
+	// A plan's own verdicts are the same check, run by the same code, for the
+	// legs of the plan (ADR 0289).
+	checked := false
+	for _, c := range run.succeeded(mateToolGetPlans.name) {
+		checked = checked || plansDeliveredVerdicts(c.result)
+	}
 	checkFailed, limitsFix := false, false
 	for _, c := range run.named(mateToolAssessPassageWindow.name) {
 		if c.ok() {
-			return "", ""
+			checked = true
+			continue
 		}
 		checkFailed = true
 		limitsFix = limitsFix || strings.Contains(c.err, "Passage limits")
+	}
+	if checked {
+		return "", ""
 	}
 	angled := false
 	for _, c := range run.succeeded(mateToolGetWindForecast.name) {
@@ -409,6 +422,29 @@ func (d assistantToolDeps) checkPassageDraft(draft string, sentences []string, r
 		return "relative wind", assistantPassageRelativeWindInstruction
 	}
 	return "", ""
+}
+
+// plansDeliveredVerdicts reports whether a get_plans result carries a verdict
+// for at least one leg. A leg with only a note (no forecast yet, not routed) was
+// not judged, and a list of plans with no plan in full judged nothing.
+func plansDeliveredVerdicts(result string) bool {
+	var r struct {
+		Plan *struct {
+			Legs []struct {
+				Verdict string `json:"verdict"`
+			} `json:"legs"`
+		} `json:"plan"`
+	}
+	if json.Unmarshal([]byte(result), &r) != nil || r.Plan == nil {
+		return false
+	}
+	for _, l := range r.Plan.Legs {
+		switch l.Verdict {
+		case "go", "marginal", "no_go":
+			return true
+		}
+	}
+	return false
 }
 
 // forecastDeliveredAngle reports whether a get_wind_forecast result carries a

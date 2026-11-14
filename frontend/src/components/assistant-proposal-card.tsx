@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
+import { fieldLabel, fieldView, fieldViewFillsWidth, formatFieldValue } from '@/components/assistant-proposal-views'
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
 import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus, undoAssistantProposal } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
@@ -123,7 +123,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
             <span
               className={cn('min-w-0 break-words text-sm', dismissed || stale || undone ? 'text-muted-foreground' : 'text-foreground', (dismissed || undone) && 'line-through')}
             >
-              {applied && op.href ? (
+              {applied && op.href && !op.hrefLabel ? (
                 <a href={op.href} className="text-primary underline underline-offset-2">
                   {op.description}
                 </a>
@@ -132,6 +132,11 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
               )}
             </span>
             <OpFields op={op} ops={proposal.ops} />
+            {applied && op.href && op.hrefLabel && (
+              <a href={op.href} className="text-xs text-primary underline underline-offset-2">
+                {op.hrefLabel}
+              </a>
+            )}
           </li>
         ))}
       </ul>
@@ -188,7 +193,12 @@ function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposal
     fieldView(op.type, name, data?.[name]) ?? <span className="min-w-0 break-words">{formatFieldValue(data?.[name], ops, op.type, name)}</span>
   return (
     <dl className="flex min-w-0 flex-col gap-1 rounded-sm bg-muted/40 p-2 text-xs">
-      {names.map((name) => (
+      {names.map((name) =>
+        op.action === 'create' && fieldViewFillsWidth(op.type, name, op.after?.[name]) ? (
+          <div key={name} className="flex min-w-0">
+            {value(op.after, name)}
+          </div>
+        ) : (
         <div key={name} className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
           <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name, op.type)}</dt>
           <dd className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1 text-foreground">
@@ -209,7 +219,8 @@ function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposal
             )}
           </dd>
         </div>
-      ))}
+        ),
+      )}
     </dl>
   )
 }

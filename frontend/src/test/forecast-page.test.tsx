@@ -398,6 +398,54 @@ describe("ForecastPage", () => {
     expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
   });
 
+  it("opens the plan a link names, even when another is current (Open plan on a Mate card)", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} />);
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+  });
+
+  it("falls back to the current plan when the plan a link names is gone", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={99} />);
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+  });
+
+  it("follows a new link while it is open", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const { rerender } = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} />);
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+  });
+
+  it("tells the app when the operator picks a plan, so the link's ?plan can be cleared", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const onPlanPicked = vi.fn();
+    render(
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} onPlanPicked={onPlanPicked} />,
+    );
+    expect(onPlanPicked).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Home run/ }));
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    expect(onPlanPicked).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the same link again after another plan was picked and the app cleared ?plan", () => {
+    plansState([PLAN, PAST], 1, LEGS);
+    const onPlanPicked = vi.fn();
+    const page = (focusPlanId?: number) => (
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={focusPlanId} onPlanPicked={onPlanPicked} />
+    );
+    const { rerender } = render(page(2));
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Home run/ }));
+    expect(onPlanPicked).toHaveBeenCalled();
+    rerender(page(undefined));
+    expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+    rerender(page(2));
+    expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+  });
+
   it("adds a night to a stop through the server's shifting rule", () => {
     plansState([PLAN], 1, LEGS);
     patchStop.mockResolvedValue(PLAN);

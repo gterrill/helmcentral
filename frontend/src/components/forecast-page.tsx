@@ -30,6 +30,13 @@ interface ForecastPageProps {
   /** The boat's IANA zone, to tell whether a plan stop keeps a different clock. */
   boatTimeZone: string | undefined;
   canWrite: boolean;
+  /** The plan a link named (Open plan on a Mate card), shown ahead of the
+   * current one. A plan that is gone drops back to the current plan. */
+  focusPlanId?: number;
+  /** Called when the operator picks or makes a plan on the page, so the app can
+   * clear the link's `?plan` from the address: a reload then opens as the page
+   * stands, and following the same link again is a change the page sees. */
+  onPlanPicked?: () => void;
 }
 
 const planRange = (plan: Plan) => formatStayRange(plan.firstDate, plan.lastDate);
@@ -48,9 +55,17 @@ export function ForecastPage({
   boat,
   boatTimeZone,
   canWrite,
+  focusPlanId,
+  onPlanPicked,
 }: ForecastPageProps) {
   const { plans, currentId, create, update, patchStop, remove, error: plansError } = usePlans();
-  const [pickedId, setPickedId] = useState<number | null>(null);
+  const [pickedId, setPickedId] = useState<number | null>(focusPlanId ?? null);
+  // A new link while the page is open picks its plan too.
+  const [focusSeen, setFocusSeen] = useState(focusPlanId);
+  if (focusPlanId !== focusSeen) {
+    setFocusSeen(focusPlanId);
+    if (focusPlanId !== undefined) setPickedId(focusPlanId);
+  }
   const [selection, setSelection] = useState<PlanPlaceSelection | null>(null);
   const [editing, setEditing] = useState<"new" | "change" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -158,6 +173,7 @@ export function ForecastPage({
   const pick = (id: number) => {
     setPickedId(id);
     setSelection(null);
+    onPlanPicked?.();
   };
 
   const planId = plan?.id;
@@ -197,6 +213,7 @@ export function ForecastPage({
       await remove(plan.id);
       setPickedId(null);
       setSelection(null);
+      onPlanPicked?.();
       setConfirmDelete(false);
     } catch (err) {
       setActionError(errorMessage(err));
@@ -389,8 +406,7 @@ export function ForecastPage({
               editing === "change" && plan
                 ? await update(plan.id, input)
                 : await create(input);
-            setPickedId(saved.id);
-            setSelection(null);
+            pick(saved.id);
           }}
         />
       )}

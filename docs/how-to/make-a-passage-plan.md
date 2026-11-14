@@ -159,5 +159,42 @@ to make changes sees the buttons to add, change or delete one.
 
 ## Ask Mate
 
-Mate can't make or change a plan yet. It can tell you the weather or the tides
-"at the marina", using the stop your current plan has you at or heading for.
+Mate can read your plans, make one for you and change one. It reads each leg's
+Go, Marginal or No-Go from the plan itself, so it gives you the same answer the
+table does. It only judges a day that isn't in a plan afresh.
+
+To have Mate make a plan, describe it or paste it in, such as a day-by-day list
+from an email.
+
+1. Open **Mate** and paste the plan. Say if you want a name for it, or Mate will
+   call it "To" followed by the last stop.
+2. Mate looks up every stop, saved places first. If a stop has no match, or two
+   places match, it asks you which one you mean before it draws anything up. It
+   never guesses a position.
+3. Read the card under its reply. It has a row for each stop with the day, the
+   nights, the place, whether the position came from your saved places or the
+   place names, and the position.
+4. Choose **Apply**. The card then has **Open plan**, which takes you to the
+   Forecast page with that plan showing.
+
+Mate reads the list this way:
+
+- Lay days: A lay day is a night at that stop, not a stop of its own.
+- The year: It takes the year from today's date.
+- Via places: It keeps a via place only if it matches a place it can find. The
+  others are left out, and Mate tells you which.
+- Bar crossings: They stay in Mate's reply as a note. A plan doesn't hold them.
+- A start date that has passed: Mate keeps the date you gave and tells you the
+  plan started in the past.
+
+To change a plan, say what you want, such as "make it two nights at Manly". The
+card says only what differs, for example "Manly: 1 night → 2 nights. Later stops
+move a day: The Boat Works arrives Wed 18 Nov." Mate replaces the whole plan, so
+check the sentence for anything you didn't ask for. If you change the plan
+yourself before you choose **Apply**, the card says it's out of date, and you ask
+Mate again.
+
+Mate only changes or makes a plan when you ask. If a leg is No-Go, it tells you
+so and doesn't re-plan it. It can't delete a plan, and it can't read a picture of
+one yet. It can also tell you the weather or the tides "at the marina", using the
+stop your current plan has you at or heading for.

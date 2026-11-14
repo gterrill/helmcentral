@@ -444,7 +444,7 @@ func savedPlaceRecordType() *recordType {
 			return deleteSavedPlaceTx(env.tx, before.ID)
 		},
 		Describe: describeSavedPlace,
-		Display:  displaySavedPlaceFields,
+		Display:  perSideDisplay(displaySavedPlaceFields),
 		Href:     func(recordSnapshot) string { return "/settings/saved-places" },
 	}
 }

@@ -84,8 +84,8 @@ and the `planned_stay` record type are gone, so Mate can no longer propose a
 stay. `get_planned_stay` stays, because the vessel status and the watch report
 read it. It now returns the stop of the current plan the boat is at or sailing
 from today, the first stop of an upcoming plan, or the last stop of the plan
-that ended most recently (which reads as ended). Mate's plan tools replace it in
-a later step.
+that ended most recently (which reads as ended). Mate's plan tools replaced it
+in [ADR 0289](0289-mate-reads-and-proposes-passage-plans.md).
 
 ## What it does not know yet
 

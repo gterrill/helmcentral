@@ -19,8 +19,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   plan with one stop. Helmcentral drops the stay you saved. After you upgrade,
   open the Forecast page, choose **New plan**, search for the place, set your
   arrival date and nights, and save. Mate can no longer set a stay for you, so
-  ask it to read your plan instead, or make the plan yourself. The old
+  ask it to make a plan instead, or make the plan yourself. The old
   `/api/planned-stay` address is gone.
+- **The Planned stay tool for outside assistants is now Passage plans.** A token
+  you made before this keeps the tools it was given, so it loses the planned stay
+  and doesn't get your plans. Open **Settings, Outside assistants**, choose the
+  token and switch **Passage plans** on. New tokens have it on already.
 
 ### Added
 
@@ -90,6 +94,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   after the time you set to leave, the row says so and **Slip a day** adds a
   night there. A leg whose verdict has changed since your last visit reads "was
   Go, now Marginal". Nothing in your plan is rewritten.
+- **Mate reads your plans and can make or change one.** Ask about your plan and
+  Mate gives each leg's Go, Marginal or No-Go from the plan itself, the same
+  answer the table shows, and doesn't judge the leg a second time. Paste a
+  day-by-day plan or describe one, and Mate looks up every stop and asks you if a
+  stop has no match or two places match. It never guesses a position. A lay day
+  becomes a night at its stop, and a via place it can't find is left out and
+  mentioned. The card under its reply has a row for each stop, and once you
+  choose **Apply** it has **Open plan**. Ask Mate to change a plan and the card
+  says only what differs, such as "Manly: 1 night → 2 nights. Later stops move a
+  day: The Boat Works arrives Wed 18 Nov." Mate only touches a plan when you ask,
+  and it can't delete one. Outside assistants can read your plans but can't make
+  or change one. Mate can't read a picture of a plan yet.
 
 ### Changed
 

@@ -227,7 +227,7 @@ func TestDepthGuard_AnyCallAboutAnotherPlaceTakesTheSounderAway(t *testing.T) {
 		{"read_document", "read_document", `{"document_id":"d1"}`},
 		{"search_documents", "search_documents", `{"query":"anchorages"}`},
 		{"search_web", "search_web", `{"query":"Butterfly Bay depth"}`},
-		{"get_planned_stay", "get_planned_stay", `{}`},
+		{"get_plans", "get_plans", `{}`},
 		{"get_tides at coordinates", "get_tides", `{"lat":-20,"lon":149}`},
 		{"get_wind_forecast at coordinates", "get_wind_forecast", `{"lat":-20,"lon":149}`},
 	}

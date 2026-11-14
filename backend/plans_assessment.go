@@ -1066,15 +1066,24 @@ func warningOn(b forecastWarningsBundle, night time.Time, today string) (warning
 
 // ── the endpoint ────────────────────────────────────────────────────────
 
-// planAssessDepsFor wires an assessment's readers; a test replaces it.
-var planAssessDepsFor = func() planAssessDeps {
-	return productionPlanAssessDeps(getEnv("SETTINGS_FILE", "../settings.yaml"))
+func planSettingsPath() string { return getEnv("SETTINGS_FILE", "../settings.yaml") }
+
+// planAssessDepsFor wires an assessment's readers from the tool deps whose clock
+// and providers the caller runs on; a test replaces it.
+var planAssessDepsFor = func(d assistantToolDeps) planAssessDeps {
+	return planAssessDepsFromTool(d, planSettingsPath())
+}
+
+// pageAssessDeps are the readers the Forecast page's endpoints run on: the
+// production tool deps, on the wall clock.
+func pageAssessDeps() planAssessDeps {
+	return planAssessDepsFor(assistantProductionToolDeps(planSettingsPath()))
 }
 
 // planAssessmentHandler is GET /api/plans/:id/assessment: each leg's verdict,
 // departure, ETA and current, and the warnings on the stops' nights.
 func planAssessmentHandler(c echo.Context) error {
-	deps := planAssessDepsFor().pinned()
+	deps := pageAssessDeps().pinned()
 	d, ok, err := loadDecoratedPlan(c, deps.now())
 	if !ok {
 		return err

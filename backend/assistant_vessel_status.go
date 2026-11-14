@@ -30,7 +30,7 @@ const (
 	// still the pressure, where a minute-old depth is not.
 	vesselStatusPressureFreshAge = barometerMaxAge
 	// vesselStatusPositionFreshAge is the limit on the boat's position when
-	// measuring to the anchor or the planned stay.
+	// measuring to the anchor or the plan's next stop.
 	vesselStatusPositionFreshAge = 5 * time.Minute
 	// vesselStatusGustWindow names the gust window to the reader and to the
 	// Wind tile's ladder (inMemoryMaxTrueWindGustKtsFor).
@@ -368,7 +368,7 @@ type vesselStatusResult struct {
 	Boat         vesselStatusBoat         `json:"boat"`
 	Alarms       vesselStatusAlarms       `json:"alarms"`
 	Anomalies    vesselStatusAnomalies    `json:"anomalies"`
-	PlannedStay  vesselStatusStay         `json:"planned_stay"`
+	NextStop     vesselStatusStay         `json:"plan_next_stop"`
 	// Position is the boat's last trusted fix as the forecast endpoint takes it,
 	// for callers that need the place and must not read the vessel state again.
 	// Not part of the tool result. The status itself judges freshness separately.
@@ -556,7 +556,7 @@ func (d assistantToolDeps) buildVesselStatus(ctx context.Context) (vesselStatusR
 	}
 	res.Alarms = d.vesselStatusAlarmsFor(alarms)
 	res.Anomalies = d.vesselStatusAnomaliesFor(now)
-	res.PlannedStay = d.vesselStatusStayFor(lat, lon, noPosition, now)
+	res.NextStop = d.vesselStatusStayFor(lat, lon, noPosition, now)
 	res.Observations, res.ObservationsUnchecked = d.vesselObservationsFor(now)
 	return res, nil
 }
@@ -1089,26 +1089,26 @@ func (d assistantToolDeps) vesselStatusAnomaliesFor(now time.Time) vesselStatusA
 	}
 }
 
-// ── planned stay ─────────────────────────────────────────────────────────
+// ── the plan's next stop ─────────────────────────────────────────────────
 
 func (d assistantToolDeps) vesselStatusStayFor(lat, lon float64, noPosition string, now time.Time) vesselStatusStay {
 	store, err := d.recordStore("get_vessel_status")
 	if err != nil {
 		return vesselStatusStay{Missing: "the records are not available"}
 	}
-	stay, ok, err := store.GetPlannedStay(now)
+	stay, ok, err := store.GetPlanNextStop(now)
 	if err != nil {
-		return vesselStatusStay{Missing: "the planned stay could not be read: " + err.Error()}
+		return vesselStatusStay{Missing: "the plan's next stop could not be read: " + err.Error()}
 	}
 	if !ok {
-		return vesselStatusStay{Missing: "no stay is planned"}
+		return vesselStatusStay{Missing: "no plan is saved"}
 	}
 	if !stay.Active {
-		return vesselStatusStay{Missing: "the last planned stay ended before today"}
+		return vesselStatusStay{Missing: "the last plan ended before today"}
 	}
 	out := vesselStatusStay{Name: stay.Name, Lat: stay.Lat, Lon: stay.Lon, Arrive: stay.Arrive, Depart: stay.Depart}
 	if noPosition != "" {
-		out.DistanceMissing = noPosition + ", so the distance to the stay is unknown"
+		out.DistanceMissing = noPosition + ", so the distance to the next stop is unknown"
 		return out
 	}
 	metres := haversineMeters(lat, lon, stay.Lat, stay.Lon)
@@ -1374,7 +1374,7 @@ var mateToolGetVesselStatus = mateTool{
 			"the hours of readings, the shallowest sounded spot, the next high and a note when the tide here does not follow the station), " +
 			"the draft, the clearance and the margin the operator set in Settings, Anchor Watch, which can be linked as [Anchor Watch settings](/settings/anchor-watch); " +
 			"Helmcentral has no chart, and the sounder depth is the depth at the boat's own position), the active and ignored alarms, the sensor checks (frozen, " +
-			"impossible and silent sensors), the planned stay with its distance from the boat, and " +
+			"impossible and silent sensors), the current plan's next stop (plan_next_stop) with its distance from the boat, and " +
 			"observations: odd things below an alarm, such as the house bank draining faster overnight than usual. " +
 			"Use it for \"status\", \"how's the boat\", \"quick update\" and the like, and copy its figures: values are " +
 			"SI with a display figure in the operator's units. A reading that cannot be given has a missing reason " +

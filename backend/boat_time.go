@@ -516,12 +516,17 @@ func boatClockSeconds(t time.Time, loc *time.Location) string {
 // boatDayClockSeconds is the weekday, date and clock with seconds:
 // "Mon 2 Nov 1.30.05 PM".
 func boatDayClockSeconds(t time.Time, loc *time.Location) string {
-	return t.In(loc).Format("Mon 2 Jan") + " " + boatClockSeconds(t, loc)
+	return boatDay(t, loc) + " " + boatClockSeconds(t, loc)
+}
+
+// boatDay is the weekday and date on loc's calendar: "Mon 2 Nov".
+func boatDay(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("Mon 2 Jan")
 }
 
 // boatDayClock is the weekday, date and clock: "Mon 2 Nov 1.30 PM".
 func boatDayClock(t time.Time, loc *time.Location) string {
-	return t.In(loc).Format("Mon 2 Jan") + " " + boatClock(t, loc)
+	return boatDay(t, loc) + " " + boatClock(t, loc)
 }
 
 // boatDayYearClock is boatDayClock with the year named when t is not in

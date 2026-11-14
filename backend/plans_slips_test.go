@@ -417,7 +417,7 @@ func TestPlanSlipsHandler_ServesSlipsAndTheRouteIsReadTier(t *testing.T) {
 	planRouteSegment = func(_ context.Context, aLat, aLon, bLat, bLon float64) (waterRoute, error) {
 		return routeOf(30, [2]float64{aLat, aLon}, [2]float64{bLat, bLon}), nil
 	}
-	planAssessDepsFor = func() planAssessDeps { return paDeps(&paFake{}) }
+	planAssessDepsFor = func(assistantToolDeps) planAssessDeps { return paDeps(&paFake{}) }
 	in := plan{Name: "Run", Stops: stopsOf("2026-11-14", 0, 1, 0)}
 	in.Stops[2].ArriveBy = "2026-11-16T12:00"
 	saved, err := store.CreatePlan(in)

@@ -617,8 +617,8 @@ report has four headings and then a few things worth a look:
   it starts again after a restart.
 - **Boat:** Whether each engine is running or off, and whether the anchor watch
   is set. An engine whose readings have stopped without it being keyed off shows
-  as unknown, not off. It also lists active and ignored alarms, and your
-  planned stay with how far it is from the boat.
+  as unknown, not off. It also lists active and ignored alarms, and the next stop
+  of your current plan with how far it is from the boat.
 - **Worth a look:** At most three things. They come from the sensor checks, which
   catch a frozen, impossible or silent sensor. They also come from readings Mate
   couldn't get, and from the house bank draining faster than usual overnight.
@@ -765,6 +765,26 @@ most three, with the level it would use and why, and each one comes as a card
 you can tap. It won't suggest an alarm on something the boat doesn't measure.
 See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for doing it
 by hand.
+
+### Passage plans
+
+Mate can read the passage plans on your Forecast page, and it can make one or
+change one. Ask "are we on time", "what's the weather at the next stop" or "can
+we leave Thursday as planned", and Mate reads the plan. For a leg of a plan it
+gives you the plan's own Go, Marginal or No-Go and what decided it, the same as
+the table, rather than judging the leg a second time. For a day that isn't in a
+plan, it checks the passage window as it always has.
+
+You can also give Mate a plan to make, such as a day-by-day list pasted from an
+email. It looks up each stop and asks you if a stop has no match or two matches.
+It never guesses a position. A lay day becomes a night at its stop, and a via
+place it can't find is left out and mentioned. The card under its reply shows a
+row for each stop. When you choose **Apply**, the card has **Open plan**.
+
+To change a plan, say what you want. The card says only what differs, such as
+"Manly: 1 night → 2 nights. Later stops move a day." Mate makes or changes a
+plan only when you ask, and it can't delete one. It can't read a picture of a
+plan yet. See [Make a passage plan](../how-to/make-a-passage-plan.md#ask-mate).
 
 ### The boat's details
 
