@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-11-15
+
 ### Breaking
 
 - **Plan a stay is now Passage plans, and your saved stay is gone.** The
@@ -108,6 +110,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   day: The Boat Works arrives Wed 18 Nov." Mate only touches a plan when you ask,
   and it can't delete one. Outside assistants can read your plans but can't make
   or change one. Mate can't read a picture of a plan yet.
+- **The forecast charts show how likely lightning is at the boat.** A thin
+  violet band across the top of the Cloud, Temperature & Rain chart and the
+  Upper Air trace has one block for every three hours. A block is pale from a
+  10% chance, stronger from 30% and solid from 60%, and a window under 10%
+  draws nothing. Hours the forecast doesn't cover, such as the days past its
+  14.5-day reach, are hatched instead of left blank. The key says what the
+  shades mean, and the tooltip gives the chance for the hour you're reading.
+  Each card in the day strip carries the same shades as a thin line along its
+  bottom edge, and the day's summary says when lightning is likely, possible
+  or a slight chance. It's for the boat's position only, so a place's forecast
+  opened from a plan shows no band and says so. Once the lightning plugin has
+  answered, a failed update is shown in the key, even beside a band that's
+  still drawn. Until it has answered, the key stays empty, and a boat with no
+  lightning plugin sees nothing about it. The plugin bundle includes the Met
+  Office lightning plugin, which needs no key. It downloads about 60 MB a day,
+  so mind that on a metered connection. Its credit is behind the ⓘ button in
+  the lightning key.
 
 ### Changed
 
@@ -125,26 +144,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and that the stretch up the river is not in the distance, time or fuel. A
   town well inland, such as Bundaberg itself, is still refused, and Mate then
   looks for that town's marina or harbour and says which one it used.
-
-### Added
-
-- **The forecast charts show how likely lightning is at the boat.** A thin
-  violet band across the top of the Cloud, Temperature & Rain chart and the
-  Upper Air trace has one block for every three hours. A block is pale from a
-  10% chance, stronger from 30% and solid from 60%, and a window under 10%
-  draws nothing. Hours the forecast doesn't cover, such as the days past its
-  14.5-day reach, are hatched instead of left blank. The key says what the
-  shades mean, and the tooltip gives the chance for the hour you're reading.
-  Each card in the day strip carries the same shades as a thin line along its
-  bottom edge, and the day's summary says when lightning is likely, possible
-  or a slight chance.
-  It's for the boat's position only, so a planned stay shows no band and says
-  so. Once the lightning plugin has answered, a failed update is shown in the
-  key, even beside a band that's still drawn. Until it has answered, the key
-  stays empty, and a boat with no lightning plugin sees nothing about it. The
-  plugin bundle includes the Met Office lightning plugin, which needs no key.
-  It downloads about 60 MB a day, so mind that on a metered connection. Its
-  credit is behind the ⓘ button in the lightning key.
 
 ## [0.65.0] - 2026-11-12
 
@@ -3754,7 +3753,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.65.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.66.0...HEAD
+[0.66.0]: https://github.com/gterrill/helmcentral/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/gterrill/helmcentral/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/gterrill/helmcentral/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/gterrill/helmcentral/compare/v0.62.0...v0.63.0
