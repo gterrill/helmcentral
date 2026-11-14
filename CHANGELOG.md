@@ -19,6 +19,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   readings labelled. On a smaller screen the plans still come first, above the
   forecast.
 
+### Fixed
+
+- **The lightning key no longer talks about a stay.** When you open the
+  forecast for a stop in a passage plan, or for the middle of a leg, the key
+  now reads "Lightning is for the boat's position, not this place."
+
 ## [0.66.0] - 2026-11-15
 
 ### Breaking
