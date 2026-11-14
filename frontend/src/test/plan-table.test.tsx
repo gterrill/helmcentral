@@ -62,10 +62,11 @@ const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
 
 function show(
   a: PlanAssessment | null,
-  opts: { error?: string | null; canWrite?: boolean; onAddNight?: (i: number) => void } = {},
+  opts: { error?: string | null; canWrite?: boolean; fresh?: boolean; onAddNight?: (i: number) => void } = {},
 ) {
   vi.mocked(usePlanAssessment).mockReturnValue({
     assessment: a,
+    fresh: opts.fresh ?? a !== null,
     shape: "shape",
     loading: a === null && !opts.error,
     error: opts.error ?? null,
@@ -233,6 +234,7 @@ describe("PlanTable verdicts", () => {
       ],
     };
     vi.mocked(usePlanAssessment).mockReturnValue({
+      fresh: true,
       shape: "shape",
       assessment: assessment({
         legs: [
@@ -602,6 +604,11 @@ describe("PlanTable progress, slack, slips and change marks", () => {
   it("asks the change marks hook for this plan's legs and whether the viewer can save", () => {
     show(assessment(), { canWrite: false });
     expect(usePlanChangeMarks).toHaveBeenCalledWith(1, expect.any(Array), false);
+  });
+
+  it("gives the change marks hook no legs while the assessment shown is the cached one", () => {
+    show(assessment(), { canWrite: true, fresh: false });
+    expect(usePlanChangeMarks).toHaveBeenCalledWith(1, null, true);
   });
 
   it("prompts on a leg the boat should have left, with Slip a day adding a night at that stop", () => {

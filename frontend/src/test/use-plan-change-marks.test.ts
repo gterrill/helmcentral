@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
+import { usePlanAssessment } from "@/hooks/use-plan-assessment";
 import { usePlanChangeMarks } from "@/hooks/use-plan-change-marks";
+import { mapPlan } from "@/hooks/use-plans";
 import { resetQueryStore } from "@/lib/api-query";
 import type { PlanLegAssessment } from "@/lib/plans";
 
@@ -135,6 +137,66 @@ describe("usePlanChangeMarks", () => {
     // The fresh read says the box already holds what is shown: no marks, no save.
     expect(two.result.current.marks.size).toBe(0);
     expect(calls(fetchMock as never)).toEqual(["GET /api/plans/7/seen", "PUT /api/plans/7/seen", "GET /api/plans/7/seen"]);
+  });
+
+  it("saves only the verdicts of an assessment fetched in this mount, never the cached ones from the last visit", async () => {
+    const PLAN = mapPlan({
+      id: 7, name: "Home run", status: "active", first_date: "2026-11-14", last_date: "2026-11-15",
+      stops: [
+        { name: "A", lat: -25.5, lon: 152.9, arrive: "2026-11-14", nights: 0, depart: "2026-11-14", vias: [], depart_time: "06:30", timezone: "Australia/Brisbane" },
+        { name: "B", lat: -26, lon: 153, arrive: "2026-11-14", nights: 1, depart: "2026-11-15", vias: [], depart_time: "", timezone: "Australia/Brisbane" },
+        { name: "C", lat: -26.5, lon: 153.1, arrive: "2026-11-15", nights: 0, depart: "2026-11-15", vias: [], depart_time: "", timezone: "Australia/Brisbane" },
+      ],
+    } as never);
+    const wireLeg = (i: number, key: string, verdict: string) => ({
+      leg: i, date: "2026-11-14", key, progress: "", still_in_port: false, verdict, limiting: "", note: "", note_kind: "",
+      depart: "", depart_suggested: false, arrive: "", hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
+      wind_changes: { changes: [], not_checked: "" },
+    });
+    const assessment = (verdictA: string) => ({
+      as_of: "", forecast_as_of: "", problem: "", warnings_error: "", night_winds: [], stops: [],
+      legs: [wireLeg(0, "A → B|2026-11-14", verdictA), wireLeg(1, "B → C|2026-11-15", "go")],
+    });
+    // What the box holds from before: A was Go. The cached assessment says Marginal,
+    // the fresh one says No-Go.
+    const seen = { legs: [{ key: "A → B|2026-11-14", verdict: "go" }, { key: "B → C|2026-11-15", verdict: "go" }] };
+    let release: () => void = () => {};
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return reply({ saved: true });
+      if (String(url).endsWith("/seen")) return reply(seen);
+      return reply(assessment("marginal"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const visit = () =>
+      renderHook(() => {
+        const { assessment: a, fresh } = usePlanAssessment(PLAN);
+        return usePlanChangeMarks(7, fresh ? (a?.legs ?? null) : null, true);
+      });
+    const puts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT").map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+
+    const one = visit();
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    one.unmount();
+    fetchMock.mockClear();
+
+    // Back inside the cache window: the cached assessment renders while the fresh one
+    // is held. The cached verdicts must not be saved as the new snapshot.
+    const held2 = new Promise<void>((r) => (release = r));
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return reply({ saved: true });
+      if (String(url).endsWith("/seen")) return reply(seen);
+      await held2;
+      return reply(assessment("no_go"));
+    });
+    const two = visit();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(puts()).toEqual([]);
+    expect(two.result.current.marks.size).toBe(0);
+    release();
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0]).toEqual({
+      legs: [{ key: "A → B|2026-11-14", verdict: "no_go" }, { key: "B → C|2026-11-15", verdict: "go" }],
+    });
   });
 
   it("starts again for another plan, with none of the first plan's marks", async () => {

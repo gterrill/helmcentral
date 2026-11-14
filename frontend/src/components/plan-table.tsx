@@ -160,8 +160,9 @@ export function PlanTable({
     }
     return [...byKey.values()];
   }, [rows, plan, legByFrom, today]);
-  const { assessment, shape, error: assessmentError } = usePlanAssessment(plan);
-  const { marks, error: marksError } = usePlanChangeMarks(plan.id, assessment?.legs ?? null, canWrite);
+  const { assessment, fresh, shape, error: assessmentError } = usePlanAssessment(plan);
+  // The snapshot kept for the next visit rests only on verdicts fetched in this mount.
+  const { marks, error: marksError } = usePlanChangeMarks(plan.id, fresh ? (assessment?.legs ?? null) : null, canWrite);
   const assessmentState: AssessmentState = assessment ? "ready" : assessmentError ? "failed" : "loading";
   const rowAssessments = useMemo(
     () => buildRowAssessments(rows, plan, assessment, assessmentState, marks),

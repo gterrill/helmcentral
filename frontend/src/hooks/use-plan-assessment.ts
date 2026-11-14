@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { ASSESSMENT_DEBOUNCE_MS, assessmentShape, useSettledShape } from "@/hooks/use-plan-shape";
 import { PLANS_PATH } from "@/hooks/use-plans";
-import { invalidateQueries, useApiQuery } from "@/lib/api-query";
+import { fetchQuery, invalidateQueries, useApiQuery } from "@/lib/api-query";
 import {
   mapLegResult,
   type LegResultApi,
@@ -152,8 +152,27 @@ export function usePlanAssessment(plan: Plan | null) {
   const current = settled === shape;
   const assessment = current ? (data ?? null) : null;
   const failure = current && error ? error.message || "Failed to check the plan against the forecast" : null;
+  // On a return inside the query cache window `data` is the answer from the last
+  // visit while the ask made on this mount is still in flight. `fresh` is true
+  // only once a read made in this mount, for this shape, has settled: what is
+  // kept as the plan's "seen" snapshot must not rest on the cached answer.
+  const enabled = plan !== null && plan.stops.length > 1;
+  const askKey = `${planId}|${settled}`;
+  const [freshFor, setFreshFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    void fetchQuery([PLANS_PATH, planId, "assessment", settled], `${PLANS_PATH}/${planId}/assessment`).then(() => {
+      if (live) setFreshFor(askKey);
+    });
+    return () => {
+      live = false;
+    };
+  }, [enabled, planId, settled, askKey]);
   return {
     assessment,
+    /** The answer shown was fetched during this mount, not served from the cache. */
+    fresh: enabled && current && freshFor === askKey && !error,
     /** The plan's shape the answer is for: what the slips are asked for too. */
     shape: settled,
     /** The check for the plan as it stands has not answered yet. */
