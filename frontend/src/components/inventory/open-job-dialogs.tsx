@@ -249,7 +249,7 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
   const [error, setError] = useState<string | null>(null)
   const [logged, setLogged] = useState(false)
 
-  const { items } = useEquipment(job !== null ? {} : null)
+  const { items, loading: itemsLoading, error: itemsError } = useEquipment(job !== null ? {} : null)
   useUnsavedWorkReport('open-job-done', job !== null && !logged)
 
   useEffect(() => {
@@ -377,7 +377,7 @@ export function OpenJobDoneDialog({ job, onClose }: OpenJobDoneDialogProps) {
                   <Input id="open-job-done-currency" value={form.currency} onChange={(e) => update({ currency: e.target.value })} placeholder="AUD" />
                 </Field>
               </div>
-              <PartsEditor parts={form.parts} onChange={(parts) => update({ parts })} items={items} />
+              <PartsEditor parts={form.parts} onChange={(parts) => update({ parts })} items={items} itemsLoading={itemsLoading} itemsError={itemsError} />
             </FieldGroup>
             {error && <FieldError errors={[{ message: error }]} />}
             <DialogFooter>
