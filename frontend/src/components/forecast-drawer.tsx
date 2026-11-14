@@ -1467,7 +1467,7 @@ export function ForecastDrawer({
       <div className="rounded-lg border border-gauge-primary/30 bg-gauge-primary/5 px-4 py-8 text-center">
         <p className="text-xs uppercase tracking-[0.16em] text-gauge-primary">Forecast Offline</p>
         <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
-        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+        <p className="mt-1 text-xs text-muted-foreground first-letter:uppercase">{error}</p>
         <div className="mt-4 flex justify-center">
           <Button type="button" size="sm" variant="outline" className="h-10 min-w-24" onClick={onRetry}>
             Retry

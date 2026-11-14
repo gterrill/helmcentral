@@ -144,10 +144,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -1080,7 +1084,7 @@ func weatherToday(c echo.Context) error {
 	bundle, fetchErr := provider.FetchForecast(point.Lat, point.Lon, 1, point.Zone.Name)
 	if fetchErr != nil {
 		log.Printf("weather provider %q error: %v", configuredProvider, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, fetchErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fetchFailureReason(fetchErr)})
 	}
 
 	localLocation := point.Zone.Loc
@@ -1155,7 +1159,7 @@ func weatherForecast(c echo.Context) error {
 	bundle, forecastErr := provider.FetchForecast(point.Lat, point.Lon, 10, point.Zone.Name)
 	if forecastErr != nil {
 		log.Printf("weather provider %q forecast error: %v", configuredProvider, forecastErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, forecastErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fetchFailureReason(forecastErr)})
 	}
 	if len(bundle.Days) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response was empty"})
@@ -1317,4 +1321,59 @@ func isDaytimeWeatherObservation(observedAt time.Time, location *time.Location) 
 
 	hour := observedAt.In(location).Hour()
 	return hour >= 6 && hour < 18
+}
+
+var (
+	fetchFailureStatusRE = regexp.MustCompile(`unexpected status (\d+)`)
+	fetchFailureEOFRE    = regexp.MustCompile(`(?:^|\W)eof(?:$|\W)`)
+)
+
+// fetchFailureReason turns a failed weather fetch into one of a fixed set of
+// short reasons that read after "Forecast failed: ". A plugin error crosses
+// the wasm boundary as flattened text, so each class is recognised by its
+// wording as well as by type. The operator sees only these reasons, never the
+// error text: callers log the full error, so the detail stays in the server
+// log.
+func fetchFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "the request was cancelled"
+	}
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return "the forecast did not arrive in time"
+	}
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	if errors.As(err, &opErr) || errors.As(err, &dnsErr) {
+		return "the weather service could not be reached"
+	}
+	low := strings.ToLower(err.Error())
+	if strings.Contains(low, "context canceled") {
+		return "the request was cancelled"
+	}
+	if m := fetchFailureStatusRE.FindStringSubmatch(low); m != nil {
+		return "the weather service answered with an error (" + m[1] + ")"
+	}
+	for _, s := range []string{"tls handshake timeout", "client.timeout", "deadline exceeded", "i/o timeout", "timed out", "timeout awaiting"} {
+		if strings.Contains(low, s) {
+			return "the forecast did not arrive in time"
+		}
+	}
+	for _, s := range []string{"connection refused", "no such host", "network is unreachable", "connection reset", "broken pipe", "certificate", "x509"} {
+		if strings.Contains(low, s) {
+			return "the weather service could not be reached"
+		}
+	}
+	if fetchFailureEOFRE.MatchString(low) {
+		return "the weather service could not be reached"
+	}
+	for _, s := range []string{"panicked", "wasm error", "exit_code", "module closed"} {
+		if strings.Contains(low, s) {
+			return "the weather plugin failed"
+		}
+	}
+	return "the weather service sent an error"
 }

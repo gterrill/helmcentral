@@ -668,13 +668,34 @@ func TestAssessPlan_AForecastThatFailsIsAProblemOnEveryLeg(t *testing.T) {
 		return passageForecast{}, errors.New("weather provider is down")
 	}}
 	got := paAssess(t, p, legs, &paFake{fc: fc})
-	if !strings.Contains(got.Problem, "weather provider is down") {
+	if !strings.Contains(got.Problem, "the weather service sent an error") {
 		t.Fatalf("problem = %q", got.Problem)
 	}
 	for _, l := range got.Legs {
-		if l.Verdict != "" || !strings.Contains(l.Note, "weather provider is down") || l.NoteKind != planKindProblem {
+		if l.Verdict != "" || !strings.Contains(l.Note, "the weather service sent an error") || l.NoteKind != planKindProblem {
 			t.Fatalf("leg = %+v", l)
 		}
+	}
+}
+
+func TestAssessPlan_AWeatherSetupErrorIsSaidAsItIsOnTheLegAndTheNight(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[0].DepartTime = "08:00"
+	d := paDeps(&paFake{})
+	d.sources = func(func() (string, error), time.Time) (passageSources, error) {
+		return passageSources{}, errors.New("unknown weather provider configured: x")
+	}
+	got := assessPlan(context.Background(), p, legs, d, planAssessOptions{})
+	const want = "unknown weather provider configured: x"
+	if !strings.Contains(got.Problem, want) {
+		t.Fatalf("problem = %q", got.Problem)
+	}
+	if l := got.Legs[0]; !strings.Contains(l.Note, want) || l.NoteKind != planKindProblem {
+		t.Fatalf("leg = %+v", l)
+	}
+	n, ok := pwcNightAt(got, 1, p.Stops[1].Arrive)
+	if !ok || !strings.Contains(n.NotChecked, want) {
+		t.Fatalf("night = %+v (found %v), want %q", n, ok, want)
 	}
 }
 
