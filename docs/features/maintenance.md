@@ -120,8 +120,10 @@ the gauge if there's no live reading to fill it in.
 A certificate or expiry with a fixed date and no recurring interval asks for
 the new due date, since there's nothing to calculate it from. One that renews
 every so many months works the date out for you. Saving writes one line to the
-service log and resets the rule so it counts down again from today. Afterward
-you can add photos to the entry: a data plate, a worn part, the finished job.
+service log, and the next one falls due counted from the date you entered, and
+the hours if you gave them. A date older than the last completion only adds to
+the history. Afterward you can add photos to the entry: a data plate, a worn
+part, the finished job.
 
 You can log repairs and improvements that aren't tied to a scheduled rule the
 same way, from an item's own page, at any time. A repair can also say when the

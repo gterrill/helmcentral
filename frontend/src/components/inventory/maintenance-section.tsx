@@ -172,7 +172,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Item / rule</TableHead>
+                <TableHead>Equipment / service</TableHead>
                 <TableHead>Remaining</TableHead>
                 <TableHead>Last done</TableHead>
                 <TableHead />

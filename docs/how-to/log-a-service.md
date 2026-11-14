@@ -21,8 +21,9 @@ whether it came from a scheduled rule or not.
 4. Add what was done, who did it, the cost and currency if you're tracking
    spend, and any parts used. Search inventory for a spare you fitted and set
    the quantity.
-5. Tap **Complete**. The rule resets to count down again from today, and any
-   acknowledgement on it clears.
+5. Tap **Complete**. The rule counts down again from the date you entered, and
+   the hours if you gave them, and any acknowledgement on it clears. A date
+   older than the last completion only adds to the history.
 6. If you like, add photos to the entry, such as a data plate, the old part or
    the finished job, then close.
 7. If the rule has a linked procedure, a link to it is offered in case the

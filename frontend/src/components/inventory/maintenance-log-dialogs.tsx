@@ -297,7 +297,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
         <DialogHeader>
           <DialogTitle>Complete: {rule?.description}</DialogTitle>
           <DialogDescription>
-            Writes a service log entry and resets this rule's baseline to today.
+            Logs this service. If it is the latest one, the next falls due counted from it.
           </DialogDescription>
         </DialogHeader>
 

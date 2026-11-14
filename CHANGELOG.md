@@ -75,6 +75,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   night there. A leg whose verdict has changed since your last visit reads "was
   Go, now Marginal". Nothing in your plan is rewritten.
 
+### Changed
+
+- **The Maintenance list reads more plainly.** The first column is headed
+  **Equipment / service**, and **Complete** now says that it logs the service
+  and that the next one falls due counted from it.
+
 ### Fixed
 
 - **Mate can now work out a passage from a marina up a river, or from an
@@ -85,6 +91,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and that the stretch up the river is not in the distance, time or fuel. A
   town well inland, such as Bundaberg itself, is still refused, and Mate then
   looks for that town's marina or harbour and says which one it used.
+
 ### Added
 
 - **The forecast charts show how likely lightning is at the boat.** A thin
