@@ -4,7 +4,15 @@ import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { ASSESSMENT_DEBOUNCE_MS, assessmentShape, useSettledShape } from "@/hooks/use-plan-shape";
 import { PLANS_PATH } from "@/hooks/use-plans";
 import { invalidateQueries, useApiQuery } from "@/lib/api-query";
-import { mapLegResult, type LegResultApi, type Plan, type PlanAssessment, type PlanLegAssessment } from "@/lib/plans";
+import {
+  mapLegResult,
+  type LegResultApi,
+  type Plan,
+  type PlanAssessment,
+  type PlanLegAssessment,
+  type PlanRowWindChanges,
+  type WindRelation,
+} from "@/lib/plans";
 
 export { ASSESSMENT_DEBOUNCE_MS };
 
@@ -27,6 +35,46 @@ interface PlanLegAssessmentApi extends LegResultApi {
   current_kn: number | null;
   current_note: string;
   not_checked: string[] | null;
+  wind_changes: WindChangesApi;
+}
+
+interface WindChangesApi {
+  changes: Array<{
+    label: string;
+    from: string;
+    to: string;
+    speed_min_kn: number;
+    speed_max_kn: number;
+    lower_confidence: boolean;
+    prominent: boolean;
+    from_sector: string;
+    sector: string;
+  }> | null;
+  not_checked: string;
+}
+
+/** A sector the server named; "" is none (a night has no course). Any other word is refused. */
+function mapSector(word: string): WindRelation | null {
+  if (word === "") return null;
+  if (word === "ahead" || word === "abeam" || word === "astern") return word;
+  throw new Error(`The plan assessment named a wind sector this page does not know: ${word}`);
+}
+
+function mapWindChanges(raw: WindChangesApi): PlanRowWindChanges {
+  return {
+    changes: (raw.changes ?? []).map((c) => ({
+      label: c.label,
+      from: c.from,
+      to: c.to,
+      speedMinKn: c.speed_min_kn,
+      speedMaxKn: c.speed_max_kn,
+      lowerConfidence: c.lower_confidence,
+      prominent: c.prominent,
+      fromSector: mapSector(c.from_sector),
+      sector: mapSector(c.sector),
+    })),
+    notChecked: raw.not_checked === "" ? null : raw.not_checked,
+  };
 }
 
 interface PlanAssessmentApi {
@@ -38,6 +86,7 @@ interface PlanAssessmentApi {
   slack?: { days: number; stop: number; behind_days: number } | null;
   legs: PlanLegAssessmentApi[] | null;
   stops: Array<{ stop: number; nights: Array<{ date: string; warning: string; url: string }> | null }> | null;
+  night_winds: Array<WindChangesApi & { stop: number; date: string }> | null;
 }
 
 function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
@@ -54,6 +103,7 @@ function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
     currentKn: l.current_kn,
     currentNote: l.current_note,
     notChecked: l.not_checked ?? [],
+    windChanges: mapWindChanges(l.wind_changes),
   };
 }
 
@@ -67,6 +117,7 @@ export function mapAssessment(raw: PlanAssessmentApi): PlanAssessment {
     slack: raw.slack ? { days: raw.slack.days, stop: raw.slack.stop, behindDays: raw.slack.behind_days } : null,
     legs: (raw.legs ?? []).map(mapLegAssessment),
     stops: (raw.stops ?? []).map((s) => ({ stop: s.stop, nights: s.nights ?? [] })),
+    nightWinds: (raw.night_winds ?? []).map((n) => ({ stop: n.stop, date: n.date, ...mapWindChanges(n) })),
   };
 }
 

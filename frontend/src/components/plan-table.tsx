@@ -14,6 +14,8 @@ import { useWeatherForecast } from "@/hooks/use-weather-forecast";
 import type { ForecastPlace } from "@/lib/forecast-place";
 import { notCheckedWords } from "@/lib/passage-measures";
 import { PlanForecastContext, PlanForecastStore, placeKey } from "@/lib/plan-forecast-store";
+import { leadWindChange } from "@/lib/forecast-wind-changes";
+import { planWindChangeLine, planWindChangesTitle } from "@/lib/plan-wind-change";
 import {
   buildPlanRows,
   changeMarkText,
@@ -29,12 +31,14 @@ import {
   verdictText,
   windRelation,
   withinForecastHorizon,
+  type DayWind,
   type LegVerdict,
   type Plan,
   type PlanAssessment,
   type PlanLeg,
   type PlanLegAssessment,
   type PlanSlack,
+  type PlanRowWindChanges,
   type PlanStopWarning,
   legErrorText,
   legNoteText,
@@ -301,6 +305,22 @@ interface RowAssessment {
   nightWarning: PlanStopWarning | undefined;
   /** A passage row's warning at the stop it arrives at, for the night of arrival. */
   arrivalWarning: PlanStopWarning | undefined;
+  /** The wind changes on this row; null until the assessment has them for it. */
+  windChanges: PlanRowWindChanges | null;
+}
+
+/**
+ * A passage row's changes with the night of arrival at the stop it lands at after
+ * them: the leg's own changes first, then the night's. Either side's "not
+ * checked" reason is kept.
+ */
+function withArrivalNight(leg: PlanRowWindChanges, night: PlanRowWindChanges | undefined): PlanRowWindChanges {
+  if (!night) return leg;
+  const reasons = [leg.notChecked, night.notChecked].filter((r): r is string => r !== null);
+  return {
+    changes: [...leg.changes, ...night.changes],
+    notChecked: reasons.length > 0 ? reasons.join(" ") : null,
+  };
 }
 
 /**
@@ -318,6 +338,7 @@ function buildRowAssessments(
   const legs = new Map((assessment?.legs ?? []).map((l) => [l.leg, l]));
   const warnings = new Map<string, PlanStopWarning>();
   for (const s of assessment?.stops ?? []) for (const n of s.nights) warnings.set(`${s.stop}|${n.date}`, n);
+  const nightWinds = new Map((assessment?.nightWinds ?? []).map((n) => [`${n.stop}|${n.date}`, n]));
   return new Map(
     rows.map((row): [string, RowAssessment] => {
       if (row.kind === "passage") {
@@ -326,12 +347,30 @@ function buildRowAssessments(
         // The server lists a stop's nights from its plan arrive date, so the passage
         // row shows the arrival stop's first night, even for a leg that lands after midnight.
         const arrivalWarning = to ? warnings.get(`${row.legIndex + 1}|${to.arrive}`) : undefined;
+        const arrivalNight = to ? nightWinds.get(`${row.legIndex + 1}|${to.arrive}`) : undefined;
         const mark = leg ? marks.get(leg.key) : undefined;
-        return [row.key, { leg, mark, stopSkipped: false, state, nightWarning: undefined, arrivalWarning }];
+        return [
+          row.key,
+          {
+            leg, mark, stopSkipped: false, state, nightWarning: undefined, arrivalWarning,
+            windChanges: leg ? withArrivalNight(leg.windChanges, arrivalNight) : null,
+          },
+        ];
       }
       const nightWarning = warnings.get(`${row.stopIndex}|${row.dayKey}`);
       const stopSkipped = row.stopIndex > 0 && legs.get(row.stopIndex - 1)?.progress === "skipped";
-      return [row.key, { leg: undefined, mark: undefined, stopSkipped, state, nightWarning, arrivalWarning: undefined }];
+      return [
+        row.key,
+        {
+          leg: undefined,
+          mark: undefined,
+          stopSkipped,
+          state,
+          nightWarning,
+          arrivalWarning: undefined,
+          windChanges: nightWinds.get(`${row.stopIndex}|${row.dayKey}`) ?? null,
+        },
+      ];
     }),
   );
 }
@@ -463,6 +502,63 @@ function VerdictText({
       {notChecked.length > 0 && (
         <p className="text-xs text-muted-foreground">Not checked: {notChecked.join(", ")}</p>
       )}
+    </>
+  );
+}
+
+/**
+ * The Wind cell: the row's wind change when the assessment has one, else the
+ * day's mean range and direction. The changes are the server's, already cut to
+ * the row's own window and judged (ADR 0287); this only draws them. With no
+ * changes for the row yet (the assessment is still loading) the cell shows the
+ * current speed range alone.
+ */
+function WindCell({
+  wind,
+  changes,
+  suffix,
+  loading,
+}: {
+  wind: DayWind | null;
+  changes: PlanRowWindChanges | null;
+  /** The leg's relation to the wind, or a stop's compass direction. */
+  suffix: string | null;
+  loading: boolean;
+}) {
+  const range = wind ? formatWindRange(wind.minKts, wind.maxKts) : null;
+  const lead = changes ? leadWindChange(changes.changes) : undefined;
+  const notes = changes && (
+    <>
+      {changes.notChecked && (
+        <span data-testid="plan-wind-changes-not-checked" className="block text-xs text-muted-foreground" title={changes.notChecked}>
+          changes not checked
+        </span>
+      )}
+    </>
+  );
+  if (changes && lead) {
+    const { text, relation } = planWindChangeLine(lead);
+    const more = changes.changes.length - 1;
+    return (
+      <>
+        {range && <span className="block">{range}</span>}
+        <span
+          data-testid="plan-wind-change"
+          className={`block ${lead.prominent ? "font-medium text-amber-600 dark:text-amber-400" : ""}`}
+          title={planWindChangesTitle(changes.changes)}
+        >
+          {text}
+          {relation && <span className="block text-xs">{relation}</span>}
+        </span>
+        {more > 0 && <span className="block text-xs text-muted-foreground">+{more} more</span>}
+        {notes}
+      </>
+    );
+  }
+  return (
+    <>
+      {range ? (suffix ? `${range} ${suffix}` : range) : loading ? "…" : "—"}
+      {notes}
     </>
   );
 }
@@ -635,13 +731,12 @@ const PlanDayRow = memo(function PlanDayRow({
       ) : (
         <>
           <Cell label="Wind">
-            {forecast.wind
-              ? `${formatWindRange(forecast.wind.minKts, forecast.wind.maxKts)}${
-                  relation ? ` ${relation}` : !passage && forecast.windDirection ? ` ${forecast.windDirection}` : ""
-                }`
-              : forecast.loading
-                ? "…"
-                : "—"}
+            <WindCell
+              wind={forecast.wind}
+              changes={assessed.windChanges}
+              suffix={relation || (!passage ? forecast.windDirection : null)}
+              loading={forecast.loading}
+            />
           </Cell>
           <Cell label="Gusts">
             {forecast.wind && forecast.wind.gustKts !== null ? `${Math.round(forecast.wind.gustKts)} kn` : "—"}

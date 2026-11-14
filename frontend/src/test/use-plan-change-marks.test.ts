@@ -9,7 +9,8 @@ const reply = (body: unknown, ok = true, status = 200) => ({ ok, status, json: a
 
 const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "A → B|2026-11-14", progress: "", stillInPort: false, verdict: "marginal", limiting: "", note: "", noteKind: "",
-  depart: null, departSuggested: false, arrive: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [], ...over,
+  depart: null, departSuggested: false, arrive: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
+  windChanges: { changes: [], notChecked: null }, ...over,
 });
 
 const LEGS = [leg({}), leg({ leg: 1, key: "B → C|2026-11-15", verdict: "go" })];

@@ -59,7 +59,12 @@ export function windChangeChipText(change: WindChange): string {
   return `${change.from}→${change.to} ${change.label}`
 }
 
-const UNSURE = 'less certain this far out'
+export const UNSURE = 'less certain this far out'
+
+/** The change a day leads with: the first prominent one, else the first. */
+export function leadWindChange<T extends { prominent: boolean }>(changes: T[]): T | undefined {
+  return changes.find((c) => c.prominent) ?? changes[0]
+}
 
 /**
  * The wind sentence that leads the extended summary, for example

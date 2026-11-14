@@ -166,6 +166,46 @@ export interface PlanLegAssessment {
   currentKn: number | null;
   currentNote: string;
   notChecked: string[];
+  /** The wind changes between the departure and the ETA, worked out on the server. */
+  windChanges: PlanRowWindChanges;
+}
+
+/**
+ * One wind change on a plan row. The server judges it: `sector` and `fromSector`
+ * are where the wind after and before blows from against the leg's course (null
+ * for a night at a stop, which has no course), and `prominent` is the amber.
+ */
+export interface PlanWindChange {
+  /** The boat clock at the row's place, "2 AM", with the weekday when it is another day. */
+  label: string;
+  from: string;
+  to: string;
+  speedMinKn: number;
+  speedMaxKn: number;
+  lowerConfidence: boolean;
+  prominent: boolean;
+  fromSector: WindRelation | null;
+  sector: WindRelation | null;
+}
+
+/**
+ * A row's changes, earliest first. `notChecked` says why they were not all looked
+ * for: the forecast read for the row stops before it ends, or the passage limits
+ * that judge a change are not set. It is null when there is nothing to say.
+ */
+export interface PlanRowWindChanges {
+  changes: PlanWindChange[];
+  notChecked: string | null;
+}
+
+/**
+ * The changes on one night at a stop: a lay-day row's, or, keyed by the stop's
+ * plan arrive date, the night of arrival, which the passage row that lands there
+ * shows after its own changes.
+ */
+export interface PlanNightWinds extends PlanRowWindChanges {
+  stop: number;
+  date: string;
 }
 
 /** An official warning in force the night the boat is at a stop. */
@@ -190,6 +230,8 @@ export interface PlanAssessment {
   slack: PlanSlack | null;
   legs: PlanLegAssessment[];
   stops: Array<{ stop: number; nights: PlanStopWarning[] }>;
+  /** The wind changes on each lay-day night still ahead. */
+  nightWinds: PlanNightWinds[];
 }
 
 /**
@@ -383,14 +425,16 @@ export type WindRelation = "ahead" | "abeam" | "astern";
 /**
  * Where the wind is against the leg's course. `windFromDeg` is the direction
  * the wind blows from, so a wind from the course direction is dead ahead.
- * Within 60 degrees of the bow is ahead, within 60 of the stern is astern,
- * the rest abeam.
+ * Under 60 degrees off the bow is ahead, 60 up to but not including 120 is
+ * abeam, 120 or more is astern. This is the server's `passageSector`
+ * (assistant_passage_window.go) edge for edge, because the page looks up the
+ * marginal wind of the sector it names here and the verdict uses the server's.
  */
 export function windRelation(courseDeg: number, windFromDeg: number): WindRelation {
   const off = Math.abs(shortTurn(courseDeg, windFromDeg));
   if (off < 60) return "ahead";
-  if (off > 120) return "astern";
-  return "abeam";
+  if (off < 120) return "abeam";
+  return "astern";
 }
 
 /** Mean of compass bearings, so 350 and 10 average to 0 and not 180. Null for none. */
@@ -434,6 +478,15 @@ export function summariseDayWind(
   };
 }
 
+/** A night runs from 18:00 on the stop's day to 06:00 the next. */
+export const OVERNIGHT_START_HOUR = 18;
+export const OVERNIGHT_END_HOUR = 6;
+
+/** Whether an hour belongs to the night of a day: 18:00 or later on that day, or before 06:00 the next. */
+export function inOvernightWindow(hour: number, isNextDay: boolean): boolean {
+  return isNextDay ? hour >= 0 && hour < OVERNIGHT_END_HOUR : hour >= OVERNIGHT_START_HOUR && hour <= 23;
+}
+
 export interface HourlyWindPoint {
   hourOfDay: number;
   windSpeed: number;
@@ -452,8 +505,8 @@ export function summariseOvernightWind(
   morning: HourlyWindPoint[] | undefined,
 ): DayWind | null {
   const night = [
-    ...evening.filter((h) => h.hourOfDay >= 18 && h.hourOfDay <= 23),
-    ...(morning ?? []).filter((h) => h.hourOfDay >= 0 && h.hourOfDay < 6),
+    ...evening.filter((h) => inOvernightWindow(h.hourOfDay, false)),
+    ...(morning ?? []).filter((h) => inOvernightWindow(h.hourOfDay, true)),
   ].filter((h) => h.windSpeed >= 0);
   if (night.length === 0) return null;
   const speeds = night.map((h) => h.windSpeed);

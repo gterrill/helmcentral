@@ -46,11 +46,12 @@ type windChangePoint struct {
 // windChange is one change in the forecast.
 type windChange struct {
 	At              time.Time
-	DayKey          string // the boat-local date of At
-	Label           string // "2 PM", the boat clock
-	DayLabel        string // "today", "tomorrow" or "Tue 17", as of the run that made it: the watch report's wording
-	From, To        string // compass points
-	SpeedMinKn      int    // the wind after the change, over the hours it holds
+	DayKey          string  // the boat-local date of At
+	Label           string  // "2 PM", the boat clock
+	DayLabel        string  // "today", "tomorrow" or "Tue 17", as of the run that made it: the watch report's wording
+	From, To        string  // compass points
+	FromDeg, ToDeg  float64 // the bearings the wind blows from before and after, for judging against a course
+	SpeedMinKn      int     // the wind after the change, over the hours it holds
 	SpeedMaxKn      int
 	LowerConfidence bool // more than three days out
 	Prominent       bool // the wind after reaches the operator's lowest marginal wind
@@ -132,9 +133,18 @@ func lowestMarginalWind(l passageLimits) float64 {
 	return marginalOf(noGo)
 }
 
+// windChangesLimitsUnset is the problem when the operator has set no wind no-go.
+// It reads after "Wind changes not judged against your limits: " in the watch
+// report and the forecast drawer, and as Mate's wind_changes_problem.
+const windChangesLimitsUnset = "your passage limits aren't set (Settings → Mate → Passage limits)"
+
 // windChangeScan is what reading a forecast for changes gave.
 type windChangeScan struct {
 	Changes []windChange
+	// ReadTo is the last hour the scan read, zero when it read none. A window that
+	// ends after it was not fully checked, whether the series was cut short or the
+	// forecast simply ended.
+	ReadTo time.Time
 	// Problem says why the changes were not judged against the operator's limits;
 	// empty when they were.
 	Problem string
@@ -157,9 +167,12 @@ type windChangeScan struct {
 func forecastWindChanges(hourly []weatherHourPoint, lastDaily time.Time, now time.Time, loc *time.Location, limits passageLimits, limitsErr error) windChangeScan {
 	var scan windChangeScan
 	prominentKn := 0.0
-	if limitsErr != nil {
+	switch {
+	case limitsErr != nil:
 		scan.Problem = firstErrorLine(limitsErr)
-	} else {
+	case !limits.anyWindNoGo():
+		scan.Problem = windChangesLimitsUnset
+	default:
 		prominentKn = lowestMarginalWind(limits)
 	}
 	kept, cut := hourlyStretch(hourly)
@@ -168,6 +181,7 @@ func forecastWindChanges(hourly []weatherHourPoint, lastDaily time.Time, now tim
 	}
 	scan.Changes = detectWindChanges(kept, now, loc, prominentKn)
 	lastRead := kept[len(kept)-1].Time.In(loc)
+	scan.ReadTo = lastRead
 	if cut == "" && !lastDaily.IsZero() && lastRead.Format("2006-01-02") < lastDaily.In(loc).Format("2006-01-02") {
 		cut = windChangeCutNotHourly
 	}
@@ -341,6 +355,8 @@ func detectWindChanges(points []windChangePoint, now time.Time, loc *time.Locati
 			DayLabel:        windChangeDayLabel(at, now, loc),
 			From:            degreesToDirection(from.mean),
 			To:              degreesToDirection(after),
+			FromDeg:         from.mean,
+			ToDeg:           after,
 			SpeedMinKn:      int(math.Round(lo)),
 			SpeedMaxKn:      int(math.Round(hi)),
 			LowerConfidence: at.Sub(now) > windChangeLowerConfidenceAfter,
@@ -365,7 +381,13 @@ func windChangesByDay(changes []windChange) map[string][]windChange {
 // its day in the response, and the client words today and tomorrow when it
 // draws, because it may hold the response for an hour.
 type windChangeResponse struct {
-	Label           string `json:"label"`
+	Label string `json:"label"`
+	windChangeFigures
+}
+
+// windChangeFigures is what a change says about the wind, on the wire for the
+// forecast and for Mate alike.
+type windChangeFigures struct {
 	From            string `json:"from"`
 	To              string `json:"to"`
 	SpeedMinKn      int    `json:"speed_min_kn"`
@@ -374,15 +396,18 @@ type windChangeResponse struct {
 	Prominent       bool   `json:"prominent"`
 }
 
+func (c windChange) figures() windChangeFigures {
+	return windChangeFigures{
+		From: c.From, To: c.To, SpeedMinKn: c.SpeedMinKn, SpeedMaxKn: c.SpeedMaxKn,
+		LowerConfidence: c.LowerConfidence, Prominent: c.Prominent,
+	}
+}
+
 // mapWindChangeResponses is never nil, so the wire carries [] and not null.
 func mapWindChangeResponses(changes []windChange) []windChangeResponse {
 	out := make([]windChangeResponse, 0, len(changes))
 	for _, c := range changes {
-		out = append(out, windChangeResponse{
-			Label: c.Label,
-			From:  c.From, To: c.To, SpeedMinKn: c.SpeedMinKn, SpeedMaxKn: c.SpeedMaxKn,
-			LowerConfidence: c.LowerConfidence, Prominent: c.Prominent,
-		})
+		out = append(out, windChangeResponse{Label: c.Label, windChangeFigures: c.figures()})
 	}
 	return out
 }

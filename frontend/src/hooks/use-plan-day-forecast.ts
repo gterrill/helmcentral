@@ -5,6 +5,7 @@ import { compassPointFor } from "@/lib/format";
 import { addDaysISO } from "@/lib/stay";
 import {
   dayCoverage,
+  inOvernightWindow,
   summariseDayWind,
   summariseOvernightWind,
   type DayCoverage,
@@ -60,9 +61,9 @@ export function dayForecast(feed: PlaceFeed, dayKey: string, span: DayWindow = "
   const waveHours =
     span === "overnight"
       ? [
-          ...(waveDay?.hourlyWave ?? []).filter((h) => h.hourOfDay >= 18 && h.hourOfDay <= 23),
-          ...(waves.days.find((d) => d.dayKey === addDaysISO(dayKey, 1))?.hourlyWave ?? []).filter(
-            (h) => h.hourOfDay >= 0 && h.hourOfDay < 6,
+          ...(waveDay?.hourlyWave ?? []).filter((h) => inOvernightWindow(h.hourOfDay, false)),
+          ...(waves.days.find((d) => d.dayKey === addDaysISO(dayKey, 1))?.hourlyWave ?? []).filter((h) =>
+            inOvernightWindow(h.hourOfDay, true),
           ),
         ]
       : (waveDay?.hourlyWave ?? []);

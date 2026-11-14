@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,6 +106,9 @@ type planLegAssessment struct {
 	CurrentKn   *float64 `json:"current_kn"`
 	CurrentNote string   `json:"current_note"`
 	NotChecked  []string `json:"not_checked"`
+	// WindChanges are the changes in the wind between the departure and the ETA,
+	// worked out here so the page only draws them (ADR 0287).
+	WindChanges planWindChanges `json:"wind_changes"`
 }
 
 // planStopNight is an official warning in force the night the boat is at a stop.
@@ -140,6 +144,9 @@ type planAssessment struct {
 	Slack *planSlack           `json:"slack"`
 	Legs  []planLegAssessment  `json:"legs"`
 	Stops []planStopAssessment `json:"stops"`
+	// NightWinds are the wind changes on each lay-day night, one entry for every
+	// night that is still ahead and inside the forecast's reach (ADR 0287).
+	NightWinds []planNightWinds `json:"night_winds"`
 }
 
 // planAssessOptions narrows an assessment to what its caller needs.
@@ -205,6 +212,7 @@ type planEnv struct {
 	now           time.Time
 	verdictsOnly  bool
 	limits        passageLimits
+	limitsErr     error
 	limitsProblem string
 	// problem is the plan's one problem from the limits or the speed, "" when none.
 	problem  string
@@ -223,6 +231,17 @@ type planLegWork struct {
 	hours  float64
 	query  planDepartureQuery
 	plan   passageLegPlan
+	// course is the leg's course in degrees true, which a wind change is placed
+	// against.
+	course float64
+	// changesRead is true once the leg's wind changes are worked out.
+	changesRead bool
+	// underway is true for the leg the boat is on. Its wind changes are read from
+	// now to eta, the operator's departure time plus the hours, and windReady says
+	// it has what that needs.
+	underway  bool
+	windReady bool
+	eta       time.Time
 	// cands are the departures to choose among when the operator set none,
 	// fairest current first.
 	cands      []tidalDeparture
@@ -300,6 +319,8 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		Legs:    make([]planLegAssessment, len(p.Stops)-1),
 		Stops:   []planStopAssessment{},
 		Problem: env.problem,
+		// A night with nothing to say is left out, so the wire carries [] and not null.
+		NightWinds: []planNightWinds{},
 	}
 	env.verdictsOnly = opts.VerdictsOnly
 	progress, underway := opts.Progress, (*planUnderway)(nil)
@@ -325,10 +346,18 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 	for _, l := range legs {
 		byFrom[l.From] = l
 	}
+	// The leg the boat is on is the first still to do when the recording began at
+	// the stop it leaves (the same reading planBehindDays makes).
+	underwayLeg := -1
+	if first := slices.Index(progress, ""); !opts.VerdictsOnly && underway != nil && first >= 0 && first < len(out.Legs) &&
+		withinArrivedNm(underway.Lat, underway.Lon, p.Stops[first].Lat, p.Stops[first].Lon) {
+		underwayLeg = first
+	}
 	work := make([]*planLegWork, len(out.Legs))
 	for i := range out.Legs {
 		out.Legs[i] = planLegAssessment{
 			Leg: i, Date: p.Stops[i].Depart, Key: planLegKey(p, i), NotChecked: []string{},
+			WindChanges: noPlanWindChanges(),
 		}
 		work[i] = &planLegWork{res: &out.Legs[i], i: i, from: p.Stops[i], to: p.Stops[i+1]}
 		if progress[i] != "" {
@@ -336,6 +365,12 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 			continue
 		}
 		d.prepareLeg(work[i], byFrom[i], env)
+		if i == underwayLeg {
+			// With no limits to judge by the leg says so below; nothing is read for it.
+			if why := work[i].prepareUnderway(byFrom[i], env); env.limitsProblem == "" && why != "" {
+				out.Legs[i].WindChanges.NotChecked, work[i].changesRead = why, true
+			}
+		}
 	}
 	d.readAndJudge(ctx, p, work, env, &out)
 	if !opts.VerdictsOnly {
@@ -347,6 +382,14 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 	for i := range out.Legs {
 		if l := &out.Legs[i]; out.Problem != "" && l.Note == out.Problem {
 			l.NoteKind = planKindProblem
+		}
+	}
+	// A leg no forecast was read for says why its wind changes were not either.
+	if !opts.VerdictsOnly {
+		for i, w := range work {
+			if !w.changesRead {
+				out.Legs[i].WindChanges = unassessedWindChanges(out.Legs[i], env, w.underway)
+			}
 		}
 	}
 	return out
@@ -364,7 +407,7 @@ func (d planAssessDeps) readEnv(ctx context.Context, now time.Time, anyLeg bool)
 	case !limits.anyWindNoGo():
 		env.limitsProblem = "Passage limits aren't set: Settings → Mate → Passage limits"
 	}
-	env.limits = limits
+	env.limits, env.limitsErr = limits, err
 	env.problem = env.limitsProblem
 	if anyLeg {
 		env.speed, env.speedErr = d.speed(ctx)
@@ -403,6 +446,44 @@ func (d planAssessDeps) prepareLeg(w *planLegWork, leg planLeg, env planEnv) {
 		}
 	}
 	w.assessable = true
+}
+
+// prepareUnderway works out what the wind changes on the leg the boat is on need,
+// beyond what prepareLeg did: its route and hours when it was not assessable (its
+// departure has passed), and its ETA from the operator's departure time. It
+// touches nothing the verdicts or the current read. It returns why the ETA is not
+// known, "" when it is.
+func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv) string {
+	w.underway = true
+	if !w.assessable {
+		if _, note := w.checkRouted(leg); note != "" {
+			return note
+		}
+		if _, note := w.setZones(); note != "" {
+			return note
+		}
+		if env.speedErr != nil {
+			return "No ETA: " + env.speedErr.Error()
+		}
+		w.hours = leg.DistanceNm / env.speed
+		w.plan = planLegPassage(w.i, w.from, w.to, leg, w.hours)
+		w.course = float64(leg.CourseDeg)
+	}
+	if w.from.DepartTime == "" {
+		return "The leg is under way and has no departure time set, so its ETA isn't known."
+	}
+	h, m, ok := passageClock(w.from.DepartTime)
+	if !ok {
+		return "Departure time not readable: " + w.from.DepartTime
+	}
+	day, err := dayStart(w.from.Depart, w.fromLoc)
+	if err != nil {
+		return "The date is not readable: " + err.Error()
+	}
+	y, mo, d := day.Date()
+	w.eta = time.Date(y, mo, d, h, m, 0, 0, w.fromLoc).Add(hoursDuration(w.hours))
+	w.windReady = true
+	return ""
 }
 
 func (w *planLegWork) checkRouted(leg planLeg) (planNoteKind, string) {
@@ -491,6 +572,7 @@ func (w *planLegWork) setRoute(leg planLeg) (planNoteKind, string) {
 	}
 	w.query = planDepartureQuery{Route: latLon, Hours: w.hours}
 	w.plan = planLegPassage(w.i, w.from, w.to, leg, w.hours)
+	w.course = float64(leg.CourseDeg)
 	return planKindNone, ""
 }
 
@@ -585,16 +667,41 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 			assessable = append(assessable, w)
 		}
 	}
+	// The wind changes are read along the legs judged and the one the boat is on.
+	windLegs := slices.Clone(assessable)
+	for _, w := range work {
+		if w.windReady && !w.assessable && env.limitsProblem == "" {
+			windLegs = append(windLegs, w)
+		}
+	}
+	// The lay-day nights, and the night of arrival at each stop a leg lands at,
+	// are read at their stops from the same source, once per stop. With no limits
+	// to judge them by nothing is read for them.
+	var nights []planNightWork
+	var stopPoints []passageRoutePoint
+	if !env.verdictsOnly {
+		nights = layDayNights(p, env.now)
+		if env.limitsProblem == "" {
+			var landings []planStop
+			for _, w := range windLegs {
+				if holdsArrivalNight(p, w.i+1) {
+					landings = append(landings, w.to)
+				}
+			}
+			stopPoints = nightPoints(nights, landings)
+		}
+	}
 	var (
 		wg          sync.WaitGroup
 		as          *passageAssessor
 		forecastErr error
+		stops       stopForecasts
 	)
-	if len(assessable) > 0 {
+	if len(windLegs) > 0 || len(stopPoints) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			as, forecastErr = d.fetchForecast(ctx, p, assessable, env)
+			as, forecastErr, stops = d.fetchForecast(ctx, p, windLegs, stopPoints, env)
 		}()
 	}
 	if !env.verdictsOnly {
@@ -622,6 +729,49 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	}
 	wg.Wait()
 
+	d.judgeLegs(ctx, as, forecastErr, assessable, out)
+	if env.verdictsOnly {
+		return
+	}
+	// The wind changes come after the verdicts, so a leg's departure is the one
+	// chosen for it and its ETA follows.
+	var arrivals []planArrival
+	for _, w := range windLegs {
+		if w.changesRead {
+			continue // the leg under way has already said why its ETA is not known
+		}
+		w.changesRead = true
+		switch {
+		case forecastErr != nil:
+			w.res.WindChanges = planWindChanges{Changes: []planWindChange{}, NotChecked: "The forecast could not be read: " + forecastErr.Error()}
+		default:
+			w.res.WindChanges = legWindChanges(as, w, env)
+		}
+		if eta, ok := w.arrival(); ok && holdsArrivalNight(p, w.i+1) {
+			arrivals = append(arrivals, planArrival{stop: w.i + 1, eta: eta})
+		}
+	}
+	nights = append(nights, arrivalNights(p, arrivals, env.now)...)
+	out.NightWinds = nightWinds(as, stops, nights, env)
+}
+
+// arrival is the instant the leg lands at its stop, when it has one: the ETA of
+// the leg under way, else the arrival the verdict was made at. A time that cannot
+// be read is already said on the leg's own row.
+func (w *planLegWork) arrival() (time.Time, bool) {
+	if w.underway {
+		return w.eta, w.windReady
+	}
+	if w.res.Arrive == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, w.res.Arrive)
+	return t, err == nil
+}
+
+// judgeLegs judges every leg whose forecast was fetched, or fails them all with
+// the reason the forecast was not.
+func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, forecastErr error, assessable []*planLegWork, out *planAssessment) {
 	if len(assessable) == 0 {
 		return
 	}
@@ -648,23 +798,39 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	}
 }
 
-// fetchForecast fetches the forecast along every assessable leg once.
-func (d planAssessDeps) fetchForecast(ctx context.Context, p plan, legs []*planLegWork, env planEnv) (*passageAssessor, error) {
+// fetchForecast fetches the forecast along every assessable leg once, and at the
+// stops whose nights are read. A stop that is a leg's end is already in the
+// assessor and is not asked for again; the rest go through the same source, whose
+// memo keeps one read per place. legsErr is why the legs' forecast is missing;
+// stopFetch says how the stops' went, stop by stop. The two fail apart: a stop
+// that cannot be read leaves the legs' verdicts, and the other stops, alone, and
+// its fetch time stays out of the forecast time the verdicts are stamped with.
+func (d planAssessDeps) fetchForecast(ctx context.Context, p plan, legs []*planLegWork, stops []passageRoutePoint, env planEnv) (as *passageAssessor, legsErr error, stopFetch stopForecasts) {
 	firstZone := p.Stops[0].Timezone
 	src, err := d.sources(func() (string, error) { return firstZone, nil }, env.now)
 	if err != nil {
-		return nil, err
+		return nil, err, stopForecasts{err: err}
 	}
-	as := newPassageAssessor(env.limits, src.fc, src.tides, d.sun)
+	as = newPassageAssessor(env.limits, src.fc, src.tides, d.sun)
 	as.skipWindAgainstTide = true
-	plans := make([]passageLegPlan, len(legs))
-	for i, w := range legs {
-		plans[i] = w.plan
+	if len(legs) > 0 {
+		plans := make([]passageLegPlan, len(legs))
+		for i, w := range legs {
+			plans[i] = w.plan
+		}
+		legsErr = as.prefetchLegs(ctx, plans)
 	}
-	if err := as.prefetchLegs(ctx, plans); err != nil {
-		return nil, err
+	var missing []passageRoutePoint
+	for _, pt := range stops {
+		if _, have := as.cache[passagePointKey(pt)]; !have {
+			missing = append(missing, pt)
+		}
 	}
-	return as, nil
+	if len(missing) > 0 {
+		failed, err := as.prefetchStops(ctx, missing)
+		stopFetch = stopForecasts{err: err, failed: failed}
+	}
+	return as, legsErr, stopFetch
 }
 
 // readLeg reads one leg's current: at the operator's departure, or, with none

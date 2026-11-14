@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { PlanTable } from "@/components/plan-table";
 import { usePlanAssessment } from "@/hooks/use-plan-assessment";
@@ -8,7 +8,7 @@ import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
 import { usePlanSlips } from "@/hooks/use-plan-slips";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
-import type { Plan, PlanAssessment, PlanLeg, PlanLegAssessment } from "@/lib/plans";
+import type { Plan, PlanAssessment, PlanLeg, PlanLegAssessment, PlanRowWindChanges, PlanWindChange } from "@/lib/plans";
 
 vi.mock("@/hooks/use-plan-assessment");
 vi.mock("@/hooks/use-plan-day-forecast");
@@ -43,7 +43,8 @@ const leg = (from: number): PlanLeg => ({
 
 const legAssessment = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
-  hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [], ...over,
+  hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [],
+  windChanges: { changes: [], notChecked: null }, ...over,
 });
 
 const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
@@ -55,6 +56,7 @@ const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({
   slack: null,
   legs: [legAssessment({}), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })],
   stops: [],
+  nightWinds: [],
   ...over,
 });
 
@@ -306,6 +308,152 @@ describe("PlanTable verdicts", () => {
   it("says warnings could not be read, instead of reading as none", () => {
     show(assessment({ warningsError: 'forecast warnings provider "bom" unavailable' }));
     expect(screen.getByText(/Warnings not checked/)).toBeInTheDocument();
+  });
+});
+
+// The Wind cell draws the row's wind changes from the assessment alone (ADR 0287):
+// which fall in the row, their sectors and which are amber are the server's.
+describe("PlanTable wind changes", () => {
+  const wind = { minKts: 6, maxKts: 18, gustKts: 24, fromDeg: 100 };
+  const windChange = (over: Partial<PlanWindChange> = {}): PlanWindChange => ({
+    label: "7 AM", from: "NNW", to: "SE", speedMinKn: 8, speedMaxKn: 18, lowerConfidence: false, prominent: false,
+    fromSector: "astern", sector: "ahead", ...over,
+  });
+  const rowChanges = (changes: PlanWindChange[], over: Partial<PlanRowWindChanges> = {}): PlanRowWindChanges => ({
+    changes, notChecked: null, ...over,
+  });
+  const onLeg = (windChanges: PlanRowWindChanges) =>
+    assessment({ legs: [legAssessment({ windChanges }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] });
+  const windCell = (row: HTMLElement) => within(row).getByText("Wind").parentElement as HTMLElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T20:00:00Z"));
+    vi.mocked(usePlanDayForecast).mockReturnValue({
+      loading: false, error: null, coverage: "inside", wind, windDirection: "E",
+      waveMinM: 0.8, waveMaxM: 1.4, wavesLoading: false, wavesError: null,
+    } as never);
+    vi.mocked(useWeatherForecast).mockReturnValue({ loading: false } as never);
+    vi.mocked(useWaveForecast).mockReturnValue({ loading: false } as never);
+    vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: false, error: null });
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map(), error: null });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the change and each side's relation to the course in place of the day's mean", () => {
+    show(onLeg(rowChanges([windChange()])));
+    const cell = windCell(rows()[0]);
+    expect(cell).toHaveTextContent("6–18 kn");
+    expect(cell).toHaveTextContent("NNW→SE 7 AM");
+    expect(cell).toHaveTextContent("astern → ahead");
+    // The mean (100 degrees, abeam of the 190 course) is not shown across a change.
+    expect(cell).not.toHaveTextContent("abeam");
+  });
+
+  it("with no change reads the day's mean as before", () => {
+    show(assessment());
+    expect(windCell(rows()[0])).toHaveTextContent("6–18 kn abeam");
+    expect(within(rows()[0]).queryByTestId("plan-wind-change")).not.toBeInTheDocument();
+  });
+
+  it("is amber when the server says prominent, and holds no threshold of its own", () => {
+    show(onLeg(rowChanges([windChange({ speedMaxKn: 30, prominent: false })])));
+    expect(within(rows()[0]).getByTestId("plan-wind-change").className).not.toMatch(/amber/);
+    cleanup();
+    show(onLeg(rowChanges([windChange({ speedMaxKn: 2, prominent: true })])));
+    expect(within(rows()[0]).getByTestId("plan-wind-change").className).toMatch(/amber/);
+  });
+
+  it("shows a lay day's night from the assessment, without a relation", () => {
+    show(
+      assessment({
+        nightWinds: [{ stop: 1, date: "2026-11-15", ...rowChanges([windChange({ label: "Sun 3 AM", fromSector: null, sector: null, prominent: true })]) }],
+      }),
+    );
+    const stopRow = rows()[1];
+    expect(stopRow).toHaveAttribute("data-kind", "stop");
+    const cell = windCell(stopRow);
+    expect(cell).toHaveTextContent("NNW→SE Sun 3 AM");
+    expect(cell).not.toHaveTextContent("→ ahead");
+    expect(within(stopRow).getByTestId("plan-wind-change").className).toMatch(/amber/);
+  });
+
+  it("leads with the first amber change, counts the rest and lists all of them in the title", () => {
+    show(onLeg(rowChanges([windChange(), windChange({ label: "9 PM", from: "SE", to: "S", prominent: true, fromSector: "ahead", sector: "abeam" })])));
+    const cell = windCell(rows()[0]);
+    const lead = within(cell).getByTestId("plan-wind-change");
+    expect(lead).toHaveTextContent("SE→S 9 PM");
+    expect(cell).toHaveTextContent("+1 more");
+    expect(lead).toHaveAttribute("title", expect.stringContaining("NNW→SE 7 AM"));
+    expect(lead).toHaveAttribute("title", expect.stringContaining("SE→S 9 PM"));
+  });
+
+  it("says the changes were not checked, with the reason as the title, instead of reading as a steady day", () => {
+    show(onLeg(rowChanges([], { notChecked: "Wind changes were only checked to Tue 17 Nov 3.00 AM: the forecast is no longer hourly" })));
+    const cell = windCell(rows()[0]);
+    expect(cell).toHaveTextContent("6–18 kn");
+    const note = within(cell).getByTestId("plan-wind-changes-not-checked");
+    expect(note).toHaveTextContent("changes not checked");
+    expect(note).toHaveAttribute("title", expect.stringContaining("no longer hourly"));
+  });
+
+  it("says the changes were not checked when the limits are not set, with the reason as the title", () => {
+    show(onLeg(rowChanges([], { notChecked: "Wind changes weren't checked because your passage limits aren't set (Settings → Mate → Passage limits)." })));
+    const note = within(windCell(rows()[0])).getByTestId("plan-wind-changes-not-checked");
+    expect(note).toHaveTextContent("changes not checked");
+    expect(note).toHaveAttribute("title", expect.stringContaining("Passage limits"));
+  });
+
+  it("says nothing extra when every change was read and checked", () => {
+    show(onLeg(rowChanges([windChange()])));
+    expect(within(rows()[0]).queryByTestId("plan-wind-changes-not-checked")).not.toBeInTheDocument();
+  });
+
+  // The night of arrival at a stop sits under the passage row that lands there,
+  // keyed by the stop's plan arrive date, which no lay-day row uses.
+  it("adds the night of arrival to the passage row that arrives, after the leg's own changes", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({ windChanges: rowChanges([windChange()]) }),
+          legAssessment({ leg: 1, date: "2026-11-16", key: "k1" }),
+        ],
+        nightWinds: [
+          { stop: 1, date: "2026-11-14", ...rowChanges([windChange({ label: "Sun 2 AM", from: "SE", to: "S", fromSector: null, sector: null })]) },
+        ],
+      }),
+    );
+    const cell = windCell(rows()[0]);
+    const lead = within(cell).getByTestId("plan-wind-change");
+    expect(lead).toHaveTextContent("NNW→SE 7 AM");
+    expect(cell).toHaveTextContent("+1 more");
+    expect(lead).toHaveAttribute("title", expect.stringContaining("SE→S Sun 2 AM"));
+  });
+
+  it("leads with the arrival night's change when the leg has none, and keeps its not-checked reason", () => {
+    show(
+      assessment({
+        nightWinds: [
+          { stop: 1, date: "2026-11-14", ...rowChanges([windChange({ label: "Sun 2 AM", fromSector: null, sector: null })], { notChecked: "The forecast at Bravo could not be read: down" }) },
+        ],
+      }),
+    );
+    const cell = windCell(rows()[0]);
+    expect(within(cell).getByTestId("plan-wind-change")).toHaveTextContent("NNW→SE Sun 2 AM");
+    expect(within(cell).getByTestId("plan-wind-changes-not-checked")).toHaveAttribute("title", expect.stringContaining("Bravo"));
+  });
+
+  it("shows the current speed range and no change line while the assessment loads", () => {
+    show(null);
+    const cell = windCell(rows()[0]);
+    expect(cell).toHaveTextContent("6–18 kn");
+    expect(within(rows()[0]).queryByTestId("plan-wind-change")).not.toBeInTheDocument();
+    expect(within(rows()[0]).queryByTestId("plan-wind-changes-not-checked")).not.toBeInTheDocument();
+  });
+
+  it("reads the day's forecast without asking it for changes", () => {
+    show(assessment());
+    expect(vi.mocked(usePlanDayForecast)).toHaveBeenCalledWith(expect.anything(), "2026-11-14", "day");
   });
 });
 
