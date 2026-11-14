@@ -1,8 +1,8 @@
 # Make a passage plan
 
 Use this when you know where you're going and when, and you want the weather
-for every day of the run in one table. See [Passage plans](../features/forecast.md#passage-plans)
-for what the table shows and where it stops.
+for every day of the run in one place. See [Passage plans](../features/forecast.md#passage-plans)
+for what a plan shows and where it stops.
 
 ## Make one
 
@@ -33,22 +33,27 @@ shore. If that route isn't the one you'll sail, add a via place.
 3. To leave at a fixed time, set **Leave at**.
 4. Choose **Save plan**.
 
-In the table, choose **Route** on a passage row to see the path on a small map.
+On a passage row, choose **Route** to see the path on a small map.
 If Helmcentral can't route a leg, the row says why and shows no distance. It
 never draws a straight line. When the charted shoreline closes off the water
 between two places, the row names them. Move a stop or add a via place.
 
-## Read the table
+## Read the plan
 
-1. The page opens on the plan whose dates include today, or the next one coming
-   up. Choose another plan from the buttons above the table.
-2. Each row is a day. A passage row shows the leg, its distance, when you leave
-   and when you should arrive. Its wind, gusts and waves are read at the
-   middle of the leg, with the wind marked ahead, abeam or astern of your
-   course. A lay day shows the wind and waves from 6 PM that day to 6 AM the
-   next morning. The last stop's final row says **leave**: it is the day you
-   sail from it, and **+1 night** is still there.
-   If the wind turns during a day, the Wind column shows the turn instead of an
+1. On a wide screen your plans sit in a column to the right of the forecast. On
+   a smaller screen they come first, above it. The page opens on the plan whose
+   dates include today, or the next one coming up. Choose another plan from the
+   buttons above the days.
+2. Each row is a day, shown as a card. It names the place or leg and labels
+   each reading: Day, Date, Distance, Depart → ETA, Wind, Gusts, Waves, Current
+   and Verdict. A
+   passage row shows the leg, its distance, when you leave and when you should
+   arrive. Its wind, gusts and waves are read at the middle of the leg, with the
+   wind marked ahead, abeam or astern of your course. A lay day shows the wind
+   and waves from 6 PM that day to 6 AM the next morning. The last stop's final
+   row says **leave**: it is the day you sail from it, and **+1 night** is still
+   there.
+   If the wind turns during a day, Wind shows the turn instead of an
    average, for example "NNW→SE 7 AM" with "astern → ahead" under it. The speed
    range above it has no single direction then, since the day had more than
    one. On a passage row only the turns between your exact departure and your
@@ -67,7 +72,7 @@ between two places, the row names them. Move a stop or add a via place.
 
 ## Read the verdict
 
-The last column judges each passage against your own passage limits. Set those
+Verdict judges each passage against your own passage limits. Set those
 first under **Settings → Mate → Passage limits**, as
 [Set your passage limits](set-passage-limits.md) describes. Until you do, the
 page says the limits aren't set and shows no verdicts.
@@ -93,7 +98,7 @@ page says the limits aren't set and shows no verdicts.
 4. Look at **Current**. "0.8 kn hindering" means the modelled current runs
    against you at that time. A dash means the model has no figure for the leg,
    and hovering over it says why.
-5. Read the line above the table. It says when the verdicts were worked out and
+5. Read the line above the days. It says when the verdicts were worked out and
    when the forecast behind them was fetched. They update on their own each
    time the forecast refreshes. After you change the plan, the verdict and the
    current read "…" until the new answer arrives, and a check that fails says
@@ -101,7 +106,7 @@ page says the limits aren't set and shows no verdicts.
 
 A leg further out than the forecast says "No forecast yet" and has no verdict.
 A leg that would run past a day says it isn't judged yet. On a lay day, the
-verdict column shows an official warning that covers that night, and stays empty
+Verdict shows an official warning that covers that night, and stays empty
 when there isn't one.
 
 ## Set an arrive-by
@@ -117,7 +122,7 @@ a booking, and you want to know how much the run can slip.
    back to keep it.
 3. Choose **Save plan**.
 
-A line above the table now says "Slack 1 day", which is the whole days between
+A line above the days now says "Slack 1 day", which is the whole days between
 when the plan has you arriving and the day you set. If the plan already has you
 arriving later, it says "Late by 1 day" in red. If you've fallen behind, the
 line says that first, for example "Behind plan by 4 days. Late by 1 day". The
@@ -127,8 +132,8 @@ slack you've already used. A long leg you left on time and are still sailing isn
 counted as late. Below the slack, the page lists
 what slipping the plan would meet, one day at a time, and names the worst leg
 for each, for example "Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
-ahead, No-Go (late by 1 day)". The slips take a little longer than the table, so
-they turn up after it. To clear an arrive-by, empty the field and save.
+ahead, No-Go (late by 1 day)". The slips take a little longer than the verdicts, so
+they turn up after them. To clear an arrive-by, empty the field and save.
 
 ## Follow the plan as you sail it
 
@@ -161,7 +166,7 @@ to make changes sees the buttons to add, change or delete one.
 
 Mate can read your plans, make one for you and change one. It reads each leg's
 Go, Marginal or No-Go from the plan itself, so it gives you the same answer the
-table does. It only judges a day that isn't in a plan afresh.
+plan shows. It only judges a day that isn't in a plan afresh.
 
 To have Mate make a plan, describe it or paste it in, such as a day-by-day list
 from an email.

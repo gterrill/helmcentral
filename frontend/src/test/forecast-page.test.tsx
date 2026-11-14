@@ -243,6 +243,32 @@ describe("ForecastPage", () => {
     expect(optionsSeen).toContainEqual({ place: { lat: -26.9, lon: 153.2 }, enabled: true });
   });
 
+  it("lays out in two columns only while there are plans", () => {
+    plansState([], null);
+    const { unmount } = render(
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
+    );
+    expect(screen.getByTestId("forecast-layout").className).not.toContain("xl:grid-cols-");
+    unmount();
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getByTestId("forecast-layout").className).toContain("xl:grid-cols-");
+  });
+
+  it("scrolls the forecast heading into view when a row is picked, not on first render", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    plansState([PLAN], 1, LEGS);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(spy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Great Sandy Straits Marina → Pelican Bay" }));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.instances[0]).toBe(screen.getByTestId("forecast-place-label"));
+    expect(spy).toHaveBeenCalledWith({ block: "start" });
+    fireEvent.click(screen.getByRole("button", { name: "Boat" }));
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
   it("does not open a leg that did not route", () => {
     plansState([PLAN], 1, LEGS);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);

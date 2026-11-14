@@ -23,6 +23,7 @@ import {
 import { errorMessage } from "@/lib/errors";
 import { findPlanRow, legForecastPlace, type Plan } from "@/lib/plans";
 import { formatStayRange } from "@/lib/stay";
+import { cn } from "@/lib/utils";
 import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
 
 interface ForecastPageProps {
@@ -41,8 +42,8 @@ interface ForecastPageProps {
 const planRange = (plan: Plan) => formatStayRange(plan.firstDate, plan.lastDate);
 
 /**
- * The Forecast page: the boat's forecast, and above it the passage plan's day
- * by day table.
+ * The Forecast page: the boat's forecast, with the passage plans beside it
+ * from xl up and above it on a smaller screen.
  *
  * It opens on the boat. Choosing a row in the table shows that row's place in
  * the drawer and a Boat button returns; the header always names which place is
@@ -124,6 +125,15 @@ export function ForecastPage({
     };
   })();
   const selectedRowKey = selection?.rowKey ?? null;
+
+  // Picking a row far down the plans column, or on a phone where plans sit
+  // above the forecast, brings the forecast it opened into view. Nothing
+  // scrolls on first render or when the selection is cleared.
+  const placeLabelRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (selectedRowKey === null) return;
+    placeLabelRef.current?.scrollIntoView({ block: "start" });
+  }, [selectedRowKey]);
 
   const place = selected ? selected.place : undefined;
   const showingPlace = selected !== null;
@@ -230,91 +240,58 @@ export function ForecastPage({
   const past = useMemo(() => plans.filter((p) => p.status === "past"), [plans]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Plans</h2>
-        {canWrite && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs"
-            onClick={() => {
-              setEditing("new");
-            }}
-          >
-            <Plus size={13} aria-hidden className="mr-1" />
-            New plan
-          </Button>
-        )}
-      </div>
-
-      {plansError && (
-        <p role="alert" className="text-xs text-destructive">
-          {plansError}
-        </p>
+    // Plans sit in a right-hand column from xl up, where the forecast still
+    // keeps about 600 px beside the app sidebar. The aside comes first in the
+    // DOM so a phone shows plans above the forecast. With no plans there is no
+    // column to fill: the Plans heading and New plan button sit full width above
+    // the forecast.
+    <div
+      data-testid="forecast-layout"
+      className={cn(
+        "grid gap-4",
+        plans.length > 0 &&
+          "xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] xl:items-start",
       )}
-
-      {plans.length > 0 && (
-        <section aria-label="Passage plans" className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div
-              className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
-              role="group"
-              aria-label="Plans"
+    >
+      <aside className="min-w-0 space-y-3 xl:col-start-2 xl:row-start-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Plans</h2>
+          {canWrite && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => {
+                setEditing("new");
+              }}
             >
-              {open.map((p) => (
-                <Button
-                  key={p.id}
-                  type="button"
-                  size="sm"
-                  variant={plan?.id === p.id ? "secondary" : "ghost"}
-                  className="h-8 min-w-0 max-w-64 text-xs"
-                  aria-pressed={plan?.id === p.id}
-                  onClick={() => pick(p.id)}
-                >
-                  <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
-                </Button>
-              ))}
-            </div>
-            {canWrite && plan && (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs"
-                  onClick={() => setEditing("change")}
-                >
-                  <Pencil size={13} aria-hidden className="mr-1" />
-                  Change plan
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 size={13} aria-hidden className="mr-1" />
-                  Delete plan
-                </Button>
-              </>
-            )}
-          </div>
+              <Plus size={13} aria-hidden className="mr-1" />
+              New plan
+            </Button>
+          )}
+        </div>
 
-          {past.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                Past ({past.length})
-              </summary>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {past.map((p) => (
+        {plansError && (
+          <p role="alert" className="text-xs text-destructive">
+            {plansError}
+          </p>
+        )}
+
+        {plans.length > 0 && (
+          <section aria-label="Passage plans" className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
+                role="group"
+                aria-label="Plans"
+              >
+                {open.map((p) => (
                   <Button
                     key={p.id}
                     type="button"
                     size="sm"
-                    variant={plan?.id === p.id ? "secondary" : "outline"}
+                    variant={plan?.id === p.id ? "secondary" : "ghost"}
                     className="h-8 min-w-0 max-w-64 text-xs"
                     aria-pressed={plan?.id === p.id}
                     onClick={() => pick(p.id)}
@@ -323,80 +300,130 @@ export function ForecastPage({
                   </Button>
                 ))}
               </div>
-            </details>
-          )}
+              {canWrite && plan && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs"
+                    onClick={() => setEditing("change")}
+                  >
+                    <Pencil size={13} aria-hidden className="mr-1" />
+                    Change plan
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 size={13} aria-hidden className="mr-1" />
+                    Delete plan
+                  </Button>
+                </div>
+              )}
+            </div>
 
-          {actionError && (
-            <p role="alert" className="text-xs text-destructive">
-              {actionError}
-            </p>
-          )}
+            {past.length > 0 && (
+              <details className="text-sm">
+                <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                  Past ({past.length})
+                </summary>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {past.map((p) => (
+                    <Button
+                      key={p.id}
+                      type="button"
+                      size="sm"
+                      variant={plan?.id === p.id ? "secondary" : "outline"}
+                      className="h-8 min-w-0 max-w-64 text-xs"
+                      aria-pressed={plan?.id === p.id}
+                      onClick={() => pick(p.id)}
+                    >
+                      <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                    </Button>
+                  ))}
+                </div>
+              </details>
+            )}
 
-          {plan && (
-            <PlanTable
-              plan={plan}
-              legs={legs}
-              legsLoading={legsLoading}
-              legsError={legsError}
-              canWrite={canWrite}
-              selectedRowKey={selectedRowKey}
-              addingNight={addingNight}
-              onSelect={selectRow}
-              onAddNight={addNight}
-            />
-          )}
-        </section>
-      )}
+            {actionError && (
+              <p role="alert" className="text-xs text-destructive">
+                {actionError}
+              </p>
+            )}
 
-      {zoneProblem && (
-        <p
-          data-testid="forecast-stay-zone-error"
-          className="text-xs text-destructive"
-        >
-          {zoneProblem}
-        </p>
-      )}
-
-      {clockDiffers && selected && stopZone && (
-        <p
-          data-testid="forecast-stay-clock-note"
-          className="text-xs text-muted-foreground"
-        >
-          Times here are {zoneOffsetLabel(stopZone, Date.now())}, local to {selected.stop.name}, not
-          the boat&apos;s clock.
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2
-          data-testid="forecast-place-label"
-          className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
-        >
-          {selected
-            ? `${selected.label} — not the boat's position`
-            : "Forecast for the boat's position"}
-        </h2>
-        {showingPlace && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-8 text-xs"
-            onClick={() => setSelection(null)}
-          >
-            Boat
-          </Button>
+            {plan && (
+              <PlanTable
+                plan={plan}
+                legs={legs}
+                legsLoading={legsLoading}
+                legsError={legsError}
+                canWrite={canWrite}
+                selectedRowKey={selectedRowKey}
+                addingNight={addingNight}
+                onSelect={selectRow}
+                onAddNight={addNight}
+              />
+            )}
+          </section>
         )}
-      </div>
+      </aside>
 
-      <ForecastDrawer
-        key={
-          selected && plan
-            ? `${plan.id}-${selected.kind}-${selected.placeName}-${selected.dayKey}-${selected.stop.arrive}-${selected.stop.depart}`
-            : "boat"
-        }
-        {...(placeProps ?? boat)}
-      />
+      <div className="min-w-0 space-y-3 xl:col-start-1 xl:row-start-1">
+        {zoneProblem && (
+          <p
+            data-testid="forecast-stay-zone-error"
+            className="text-xs text-destructive"
+          >
+            {zoneProblem}
+          </p>
+        )}
+
+        {clockDiffers && selected && stopZone && (
+          <p
+            data-testid="forecast-stay-clock-note"
+            className="text-xs text-muted-foreground"
+          >
+            Times here are {zoneOffsetLabel(stopZone, Date.now())}, local to {selected.stop.name}, not
+            the boat&apos;s clock.
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2
+            ref={placeLabelRef}
+            data-testid="forecast-place-label"
+            className="min-w-0 flex-1 scroll-mt-3 truncate text-sm font-semibold text-foreground"
+          >
+            {selected
+              ? `${selected.label} — not the boat's position`
+              : "Forecast for the boat's position"}
+          </h2>
+          {showingPlace && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8 text-xs"
+              onClick={() => setSelection(null)}
+            >
+              Boat
+            </Button>
+          )}
+        </div>
+
+        <ForecastDrawer
+          key={
+            selected && plan
+              ? `${plan.id}-${selected.kind}-${selected.placeName}-${selected.dayKey}-${selected.stop.arrive}-${selected.stop.depart}`
+              : "boat"
+          }
+          {...(placeProps ?? boat)}
+        />
+      </div>
 
       {canWrite && (
         <PlanEditor

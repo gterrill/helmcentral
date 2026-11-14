@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Plans sit beside the forecast.** On a wide screen the Forecast page shows
+  your passage plans in a column on the right, so the forecast starts at the
+  top of the page. Beside the forecast, each day of a plan is a card with its
+  readings labelled. On a smaller screen the plans still come first, above the
+  forecast.
+
 ## [0.66.0] - 2026-11-15
 
 ### Breaking

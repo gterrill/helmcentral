@@ -48,10 +48,13 @@ import { formatDayMonth, formatWeekday } from "@/lib/stay";
 import { formatDayKey, formatHourMinute, formatTimeOfDay, zoneKnown } from "@/lib/vessel-time";
 
 // The columns, widest first. The grid switches on the table's own width (the
-// table is an @container), not the screen's: beside the sidebar and a second
-// column a 768 px screen leaves the table about 480 px. Narrower than that
-// each row is a card and each cell carries its own label. Leg and Depart → ETA
-// get the most room and wrap; nothing in them is cut short with an ellipsis.
+// table is an @container), not the screen's. Narrower than 72rem each row is a
+// card and each cell carries its own label. The Forecast page shows cards in
+// a 20-24rem column beside the forecast from xl up. Below xl the table is full
+// width and shows the wide grid only once its container reaches 72rem, for
+// example a window about 1220-1279 px wide with the app sidebar collapsed to
+// icons. Leg and Depart → ETA get the most room and wrap; nothing in them is
+// cut short with an ellipsis.
 // There is no Lightning column: the lightning forecast is read for the boat's
 // own cell only, so it cannot be read for a leg (ADR 0286).
 const GRID =
