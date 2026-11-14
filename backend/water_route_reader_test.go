@@ -170,3 +170,25 @@ func TestRouteOverWaterReader_ACancelledContextStopsBetweenMargins(t *testing.T)
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRouteOverWaterReader_InlandEndIsTheTypedOnLandError(t *testing.T) {
+	r, _ := newRouteReader(t, true)
+	cases := []struct {
+		name                           string
+		fromLat, fromLon, toLat, toLon float64
+		atStart                        bool
+	}{
+		{"start", -24.5, 133.5, -20.0, 149.0, true},
+		{"destination", -20.0, 149.0, -24.5, 133.5, false},
+	}
+	for _, c := range cases {
+		_, err := r.RouteOverWater(context.Background(), c.fromLat, c.fromLon, c.toLat, c.toLon)
+		var onLand *waterRouteOnLandError
+		if !errors.As(err, &onLand) || onLand.AtStart != c.atStart {
+			t.Fatalf("%s: want an on-land error with AtStart=%v, got %T %v", c.name, c.atStart, err, err)
+		}
+		if !strings.Contains(err.Error(), "is inland, well clear of the sea") {
+			t.Fatalf("%s: the router's wording must stay: %q", c.name, err)
+		}
+	}
+}

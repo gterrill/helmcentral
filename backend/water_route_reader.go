@@ -148,7 +148,7 @@ func (r *offlineCoastlineReader) RouteOverWater(ctx context.Context, fromLat, fr
 }
 
 func (r *offlineCoastlineReader) routeWithin(ctx context.Context, fromLat, fromLon, toLat, toLon float64) (waterRoute, error) {
-	for _, e := range []struct {
+	for i, e := range []struct {
 		name     string
 		lat, lon float64
 	}{{"start", fromLat, fromLon}, {"destination", toLat, toLon}} {
@@ -157,7 +157,7 @@ func (r *offlineCoastlineReader) routeWithin(ctx context.Context, fromLat, fromL
 			return waterRoute{}, err
 		}
 		if squareInland(sq) {
-			return waterRoute{}, fmt.Errorf("the %s (%.4f, %.4f) is inland, well clear of the sea", e.name, e.lat, e.lon)
+			return waterRoute{}, &waterRouteOnLandError{AtStart: i == 0, msg: fmt.Sprintf("the %s (%.4f, %.4f) is inland, well clear of the sea", e.name, e.lat, e.lon)}
 		}
 	}
 	from, to := shorelinePoint{Lat: fromLat, Lon: fromLon}, shorelinePoint{Lat: toLat, Lon: toLon}

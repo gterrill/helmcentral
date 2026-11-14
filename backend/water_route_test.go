@@ -511,3 +511,22 @@ func TestRouteOverWater_BundabergTownStaysAnOnLandError(t *testing.T) {
 	}
 	t.Log(err)
 }
+
+func TestRouteOverWater_FarInsideLandIsTheTypedOnLandError(t *testing.T) {
+	// Beyond the snap distance the end still counts as on land, and says which end.
+	lines := []shorelineLine{islandRing("way/big", -20.0, 149.0, 0.1)}
+	_, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.5}, lines, 5)
+	var onLand *waterRouteOnLandError
+	if !errors.As(err, &onLand) || !onLand.AtStart {
+		t.Fatalf("want an on-land error at the start, got %T %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "is on land, ") || !strings.Contains(err.Error(), "more than the 1.5 nm an end point is moved to the water") {
+		t.Fatalf("the router's wording must stay: %q", err)
+	}
+
+	lines = []shorelineLine{islandRing("way/big", -20.0, 149.3, 0.1)}
+	_, err = routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
+	if !errors.As(err, &onLand) || onLand.AtStart {
+		t.Fatalf("want an on-land error at the destination, got %T %v", err, err)
+	}
+}

@@ -116,8 +116,8 @@ type waterRoute struct {
 	ExactWithinNm float64
 }
 
-// waterRouteOnLandError is an end point on land with no water found in front
-// of it. AtStart says which end; the message is the router's wording.
+// waterRouteOnLandError is an end point on land: too far inside the charted
+// shoreline to move, inland, or with no water found in front of it. AtStart says which end; the message is the router's wording.
 type waterRouteOnLandError struct {
 	AtStart bool
 	msg     string
@@ -577,7 +577,7 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 		}
 		if found && onLand {
 			if d > waterRouteSnapMaxNm {
-				return waterRoute{}, fmt.Errorf("the %s (%.4f, %.4f) is on land, %.2f nm inside the charted shoreline, more than the %.1f nm an end point is moved to the water", e.name, e.in.Lat, e.in.Lon, d, waterRouteSnapMaxNm)
+				return waterRoute{}, &waterRouteOnLandError{AtStart: i == 0, msg: fmt.Sprintf("the %s (%.4f, %.4f) is on land, %.2f nm inside the charted shoreline, more than the %.1f nm an end point is moved to the water", e.name, e.in.Lat, e.in.Lon, d, waterRouteSnapMaxNm)}
 			}
 			moved := wrAdd(q, wrScale(water, waterRouteClearanceNm))
 			movedNear, _, _, still, _ := nearestShore(moved, allSegs)
