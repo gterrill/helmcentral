@@ -117,6 +117,12 @@ inventory. The hours are filled in automatically where a live reading exists.
 A rule that runs on hours needs an hours figure to complete, so type it in from
 the gauge if there's no live reading to fill it in.
 
+To add a part, start typing in **Add a part**. The list narrows as you type,
+and it matches the name, part number, manufacturer and model. If the part isn't in
+inventory yet, choose **Add "your text" as a spare** at the bottom of the list.
+That saves it as a spare, then you set the quantity and press the plus button
+like any other part.
+
 A certificate or expiry with a fixed date and no recurring interval asks for
 the new due date, since there's nothing to calculate it from. One that renews
 every so many months works the date out for you. Saving writes one line to the

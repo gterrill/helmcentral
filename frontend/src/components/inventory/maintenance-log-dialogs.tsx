@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { BookOpen, Plus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -10,13 +10,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Combobox, ComboboxInput, ComboboxItem, ComboboxPopup } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { PhotoStripEditor } from '@/components/inventory/photo-strip-editor'
 import { apiBaseUrl } from '@/config/api'
-import { useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
+import { BLANK_DRAFT, createEquipment, useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import {
   deleteMaintenanceLogPhoto,
   hoursAgeLabel,
@@ -31,6 +32,7 @@ import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { documentViewerHref } from '@/lib/document-citation'
 import { addMonthsISO, STARTED_AFTER_REPAIR, startedAfterRepair, todayISO } from '@/lib/local-date'
 import { errorMessage } from '@/lib/errors'
+import { matchesAllWords } from '@/lib/word-match'
 
 // ADR 0138: the service log's own two write dialogs - completing a rule
 // (spec §6, always kind='maintenance') and a standalone entry (repair,
@@ -50,24 +52,108 @@ interface PartsEditorProps {
   parts: MaintenanceLogPartInput[]
   onChange: (parts: MaintenanceLogPartInput[]) => void
   items: EquipmentItem[]
+  /** The equipment list is still on its way; an empty `items` proves nothing. */
+  itemsLoading: boolean
+  /** Why the equipment list failed to load, or null. */
+  itemsError: string | null
 }
 
-export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
-  const [pickerId, setPickerId] = useState('')
-  const [quantity, setQuantity] = useState('1')
+interface PartOption {
+  id: string
+  label: string
+  /** Part number, then manufacturer and model: tells apart rows that share a name. */
+  detail: string
+}
 
-  const nameFor = (id: string) => items.find((i) => i.id === id)?.name ?? id
+/** Lower-cased, trimmed, with runs of whitespace as one space. */
+function collapse(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** The id of the last row, which creates the typed text as a spare. */
+const CREATE_OPTION_ID = '__create_spare__'
+
+export function PartsEditor({ parts, onChange, items, itemsLoading, itemsError }: PartsEditorProps) {
+  const [pickerId, setPickerId] = useState('')
+  const [query, setQuery] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  // Spares made from this field: the equipment list refetches after the
+  // create, and until it lands they still need a name and still count as
+  // taken.
+  const [made, setMade] = useState<EquipmentItem[]>([])
+  const creatingRef = useRef(false)
+
+  const pool = useMemo(
+    () => [...items, ...made.filter((m) => !items.some((i) => i.id === m.id))],
+    [items, made],
+  )
+  const nameFor = (id: string) => pool.find((i) => i.id === id)?.name ?? id
+
+  const typed = query.trim()
+  // pickerId is the last part picked; it is the live pick only while the box
+  // still holds its name, so typing away and back restores it.
+  const picked = pickerId !== '' && query === nameFor(pickerId) ? pickerId : ''
+  const showingPick = picked !== ''
+  // Once a part is picked the input holds its name; the chevron should still
+  // offer the whole list, as the old select did. Every typed word must match
+  // one of the fields, so "jabsco impeller" finds the Jabsco impeller.
+  const matches = useMemo<PartOption[]>(
+    () =>
+      pool
+        .filter((i) => showingPick || matchesAllWords([i.name, i.part_number, i.manufacturer, i.model].join(' '), typed))
+        .map((i) => ({
+          id: i.id,
+          label: i.name,
+          detail: [i.part_number, [i.manufacturer, i.model].filter(Boolean).join(' ')].filter(Boolean).join(' · '),
+        })),
+    [pool, showingPick, typed],
+  )
+  // A new spare is offered only against a list that has actually arrived:
+  // while it loads, or after it failed, "not in the list" would make a
+  // second copy of a part already aboard.
+  const listHere = !itemsLoading && itemsError === null
+  const options = useMemo<PartOption[]>(() => {
+    const exact = pool.some((i) => collapse(i.name) === collapse(typed))
+    return listHere && typed !== '' && !exact
+      ? [...matches, { id: CREATE_OPTION_ID, label: `Add "${typed}" as a spare`, detail: '' }]
+      : matches
+  }, [pool, matches, typed, listHere])
+  const selected = pickerId ? { id: pickerId, label: nameFor(pickerId), detail: '' } : null
+  const listId = useId()
+
+  const createSpare = async () => {
+    if (creatingRef.current || typed === '') return
+    creatingRef.current = true
+    setCreating(true)
+    setCreateError(null)
+    try {
+      // Nobody has counted how many are aboard, so none are claimed.
+      const created = await createEquipment({ ...BLANK_DRAFT, name: typed, status: 'stored', quantity: 0 })
+      setMade((prev) => [...prev, created])
+      setPickerId(created.id)
+      setQuery(created.name)
+    } catch (err) {
+      setCreateError(errorMessage(err))
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
+    }
+  }
 
   const addPart = () => {
-    if (!pickerId) return
+    if (!picked) return
     const qty = Number(quantity) || 1
-    const existing = parts.find((p) => p.equipment_id === pickerId)
+    const existing = parts.find((p) => p.equipment_id === picked)
     if (existing) {
-      onChange(parts.map((p) => (p.equipment_id === pickerId ? { ...p, quantity: p.quantity + qty } : p)))
+      onChange(parts.map((p) => (p.equipment_id === picked ? { ...p, quantity: p.quantity + qty } : p)))
     } else {
-      onChange([...parts, { equipment_id: pickerId, quantity: qty }])
+      onChange([...parts, { equipment_id: picked, quantity: qty }])
     }
     setPickerId('')
+    setQuery('')
     setQuantity('1')
   }
 
@@ -93,16 +179,53 @@ export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
           </div>
         ))}
         <div className="flex items-center gap-2">
-          <Select value={pickerId} onValueChange={(value) => setPickerId(value ?? '')}>
-            <SelectTrigger aria-label="Add a part" className="h-9 min-w-0 flex-1">
-              <SelectValue>{(value: string) => (value ? nameFor(value) : 'Add a part...')}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {items.map((item) => (
-                <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+          <Combobox<PartOption>
+            items={options}
+            filter={null}
+            value={selected}
+            inputValue={query}
+            open={open}
+            onOpenChange={setOpen}
+            itemToStringLabel={(o) => o.label}
+            isItemEqualToValue={(a, b) => a.id === b.id}
+            readOnly={creating}
+            onInputValueChange={(text, details) => {
+              // Only the operator's own typing moves the query. Base UI also
+              // writes into the input on a pick or a close, which would put
+              // the create row's wording in the box or undo a fresh pick.
+              if (creating || creatingRef.current || details.reason !== 'input-change') return
+              setQuery(text)
+              setCreateError(null)
+              if (text !== '') setOpen(true)
+            }}
+            onValueChange={(option) => {
+              if (!option || creating || creatingRef.current) return
+              if (option.id === CREATE_OPTION_ID) void createSpare()
+              else {
+                setPickerId(option.id)
+                setQuery(option.label)
+              }
+            }}
+          >
+            <ComboboxInput aria-label="Add a part" placeholder="Add a part..." className="h-9" />
+            <ComboboxPopup>
+              {options.map((o) => (
+                <ComboboxItem
+                  key={o.id}
+                  value={o}
+                  aria-labelledby={`${listId}-${o.id}-name`}
+                  aria-describedby={o.detail ? `${listId}-${o.id}-detail` : undefined}
+                >
+                  <span className="flex min-w-0 flex-col">
+                    <span id={`${listId}-${o.id}-name`}>{o.label}</span>
+                    {o.detail && (
+                      <span id={`${listId}-${o.id}-detail`} className="truncate text-xs text-muted-foreground">{o.detail}</span>
+                    )}
+                  </span>
+                </ComboboxItem>
               ))}
-            </SelectPopup>
-          </Select>
+            </ComboboxPopup>
+          </Combobox>
           <Input
             type="number"
             inputMode="numeric"
@@ -112,10 +235,13 @@ export function PartsEditor({ parts, onChange, items }: PartsEditorProps) {
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
           />
-          <Button type="button" variant="outline" size="icon" aria-label="Add part" disabled={!pickerId} onClick={addPart}>
+          <Button type="button" variant="outline" size="icon" aria-label="Add part" disabled={!picked || creating} onClick={addPart}>
             <Plus className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
+        {itemsError && <FieldError>Couldn't load the equipment list: {itemsError}</FieldError>}
+        {creating && <FieldDescription>Adding the spare...</FieldDescription>}
+        {createError && <FieldError>{createError}</FieldError>}
       </div>
     </Field>
   )
@@ -231,7 +357,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
   const [completedEntry, setCompletedEntry] = useState<MaintenanceLogEntry | null>(null)
   const [completedRule, setCompletedRule] = useState<MaintenanceRule | null>(null)
 
-  const { items } = useEquipment(rule !== null ? {} : null)
+  const { items, loading: itemsLoading, error: itemsError } = useEquipment(rule !== null ? {} : null)
 
   // Anything changed since the form was opened and not yet written to the log is unsaved work.
   const entered = rule !== null && completedEntry === null
@@ -382,7 +508,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                   <Input id="maintenance-complete-currency" value={form.currency} onChange={(e) => setForm((p) => ({ ...p, currency: e.target.value }))} placeholder="AUD" />
                 </Field>
               </div>
-              <PartsEditor parts={form.parts} onChange={(parts) => setForm((p) => ({ ...p, parts }))} items={items} />
+              <PartsEditor parts={form.parts} onChange={(parts) => setForm((p) => ({ ...p, parts }))} items={items} itemsLoading={itemsLoading} itemsError={itemsError} />
             </FieldGroup>
             {error && <FieldError errors={[{ message: error }]} />}
             <DialogFooter>
@@ -464,7 +590,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   // for as long as there is something it would actually save.
   const [dirty, setDirty] = useState(false)
 
-  const { items } = useEquipment(open ? {} : null)
+  const { items, loading: itemsLoading, error: itemsError } = useEquipment(open ? {} : null)
   useUnsavedWorkReport('maintenance-entry', open && dirty)
 
   useEffect(() => {
@@ -621,7 +747,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
               <Input id="maintenance-log-currency" value={form.currency} onChange={(e) => updateForm((p) => ({ ...p, currency: e.target.value }))} placeholder="AUD" />
             </Field>
           </div>
-          <PartsEditor parts={form.parts} onChange={(parts) => updateForm((p) => ({ ...p, parts }))} items={items} />
+          <PartsEditor parts={form.parts} onChange={(parts) => updateForm((p) => ({ ...p, parts }))} items={items} itemsLoading={itemsLoading} itemsError={itemsError} />
 
           {/* Code-review finding: a part whose own item has since been
               deleted survives as history (backend 2026-09-27 amendment) but

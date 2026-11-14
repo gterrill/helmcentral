@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useEquipment } from '@/hooks/use-inventory'
 import { useOpenJobs } from '@/hooks/use-open-jobs'
 import { plural } from '@/lib/inbox-api'
+import { matchesAllWords } from '@/lib/word-match'
 
 // The picker for "Add to equipment" and "Add to a job": the operator searches
 // the boat's own list and chooses the item or job; nothing is guessed. Mounted
@@ -55,12 +56,8 @@ function useEquipmentTargets(query: string): TargetList {
 function useJobTargets(query: string): TargetList {
   const { jobs, loading, error } = useOpenJobs({ includeStored: true })
   const options = useMemo<TargetOption[]>(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     return jobs
-      .filter((j) => {
-        const haystack = `${j.title} ${j.equipment_name}`.toLowerCase()
-        return words.every((w) => haystack.includes(w))
-      })
+      .filter((j) => matchesAllWords(`${j.title} ${j.equipment_name}`, query))
       .map((j) => ({ id: j.id, name: j.title, detail: j.equipment_name }))
   }, [jobs, query])
   return { options, loading, error }

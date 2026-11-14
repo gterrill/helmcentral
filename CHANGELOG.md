@@ -24,6 +24,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Search the Parts used list and add a spare from it.** When you complete a
+  job or log a repair, type in **Add a part** and the list narrows by name,
+  part number, manufacturer or model. If the part isn't in inventory, such as a litre
+  of hydraulic oil, choose **Add "hydraulic oil" as a spare**. It is saved as
+  a spare and put in the box; set the quantity and press the plus button to
+  add it to the job.
 - **The forecast marks a change in the wind.** When one steady wind gives way
   to another from 90 degrees or more away, even through a few hours of light
   air, the day card gets a chip such as "N→SE 2 PM", and the ten-day summary
