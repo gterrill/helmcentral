@@ -46,8 +46,9 @@ func planRecordType() *recordType {
 		Fields: []recordField{
 			{Name: "name", Kind: kindString, Writable: true, Description: "the plan's name; \"To <last stop>\" when the operator gave none"},
 			{Name: "stops", Kind: kindObjectList, Writable: true, Description: "the whole list of stops in order, each {name, lat, lon, nights, vias, depart_time, arrive_by, source}. " +
-				"Only the first stop has an arrive (YYYY-MM-DD): every later arrival is worked out from the stop before it and its nights, so give none. " +
-				"lat and lon are required and come from find_places. nights is the whole nights at the stop, 0 for a stop passed through the same day. " +
+				"Only the first stop has an arrive (YYYY-MM-DD): every later arrival is worked out from the first arrival and the nights before it, so give none. " +
+				"A later arrive, or a depart, that disagrees with the nights is refused. " +
+				"lat and lon are required and come from find_places. nights is required on every stop: the whole nights at the stop, 0 for a stop passed through the same day. " +
 				"vias is the places the leg leaving the stop passes, each {name, lat, lon}, left out on the last stop. depart_time is \"HH:MM\" at the stop, " +
 				"arrive_by is \"YYYY-MM-DDTHH:MM\" at the stop and never on the first. source is \"saved place\" or \"place names\" where find_places found the position, or \"your position\" for one the operator gave. " +
 				"On an update send every stop the plan keeps with all its fields: a field left out is cleared."},
@@ -130,14 +131,16 @@ func listPlanRecords(s *documentStore, _ map[string]string) ([]recordSnapshot, e
 }
 
 // planStopInput is a stop as Mate gives it. Lat and lon are pointers so that a
-// stop with no position is refused rather than placed at 0, 0. Depart is what a
-// read shows and is ignored on a write.
+// stop with no position is refused rather than placed at 0, 0, and nights is a
+// pointer so that a missing count is refused rather than read as 0. A later
+// arrive and any depart are checked against the dates the nights give
+// (checkPlanStopDates) and refused when they differ.
 type planStopInput struct {
 	Name       string         `json:"name"`
 	Lat        *float64       `json:"lat"`
 	Lon        *float64       `json:"lon"`
 	Arrive     string         `json:"arrive"`
-	Nights     int            `json:"nights"`
+	Nights     *int           `json:"nights"`
 	Depart     string         `json:"depart"`
 	Vias       []planViaInput `json:"vias"`
 	DepartTime string         `json:"depart_time"`
@@ -190,7 +193,15 @@ func parsePlanStops(raw any) ([]planStop, error) {
 		default:
 			return nil, fieldErr("source", "stop %d: must be %q, %q or %q, got %q", n, planSourceSavedPlace, planSourcePlaceNames, planSourceYourPosition, in.Source)
 		}
-		stop := planStop{Name: in.Name, Lat: *in.Lat, Lon: *in.Lon, Arrive: in.Arrive, Nights: in.Nights, DepartTime: in.DepartTime, ArriveBy: in.ArriveBy}
+		if in.Nights == nil {
+			return nil, fieldErr("nights", "stop %d (%s): give its nights, 0 for a stop passed through the same day; the dates follow from them", n, in.Name)
+		}
+		// Bad nights are refused here, before the dates that follow from them
+		// are compared, so the error points at the nights.
+		if e := checkNights("nights", fmt.Sprintf("stop %d (%s): ", n, in.Name), *in.Nights); e != nil {
+			return nil, e
+		}
+		stop := planStop{Name: in.Name, Lat: *in.Lat, Lon: *in.Lon, Arrive: in.Arrive, Nights: *in.Nights, Depart: in.Depart, DepartTime: in.DepartTime, ArriveBy: in.ArriveBy}
 		for j, v := range in.Vias {
 			if v.Lat == nil || v.Lon == nil {
 				return nil, fieldErr("vias", "stop %d, via %d (%s): give its lat and lon from find_places; a via place is left out when it matches no place", n, j+1, v.Name)
@@ -199,7 +210,38 @@ func parsePlanStops(raw any) ([]planStop, error) {
 		}
 		stops[i] = stop
 	}
+	if err := checkPlanStopDates(stops); err != nil {
+		return nil, err
+	}
 	return stops, nil
+}
+
+// checkPlanStopDates refuses a date Mate gave that the plan's own arithmetic
+// would overwrite: the dates follow from the first arrival and the nights, so an
+// arrive on a later stop, or a depart on any stop, that differs from the
+// computed day is a plan Mate believes in and the page would not show. A stop
+// that gives neither is fine. A first arrival that is missing or not a date is
+// left to the plan rule, which refuses it.
+func checkPlanStopDates(stops []planStop) error {
+	if len(stops) == 0 {
+		return nil
+	}
+	day, err := time.Parse(planDateLayout, stops[0].Arrive)
+	if err != nil {
+		return nil
+	}
+	for i, s := range stops {
+		arrive := day.Format(planDateLayout)
+		if i > 0 && s.Arrive != "" && s.Arrive != arrive {
+			return fieldErr("arrive", "stop %d (%s): arrive %s does not match %s, which the first arrival and the nights before it give; leave arrive out of a later stop or fix the nights", i+1, s.Name, s.Arrive, arrive)
+		}
+		day = day.AddDate(0, 0, s.Nights)
+		depart := day.Format(planDateLayout)
+		if s.Depart != "" && s.Depart != depart {
+			return fieldErr("depart", "stop %d (%s): depart %s does not match %s, which its arrival and nights give; leave depart out or fix the nights", i+1, s.Name, s.Depart, depart)
+		}
+	}
+	return nil
 }
 
 // planSources is the source of each stop's position as the operation gave it,
@@ -282,7 +324,13 @@ func updatePlanRecord(env changeEnv, before recordSnapshot, given fieldSet) erro
 		return err
 	}
 	if sameFieldValue(planSnapshot(cur).Fields, planSnapshot(norm).Fields) {
-		return fieldErr("stops", "the change leaves %q exactly as it is; propose only what differs", cur.Name)
+		var sent []string
+		for _, f := range []string{"name", "stops"} {
+			if _, ok := given[f]; ok {
+				sent = append(sent, f)
+			}
+		}
+		return fieldErr(sent[0], "the change to %s leaves %q exactly as it is; propose only what differs", strings.Join(sent, " and "), cur.Name)
 	}
 	if _, found, err := updatePlanTx(env.tx, env.now, id, norm); err != nil {
 		return err
@@ -345,49 +393,66 @@ func planStopOfFields(fields map[string]any) (planStop, error) {
 	return stop, r.err
 }
 
-// planDayText is a day as the card says it, "Wed 18 Nov"; a day that does not
-// parse is said as it is.
-func planDayText(day string) string {
-	if label, err := planDayLabel(day); err == nil {
-		return label
+// planLabeler says days and times as the card does, with the same labels
+// get_plans gives, and keeps the first one it could not say. describePlan cannot return an error,
+// so it asks the labeler at the end and reports the failure in the line;
+// showPlan runs first and refuses a snapshot whose dates it cannot say, so a
+// proposal with one never reaches a card.
+type planLabeler struct{ err error }
+
+func (l *planLabeler) keep(label string, err error) string {
+	if err != nil && l.err == nil {
+		l.err = err
 	}
-	return day
+	return label
 }
 
-// planTimeText is an "HH:MM" departure time as the operator reads a time,
-// "6.30 AM".
-func planTimeText(hhmm string) string {
-	t, err := time.Parse("15:04", hhmm)
-	if err != nil {
-		return hhmm
-	}
-	return boatClock(t, time.UTC)
-}
+func (l *planLabeler) day(v string) string      { return l.keep(planDayLabel(v)) }
+func (l *planLabeler) clock(v string) string    { return l.keep(planClockLabel(v)) }
+func (l *planLabeler) arriveBy(v string) string { return l.keep(planArriveByLabel(v)) }
 
-// planArriveByText is an "YYYY-MM-DDTHH:MM" arrive-by as "Mon 16 Nov 4.00 PM".
-func planArriveByText(v string) string {
-	t, err := time.Parse("2006-01-02T15:04", v)
-	if err != nil {
-		return v
+// checkPlanLabels is every date and time a snapshot's stops carry, said once,
+// so that the first one that is not a date is an error.
+func checkPlanLabels(snap *recordSnapshot, stops []planStop) error {
+	var l planLabeler
+	for _, f := range []string{"first_date", "last_date"} {
+		l.day(stringOf(snap.Fields[f]))
 	}
-	return boatDayClock(t, time.UTC)
+	for i, s := range stops {
+		l.day(s.Arrive)
+		l.day(s.Depart)
+		if s.DepartTime != "" {
+			l.clock(s.DepartTime)
+		}
+		if s.ArriveBy != "" {
+			l.arriveBy(s.ArriveBy)
+		}
+		if l.err != nil {
+			return fmt.Errorf("stop %d (%s): %w", i+1, s.Name, l.err)
+		}
+	}
+	return l.err
 }
 
 // describePlan writes the operator's line. showPlan has already read both
-// snapshots' stops by the time this runs, so a failure here is reported in the
-// line rather than hidden.
+// snapshots' stops and dates by the time this runs, so a failure here is
+// reported in the line rather than hidden.
 func describePlan(d describeInput) string {
 	if d.Op.Action == changeCreate {
 		stops, err := planStopsOfFields(d.After.Fields["stops"])
 		if err != nil {
 			return fmt.Sprintf("Add plan %q: its stops could not be read: %v", d.After.Label, err)
 		}
-		first, last := stringOf(d.After.Fields["first_date"]), stringOf(d.After.Fields["last_date"])
+		var l planLabeler
+		first, last := l.day(stringOf(d.After.Fields["first_date"])), l.day(stringOf(d.After.Fields["last_date"]))
+		if l.err != nil {
+			return fmt.Sprintf("Add plan %q: its dates could not be read: %v", d.After.Label, l.err)
+		}
 		noun := "stops"
 		if len(stops) == 1 {
 			noun = "stop"
 		}
-		return fmt.Sprintf("Add plan %q: %d %s, %s to %s", d.After.Label, len(stops), noun, planDayText(first), planDayText(last))
+		return fmt.Sprintf("Add plan %q: %d %s, %s to %s", d.After.Label, len(stops), noun, first, last)
 	}
 	sentences, err := planDiff(d.Before, d.After)
 	if err != nil {
@@ -411,11 +476,12 @@ func planDiff(before, after *recordSnapshot) ([]string, error) {
 		return nil, err
 	}
 	var out []string
+	var lb planLabeler
 	if b, a := stringOf(before.Fields["name"]), stringOf(after.Fields["name"]); b != a {
 		out = append(out, fmt.Sprintf("Renamed to %q.", a))
 	}
 	matchOf, taken := matchPlanStops(bs, as)
-	out = append(out, planStopsCameAndWent(bs, as, matchOf, taken)...)
+	out = append(out, planStopsCameAndWent(&lb, bs, as, matchOf, taken)...)
 	if planStopsReordered(matchOf) {
 		out = append(out, "The stops are in a new order.")
 	}
@@ -425,18 +491,27 @@ func planDiff(before, after *recordSnapshot) ([]string, error) {
 			continue
 		}
 		b := bs[matchOf[i]]
-		out = append(out, planStopChanges(i == 0, b, a)...)
+		out = append(out, planStopChanges(&lb, i == 0, b, a)...)
 		if i == 0 {
 			continue
 		}
-		bd, berr := time.Parse(planDateLayout, b.Arrive)
-		ad, aerr := time.Parse(planDateLayout, a.Arrive)
-		if berr == nil && aerr == nil && !ad.Equal(bd) {
+		bd, err := time.Parse(planDateLayout, b.Arrive)
+		if err != nil {
+			return nil, fmt.Errorf("stop %d (%s) arrival before the change: %w", i+1, b.Name, err)
+		}
+		ad, err := time.Parse(planDateLayout, a.Arrive)
+		if err != nil {
+			return nil, fmt.Errorf("stop %d (%s) arrival: %w", i+1, a.Name, err)
+		}
+		if !ad.Equal(bd) {
 			shifts = append(shifts, planArrivalShift{a.Name, a.Arrive, planDaysBetween(bd, ad)})
 		}
 	}
 	if len(shifts) > 0 {
-		out = append(out, planShiftSentence(shifts))
+		out = append(out, planShiftSentence(&lb, shifts))
+	}
+	if lb.err != nil {
+		return nil, lb.err
 	}
 	return out, nil
 }
@@ -461,7 +536,7 @@ func matchPlanStops(bs, as []planStop) (matchOf []int, taken []bool) {
 
 // planStopsCameAndWent says the stops that were removed, then the ones added and
 // where.
-func planStopsCameAndWent(bs, as []planStop, matchOf []int, taken []bool) []string {
+func planStopsCameAndWent(lb *planLabeler, bs, as []planStop, matchOf []int, taken []bool) []string {
 	var out []string
 	for j, b := range bs {
 		if !taken[j] {
@@ -476,7 +551,7 @@ func planStopsCameAndWent(bs, as []planStop, matchOf []int, taken []bool) []stri
 		if i > 0 {
 			where = "after " + as[i-1].Name
 		}
-		out = append(out, fmt.Sprintf("%s added %s (arrives %s, %s).", a.Name, where, planDayText(a.Arrive), plural(a.Nights, "night", "nights")))
+		out = append(out, fmt.Sprintf("%s added %s (arrives %s, %s).", a.Name, where, lb.day(a.Arrive), plural(a.Nights, "night", "nights")))
 	}
 	return out
 }
@@ -506,11 +581,11 @@ type planArrivalShift struct {
 // planShiftSentence says the stops whose arrival moved: one sentence with the
 // shift when it is the same for every stop (uniform), else one that only lists
 // the new dates.
-func planShiftSentence(shifts []planArrivalShift) string {
+func planShiftSentence(lb *planLabeler, shifts []planArrivalShift) string {
 	parts := make([]string, len(shifts))
 	uniform := true
 	for i, s := range shifts {
-		parts[i] = fmt.Sprintf("%s arrives %s", s.name, planDayText(s.arrive))
+		parts[i] = fmt.Sprintf("%s arrives %s", s.name, lb.day(s.arrive))
 		uniform = uniform && s.days == shifts[0].days
 	}
 	if !uniform {
@@ -528,7 +603,7 @@ func planShiftSentence(shifts []planArrivalShift) string {
 }
 
 // planStopChanges is what differs at one stop that is in both plans.
-func planStopChanges(first bool, b, a planStop) []string {
+func planStopChanges(lb *planLabeler, first bool, b, a planStop) []string {
 	var out []string
 	say := func(format string, args ...any) {
 		out = append(out, a.Name+": "+fmt.Sprintf(format, args...)+".")
@@ -537,13 +612,13 @@ func planStopChanges(first bool, b, a planStop) []string {
 		say("%s → %s", plural(b.Nights, "night", "nights"), plural(a.Nights, "night", "nights"))
 	}
 	if first && b.Arrive != a.Arrive {
-		say("arrives %s → %s", planDayText(b.Arrive), planDayText(a.Arrive))
+		say("arrives %s → %s", lb.day(b.Arrive), lb.day(a.Arrive))
 	}
 	if b.Lat != a.Lat || b.Lon != a.Lon {
 		say("position changed")
 	}
-	out = append(out, planTextChange(a.Name, "departure time", b.DepartTime, a.DepartTime, planTimeText)...)
-	out = append(out, planTextChange(a.Name, "arrive-by", b.ArriveBy, a.ArriveBy, planArriveByText)...)
+	out = append(out, planTextChange(a.Name, "departure time", b.DepartTime, a.DepartTime, lb.clock)...)
+	out = append(out, planTextChange(a.Name, "arrive-by", b.ArriveBy, a.ArriveBy, lb.arriveBy)...)
 	out = append(out, planViaChanges(a.Name, b.Vias, a.Vias)...)
 	return out
 }
@@ -611,6 +686,9 @@ func showPlan(op changeOp, before, after *recordSnapshot) (map[string]any, map[s
 		if stops, err = planStopsOfFields(snap.Fields["stops"]); err != nil {
 			return nil, nil, err
 		}
+		if err := checkPlanLabels(snap, stops); err != nil {
+			return nil, nil, fmt.Errorf("plan %q: %w", snap.Label, err)
+		}
 	}
 	if op.Action != changeCreate || after == nil {
 		return nil, nil, nil
@@ -618,8 +696,12 @@ func showPlan(op changeOp, before, after *recordSnapshot) (map[string]any, map[s
 	sources := planSources(op.Fields)
 	rows := make([]map[string]any, len(stops))
 	for i, s := range stops {
+		arrive, err := planDayLabel(s.Arrive)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stop %d (%s): %w", i+1, s.Name, err)
+		}
 		row := map[string]any{
-			"arrive": s.Arrive, "arrive_label": planDayText(s.Arrive), "nights": s.Nights,
+			"arrive": s.Arrive, "arrive_label": arrive, "nights": s.Nights,
 			"name": s.Name, "lat": s.Lat, "lon": s.Lon,
 		}
 		if i < len(sources) && sources[i] != "" {

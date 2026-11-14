@@ -98,7 +98,7 @@ function PlanStopRows({ rows }: { rows: PlanStopRow[] }) {
   return (
     <ol className="flex min-w-0 flex-1 flex-col gap-2">
       {rows.map((row, index) => {
-        const nights = index === rows.length - 1 ? '' : row.nights === 1 ? '1 night' : `${row.nights} nights`
+        const nights = index === rows.length - 1 && row.nights === 0 ? '' : row.nights === 1 ? '1 night' : `${row.nights} nights`
         const position = formatPositionDM(row.lat, row.lon)
         return (
           <li key={index} data-plan-stop="" className="flex min-w-0 flex-col gap-0.5">

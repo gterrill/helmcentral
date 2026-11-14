@@ -322,3 +322,75 @@ func TestGetPlans_ABigReportKeepsTheStopsVersionAndVerdictsAndSaysWhatWasLeftOut
 		t.Fatalf("the note should say what was left out: %q", got.Note)
 	}
 }
+
+func TestGetPlans_CarriesTheWindChangesTheTableShows(t *testing.T) {
+	deps, store, f := plansToolEnv(t)
+	// Leaves Sat 8 AM, 30 nm at 6 kn: the wind goes from the north at 12 kn to the
+	// south-east at 18 kn at 10 AM, mid-leg.
+	f.fc = pwcStep(paAt(14, 10, 0), 0, 12, 135, 18)
+	run := plan{Name: "Home run", Stops: stopsOf("2026-11-14", 0, 1, 0)}
+	run.Stops[0].DepartTime = "08:00"
+	if _, err := store.CreatePlan(run); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := runRecordTool(t, deps, "get_plans", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Plan struct {
+			Legs []struct {
+				WindChanges *struct {
+					Changes []struct {
+						Label      string `json:"label"`
+						From       string `json:"from"`
+						To         string `json:"to"`
+						SpeedMaxKn int    `json:"speed_max_kn"`
+						Sector     string `json:"sector"`
+					} `json:"changes"`
+					NotChecked string `json:"not_checked"`
+				} `json:"wind_changes"`
+			} `json:"legs"`
+			NightWinds []struct {
+				Stop        string `json:"stop"`
+				Date        string `json:"date"`
+				DateLabel   string `json:"date_label"`
+				WindChanges *struct {
+					Changes []json.RawMessage `json:"changes"`
+				} `json:"wind_changes"`
+			} `json:"night_winds"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	legs := out.Plan.Legs
+	if len(legs) == 0 || legs[0].WindChanges == nil || len(legs[0].WindChanges.Changes) != 1 {
+		t.Fatalf("leg 0 should carry the one change the table shows: %s", raw)
+	}
+	c := legs[0].WindChanges.Changes[0]
+	if c.Label != "10 AM" || c.From != "N" || c.To != "SE" || c.SpeedMaxKn != 18 || c.Sector != "ahead" {
+		t.Errorf("change = %+v", c)
+	}
+	if len(out.Plan.NightWinds) == 0 {
+		t.Fatalf("the lay-day night's wind changes are missing: %s", raw)
+	}
+	n := out.Plan.NightWinds[0]
+	if n.Stop != "Pelican Bay" || n.Date != "2026-11-14" || n.DateLabel != "Sat 14 Nov" || n.WindChanges == nil {
+		t.Errorf("night = %+v", n)
+	}
+}
+
+func TestPlanReportOf_ARoutedLegIsFoundByItsLegNotItsPlace(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	legs[0].DistanceNm, legs[1].DistanceNm = 11, 22
+	// An assessment that holds only the second leg: its position in the list is 0.
+	a := planAssessment{Legs: []planLegAssessment{{Leg: 1, Date: "2026-11-15"}}}
+	r, err := planReportOf(p, legs, a, planSlips{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Legs) != 1 || r.Legs[0].From != p.Stops[1].Name || r.Legs[0].DistanceNm == nil || *r.Legs[0].DistanceNm != 22 {
+		t.Fatalf("leg = %+v, want %s's own 22 nm", r.Legs, p.Stops[1].Name)
+	}
+}

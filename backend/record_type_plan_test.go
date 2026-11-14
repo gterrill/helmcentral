@@ -143,6 +143,108 @@ func TestProposePlan_RefusalsNameTheField(t *testing.T) {
 	}
 }
 
+func TestProposePlan_EveryStopMustGiveItsNights(t *testing.T) {
+	deps, _ := proposeDeps(t)
+	stops := threeStopPlan(1)
+	delete(stops[1].(map[string]any), "nights")
+	msg := proposeError(t, deps, planCreateArgs("Run", stops))
+	if !strings.Contains(msg, "nights") || !strings.Contains(msg, "Manly") || !strings.Contains(msg, "stop 2") {
+		t.Fatalf("expected the error to name the stop and nights, got %q", msg)
+	}
+}
+
+func TestProposePlan_ADateThatDisagreesWithTheNightsIsRefusedNamingTheStop(t *testing.T) {
+	deps, _ := proposeDeps(t)
+	laterArrive := threeStopPlan(1)
+	laterArrive[1].(map[string]any)["arrive"] = "2026-11-17"
+	msg := proposeError(t, deps, planCreateArgs("Run", laterArrive))
+	for _, want := range []string{"Manly", "2026-11-17", "2026-11-16"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("arrive refusal %q lacks %q", msg, want)
+		}
+	}
+	wrongDepart := threeStopPlan(1)
+	wrongDepart[1].(map[string]any)["depart"] = "2026-11-20"
+	msg = proposeError(t, deps, planCreateArgs("Run", wrongDepart))
+	for _, want := range []string{"Manly", "2026-11-20", "2026-11-17"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("depart refusal %q lacks %q", msg, want)
+		}
+	}
+	// An update is held to the same rule.
+	env := newProposalEnv(t)
+	saved, err := env.docs.CreatePlan(plan{Name: "To The Boat Works", Stops: planStopsOf(threeStopPlan(1))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg := proposeError(t, env.deps, planUpdateArgs(saved.ID, map[string]any{"stops": laterArrive})); !strings.Contains(msg, "Manly") {
+		t.Fatalf("update: %q", msg)
+	}
+}
+
+func TestProposePlan_DatesThatAgreeWithTheNightsAreAccepted(t *testing.T) {
+	env := newProposalEnv(t)
+	stops := threeStopPlan(2)
+	// What get_plans shows for each stop, computed from the first arrival.
+	for i, d := range [][2]string{{"2026-11-15", "2026-11-16"}, {"2026-11-16", "2026-11-18"}, {"2026-11-18", "2026-11-18"}} {
+		stops[i].(map[string]any)["arrive"], stops[i].(map[string]any)["depart"] = d[0], d[1]
+	}
+	p := env.propose(t, planCreateArgs("To The Boat Works", stops))
+	if len(p.Ops) != 1 {
+		t.Fatalf("ops = %+v", p.Ops)
+	}
+}
+
+func TestProposePlan_ANoChangeRefusalNamesTheFieldsSent(t *testing.T) {
+	env := newProposalEnv(t)
+	saved, err := env.docs.CreatePlan(plan{Name: "To The Boat Works", Stops: planStopsOf(threeStopPlan(1))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := proposeError(t, env.deps, planUpdateArgs(saved.ID, map[string]any{"name": "To The Boat Works"}))
+	if !strings.Contains(msg, "name") || strings.Contains(msg, "stops") {
+		t.Fatalf("a name-only change should blame the name alone, got %q", msg)
+	}
+	msg = proposeError(t, env.deps, planUpdateArgs(saved.ID, map[string]any{"stops": threeStopPlan(1)}))
+	if !strings.Contains(msg, "stops") {
+		t.Fatalf("got %q", msg)
+	}
+	// Both sent: the error's field is one real field, and the words name both.
+	msg = proposeError(t, env.deps, planUpdateArgs(saved.ID, map[string]any{"name": "To The Boat Works", "stops": threeStopPlan(1)}))
+	if strings.Contains(msg, "name, stops") || !strings.Contains(msg, "name and stops") {
+		t.Fatalf("expected one field and both names in the words, got %q", msg)
+	}
+}
+
+func TestProposePlan_BadNightsAreBlamedOnTheNightsNotTheDates(t *testing.T) {
+	deps, _ := proposeDeps(t)
+	stops := threeStopPlan(1)
+	stops[1].(map[string]any)["nights"] = -1
+	stops[1].(map[string]any)["depart"] = "2026-11-17"
+	msg := proposeError(t, deps, planCreateArgs("Run", stops))
+	if !strings.Contains(msg, "nights must be") || strings.Contains(msg, "does not match") {
+		t.Fatalf("expected the nights refused first, got %q", msg)
+	}
+}
+
+func TestPlanCard_ADateItCannotReadIsAnErrorNotARawString(t *testing.T) {
+	bad := func(arrive string) *recordSnapshot {
+		s := planSnapshot(plan{Name: "Run", Stops: []planStop{{Name: "Manly", Lat: -27.4, Lon: 153.1, Arrive: arrive, Depart: "2026-11-16", Nights: 1}}})
+		return &s
+	}
+	op := changeOp{Type: "plan", Action: "create"}
+	if _, _, err := showPlan(op, nil, bad("tomorrow")); err == nil || !strings.Contains(err.Error(), "tomorrow") {
+		t.Fatalf("showPlan: %v", err)
+	}
+	if _, _, err := showPlan(op, nil, bad("2026-11-15")); err != nil {
+		t.Fatalf("showPlan on good dates: %v", err)
+	}
+	line := describePlan(describeInput{Op: op, After: bad("tomorrow")})
+	if !strings.Contains(line, "tomorrow") || !strings.Contains(line, "could not") {
+		t.Fatalf("describePlan should say it could not read the date, got %q", line)
+	}
+}
+
 func TestProposePlan_ADeleteIsRefused(t *testing.T) {
 	env := newProposalEnv(t)
 	saved, err := env.docs.CreatePlan(plan{Name: "Run", Stops: []planStop{{Name: "Manly", Lat: -27.45, Lon: 153.19, Arrive: "2026-11-15", Nights: 1}}})

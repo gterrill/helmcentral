@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -33,10 +33,9 @@ interface ForecastPageProps {
   /** The plan a link named (Open plan on a Mate card), shown ahead of the
    * current one. A plan that is gone drops back to the current plan. */
   focusPlanId?: number;
-  /** Called when the operator picks or makes a plan on the page, so the app can
-   * clear the link's `?plan` from the address: a reload then opens as the page
-   * stands, and following the same link again is a change the page sees. */
-  onPlanPicked?: () => void;
+  /** Called once the page has followed the link, so the app can drop `?plan`
+   * from the address. */
+  onPlanLinkFollowed?: () => void;
 }
 
 const planRange = (plan: Plan) => formatStayRange(plan.firstDate, plan.lastDate);
@@ -56,21 +55,28 @@ export function ForecastPage({
   boatTimeZone,
   canWrite,
   focusPlanId,
-  onPlanPicked,
+  onPlanLinkFollowed,
 }: ForecastPageProps) {
   const { plans, currentId, create, update, patchStop, remove, error: plansError } = usePlans();
   const [pickedId, setPickedId] = useState<number | null>(focusPlanId ?? null);
-  // A new link while the page is open picks its plan too.
-  const [focusSeen, setFocusSeen] = useState(focusPlanId);
-  if (focusPlanId !== focusSeen) {
-    setFocusSeen(focusPlanId);
-    if (focusPlanId !== undefined) setPickedId(focusPlanId);
-  }
   const [selection, setSelection] = useState<PlanPlaceSelection | null>(null);
   const [editing, setEditing] = useState<"new" | "change" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // A link is followed once: it picks its plan, closes any editor and delete
+  // prompt that belonged to the plan on show, and has the app drop ?plan from the
+  // address. Save in an editor left open would otherwise write one plan's stops
+  // over another's.
+  useEffect(() => {
+    if (focusPlanId === undefined) return;
+    setPickedId(focusPlanId);
+    setSelection(null);
+    setEditing(null);
+    setConfirmDelete(false);
+    onPlanLinkFollowed?.();
+  }, [focusPlanId, onPlanLinkFollowed]);
 
   // The plan on show is the one the operator picked, else the one the server
   // names as current. A picked plan that was deleted drops back to current.
@@ -173,7 +179,6 @@ export function ForecastPage({
   const pick = (id: number) => {
     setPickedId(id);
     setSelection(null);
-    onPlanPicked?.();
   };
 
   const planId = plan?.id;
@@ -213,7 +218,6 @@ export function ForecastPage({
       await remove(plan.id);
       setPickedId(null);
       setSelection(null);
-      onPlanPicked?.();
       setConfirmDelete(false);
     } catch (err) {
       setActionError(errorMessage(err));

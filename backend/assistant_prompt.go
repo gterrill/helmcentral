@@ -947,7 +947,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"never \"saved place\" unless find_places returned it from saved places. If a stop has no match, or two places tie, ask the operator which before you draft; " +
 		"never guess a position. When you draft a plan, propose only the plan: do not offer to save its stops as places unless the operator asks. " +
 		"An update replaces the whole plan, so send every stop it keeps with all its fields; look up only the stops that are new or moved, " +
-		"and keep the other stops' positions as they are.\n\n" +
+		"and keep the other stops' positions as they are. The dates follow from the first arrival and the nights: give every stop its nights, 0 for a stop passed through the same day, " +
+		"and give an arrive only on the first stop. A later stop's arrive or a stop's depart that disagrees with the nights is refused, naming the stop.\n\n" +
 
 		"When the operator pastes a day-by-day plan, read it this way. A lay day row is a night at that stop: add it to that stop's nights " +
 		"rather than making a stop. Take the year from today's date. Give a via only when it matches a place find_places knows; otherwise leave it out " +

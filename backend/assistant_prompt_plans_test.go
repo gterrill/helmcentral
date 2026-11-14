@@ -25,6 +25,10 @@ func TestBuildAssistantSystemPrompt_PlansRule(t *testing.T) {
 		`"saved place", "place names" or "your position"`,
 		`"your position" for a position the operator gave`,
 		`never "saved place" unless find_places returned it from saved places`,
+		// Every stop gives its nights; the dates follow from them.
+		"give every stop its nights, 0 for a stop passed through the same day",
+		"give an arrive only on the first stop",
+		"later stop's arrive or a stop's depart that disagrees with the nights is refused",
 		// A plan alone; an update looks up only what is new.
 		"propose only the plan",
 		"do not offer to save its stops as places unless the operator asks",

@@ -101,7 +101,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   stop has no match or two places match. It never guesses a position. A lay day
   becomes a night at its stop, and a via place it can't find is left out and
   mentioned. The card under its reply has a row for each stop, and once you
-  choose **Apply** it has **Open plan**. Ask Mate to change a plan and the card
+  choose **Apply** it has **Open plan**, which takes you to that plan once and
+  closes any plan you had open for editing. Mate asks for the nights at every
+  stop and won't guess them. Ask Mate to change a plan and the card
   says only what differs, such as "Manly: 1 night → 2 nights. Later stops move a
   day: The Boat Works arrives Wed 18 Nov." Mate only touches a plan when you ask,
   and it can't delete one. Outside assistants can read your plans but can't make

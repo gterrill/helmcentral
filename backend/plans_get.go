@@ -76,6 +76,18 @@ type planReportLeg struct {
 	CurrentKn       *float64 `json:"current_kn,omitempty"`
 	CurrentNote     string   `json:"current_note,omitempty"`
 	NotChecked      []string `json:"not_checked,omitempty"`
+	// WindChanges are the changes in the wind between the departure and the
+	// arrival, as the table shows them: Label is already the boat clock.
+	WindChanges planWindChanges `json:"wind_changes"`
+}
+
+// planReportNightWinds is the wind changes on one lay-day night at a stop, 18:00
+// to 06:00 on the stop's clock.
+type planReportNightWinds struct {
+	Stop        string          `json:"stop"`
+	Date        string          `json:"date"`
+	DateLabel   string          `json:"date_label"`
+	WindChanges planWindChanges `json:"wind_changes"`
 }
 
 type planReportSlack struct {
@@ -129,7 +141,10 @@ type planReport struct {
 	WarningsError string              `json:"warnings_error,omitempty"`
 	Slack         *planReportSlack    `json:"slack,omitempty"`
 	Warnings      []planReportWarning `json:"warnings,omitempty"`
-	Slips         *planReportSlips    `json:"slips,omitempty"`
+	// NightWinds are the wind changes on each lay-day night still ahead and inside
+	// the forecast's reach.
+	NightWinds []planReportNightWinds `json:"night_winds,omitempty"`
+	Slips      *planReportSlips       `json:"slips,omitempty"`
 }
 
 type getPlansResult struct {
@@ -144,7 +159,7 @@ type getPlansResult struct {
 
 // shrink drops detail a result too big for Mate cannot carry, one kind at a
 // time, least needed first: the list of the other plans, the slips one by one,
-// then the warning text. The stops, the version and every leg's verdict stay, and
+// the wind changes on the nights, then the warning text. The stops, the version and every leg's verdict stay, and
 // the note says what went. It reports false when there is nothing left to drop.
 func (r *getPlansResult) shrink() bool {
 	var dropped string
@@ -159,6 +174,8 @@ func (r *getPlansResult) shrink() bool {
 		r.Plans, dropped = kept, "the list of the other plans"
 	case r.Plan != nil && r.Plan.Slips != nil && len(r.Plan.Slips.Slips) > 0:
 		r.Plan.Slips.Slips, dropped = []planReportSlip{}, "what each slip would meet"
+	case r.Plan != nil && len(r.Plan.NightWinds) > 0:
+		r.Plan.NightWinds, dropped = nil, "the wind changes on the nights at stops"
 	case r.Plan != nil && len(r.Plan.Warnings) > 0:
 		r.Plan.Warnings, dropped = nil, "the warnings on the stops"
 	default:
@@ -278,12 +295,13 @@ func planReportOf(p plan, legs []planLeg, a planAssessment, slips planSlips, isC
 			ArriveBy: s.ArriveBy, ArriveByLabel: arriveBy, Vias: s.Vias, Timezone: s.Timezone,
 		}
 	}
+	// A routed leg is found by the leg it is, never by where the assessment lists it.
 	byFrom := map[int]planLeg{}
 	for _, l := range legs {
 		byFrom[l.From] = l
 	}
 	for i, l := range a.Legs {
-		out, err := planReportLegOf(p, l, byFrom[i])
+		out, err := planReportLegOf(p, l, byFrom[l.Leg])
 		if err != nil {
 			return planReport{}, err
 		}
@@ -300,6 +318,13 @@ func planReportOf(p plan, legs []planLeg, a planAssessment, slips planSlips, isC
 			}
 			r.Warnings = append(r.Warnings, planReportWarning{Stop: p.Stops[st.Stop].Name, Date: n.Date, DateLabel: label, Warning: n.Warning})
 		}
+	}
+	for _, n := range a.NightWinds {
+		label, err := planDayLabel(n.Date)
+		if err != nil {
+			return planReport{}, fmt.Errorf("night winds at %s: %w", p.Stops[n.Stop].Name, err)
+		}
+		r.NightWinds = append(r.NightWinds, planReportNightWinds{Stop: p.Stops[n.Stop].Name, Date: n.Date, DateLabel: label, WindChanges: n.planWindChanges})
 	}
 	if slips.Problem != "" || len(slips.Slips) > 0 {
 		out := &planReportSlips{Problem: slips.Problem, SlackDays: slips.SlackDays, Capped: slips.Capped, Slips: []planReportSlip{}}
@@ -337,7 +362,7 @@ func planReportLegOf(p plan, l planLegAssessment, routed planLeg) (planReportLeg
 		From: p.Stops[l.Leg].Name, To: p.Stops[l.Leg+1].Name, Date: l.Date, DateLabel: date,
 		Progress: l.Progress, StillInPort: l.StillInPort, Verdict: l.Verdict, Limiting: l.Limiting, Note: l.Note,
 		Depart: depart, DepartSuggested: l.DepartSuggested, Arrive: arrive, Hours: l.Hours, SpeedKn: l.SpeedKn,
-		CurrentKn: l.CurrentKn, CurrentNote: l.CurrentNote, NotChecked: l.NotChecked,
+		CurrentKn: l.CurrentKn, CurrentNote: l.CurrentNote, NotChecked: l.NotChecked, WindChanges: l.WindChanges,
 	}
 	if routed.Error != "" {
 		out.RouteError = routed.Error

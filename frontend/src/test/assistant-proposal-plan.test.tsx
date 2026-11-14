@@ -53,6 +53,16 @@ describe('a plan proposal card', () => {
     expect(within(rows[2]).getByText(/^27°52\.800' S/)).toBeInTheDocument()
   })
 
+  it('a last stop that holds nights shows them, as does a one-stop plan', () => {
+    const card = createCard()
+    card.ops[0].after = {
+      stops: [{ arrive: '2026-11-15', arrive_label: 'Sun 15 Nov', nights: 3, name: 'Opua', lat: -35.31, lon: 174.12, source: 'saved place' }],
+    }
+    render(<AssistantProposalCard proposal={card} canWrite onChange={vi.fn()} />)
+    const rows = screen.getAllByRole('listitem').filter((li) => li.getAttribute('data-plan-stop') !== null)
+    expect(within(rows[0]).getByText('Sun 15 Nov · 3 nights')).toBeInTheDocument()
+  })
+
   it('the stops fill the card without a Stops label column', () => {
     render(<AssistantProposalCard proposal={createCard()} canWrite onChange={vi.fn()} />)
     expect(screen.queryByText('Stops')).not.toBeInTheDocument()

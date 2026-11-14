@@ -371,8 +371,9 @@ function AppShell() {
   const router = useAppRouter()
   const appLocation = useAppLocation()
   const navigate = useNavigate()
-  // Picking a plan on the Forecast page drops the link's ?plan from the address
-  // (replacing the entry, not adding one), so a reload does not jump back to it.
+  // The Forecast page follows a plan link once, then drops its ?plan from the
+  // address (replacing the entry, not adding one), so a reload or back does not
+  // jump to the plan again.
   const forecastLinkNamesPlan = appLocation.panel === 'forecast' && 'planId' in appLocation
   const clearForecastPlanLink = useCallback(() => {
     if (forecastLinkNamesPlan) navigate({ panel: 'forecast' }, { replace: true })
@@ -1486,7 +1487,7 @@ function AppShell() {
           <LiveForecastPage
             canWrite={canWrite}
             focusPlanId={appLocation.panel === 'forecast' && 'planId' in appLocation ? appLocation.planId : undefined}
-            onPlanPicked={clearForecastPlanLink}
+            onPlanLinkFollowed={clearForecastPlanLink}
             unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
           />
         )

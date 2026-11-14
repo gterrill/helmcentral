@@ -7,10 +7,15 @@ import { applyAssistantProposal } from '@/lib/assistant-proposal-actions'
 // reads it changes, so a page already on screen reads them again.
 const invalidated: string[] = []
 const skips: Array<{ path: string; skip?: (key: readonly unknown[]) => boolean }> = []
+const refetched: Array<{ key: readonly unknown[]; path: string }> = []
 vi.mock('@/lib/api-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-query')>()
   return {
     ...actual,
+    refetchQuery: vi.fn((key: readonly unknown[], path: string) => {
+      refetched.push({ key, path })
+      return Promise.resolve()
+    }),
     invalidateQueries: vi.fn((prefix: readonly unknown[], skip?: (key: readonly unknown[]) => boolean) => {
       invalidated.push(String(prefix[0]))
       skips.push({ path: String(prefix[0]), skip })
@@ -34,6 +39,7 @@ describe('applying a proposal refreshes the pages it changed', () => {
   beforeEach(() => {
     invalidated.length = 0
     skips.length = 0
+    refetched.length = 0
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -85,11 +91,17 @@ describe('applying a proposal refreshes the pages it changed', () => {
     ['vessel_particulars', '/api/vessel/particulars'],
     ['document', '/api/documents'],
     ['document', '/api/documents/tags'],
-    ['plan', '/api/plans'],
   ])('%s refreshes %s', async (type, path) => {
     reply([type])
     await applyAssistantProposal('p1')
     expect(invalidated).toContain(path)
+  })
+
+  it('reads only the list of plans again, not the assessment, slips and legs under /api/plans', async () => {
+    reply(['plan'], 'update', '7')
+    await applyAssistantProposal('p1')
+    expect(refetched).toEqual([{ key: ['/api/plans'], path: '/api/plans' }])
+    expect(invalidated).not.toContain('/api/plans')
   })
 
   it('refreshes the union of every op in the proposal', async () => {

@@ -70,6 +70,14 @@ removes with their own tap.
   of the store writes the page's handlers call. A stop with no lat or lon is
   refused, and so is a field that is not a stop's, so a misspelt `nights` fails
   and names itself.
+- **Strict about nights and dates.** Every stop must give `nights`, 0 for a stop
+  passed through the same day, because a default of 0 would silently drop a
+  night Mate meant to keep. A later stop's `arrive`, or any stop's `depart`, may
+  be sent back as `get_plans` shows it, but it must equal the day the first
+  arrival and the nights give. A date that disagrees is refused, and the error
+  names the stop, the date Mate sent and the date the nights give. The page would
+  otherwise overwrite the date and the card would describe a plan the operator
+  never gets.
 - **An update replaces the plan whole.** The stops given are the stops kept, so a
   stop left out is removed and a field left out is cleared. The card shows that
   plainly. An update that leaves the plan as it is, is refused.
@@ -95,6 +103,20 @@ removes with their own tap.
   and the Forecast page opens on that plan. The address carries a plan id and
   nothing else. An id that is not a whole number above zero, or a plan since
   deleted, opens the current plan.
+- **Open plan is followed once.** The page selects the plan when it opens, or
+  when the link is followed while the page is already open, and then the app
+  drops `?plan` from the address by replacing the history entry. Following the
+  link first closes any open plan editor and any delete prompt, because Save in
+  an editor left open would write one plan's stops over another's. Back and
+  forward never select a plan, since no entry keeps the `?plan`.
+
+## What the plan read carries
+
+`get_plans` carries the wind changes ADR 0287 put on the table: each leg's
+changes with their boat-clock labels and the reason when they were not checked,
+and the changes for each lay-day night. Mate quotes them as given and does not
+read the forecast again to find them. A result too big to send drops the nights'
+changes before the warning text, and the note says so.
 
 ## Places
 
