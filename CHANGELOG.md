@@ -33,6 +33,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   limits, so set those if you haven't. A change more than about three days out
   is marked as less certain. The weather section of a watch report gets one
   line when a change is coming.
+- **A passage plan shows a wind change instead of the day's average.** If the
+  wind turns between your departure and your ETA, even on an overnight leg, the
+  Wind column reads, for example, "NNW→SE 7 AM" with "astern → ahead" under it,
+  so a southeasterly arriving on the day you have to be somewhere can't hide
+  behind an average. It turns amber when the new wind reaches your marginal wind
+  for that side of the leg, using your passage limits. A lay day shows a change
+  between 6 PM and 6 AM, and a passage row adds the night you arrive. A row says
+  "changes not checked" when it couldn't look, for example when your passage
+  limits aren't set, and the reason shows when you hover over it. Mate now lists the same changes when you ask it about the wind,
+  and says so if it couldn't judge them against your limits.
 - **Plan a run stop by stop and see every day of it on the Forecast page.** Add
   the places in order with the nights at each, and add a via place on a leg
   where the route needs steering. The table has one row per day with the

@@ -509,8 +509,10 @@ func TestAssessPlan_ArrivalPastTheLastForecastHourIsNoForecastYet(t *testing.T) 
 func TestAssessPlan_ASuggestedLegWithNoForecastShowsNoDepartureAndNoCurrent(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	f := &paFake{
-		fc:         pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
-		departures: func(planDepartureQuery) ([]tidalDeparture, error) { return []tidalDeparture{paDeparture(21, 0, 0.4)}, nil },
+		fc: pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
+		departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(21, 0, 0.4)}, nil
+		},
 	}
 	l := paAssess(t, p, legs, f).Legs[0]
 	if l.NoteKind != planKindNoForecast || l.Verdict != "" {

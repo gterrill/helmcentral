@@ -136,6 +136,17 @@ describe("windRelation", () => {
     expect(windRelation(90, 0)).toBe("abeam");
     expect(windRelation(90, 180)).toBe("abeam");
   });
+  // The server's passageSector (assistant_passage_window.go): ahead under 60
+  // degrees off the bow, abeam from 60 up to but not including 120, astern from 120.
+  it("draws the sector edges where the server does, on both sides", () => {
+    expect(windRelation(0, 59)).toBe("ahead");
+    expect(windRelation(0, 60)).toBe("abeam");
+    expect(windRelation(0, 119)).toBe("abeam");
+    expect(windRelation(0, 120)).toBe("astern");
+    expect(windRelation(0, 240)).toBe("astern");
+    expect(windRelation(0, 300)).toBe("abeam");
+    expect(windRelation(0, 301)).toBe("ahead");
+  });
 });
 
 describe("meanForecastBearing", () => {

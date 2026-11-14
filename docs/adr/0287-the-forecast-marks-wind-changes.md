@@ -136,12 +136,93 @@ per-day copies.
   official warnings stay as ADR 0087 has them. When the forecast cannot be read
   the section says so.
 
-## Not yet built
+## The plan table and Mate
 
-The plan table's Wind column, the `get_wind_forecast` tool for Mate, the plan
-verdict rule and arrive-by slack come after the passage plans verdict work lands
-(`plans.ts`, `plan-table.tsx` and `assistant_tools_forecast.go` are in flight on
-another branch).
+- **The Wind column shows the change, never a mean across it.** A row that holds
+  changes shows its speed range, then the first amber change or else the first,
+  worded as the chip is ("NNW→SE 7 AM"), then each side's relation to the leg's
+  course ("astern → ahead", or "stays ahead"), with "+N more" and a hover title
+  for the rest. A row with no change reads exactly as before.
+- **The assessment works out each row's changes; the page only draws them.** An
+  earlier version cut the forecast page's per-day lists on the page, by whole
+  hours and a regular expression on the checked-to label, and it judged amber
+  from marginal winds the assessment sent. That put three judgments in two
+  places, and the hour cut was wrong at the edges: a change stamped 10:00 was
+  kept for a leg that left at 10:45, and a leg that crossed midnight lost its
+  second morning. The server now holds all of it, for two reasons. It has the
+  exact instants, and it already judges every other figure in the row.
+  - **A leg** reads the hourly forecast the assessment fetched for its verdict,
+    at the sample nearest the middle of its route, so it adds no fetch. It runs
+    `forecastWindChanges` on that series and keeps the changes whose onset lies
+    between the leg's departure and its ETA, compared as instants. A suggested
+    departure counts as the departure. With no ETA the window runs from the
+    departure to the end of that day at the departure stop, and with no
+    departure it is the whole day. A leg that crosses midnight needs no special
+    case. The last hourly stamp read covers the hour after it, so an ETA within
+    that hour is checked, as the end of a day or a night is. The leg the boat is
+    on (the first leg still to do, when the recording under way began at the
+    stop it leaves) is read from now to its ETA, which is the operator's
+    departure time plus the hours at the boat's speed. With no departure time
+    that ETA is not known and the leg says so. Its forecast is fetched for this
+    alone, since its past departure leaves it without a verdict. A leg done or
+    skipped shows nothing.
+  - **A lay-day night** is the window from 18:00 on the day to 06:00 the day
+    after, on the stop's clock, read at the stop. The table has a row for each
+    lay day of the first stop and, at a later stop, for those after the night of
+    arrival, so those are the nights sent.
+  - **The night of arrival** is the same window on the ETA's day at the stop,
+    starting at the ETA when that is later than 18:00 (the leg owns the ETA
+    instant itself). It is sent for a stop the plan stays at and for the last
+    stop, keyed by the stop's plan arrive date, which no lay-day row uses. The
+    passage row that lands there lists these changes after the leg's own, and
+    the page only joins the two lists.
+  - **The stops' forecasts** come from the same source as the legs', whose memo
+    keeps one read per place. A stop that is a leg's end is already in the
+    assessor and costs no read. When no leg is assessable the nights still
+    fetch their stops once each. The stops are fetched on their own, and their
+    fetch time stays out of the forecast time the verdicts are stamped with, so
+    an older stop cannot make a leg's forecast look older. A stop that cannot
+    be read leaves the legs' verdicts alone, and says so only on the nights at
+    that stop, naming it; the nights at stops that were read keep their
+    changes.
+  - **Each change** carries its label on the departure stop's clock (with the
+    weekday when it falls on a later day than the row's), the speeds, the
+    confidence, and, on a leg, the sector the wind before (`from_sector`) and
+    after (`sector`) blows from against the leg's course, worked out with
+    `passageSector` on the whole degree, so a wind exactly 120 degrees off is
+    astern. It is prominent when the top of the wind after, as shown, reaches the
+    marginal wind of that sector (`marginalOf` its wind no-go). A sector with no
+    wind no-go is never prominent. A night has no course, so it has no sector
+    and takes the detector's own mark, the lowest marginal wind. The
+    wind-against-tide offset is not applied, since the stream at the hour of the
+    change is not known.
+  - **Not checked is said, per row.** `not_checked` carries the reason when the
+    forecast read for the row stops before the window ends, whether the hourly
+    series was cut short or the forecast simply ended, or when the limits that
+    judge a change are unset or unreadable. With no limits no forecast is read
+    for the nights, and every leg and night says its changes were not checked,
+    with the reason "your passage limits aren't set (Settings → Mate → Passage
+    limits)" or the read error; there is no separate "not judged" state, since a
+    change that cannot be judged is not looked for. A leg that could not be
+    assessed says why instead of showing an empty list. The page draws "changes
+    not checked" in small grey text with the reason as its title, so a row never
+    reads as a steady day when nothing looked. While the assessment loads, the
+    cell shows the current speed range and no change line.
+  - The slips (`VerdictsOnly`) skip all of this.
+- **Slips still rest on verdicts.** ADR 0288 prices a slip by running the
+  assessment again, so a slip into a change shows as a worse verdict on the leg.
+  The plan's Wind column adds no second detector and the slips do not call this
+  one.
+- **Mate reads the same detector.** `get_wind_forecast` calls
+  `forecastWindChanges` on the bundle it fetched and returns `wind_changes`
+  (date, boat-clock time label, from, to, speed range after, `lower_confidence`,
+  `prominent`), `wind_changes_problem` when the limits could not be read or the
+  install wires none, and `wind_changes_checked_to` with its reason when the
+  hourly forecast stops early. An empty `wind_changes` means none was found in
+  the hours read. The scan reads only the days the tool was asked for. The tool
+  description says how to word each field, and not to call a change a front.
+
+Arrive-by slack is ADR 0288.
 
 ## Consequences
 

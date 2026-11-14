@@ -317,6 +317,10 @@ Here's what the table shows:
   and the waves from 6 PM that day to 6 AM the next morning, and the wind's
   direction. If the next morning is past the forecast, only the evening is used. The last stop's final
   row is the day you leave it, and says **leave**. There's no shelter label.
+  When the wind changes during a day, the row shows the change, such as
+  "NNW→SE 7 AM" and "astern → ahead", in place of the day's average, and it turns
+  amber when the new wind reaches your marginal wind for that side. See
+  [Wind changes](wind-changes.md).
 - **No forecast yet.** The forecast reaches about ten days ahead, so a day
   further out says "No forecast yet" and shows nothing. Nothing is guessed to
   fill the gap.
