@@ -87,13 +87,14 @@ func slipRank(l planLegAssessment) int {
 	return -1
 }
 
-// worstSlipLeg is the worst of the legs still to do, the earliest among equals. A
+// worstSlipLeg is the worst of the legs still to do from firstToDo on (a leg
+// under way is not slipped), the earliest among equals. A
 // run of legs that say nothing but a note gives the first of them.
-func worstSlipLeg(legs []planLegAssessment) planLegAssessment {
+func worstSlipLeg(legs []planLegAssessment, firstToDo int) planLegAssessment {
 	var worst planLegAssessment
 	best := -2
 	for _, l := range legs {
-		if l.Progress != "" {
+		if l.Progress != "" || l.Leg < firstToDo {
 			continue
 		}
 		if r := slipRank(l); r > best {
@@ -107,7 +108,7 @@ func worstSlipLeg(legs []planLegAssessment) planLegAssessment {
 type planSlipSetup struct {
 	progress []string
 	slack    planSlack
-	first    int // the first leg still to do
+	first    int // the first leg still to do, past one under way
 	count    int // how many slips to price
 	capped   bool
 }
@@ -119,7 +120,7 @@ type planSlipSetup struct {
 func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetup, out planSlips, done bool) {
 	out = planSlips{Slips: []planSlip{}}
 	// A plan with no arrive-by has nothing to price: the passages are not read.
-	if _, ok, err := planSlackOf(p, nil, 0); err != nil {
+	if _, ok, err := planSlackOf(p, nil, 0, 0); err != nil {
 		out.Problem = "Slack could not be worked out: " + err.Error()
 		return s, out, true
 	} else if !ok {
@@ -185,7 +186,7 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 		out.Problem = env.problem
 		return out
 	}
-	d.warmForecast(ctx, p, legs, s.progress)
+	d.warmForecast(ctx, p, legs, s.progress, s.first)
 
 	opts := planAssessOptions{VerdictsOnly: true, Progress: s.progress, Env: &env}
 	slips := make([]planSlip, s.count)
@@ -214,7 +215,7 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 				slips[n-1] = unchecked(a.Problem)
 				return
 			}
-			w := worstSlipLeg(a.Legs)
+			w := worstSlipLeg(a.Legs, s.first)
 			slips[n-1] = planSlip{
 				Days: n, LateByDays: late,
 				Leg: w.Leg, Date: w.Date, Verdict: w.Verdict, Limiting: w.Limiting, Note: w.Note, NoteKind: w.NoteKind,
@@ -227,12 +228,12 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 }
 
 // warmForecast reads the forecast at every distinct point of the legs still to
-// do, once, before the slips fan out, so each of them finds it kept. A read that
+// do from first on, once, before the slips fan out, so each of them finds it kept. A read that
 // fails is left for the slips, which each read the points again and say so.
-func (d planAssessDeps) warmForecast(ctx context.Context, p plan, legs []planLeg, progress []string) {
+func (d planAssessDeps) warmForecast(ctx context.Context, p plan, legs []planLeg, progress []string, first int) {
 	var plans []passageLegPlan
 	for _, leg := range legs {
-		if leg.From >= len(progress) || progress[leg.From] != "" || leg.Error != "" || len(leg.Route) < 2 || leg.DistanceNm <= 0 {
+		if leg.From < first || leg.From >= len(progress) || progress[leg.From] != "" || leg.Error != "" || len(leg.Route) < 2 || leg.DistanceNm <= 0 {
 			continue
 		}
 		// The points a leg is read at do not depend on its hours.
