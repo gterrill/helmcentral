@@ -285,11 +285,12 @@ no data for are hatched, and the key under the chart says what's wrong.
 The week before a run, you want to see every day of it at once: where you'll be,
 how far each leg is, and what the wind and sea will do. A plan is your run as a
 list of stops with the nights at each, and the forecast page lays it out one row
-per day.
+per day. On a wide screen your plans sit in a column to the right of the
+forecast. On a smaller screen they sit above it.
 
 Plans are kept on the boat's server, so every phone, tablet and wall display
 sees the same ones. You can keep several. The page opens on the plan whose dates
-include today, or the next one coming up, and buttons above the table switch to
+include today, or the next one coming up, and buttons above the days switch to
 another. A plan whose last day has passed moves under **Past** and stays there
 until you delete it.
 
@@ -302,7 +303,9 @@ that this isn't the boat's position. Nothing on the dashboard changes. The tiles
 sunrise and sunset, the day and night theme, the anchor rode planner and the
 alarms all keep reading from the boat's own position.
 
-Here's what the table shows:
+Here's what a plan shows. Each day is a card. It names the place or leg and
+labels each reading: Day, Date, Distance, Depart → ETA, Wind, Gusts, Waves,
+Current or Verdict:
 
 - **One row per day.** A passage row is the day you sail from one stop to the
   next. A lay day is a day you stay put. Dates after the first follow from the
@@ -325,7 +328,8 @@ Here's what the table shows:
   further out says "No forecast yet" and shows nothing. Nothing is guessed to
   fill the gap.
 - **Times at the place.** Dates are the place's own. When a place's clock
-  differs from the boat's, a note under the table says so once you've opened it.
+  differs from the boat's, a note at the top of the forecast, above its heading,
+  says so once you've opened it.
 - **Depart and ETA.** A passage row shows when you leave and when you should
   arrive. The arrival comes from the speed your boat has actually made. That's
   the middle value of the passages Helmcentral recorded over the last twelve
@@ -369,14 +373,14 @@ Here's what the table shows:
   hour by hour along the leg, at your departure time or the suggested one. A
   measure it couldn't check, such as waves with no wave forecast, is listed
   under the verdict as not checked. If the limits aren't set, the page says so
-  once above the table.
-- **Warnings on a stop.** A lay day's verdict column shows an official wind or
+  once above the days.
+- **Warnings on a stop.** A lay day's Verdict shows an official wind or
   sea warning that covers that night at the stop. The night you arrive at a stop
   is shown under the passage row that gets you there. A warning names its day as
   a weekday, so only nights within the next week are matched. If the warnings
-  can't be read, the page says so, and an empty column then doesn't mean none are
+  can't be read, the page says so, and an empty Verdict then doesn't mean none are
   in force.
-- **As of.** Above the table a line says when the verdicts were worked out and
+- **As of.** Above the days a line says when the verdicts were worked out and
   when the forecast behind them was fetched. They're worked out again each time
   the forecast refreshes, which is about every ten minutes, and whenever you
   change the plan. While the new answer is being worked out, the verdict and
@@ -384,7 +388,7 @@ Here's what the table shows:
   change on screen. If the check fails, the page says why.
 - **Arrive by and slack.** On any stop but the first you can set an arrive-by,
   the latest date and time you want to be there. The first stop has none,
-  because the plan starts where the boat already is. A line above the table
+  because the plan starts where the boat already is. A line above the days
   then says "Slack 1 day", which is the whole days between when the plan has you
   arriving and that day. If the plan already has you arriving later, the line
   says "Late by 1 day" in red. With several arrive-bys, the line follows the
@@ -405,7 +409,7 @@ Here's what the table shows:
   ahead, No-Go (late by 1 day)." The worst is a No-Go, then No data, then
   Marginal, then Go. A leg past the forecast says "No forecast yet". Nothing is
   saved, so your plan stays as it is. The slips take a little longer than the
-  table, so they turn up after it, and the page says while it's still working.
+  verdicts, so they turn up after them, and the page says while it's still working.
   It checks no more than ten days of slip, which is as far as the forecast
   reaches.
 - **Done and Skipped.** A leg is Done when a passage Helmcentral recorded ends
@@ -442,8 +446,10 @@ Here's what the table shows:
   the marks. A leg whose stops you rename is a new leg and has no mark. Someone who can't make changes sees the marks but doesn't update what was
   last seen.
 
-Where the table is too narrow for its columns, on a phone or a tablet held
-upright, each row becomes a card.
+Sometimes the plans sit above the forecast in a wide window, for example with
+the sidebar collapsed to icons. Then the days are laid out as one wide table,
+with a column for each reading. The readings and their
+names are the same.
 
 The full forecast for a place, once you open it, works as it always has for a
 place away from the boat:
@@ -455,8 +461,8 @@ place away from the boat:
   it as the trend in the upper air over them, and not as a forecast for each
   day.
 - **No lightning bands.** Lightning is only worked out for the boat's position,
-  so the charts show no band for a plan stop and the key says why. The table has
-  no lightning column for the same reason.
+  so the charts show no band for a plan stop and the key says why. A plan has
+  no Lightning reading for the same reason.
 - **Tide from the nearest station.** The tide chart uses the station closest to
   the place, names it, and says how far it is from the place. A station more
   than 20 nautical miles away is flagged, because a tide there can differ from
@@ -471,13 +477,13 @@ place away from the boat:
   a river or beside a lake, the card says "No wave forecast for this spot". It
   doesn't borrow the open water's sea state.
 
-Here's where it stops. There's no Lightning column, because the lightning
+Here's where it stops. There's no Lightning reading, because the lightning
 forecast is only worked out for the boat's own position. A leg is one day, so a passage that runs overnight isn't judged, and its row
 says so. A bar crossing isn't checked, so a leg across a bar is judged on the
 wind and waves along the route alone. Wind against tide isn't checked either,
 because a plan doesn't know which way the flood sets. Mate can read your plans,
 make one from a description or a pasted list, and change one, and it gives the
-same verdict for a leg that the table does. It only does so when you ask, and you
+same verdict for a leg that the plan does. It only does so when you ask, and you
 choose **Apply** on its card. It can't delete a plan. See
 [Make a passage plan](../how-to/make-a-passage-plan.md) for the steps.
 
