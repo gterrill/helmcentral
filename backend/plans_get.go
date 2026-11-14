@@ -438,6 +438,7 @@ func (d assistantToolDeps) executeGetPlans(ctx context.Context, raw json.RawMess
 	// The clock and the providers are the tool deps' own, so a pinned or replayed
 	// run reads the plans as it did then.
 	deps := planAssessDepsFor(d).pinned()
+	deps.suggested = readOnlySuggested(deps)
 	plans := make([]plan, 0, len(stored))
 	res := getPlansResult{Plans: []planBrief{}}
 	for _, p := range stored {

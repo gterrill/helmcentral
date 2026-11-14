@@ -394,3 +394,48 @@ func TestPlanReportOf_ARoutedLegIsFoundByItsLegNotItsPlace(t *testing.T) {
 		t.Fatalf("leg = %+v, want %s's own 22 nm", r.Legs, p.Stops[1].Name)
 	}
 }
+
+// get_plans is a read tool, open to an outside assistant and to a replay on a
+// pinned clock. It must not write the day's first suggestion, which the Forecast
+// page's still-in-port prompt is timed from.
+func TestGetPlans_NeverWritesTheDaysFirstSuggestion(t *testing.T) {
+	deps, store, f := plansToolEnv(t)
+	f.store = store
+	if _, err := store.CreatePlan(plan{Name: "Home run", Stops: stopsOf("2026-11-14", 0, 1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	out := callGetPlans(t, deps, `{}`)
+	if out.Plan == nil {
+		t.Fatalf("no plan in full: %+v", out)
+	}
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM plan_first_suggestions`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("get_plans kept %d first suggestions (%v)", n, err)
+	}
+}
+
+// With a first suggestion already kept, the tool reads it, so its still-in-port
+// answer is the page's.
+func TestToolSuggested_ReadsTheKeptSuggestionAndWritesNothing(t *testing.T) {
+	store := newTestDocumentStore(t)
+	loc := paNow.Location()
+	given := paNow.Add(3 * time.Hour)
+	d := planAssessDeps{keptSuggestion: store.KeptSuggestion}
+	suggested := readOnlySuggested(d)
+	got, err := suggested(1, "k", "2026-11-14", given)
+	if err != nil || !got.Equal(given) {
+		t.Fatalf("no row kept: got %v, %v; want the time given", got, err)
+	}
+	first := paNow.Add(time.Hour).In(loc)
+	if _, err := store.FirstSuggestion(1, "k", "2026-11-14", first); err != nil {
+		t.Fatal(err)
+	}
+	got, err = suggested(1, "k", "2026-11-14", given)
+	if err != nil || !got.Equal(first) {
+		t.Fatalf("row kept: got %v, %v; want %v", got, err, first)
+	}
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM plan_first_suggestions`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d rows (%v), want the one planted", n, err)
+	}
+}

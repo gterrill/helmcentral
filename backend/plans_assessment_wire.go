@@ -183,6 +183,25 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 	}
 }
 
+// readOnlySuggested is the first-suggestion callback for a run that must not
+// write: the departure kept for the leg and day when there is one, so the answer
+// is the Forecast page's, and the time given when there is none. Only the page's
+// own requests keep the day's first suggestion; a read tool, an outside assistant
+// or a replay on a pinned clock must not set the reference the page times its
+// still-in-port prompt from.
+func readOnlySuggested(d planAssessDeps) func(planID int64, legKey, day string, t time.Time) (time.Time, error) {
+	return func(planID int64, legKey, day string, t time.Time) (time.Time, error) {
+		if d.keptSuggestion == nil {
+			return t, nil
+		}
+		kept, ok, err := d.keptSuggestion(planID, legKey, day, t.Location())
+		if err != nil || !ok {
+			return t, err
+		}
+		return kept, nil
+	}
+}
+
 // planWarningsFrom reads warnings through the same check the warnings fetch loop
 // makes, so a provider that is only serving a stale cache is an error here too,
 // never "no warnings in force".
