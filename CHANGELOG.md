@@ -52,6 +52,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   check that fails says why. Set your limits under
   **Settings → Mate → Passage limits**, or the page says they aren't set. A leg
   that runs past a day, or a day past the forecast, gets no verdict.
+- **A plan now knows what you've sailed, how much it can slip, and what changed
+  since you last looked.** Set **Arrive by** on any stop and a line above the
+  table says "Slack 1 day", or "Late by 1 day" in red. Below it, the page tells
+  you what slipping the plan one day at a time would meet and names the worst
+  leg for each, like "Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
+  ahead, No-Go (late by 1 day)". A leg is marked **Done** when a passage you
+  recorded ends within one and a half nautical miles of its destination, and
+  stops you sailed past read **Skipped**. When you're still at a stop an hour
+  after the time you set to leave, the row says so and **Slip a day** adds a
+  night there. A leg whose verdict has changed since your last visit reads "was
+  Go, now Marginal". Nothing in your plan is rewritten.
 
 ### Fixed
 

@@ -42,6 +42,7 @@ vi.mock("@/components/plan-leg-map", () => ({
 }));
 vi.mock("@/hooks/use-plans");
 vi.mock("@/hooks/use-plan-assessment");
+vi.mock("@/hooks/use-plan-change-marks", () => ({ usePlanChangeMarks: () => ({ marks: new Map(), error: null }) }));
 vi.mock("@/hooks/use-plan-day-forecast");
 vi.mock("@/hooks/use-weather-forecast");
 vi.mock("@/hooks/use-wave-forecast");
@@ -109,7 +110,7 @@ function plansState(plans: unknown[], currentId: number | null, legs: unknown[] 
     refetch: vi.fn(),
   } as never);
   vi.mocked(usePlanLegs).mockReturnValue({ legs, loading: false, error: null } as never);
-  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: null, loading: false, error: null });
+  vi.mocked(usePlanAssessment).mockReturnValue({ assessment: null, shape: "", loading: false, error: null });
 }
 
 const LEGS = [

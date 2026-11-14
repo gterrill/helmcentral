@@ -378,6 +378,50 @@ Here's what the table shows:
   change the plan. While the new answer is being worked out, the verdict and
   current read "…", and Helmcentral never leaves an answer from before your
   change on screen. If the check fails, the page says why.
+- **Arrive by and slack.** On any stop you can set an arrive-by, the latest
+  date and time you want to be there. A line above the table then says "Slack 1
+  day", which is the whole days between when the plan has you arriving and that
+  day. If the plan already has you arriving later, the line says "Late by 1 day"
+  in red. With several arrive-bys, the line follows the tightest one that's still
+  ahead of you. With none, there's no line.
+- **What a slip would meet.** When there's slack, the page works out what
+  slipping the plan would do, one day at a time, up to one day past your slack.
+  Every leg you haven't done moves later by that many days, the plan is judged
+  again, and the line names the worst leg. For example, "Slip 1 day: Manly →
+  Boat Works Wed, Go. Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
+  ahead, No-Go (late by 1 day)." The worst is a No-Go, then No data, then
+  Marginal, then Go. A leg past the forecast says "No forecast yet". Nothing is
+  saved, so your plan stays as it is. The slips take a little longer than the
+  table, so they turn up after it, and the page says while it's still working.
+  It checks no more than ten days of slip, which is as far as the forecast
+  reaches.
+- **Done and Skipped.** A leg is Done when a passage Helmcentral recorded ends
+  within one and a half nautical miles of the leg's destination, on or after the
+  day the leg was planned. If a passage ends at a later stop, the stops it went
+  by are Skipped, along with the legs into them. Done and Skipped rows are
+  dimmed, have no verdict or suggested time, and are left out of the slips. Your
+  plan isn't changed. If Helmcentral can't read the recorded passages, the page
+  says so, and nothing is marked.
+- **Still in port.** On a leg's sailing day, once you're an hour past the time
+  you set to leave, and the boat is still within one and a half nautical miles of
+  the stop, the row says "Planned to leave today" and names the stop you're still
+  at. **Slip a
+  day** adds a night at that stop, the same as **+1 night**, and moves every
+  later date. If you didn't set a time, the hour counts from the first time
+  Helmcentral suggested that day. When the day's window has closed, with the boat
+  still there, the row says it straight away. With no usable position fix, there's
+  no prompt, since an unknown position doesn't mean you're in port. Dates never
+  move on their own.
+- **What changed since you last looked.** When you open a plan, a leg whose
+  verdict is different from the one you saw last time is marked, for example "was
+  Go, now Marginal". Only the verdict counts, so a changed gust figure under the
+  same verdict isn't a change. The marks compare what's on screen with what you
+  were shown last time, and they hold for as long as the plan is open. Helmcentral
+  then remembers what you were shown, on the boat, so the next visit compares
+  against it, from any device. A
+  leg you move to another day, or whose stops you rename, is a new leg and has no
+  mark. Someone who can't make changes sees the marks but doesn't update what was
+  last seen.
 
 Where the table is too narrow for its columns, on a phone or a tablet held
 upright, each row becomes a card.
@@ -409,9 +453,7 @@ place away from the boat:
   doesn't borrow the open water's sea state.
 
 Here's where it stops. There's no Lightning column, because the lightning
-forecast is only worked out for the boat's own position. There's no mark yet
-when a verdict changes, and a leg isn't marked done when you record the passage.
-A leg is one day, so a passage that runs overnight isn't judged, and its row
+forecast is only worked out for the boat's own position. A leg is one day, so a passage that runs overnight isn't judged, and its row
 says so. A bar crossing isn't checked, so a leg across a bar is judged on the
 wind and waves along the route alone. Wind against tide isn't checked either,
 because a plan doesn't know which way the flood sets. Mate can't make or change

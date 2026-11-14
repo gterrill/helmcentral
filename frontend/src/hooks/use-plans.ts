@@ -32,6 +32,7 @@ interface PlanStopApi {
   depart: string;
   vias: PlanViaApi[] | null;
   depart_time: string;
+  arrive_by?: string;
   timezone: string;
 }
 
@@ -74,6 +75,7 @@ function mapStop(s: PlanStopApi): PlanStop {
     depart: s.depart,
     vias: (s.vias ?? []).map((v): PlanVia => ({ name: v.name, lat: v.lat, lon: v.lon })),
     departTime: s.depart_time,
+    arriveBy: s.arrive_by ?? "",
     timezone: s.timezone,
   };
 }
@@ -100,6 +102,7 @@ export function planToApi(input: PlanInput) {
       nights: s.nights,
       vias: s.vias,
       depart_time: s.departTime,
+      arrive_by: s.arriveBy,
     })),
   };
 }

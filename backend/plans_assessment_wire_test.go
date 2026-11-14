@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -18,6 +20,57 @@ func southboundQuery(hours float64) planDepartureQuery {
 	return planDepartureQuery{
 		Route: []assistantLatLon{{Lat: -27.0, Lon: 153.0}, {Lat: -27.3, Lon: 153.0}},
 		Hours: hours,
+	}
+}
+
+func TestPlanForecastMemo_ReadersMissingOnTheSamePointAtOnceShareOneRead(t *testing.T) {
+	m := newPlanForecastMemo(planForecastMemoTTL)
+	var calls atomic.Int32
+	release := make(chan struct{})
+	fc := forecastSource{Provider: "wx", Fetch: func(context.Context, float64, float64) (passageForecast, error) {
+		calls.Add(1)
+		<-release
+		return passageForecast{FetchedAt: paNow}, nil
+	}}
+	wrapped := m.wrap(fc, "Australia/Brisbane", paNow)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := wrapped.Fetch(context.Background(), -27.0, 153.0); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("%d provider reads for 5 concurrent readers", got)
+	}
+}
+
+func TestPlanForecastMemo_ExpiredPointsAreClearedOncePerTTLNotOnEveryMiss(t *testing.T) {
+	m := newPlanForecastMemo(10 * time.Minute)
+	fc := forecastSource{Provider: "wx", Fetch: func(context.Context, float64, float64) (passageForecast, error) {
+		return passageForecast{}, nil
+	}}
+	read := func(at time.Time, lat float64) {
+		if _, err := m.wrap(fc, "z", at).Fetch(context.Background(), lat, 153.0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t0 := paNow
+	read(t0, -27.0)
+	read(t0.Add(11*time.Minute), -28.0) // sweeps: the first point is gone
+	if len(m.m) != 1 {
+		t.Fatalf("%d points kept, want only the fresh one", len(m.m))
+	}
+	read(t0.Add(12*time.Minute), -29.0)
+	read(t0.Add(23*time.Minute), -30.0) // a second sweep a TTL on
+	if len(m.m) != 1 {
+		t.Fatalf("%d points kept", len(m.m))
 	}
 }
 
@@ -271,7 +324,7 @@ func TestPlanAssessmentLatency_ColdAndWarm(t *testing.T) {
 	}
 	for _, run := range []string{"cold", "warm"} {
 		start := time.Now()
-		out := assessPlan(context.Background(), p, legs, d)
+		out := assessPlan(context.Background(), p, legs, d, planAssessOptions{})
 		t.Logf("%s: %s for %d legs (%d forecast reads so far)", run, time.Since(start).Round(10*time.Millisecond), len(out.Legs), f.fetches)
 	}
 }

@@ -64,9 +64,20 @@ type paFake struct {
 	speedErr      error
 	speedReads    int
 	fc            forecastSource
+	// progress answers the plan's per-leg progress; nil is nothing done.
+	progress    []string
+	progressErr error
+	// position is the boat's own fix; the default is none.
+	position func() (float64, float64, error)
+	// store keeps the day's first suggestion between assessments; nil keeps none.
+	store *documentStore
 }
 
 func paDeps(f *paFake) planAssessDeps {
+	var suggested func(planID int64, legKey, day string, t time.Time) (time.Time, error)
+	if f.store != nil {
+		suggested = f.store.FirstSuggestion
+	}
 	if f.speed == 0 && f.speedErr == nil {
 		f.speed = 6
 	}
@@ -95,7 +106,15 @@ func paDeps(f *paFake) planAssessDeps {
 			f.mu.Unlock()
 			return f.speed, f.speedErr
 		},
-		sun:   pwSun,
+		progress: func(context.Context, plan) ([]string, error) { return f.progress, f.progressErr },
+		position: func() (float64, float64, error) {
+			if f.position != nil {
+				return f.position()
+			}
+			return 0, 0, errors.New("the boat has no usable position fix yet")
+		},
+		suggested: suggested,
+		sun:       pwSun,
 		dawn: func(date time.Time, lat, lon float64) (time.Time, bool) {
 			y, m, d := date.Date()
 			return time.Date(y, m, d, 5, 15, 0, 0, date.Location()), true
@@ -137,7 +156,7 @@ func paDeps(f *paFake) planAssessDeps {
 
 func paAssess(t *testing.T, p plan, legs []planLeg, f *paFake) planAssessment {
 	t.Helper()
-	return assessPlan(context.Background(), p, legs, paDeps(f))
+	return assessPlan(context.Background(), p, legs, paDeps(f), planAssessOptions{})
 }
 
 func paParse(t *testing.T, s string) time.Time {
@@ -368,7 +387,7 @@ func TestAssessPlan_ADepartureInThePastIsNotSuggested(t *testing.T) {
 	f := &paFake{}
 	d := paDeps(f)
 	d.now = func() time.Time { return paAt(14, 8, 7) }
-	assessPlan(context.Background(), p, legs, d)
+	assessPlan(context.Background(), p, legs, d, planAssessOptions{})
 	if len(f.rankings) != 1 || !f.rankings[0].Earliest.Equal(paAt(14, 8, 15)) {
 		t.Fatalf("window = %+v: no earlier than the next quarter hour", f.rankings)
 	}
@@ -405,7 +424,7 @@ func TestAssessPlan_ADaylightWindowThatHasGoneTodaySaysSoNotThatThereWasNone(t *
 	f := &paFake{}
 	d := paDeps(f)
 	d.now = func() time.Time { return paAt(14, 18, 0) } // sunset is 5.32 PM
-	l := assessPlan(context.Background(), p, legs, d).Legs[0]
+	l := assessPlan(context.Background(), p, legs, d, planAssessOptions{}).Legs[0]
 	if l.Note != "Today's window has passed" || l.NoteKind != planKindWindowPassed || l.Depart != "" || l.Verdict != "" || l.DepartSuggested {
 		t.Fatalf("leg = %+v", l)
 	}
@@ -616,7 +635,7 @@ func TestAssessPlan_LimitsNotSetIsAProblemNotAGuess(t *testing.T) {
 	f := &paFake{}
 	d := paDeps(f)
 	d.limits = func() (passageLimits, error) { return passageLimits{}, nil }
-	got := assessPlan(context.Background(), p, legs, d)
+	got := assessPlan(context.Background(), p, legs, d, planAssessOptions{})
 	l := got.Legs[0]
 	if !strings.Contains(got.Problem, "Passage limits") || l.Verdict != "" || !strings.Contains(l.Note, "Passage limits") || l.NoteKind != planKindProblem {
 		t.Fatalf("got %+v", got)
@@ -1042,7 +1061,7 @@ func TestPlanAssessmentHandler_ServesTheAssessment(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Legs) != 2 || out.Legs[0].Verdict != "go" {
 		t.Fatalf("assessment = %s (%v)", rec.Body.String(), err)
 	}
-	for _, key := range []string{`"as_of"`, `"forecast_as_of"`, `"problem"`, `"warnings_error"`, `"depart_suggested"`, `"current_kn"`, `"current_note"`, `"limiting"`, `"note_kind"`} {
+	for _, key := range []string{`"as_of"`, `"forecast_as_of"`, `"problem"`, `"warnings_error"`, `"depart_suggested"`, `"current_kn"`, `"current_note"`, `"limiting"`, `"note_kind"`, `"key"`, `"progress"`, `"still_in_port"`, `"slack"`, `"progress_error"`} {
 		if !strings.Contains(rec.Body.String(), key) {
 			t.Errorf("the page binds %s; it is missing from %s", key, rec.Body.String())
 		}
@@ -1082,7 +1101,7 @@ func TestPlanAssessmentHandler_ReadsTheSpeedOncePerRequest(t *testing.T) {
 
 // The speed is kept for ten minutes in the process, a failed read never.
 func TestCachedCruisingSpeed_IsKeptForTenMinutesAndAFailureIsNot(t *testing.T) {
-	var c cruisingSpeedCache
+	var c planReadCache[struct{}, float64]
 	reads, fail := 0, false
 	read := func() (float64, error) {
 		reads++
@@ -1092,22 +1111,22 @@ func TestCachedCruisingSpeed_IsKeptForTenMinutesAndAFailureIsNot(t *testing.T) {
 		return 6.5, nil
 	}
 	now := paNow
-	if v, err := c.get(now, read); err != nil || v != 6.5 || reads != 1 {
+	if v, err := c.get(now, struct{}{}, read); err != nil || v != 6.5 || reads != 1 {
 		t.Fatalf("first: %v %v %d", v, err, reads)
 	}
-	if v, _ := c.get(now.Add(9*time.Minute), read); v != 6.5 || reads != 1 {
+	if v, _ := c.get(now.Add(9*time.Minute), struct{}{}, read); v != 6.5 || reads != 1 {
 		t.Fatalf("inside ten minutes the read is reused: reads %d", reads)
 	}
 	fail = true
-	if _, err := c.get(now.Add(11*time.Minute), read); err == nil || reads != 2 {
+	if _, err := c.get(now.Add(11*time.Minute), struct{}{}, read); err == nil || reads != 2 {
 		t.Fatalf("after ten minutes it reads again: %v %d", err, reads)
 	}
-	if _, err := c.get(now.Add(11*time.Minute), read); err == nil || reads != 3 {
+	if _, err := c.get(now.Add(11*time.Minute), struct{}{}, read); err == nil || reads != 3 {
 		t.Fatalf("a failure is not kept: %d", reads)
 	}
 	c.drop()
 	fail = false
-	if v, err := c.get(now.Add(12*time.Minute), read); err != nil || v != 6.5 || reads != 4 {
+	if v, err := c.get(now.Add(12*time.Minute), struct{}{}, read); err != nil || v != 6.5 || reads != 4 {
 		t.Fatalf("after a drop: %v %v %d", v, err, reads)
 	}
 }

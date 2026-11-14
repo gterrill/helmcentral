@@ -31,6 +31,7 @@ function stop(name: string, arrive: string, nights: number): PlanStop {
     depart: end.toISOString().slice(0, 10),
     vias: [],
     departTime: "",
+    arriveBy: "",
     timezone: "Australia/Brisbane",
   };
 }
@@ -254,11 +255,13 @@ describe("the editor's draft", () => {
   it("sends no vias or departure time for the last stop", () => {
     const via = { name: "V", lat: -26, lon: 153 };
     const input = draftToInput(" Run ", "2026-11-14", [
-      { name: "A", lat: 1, lon: 2, nights: 1, vias: [via], departTime: "06:30" },
-      { name: "B ", lat: 3, lon: 4, nights: 0, vias: [via], departTime: "07:00" },
+      { name: "A", lat: 1, lon: 2, nights: 1, vias: [via], departTime: "06:30", arriveBy: "" },
+      { name: "B ", lat: 3, lon: 4, nights: 0, vias: [via], departTime: "07:00", arriveBy: "2026-11-20T17:00" },
     ]);
     expect(input.name).toBe("Run");
     expect(input.stops[0]).toMatchObject({ arrive: "2026-11-14", vias: [via], departTime: "06:30" });
+    // An arrive-by belongs to any stop, the last included.
+    expect(input.stops[1]).toMatchObject({ vias: [], departTime: "", arriveBy: "2026-11-20T17:00" });
     // The server dates every stop after the first.
     expect(input.stops[1]).toMatchObject({ name: "B", vias: [], departTime: "" });
     expect(input.stops[1].arrive).toBeUndefined();

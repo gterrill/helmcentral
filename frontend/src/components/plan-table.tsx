@@ -6,7 +6,9 @@ import { PlanLegMap } from "@/components/plan-leg-map";
 import { Button } from "@/components/ui/button";
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { usePlanAssessment } from "@/hooks/use-plan-assessment";
+import { usePlanChangeMarks } from "@/hooks/use-plan-change-marks";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
+import { usePlanSlips } from "@/hooks/use-plan-slips";
 import { useWaveForecast } from "@/hooks/use-wave-forecast";
 import { useWeatherForecast } from "@/hooks/use-weather-forecast";
 import type { ForecastPlace } from "@/lib/forecast-place";
@@ -14,10 +16,16 @@ import { notCheckedWords } from "@/lib/passage-measures";
 import { PlanForecastContext, PlanForecastStore, placeKey } from "@/lib/plan-forecast-store";
 import {
   buildPlanRows,
+  changeMarkText,
   currentText,
+  slackText,
+  slipText,
+  type ChangeMark,
   formatWaveRange,
   formatWindRange,
   legForecastPlace,
+  PROGRESS_LABEL,
+  VERDICT_ORDER,
   verdictText,
   windRelation,
   withinForecastHorizon,
@@ -26,6 +34,7 @@ import {
   type PlanAssessment,
   type PlanLeg,
   type PlanLegAssessment,
+  type PlanSlack,
   type PlanStopWarning,
   legErrorText,
   legNoteText,
@@ -50,6 +59,12 @@ const VERDICT_CLASS: Record<LegVerdict, string> = {
   no_go: "text-red-600 dark:text-red-400",
   no_data: "text-muted-foreground",
 };
+
+/** A change for the worse reads amber, one for the better emerald. */
+const markClass = (mark: ChangeMark) =>
+  VERDICT_ORDER[mark.now] > VERDICT_ORDER[mark.was]
+    ? "text-amber-600 dark:text-amber-400"
+    : "text-emerald-600 dark:text-emerald-400";
 
 /**
  * The row the operator chose, by its key (PlanRow.key). Its stop and dates are
@@ -135,11 +150,12 @@ export function PlanTable({
     }
     return [...byKey.values()];
   }, [rows, plan, legByFrom, today]);
-  const { assessment, error: assessmentError } = usePlanAssessment(plan);
+  const { assessment, shape, error: assessmentError } = usePlanAssessment(plan);
+  const { marks, error: marksError } = usePlanChangeMarks(plan.id, assessment?.legs ?? null, canWrite);
   const assessmentState: AssessmentState = assessment ? "ready" : assessmentError ? "failed" : "loading";
   const rowAssessments = useMemo(
-    () => buildRowAssessments(rows, plan, assessment, assessmentState),
-    [rows, plan, assessment, assessmentState],
+    () => buildRowAssessments(rows, plan, assessment, assessmentState, marks),
+    [rows, plan, assessment, assessmentState, marks],
   );
   const zone = plan.stops[0]?.timezone;
   return (
@@ -162,6 +178,13 @@ export function PlanTable({
       {assessment?.warningsError && (
         <p className="text-xs text-muted-foreground">Warnings not checked: {assessment.warningsError}</p>
       )}
+      {assessment?.progressError && (
+        <p className="text-xs text-muted-foreground">Progress not checked: {assessment.progressError}</p>
+      )}
+      {marksError && (
+        <p className="text-xs text-muted-foreground">Changes since your last visit not shown: {marksError}</p>
+      )}
+      {assessment?.slack && <PlanSlackAndSlips plan={plan} shape={shape} slack={assessment.slack} />}
       {assessment && zone && (
         <p data-testid="plan-assessment-asof" className="text-xs text-muted-foreground">
           Verdicts as of {formatTimeOfDay(assessment.asOf, zone)}
@@ -209,12 +232,64 @@ export function PlanTable({
   );
 }
 
+/**
+ * The room the plan has before its arrive-by, and, while there is some, what
+ * each slip from one day to the slack plus one would meet. The slips are priced
+ * apart from the table, so the rows never wait for them.
+ */
+function PlanSlackAndSlips({ plan, shape, slack }: { plan: Plan; shape: string; slack: PlanSlack }) {
+  const { text, late } = slackText(slack);
+  const heading = (
+    <p data-testid="plan-slack" className={`text-sm font-medium ${late ? "text-destructive" : "text-foreground"}`}>
+      {text}
+    </p>
+  );
+  // A plan already past its arrive-by has no slips to price.
+  if (late) return heading;
+  return (
+    <div className="space-y-0.5">
+      {heading}
+      <PlanSlipList plan={plan} shape={shape} />
+    </div>
+  );
+}
+
+/** The slips, priced apart from the table; mounted only while there is slack to spend. */
+function PlanSlipList({ plan, shape }: { plan: Plan; shape: string }) {
+  const { slips, loading, error } = usePlanSlips(plan.id, shape);
+  return (
+    <>
+      {loading && <p className="text-xs text-muted-foreground">Pricing the slips…</p>}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          Slips could not be priced: {error}
+        </p>
+      )}
+      {slips?.problem && <p className="text-xs text-muted-foreground">{slips.problem}</p>}
+      {slips && slips.slips.length > 0 && (
+        <ul className="space-y-0.5">
+          {slips.slips.map((s) => (
+            <li key={s.days} data-testid="plan-slip" className="text-xs text-muted-foreground">
+              {slipText(s, plan)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {slips?.capped && <p className="text-xs text-muted-foreground">Slips are checked as far as the forecast reaches.</p>}
+    </>
+  );
+}
+
 type AssessmentState = "loading" | "ready" | "failed";
 
 /** What the assessment says about one row, worked out once per assessment. */
 interface RowAssessment {
   /** A passage row's leg verdict; undefined until the assessment has one for it. */
   leg: PlanLegAssessment | undefined;
+  /** A passage row's change since the last visit. */
+  mark: ChangeMark | undefined;
+  /** A stop row at a stop the boat went by. */
+  stopSkipped: boolean;
   state: AssessmentState;
   /** A stop row's warning for the night it is read for. */
   nightWarning: PlanStopWarning | undefined;
@@ -232,6 +307,7 @@ function buildRowAssessments(
   plan: Plan,
   assessment: PlanAssessment | null,
   state: AssessmentState,
+  marks: ReadonlyMap<string, ChangeMark>,
 ): Map<string, RowAssessment> {
   const legs = new Map((assessment?.legs ?? []).map((l) => [l.leg, l]));
   const warnings = new Map<string, PlanStopWarning>();
@@ -244,10 +320,12 @@ function buildRowAssessments(
         // The server lists a stop's nights from its plan arrive date, so the passage
         // row shows the arrival stop's first night, even for a leg that lands after midnight.
         const arrivalWarning = to ? warnings.get(`${row.legIndex + 1}|${to.arrive}`) : undefined;
-        return [row.key, { leg, state, nightWarning: undefined, arrivalWarning }];
+        const mark = leg ? marks.get(leg.key) : undefined;
+        return [row.key, { leg, mark, stopSkipped: false, state, nightWarning: undefined, arrivalWarning }];
       }
       const nightWarning = warnings.get(`${row.stopIndex}|${row.dayKey}`);
-      return [row.key, { leg: undefined, state, nightWarning, arrivalWarning: undefined }];
+      const stopSkipped = row.stopIndex > 0 && legs.get(row.stopIndex - 1)?.progress === "skipped";
+      return [row.key, { leg: undefined, mark: undefined, stopSkipped, state, nightWarning, arrivalWarning: undefined }];
     }),
   );
 }
@@ -318,7 +396,8 @@ function DepartEtaCell({
   operatorTime: string;
   state: AssessmentState;
 }) {
-  if (!passage) return <Cell label="Depart → ETA">—</Cell>;
+  // A leg the boat has done or passed by has no departure left to show.
+  if (!passage || a?.progress) return <Cell label="Depart → ETA">—</Cell>;
   const { text, suggested } = departEtaText(a, fromZone, toZone, operatorTime);
   const waiting = text === "—" && a === undefined && state === "loading";
   return (
@@ -349,6 +428,9 @@ function VerdictText({
 }) {
   if (a === undefined) {
     return <span className="text-sm text-muted-foreground">{state === "loading" ? "…" : "—"}</span>;
+  }
+  if (a.progress !== "") {
+    return <span className="text-sm text-muted-foreground">{PROGRESS_LABEL[a.progress]}</span>;
   }
   // The problem that stopped every verdict is said once, above the table.
   if (a.verdict === null && a.noteKind === "problem") {
@@ -430,7 +512,9 @@ const PlanDayRow = memo(function PlanDayRow({
       role="row"
       data-testid="plan-row"
       data-kind={row.kind}
-      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"}`}
+      className={`${GRID} rounded-md border bg-card p-3 ${selected ? "border-primary" : "border-border"} ${
+        assessed.leg?.progress || assessed.stopSkipped ? "opacity-60" : ""
+      }`}
     >
       <Cell label="Day">{`Day ${row.dayNumber}`}</Cell>
       <Cell label="Date">{`${formatWeekday(row.dayKey)} ${formatDayMonth(row.dayKey)}`}</Cell>
@@ -460,6 +544,25 @@ const PlanDayRow = memo(function PlanDayRow({
           <p className="text-xs text-muted-foreground" title={leg.note}>
             {legNoteText(leg)}
           </p>
+        )}
+        {passage && assessed.leg?.stillInPort && (
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+              Planned to leave today — still at {from.name}
+            </p>
+            {canWrite && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-xs"
+                disabled={addingNight}
+                onClick={() => onAddNight(row.legIndex)}
+              >
+                Slip a day
+              </Button>
+            )}
+          </div>
         )}
         <div className="mt-1 flex flex-wrap gap-1">
           {!passage && canWrite && (
@@ -569,12 +672,19 @@ const PlanDayRow = memo(function PlanDayRow({
             state={assessed.state}
             noForecast={noForecast}
           />
+        ) : assessed.stopSkipped ? (
+          <span className="text-sm text-muted-foreground">{PROGRESS_LABEL.skipped}</span>
         ) : (
           assessed.nightWarning && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
               <WarningLink warning={assessed.nightWarning} />
             </p>
           )
+        )}
+        {passage && assessed.mark && (
+          <p data-testid="change-mark" className={`text-xs font-medium ${markClass(assessed.mark)}`}>
+            {changeMarkText(assessed.mark)}
+          </p>
         )}
         {passage && assessed.arrivalWarning && to && (
           <p className="text-xs text-amber-600 dark:text-amber-400">

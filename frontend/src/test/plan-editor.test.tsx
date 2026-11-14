@@ -18,6 +18,7 @@ const stop = (name: string, arrive: string, nights: number, extra = {}) => ({
   depart: arrive,
   vias: [],
   departTime: "",
+  arriveBy: "",
   timezone: "Australia/Brisbane",
   ...extra,
 });
@@ -30,7 +31,7 @@ const PLAN: Plan = {
   stops: [
     stop("A", "2026-11-14", 1, { vias: [via], departTime: "06:30" }),
     stop("B", "2026-11-15", 1, { vias: [via], departTime: "07:00" }),
-    stop("C", "2026-11-16", 0),
+    stop("C", "2026-11-16", 0, { arriveBy: "2026-11-17T17:00" }),
   ],
 };
 
@@ -56,6 +57,34 @@ describe("PlanEditor", () => {
     const saved = onSave.mock.calls[0][0];
     expect(saved.stops.map((s: { name: string }) => s.name)).toEqual(["A", "C", "B"]);
     expect(saved.stops[0]).toMatchObject({ vias: [], departTime: "" });
+  });
+
+  it("offers an arrive-by on every stop, the last one included, filled from the saved plan", () => {
+    open();
+    expect(screen.getAllByLabelText("Arrive by")).toHaveLength(3);
+    expect(screen.getAllByLabelText("Arrive by")[2]).toHaveValue("2026-11-17T17:00");
+    expect(screen.getAllByLabelText("Arrive by")[0]).toHaveValue("");
+  });
+
+  it("saves an arrive-by set on a middle stop, and an emptied one as none", async () => {
+    const onSave = open();
+    fireEvent.change(screen.getAllByLabelText("Arrive by")[1], { target: { value: "2026-11-16T09:30" } });
+    fireEvent.change(screen.getAllByLabelText("Arrive by")[2], { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save plan" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.stops.map((s: { arriveBy: string }) => s.arriveBy)).toEqual(["", "2026-11-16T09:30", ""]);
+  });
+
+  it("keeps a stop's arrive-by when stops are moved, since it belongs to the stop", async () => {
+    const onSave = open();
+    fireEvent.click(screen.getByRole("button", { name: "Move stop 3 up" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save plan" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.stops.map((s: { name: string; arriveBy: string }) => [s.name, s.arriveBy])).toEqual([
+      ["A", ""], ["C", "2026-11-17T17:00"], ["B", ""],
+    ]);
   });
 
   it("keeps a leg's vias when the stops either side of it are untouched", async () => {

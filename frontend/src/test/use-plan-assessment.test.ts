@@ -46,6 +46,36 @@ const API_ASSESSMENT = {
   stops: [{ stop: 1, nights: [{ date: "2026-11-14", warning: "Gale Warning", url: "https://example.test/w" }] }],
 };
 
+describe("mapAssessment progress, slack and keys", () => {
+  const withProgress = {
+    ...API_ASSESSMENT,
+    progress_error: "",
+    slack: { days: 2, stop: 2 },
+    legs: [
+      { ...API_ASSESSMENT.legs[0], key: "A → B|2026-11-14", progress: "done", still_in_port: false, note: "", note_kind: "", verdict: "" },
+      { ...API_ASSESSMENT.legs[1], key: "B → C|2026-11-15", progress: "", still_in_port: true },
+    ],
+  };
+
+  it("reads each leg's key, its Done or Skipped state and the still-in-port flag", () => {
+    const a = mapAssessment(withProgress as never);
+    expect(a.legs[0]).toMatchObject({ key: "A → B|2026-11-14", progress: "done", stillInPort: false, verdict: null, noteKind: "" });
+    expect(a.legs[1]).toMatchObject({ key: "B → C|2026-11-15", progress: "", stillInPort: true });
+    expect(mapAssessment({ ...withProgress, legs: [{ ...withProgress.legs[0], progress: "skipped" }] } as never).legs[0]).toMatchObject({ progress: "skipped", noteKind: "" });
+    // A progress this page does not know is still to do.
+    expect(mapAssessment({ ...withProgress, legs: [{ ...withProgress.legs[0], progress: "lost" }] } as never).legs[0].progress).toBe("");
+  });
+
+  it("reads the slack, or null when no stop has an arrive-by", () => {
+    expect(mapAssessment(withProgress as never).slack).toEqual({ days: 2, stop: 2 });
+    expect(mapAssessment({ ...withProgress, slack: null } as never).slack).toBeNull();
+  });
+
+  it("carries the reason the recorded passages could not be read", () => {
+    expect(mapAssessment({ ...withProgress, progress_error: "disk" } as never).progressError).toBe("disk");
+  });
+});
+
 describe("mapAssessment", () => {
   it("reads the wire shape, an empty verdict and time becoming null", () => {
     const a = mapAssessment(API_ASSESSMENT as never);
@@ -69,7 +99,7 @@ describe("mapAssessment", () => {
 
 describe("verdictText and currentText", () => {
   const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
-    leg: 0, date: "2026-11-14", verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
+    leg: 0, date: "2026-11-14", key: "k", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
     hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [], ...over,
   });
 

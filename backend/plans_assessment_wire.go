@@ -8,14 +8,18 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Production wiring for the passage plan's assessment (plans_assessment.go):
 // the readers Mate's tools use, called without a model between them.
 
 // planForecastMemoTTL is how long a point's forecast is reused between
-// assessments: an edit to one stop asks again only for the places it moved.
-const planForecastMemoTTL = 10 * time.Minute
+// assessments: an edit to one stop asks again only for the places it moved. It
+// is a little longer than the page's refresh (FORECAST_REFRESH_SECONDS, 600), so
+// the refresh finds it kept rather than racing its expiry.
+const planForecastMemoTTL = 12 * time.Minute
 
 // planForecastPoints is the forecast read at every point of every plan's legs,
 // kept for planForecastMemoTTL.
@@ -23,11 +27,14 @@ var planForecastPoints = newPlanForecastMemo(planForecastMemoTTL)
 
 // planForecastMemo keeps each point's forecast, so the legs a plan edit did not
 // touch are not read again. A point is keyed as the assessor keys it, with the
-// providers and the zone its hours are read in. A failed read is never kept.
+// providers and the zone its hours are read in. A failed read is never kept, and
+// readers that miss on the same point at once share one read.
 type planForecastMemo struct {
-	mu  sync.Mutex
-	ttl time.Duration
-	m   map[string]planForecastMemoEntry
+	mu     sync.Mutex
+	ttl    time.Duration
+	m      map[string]planForecastMemoEntry
+	swept  time.Time
+	flight singleflight.Group
 }
 
 type planForecastMemoEntry struct {
@@ -45,27 +52,54 @@ func (m *planForecastMemo) wrap(fc forecastSource, zone string, now time.Time) f
 	inner := fc.Fetch
 	fc.Fetch = func(ctx context.Context, lat, lon float64) (passageForecast, error) {
 		key := fc.Provider + "|" + fc.WaveProvider + "|" + zone + "|" + passagePointKey(passageRoutePoint{Lat: lat, Lon: lon})
-		m.mu.Lock()
-		e, ok := m.m[key]
-		m.mu.Unlock()
-		if ok && now.Sub(e.at) < m.ttl && !now.Before(e.at) {
-			return e.f, nil
+		if f, ok := m.kept(key, now); ok {
+			return f, nil
 		}
-		f, err := inner(ctx, lat, lon)
+		v, err, _ := m.flight.Do(key, func() (any, error) {
+			// A reader that waited on an earlier flight finds what it kept.
+			if f, ok := m.kept(key, now); ok {
+				return f, nil
+			}
+			f, err := inner(ctx, lat, lon)
+			if err != nil {
+				return nil, err
+			}
+			m.keep(key, now, f)
+			return f, nil
+		})
 		if err != nil {
 			return passageForecast{}, err
 		}
-		m.mu.Lock()
+		return v.(passageForecast), nil
+	}
+	return fc
+}
+
+// kept is the point's forecast when it was read within the TTL of now.
+func (m *planForecastMemo) kept(key string, now time.Time) (passageForecast, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.m[key]
+	if ok && now.Sub(e.at) < m.ttl && !now.Before(e.at) {
+		return e.f, true
+	}
+	return passageForecast{}, false
+}
+
+// keep stores a forecast. The expired ones are cleared at most once a TTL, not on
+// every miss.
+func (m *planForecastMemo) keep(key string, now time.Time, f passageForecast) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if now.Sub(m.swept) >= m.ttl {
 		for k, old := range m.m {
 			if now.Sub(old.at) >= m.ttl {
 				delete(m.m, k)
 			}
 		}
-		m.m[key] = planForecastMemoEntry{at: now, f: f}
-		m.mu.Unlock()
-		return f, nil
+		m.swept = now
 	}
-	return fc
+	m.m[key] = planForecastMemoEntry{at: now, f: f}
 }
 
 // productionPlanAssessDeps wires the configured providers, the boat's recorded
@@ -89,9 +123,31 @@ func productionPlanAssessDeps(settingsPath string) planAssessDeps {
 		},
 		speed: func(ctx context.Context) (float64, error) {
 			now := d.now()
-			return planCruisingSpeed.get(now, func() (float64, error) {
+			return planCruisingSpeed.get(now, struct{}{}, func() (float64, error) {
 				return recordedCruisingSpeed(ctx, globalPassageStore, now)
 			})
+		},
+		progress: func(ctx context.Context, p plan) ([]string, error) {
+			first, err := time.Parse(planDateLayout, p.Stops[0].Arrive)
+			if err != nil {
+				return nil, fmt.Errorf("the first arrival %q is not a date: %w", p.Stops[0].Arrive, err)
+			}
+			// A day either side covers the zones the plan's dates are kept in.
+			since := first.AddDate(0, 0, -1)
+			ends, err := planPassageEnds.get(d.now(), since.Format(planDateLayout), func() ([]planPassageEnd, error) {
+				return readPassageEnds(ctx, globalPassageStore, since)
+			})
+			if err != nil {
+				return nil, err
+			}
+			return planProgressOf(p, ends)
+		},
+		position: func() (float64, float64, error) {
+			state, err := tideVesselState()
+			return boatOwnPosition(state, err)
+		},
+		suggested: func(planID int64, legKey, day string, t time.Time) (time.Time, error) {
+			return globalDocumentStore.FirstSuggestion(planID, legKey, day, t)
 		},
 		sun:          sunTimes,
 		dawn:         civilDawn,
@@ -129,44 +185,62 @@ const (
 	planSpeedMinUnderway = 30 * time.Minute
 )
 
-// planCruisingSpeedTTL is how long the recorded speed is reused. It moves only
-// when a passage is recorded or edited, and a few minutes' lag is harmless.
-const planCruisingSpeedTTL = 10 * time.Minute
+// planReadTTL is how long a read of the passage record is reused. It moves only
+// when a passage is recorded or edited, and a few minutes' lag is harmless. The
+// passage writes are many and scattered, so the lag is bounded by this alone.
+const planReadTTL = 10 * time.Minute
 
-// planCruisingSpeed is the recorded speed the plan assessment reads.
-var planCruisingSpeed cruisingSpeedCache
+var (
+	// planCruisingSpeed is the recorded speed the plan assessment reads.
+	planCruisingSpeed planReadCache[struct{}, float64]
+	// planPassageEnds is where the recorded passages ended, by the day they are
+	// read since.
+	planPassageEnds planReadCache[string, []planPassageEnd]
+)
 
-// cruisingSpeedCache keeps the recorded speed for planCruisingSpeedTTL, so a
-// read of the passage record does not run on every request. A failed read is
-// never kept.
-type cruisingSpeedCache struct {
-	mu    sync.Mutex
-	at    time.Time
-	speed float64
-	have  bool
+// planReadCache keeps what a read of the passage record returned for planReadTTL,
+// so it does not run on every request. A failed read is never kept. The zero
+// value is ready.
+type planReadCache[K comparable, V any] struct {
+	mu sync.Mutex
+	m  map[K]planReadEntry[V]
 }
 
-func (c *cruisingSpeedCache) get(now time.Time, read func() (float64, error)) (float64, error) {
+type planReadEntry[V any] struct {
+	at time.Time
+	v  V
+}
+
+func (c *planReadCache[K, V]) get(now time.Time, key K, read func() (V, error)) (V, error) {
 	c.mu.Lock()
-	if c.have && now.Sub(c.at) < planCruisingSpeedTTL && !now.Before(c.at) {
-		v := c.speed
-		c.mu.Unlock()
-		return v, nil
-	}
+	e, ok := c.m[key]
 	c.mu.Unlock()
+	if ok && now.Sub(e.at) < planReadTTL && !now.Before(e.at) {
+		return e.v, nil
+	}
 	v, err := read()
 	if err != nil {
-		return 0, err
+		var zero V
+		return zero, err
 	}
 	c.mu.Lock()
-	c.at, c.speed, c.have = now, v, true
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[K]planReadEntry[V]{}
+	}
+	// A key is a day or nothing, so the map stays small.
+	for k, old := range c.m {
+		if now.Sub(old.at) >= planReadTTL {
+			delete(c.m, k)
+		}
+	}
+	c.m[key] = planReadEntry[V]{at: now, v: v}
 	return v, nil
 }
 
-func (c *cruisingSpeedCache) drop() {
+func (c *planReadCache[K, V]) drop() {
 	c.mu.Lock()
-	c.have = false
+	c.m = nil
 	c.mu.Unlock()
 }
 
@@ -176,14 +250,11 @@ func (c *cruisingSpeedCache) drop() {
 // way. It reads Helmcentral's own passage record, not the engine history. With
 // no such passage there is no speed, and no default is made up.
 func recordedCruisingSpeed(ctx context.Context, store *passageStore, now time.Time) (float64, error) {
-	if store == nil {
-		return 0, fmt.Errorf("the passage record is not available")
-	}
-	records, err := store.ListPassages()
-	if err != nil {
-		return 0, fmt.Errorf("the passage record could not be read: %w", err)
-	}
 	since := now.AddDate(0, -planSpeedMonths, 0)
+	records, err := visiblePassagesSince(ctx, store, since)
+	if err != nil {
+		return 0, err
+	}
 	var speeds []float64
 	for _, r := range records {
 		if r.Start.Before(since) || r.Start.After(now) {

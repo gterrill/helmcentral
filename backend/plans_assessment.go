@@ -73,6 +73,15 @@ type planLegAssessment struct {
 	// Leg is the stop the leg leaves; Date is the day it leaves, at that stop.
 	Leg  int    `json:"leg"`
 	Date string `json:"date"`
+	// Key names the leg across edits, "From → To|date": the change marks keep a
+	// verdict against it (ADR 0288). Renaming or moving the leg gives it a new key.
+	Key string `json:"key"`
+	// Progress is "done" or "skipped" when the recorded passages say so, else "".
+	// Such a leg has no verdict, departure, suggestion or note.
+	Progress string `json:"progress"`
+	// StillInPort is true on the leg's departure day when it is an hour past the
+	// leg's set or suggested departure and the boat is still at the stop.
+	StillInPort bool `json:"still_in_port"`
 	// Verdict is go, marginal, no_go or no_data; "" when the leg has none, and
 	// Note says why, NoteKind what sort of reason it is. Limiting names the figure
 	// that decided it, "gusts 32 kn ahead".
@@ -120,9 +129,26 @@ type planAssessment struct {
 	Problem string `json:"problem"`
 	// WarningsError is why official warnings could not be read. No warnings read
 	// is not the same as none in force.
-	WarningsError string               `json:"warnings_error"`
-	Legs          []planLegAssessment  `json:"legs"`
-	Stops         []planStopAssessment `json:"stops"`
+	WarningsError string `json:"warnings_error"`
+	// ProgressError is why the recorded passages could not be read; no leg is then
+	// marked done or skipped, and the plan is judged as still to come.
+	ProgressError string `json:"progress_error"`
+	// Slack is the room before the tightest arrive-by, nil when no stop that is
+	// still ahead has one.
+	Slack *planSlack           `json:"slack"`
+	Legs  []planLegAssessment  `json:"legs"`
+	Stops []planStopAssessment `json:"stops"`
+}
+
+// planAssessOptions narrows an assessment to what its caller needs.
+type planAssessOptions struct {
+	// VerdictsOnly leaves out what a verdict does not need: the current at a
+	// departure the operator set, the warnings on the stops, the slack and the
+	// still-in-port check, which with it never writes the day's first suggestion.
+	VerdictsOnly bool
+	// Progress, when not nil, is each leg's progress already read, one entry for
+	// every leg; the assessment does not read the passages again.
+	Progress []string
 }
 
 // planDepartureQuery is a leg as the ranking and the current read it: the routed
@@ -154,11 +180,19 @@ type planAssessDeps struct {
 	currentAlong func(ctx context.Context, q planDepartureQuery, dep time.Time) (planCurrentReading, error)
 	// warnings resolves the warnings provider once for an assessment made at now.
 	warnings func(now time.Time) (planWarningsReader, error)
+	// progress is each leg's progress from the recorded passages ("" to do).
+	progress func(ctx context.Context, p plan) ([]string, error)
+	// position is the boat's own trusted fix, or why there is none.
+	position func() (lat, lon float64, err error)
+	// suggested keeps the first departure suggested for a leg on a day and returns
+	// the one kept (documentStore.FirstSuggestion). Nil keeps nothing.
+	suggested func(planID int64, legKey, day string, t time.Time) (time.Time, error)
 }
 
 // planEnv is what every leg of an assessment shares.
 type planEnv struct {
 	now           time.Time
+	verdictsOnly  bool
 	limits        passageLimits
 	limitsProblem string
 	speed         float64
@@ -185,6 +219,13 @@ type planLegWork struct {
 // fail leaves the leg without a verdict and says why.
 func (w *planLegWork) fail(kind planNoteKind, note string) {
 	w.res.Note, w.res.NoteKind = note, kind
+	w.assessable = false
+}
+
+// markProgress leaves a leg the boat has done or passed by without a verdict,
+// a departure, a note or any reading.
+func (w *planLegWork) markProgress(progress string) {
+	w.res.Progress = progress
 	w.assessable = false
 }
 
@@ -222,7 +263,7 @@ func fmtLeg(t time.Time, loc *time.Location) string { return t.In(loc).Format(ti
 
 // assessPlan judges every leg of a decorated plan and reads the warnings on its
 // stops. legs are the plan's routed legs, in order.
-func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps) planAssessment {
+func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, opts planAssessOptions) planAssessment {
 	now := d.now()
 	out := planAssessment{
 		AsOf:  now.UTC().Format(time.RFC3339),
@@ -230,6 +271,16 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps) p
 		Stops: []planStopAssessment{},
 	}
 	env := d.readEnv(ctx, now, len(out.Legs) > 0, &out)
+	env.verdictsOnly = opts.VerdictsOnly
+	progress := opts.Progress
+	if progress == nil {
+		progress = d.readProgress(ctx, p, &out)
+	}
+	if !opts.VerdictsOnly {
+		if s, ok, _ := planOutlook(p, progress); ok {
+			out.Slack = &s
+		}
+	}
 
 	byFrom := map[int]planLeg{}
 	for _, l := range legs {
@@ -237,11 +288,20 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps) p
 	}
 	work := make([]*planLegWork, len(out.Legs))
 	for i := range out.Legs {
-		out.Legs[i] = planLegAssessment{Leg: i, Date: p.Stops[i].Depart, NotChecked: []string{}}
+		out.Legs[i] = planLegAssessment{
+			Leg: i, Date: p.Stops[i].Depart, Key: planLegKey(p, i), NotChecked: []string{},
+		}
 		work[i] = &planLegWork{res: &out.Legs[i], i: i, from: p.Stops[i], to: p.Stops[i+1]}
+		if progress[i] != "" {
+			work[i].markProgress(progress[i])
+			continue
+		}
 		d.prepareLeg(work[i], byFrom[i], env)
 	}
 	d.readAndJudge(ctx, p, work, env, &out)
+	if !opts.VerdictsOnly {
+		d.markStillInPort(p, work, progress, now, &out)
+	}
 
 	// A leg whose note is the plan's one problem says "not checked" and leaves the
 	// words to the line above the table.
@@ -387,16 +447,22 @@ func (w *planLegWork) checkHorizon(now time.Time) (planNoteKind, string) {
 // passageWindowMaxRoutePoints (planPassageLeg).
 func (w *planLegWork) setRoute(leg planLeg) (planNoteKind, string) {
 	latLon := make([]assistantLatLon, len(leg.Route))
-	points := make([]passageRoutePoint, len(leg.Route))
 	for i, pt := range leg.Route {
 		latLon[i] = assistantLatLon{Lat: pt[0], Lon: pt[1]}
-		points[i] = passageRoutePoint{Lat: pt[0], Lon: pt[1]}
 	}
 	w.query = planDepartureQuery{Route: latLon, Hours: w.hours}
-	points[0].Name, points[len(points)-1].Name = w.from.Name, w.to.Name
-	hours := w.hours
-	w.plan = planPassageLeg(w.i, passageLegArgs{Name: w.from.Name + " → " + w.to.Name, Route: points, PassageHours: &hours})
+	w.plan = planLegPassage(w.i, w.from, w.to, leg, w.hours)
 	return planKindNone, ""
+}
+
+// planLegPassage is a routed leg as the passage assessor reads it.
+func planLegPassage(i int, from, to planStop, leg planLeg, hours float64) passageLegPlan {
+	points := make([]passageRoutePoint, len(leg.Route))
+	for j, pt := range leg.Route {
+		points[j] = passageRoutePoint{Lat: pt[0], Lon: pt[1]}
+	}
+	points[0].Name, points[len(points)-1].Name = from.Name, to.Name
+	return planPassageLeg(i, passageLegArgs{Name: from.Name + " → " + to.Name, Route: points, PassageHours: &hours})
 }
 
 // setSuggestionWindow is the span a departure may be suggested in, for a leg the
@@ -492,14 +558,19 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 			as, forecastErr = d.fetchForecast(ctx, p, assessable, env)
 		}()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.readWarnings(p, env.now, out)
-	}()
+	if !env.verdictsOnly {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.readWarnings(p, env.now, out)
+		}()
+	}
 	sem := make(chan struct{}, planLegWorkers)
 	for _, w := range work {
-		if w.query.Route == nil || (w.depart.IsZero() && !w.assessable) {
+		// A leg with a departure set is read for its current alone, which a
+		// verdicts-only assessment leaves out; one without is read for the ranking
+		// its verdict is chosen from.
+		if w.query.Route == nil || (w.depart.IsZero() && !w.assessable) || (!w.depart.IsZero() && env.verdictsOnly) {
 			continue
 		}
 		sem <- struct{}{}
@@ -798,24 +869,13 @@ var planAssessDepsFor = func() planAssessDeps {
 // planAssessmentHandler is GET /api/plans/:id/assessment: each leg's verdict,
 // departure, ETA and current, and the warnings on the stops' nights.
 func planAssessmentHandler(c echo.Context) error {
-	id, ok := planIDParam(c)
-	if !ok {
-		return planNotFound(c)
-	}
-	p, found, err := globalDocumentStore.GetPlan(id)
-	if err != nil {
-		return writeDocumentError(c, err)
-	}
-	if !found {
-		return planNotFound(c)
-	}
 	deps := planAssessDepsFor()
-	d, err := decoratePlan(p, deps.now())
-	if err != nil {
-		return planZoneError(c, err)
+	d, ok, err := loadDecoratedPlan(c, deps.now())
+	if !ok {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), planAssessmentDeadline)
 	defer cancel()
 	legs := planLegs(ctx, d)
-	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps))
+	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps, planAssessOptions{}))
 }
