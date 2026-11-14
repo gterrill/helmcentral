@@ -126,7 +126,7 @@ func TestPlanSlack_TheTightestStopRulesAndAReachedStopIsLeftOut(t *testing.T) {
 // still to do, and slack is counted on the moved dates.
 
 func TestPlanBehindDays_IsTodayPastTheFirstLegToDosDeparture(t *testing.T) {
-	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // leaves stop 0 on the 16th, stop 1 on the 17th
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0) // leaves stop 0 on the 16th, stop 1 on the 17th
 	// 18 Nov 01:00 at UTC+10 is still the 17th in UTC: the day is the boat's.
 	cases := []struct {
 		name     string
@@ -141,10 +141,64 @@ func TestPlanBehindDays_IsTodayPastTheFirstLegToDosDeparture(t *testing.T) {
 		{"everything done", time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), []string{planProgressDone, planProgressDone, planProgressSkipped, planProgressDone}, 0},
 	}
 	for _, c := range cases {
-		got, err := planBehindDays(p, c.progress, c.now)
+		got, err := planBehindDays(p, c.progress, c.now, nil)
 		if err != nil || got != c.want {
 			t.Errorf("%s: behind %d (%v), want %d", c.name, got, err, c.want)
 		}
+	}
+}
+
+// A long leg left on time and is still being sailed: it is under way, not behind.
+
+func TestPlanBehindDays_ALegUnderWayIsNotBehindAndTheNextOneSetsTheClock(t *testing.T) {
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0) // leaves stop 0 on the 16th, stop 1 on the 17th, stop 2 on the 18th
+	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC)              // 18 Nov at UTC+10
+	atStop0 := &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon}
+	got, err := planBehindDays(p, nil, now, atStop0)
+	// Leg 0 left on the 16th and is under way; leg 1 was to leave on the 17th, a day ago.
+	if err != nil || got != 1 {
+		t.Fatalf("behind %d (%v), want 1 from the leg after the one under way", got, err)
+	}
+	// On the day the next leg is due the plan is on time.
+	got, err = planBehindDays(p, nil, time.Date(2026, 11, 16, 15, 0, 0, 0, time.UTC), atStop0)
+	if err != nil || got != 0 {
+		t.Fatalf("behind %d (%v), want 0 while the long leg is sailed", got, err)
+	}
+	// Without a passage under way the same day is a day behind.
+	got, err = planBehindDays(p, nil, time.Date(2026, 11, 16, 15, 0, 0, 0, time.UTC), nil)
+	if err != nil || got != 1 {
+		t.Fatalf("behind %d (%v), want 1 with nothing under way", got, err)
+	}
+	// A passage begun elsewhere says nothing about leg 0.
+	away := &planUnderway{Lat: p.Stops[3].Lat, Lon: p.Stops[3].Lon}
+	got, err = planBehindDays(p, nil, time.Date(2026, 11, 16, 15, 0, 0, 0, time.UTC), away)
+	if err != nil || got != 1 {
+		t.Fatalf("behind %d (%v), want 1 when the passage began elsewhere", got, err)
+	}
+}
+
+func TestPlanBehindDays_TheLastLegUnderWayLeavesNothingBehind(t *testing.T) {
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0)
+	progress := []string{planProgressDone, planProgressDone, planProgressDone, ""}
+	last := &planUnderway{Lat: p.Stops[3].Lat, Lon: p.Stops[3].Lon}
+	got, err := planBehindDays(p, progress, time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC), last)
+	if err != nil || got != 0 {
+		t.Fatalf("behind %d (%v), want 0", got, err)
+	}
+}
+
+// The zones are the ones the plan was decorated with; a stop whose zone cannot be
+// loaded is said, never skipped over.
+
+func TestPlanBehindDays_AZoneThatCannotBeLoadedIsAnErrorNotAGuess(t *testing.T) {
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0)
+	p.Stops[0].Timezone = "Mars/Olympus_Mons"
+	if _, err := planBehindDays(p, nil, time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), nil); err == nil || !strings.Contains(err.Error(), "time zone") {
+		t.Fatalf("err = %v, want the zone said", err)
+	}
+	p.Stops[0].Timezone = ""
+	if _, err := planBehindDays(p, nil, time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), nil); err == nil {
+		t.Fatal("a plan whose zones were not worked out is an error")
 	}
 }
 
@@ -165,10 +219,10 @@ func TestPlanSlack_ABehindPlanIsCountedOnTheProjectedArrival(t *testing.T) {
 }
 
 func TestPlanOutlook_SaysHowFarBehindThePlanIsAndWhetherThatMakesItLate(t *testing.T) {
-	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0)
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0)
 	p.Stops[4].ArriveBy = "2026-11-20T17:00"
-	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
-	s, ok, first, err := planOutlook(p, make([]string, 4), now)
+	now :=time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
+	s, ok, first, err := planOutlook(p, make([]string, 4), now, nil)
 	if err != nil || !ok || first != 0 || s.Days != -1 || s.BehindDays != 2 {
 		t.Fatalf("outlook = %+v %v first %d (%v)", s, ok, first, err)
 	}

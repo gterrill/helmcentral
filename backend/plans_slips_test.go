@@ -208,6 +208,67 @@ func TestSlipPlan_NeverWritesTheDaysFirstSuggestion(t *testing.T) {
 	}
 }
 
+// slipsWithMemo prices a plan's slips with the production forecast memo between
+// the plan and the fake provider, and a clock that moves on at every read. now
+// is every instant the memo was asked about.
+func slipsWithMemo(t *testing.T, step time.Duration, clock func(call int) time.Time) (got planSlips, f *paFake, memo *planForecastMemo, nows []time.Time) {
+	t.Helper()
+	p, legs := slipPlan2(t, "2026-11-20T12:00") // slack 5: six slips
+	f = &paFake{fc: slipWind()}
+	d := paDeps(f)
+	memo = newPlanForecastMemo(planForecastMemoTTL)
+	var mu sync.Mutex
+	calls := 0
+	d.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return clock(calls)
+	}
+	d.sources = func(zone func() (string, error), now time.Time) (passageSources, error) {
+		mu.Lock()
+		nows = append(nows, now)
+		mu.Unlock()
+		return passageSources{fc: memo.wrap(f.fc, "Australia/Brisbane", now), tides: pwNoTides, fallbackModel: func() string { return "" }}, nil
+	}
+	got = slipsOf(context.Background(), p, legs, d)
+	return got, f, memo, nows
+}
+
+func TestSlipPlan_ReusesTheWarmedForecastSoEachPointIsReadOnce(t *testing.T) {
+	// The clock moves a second at every read, as a real one does.
+	got, f, memo, _ := slipsWithMemo(t, time.Second, func(call int) time.Time {
+		return paNow.Add(time.Duration(call) * time.Second)
+	})
+	if got.Problem != "" || len(got.Slips) != 6 {
+		t.Fatalf("slips = %+v", got)
+	}
+	memo.mu.Lock()
+	unique := len(memo.m)
+	memo.mu.Unlock()
+	if unique == 0 || f.fetches != unique {
+		t.Fatalf("%d provider reads for %d distinct points: the slips must reuse the warmed forecast", f.fetches, unique)
+	}
+}
+
+func TestSlipPlan_OneClockReadingForTheWholeRequestEvenAcrossMidnight(t *testing.T) {
+	before := time.Date(2026, 11, 14, 23, 59, 59, 0, paLoc)
+	_, _, _, nows := slipsWithMemo(t, time.Second, func(call int) time.Time {
+		if call == 1 {
+			return before
+		}
+		return before.Add(2 * time.Second) // 15 Nov, just past midnight
+	})
+	if len(nows) == 0 {
+		t.Fatal("the forecast was never read")
+	}
+	for _, n := range nows {
+		if !n.Equal(before) {
+			t.Fatalf("the request used %v as now and %v as now: it must be one instant", before, n)
+		}
+	}
+}
+
 func TestSlipPlan_TheRecordedPassagesAreReadOnce(t *testing.T) {
 	p, legs := slipPlan2(t, "2026-11-16T12:00")
 	reads := 0

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,6 +102,32 @@ func TestAssessPlan_ABehindPlanStatesHowFarBehindAndWhetherItIsLate(t *testing.T
 	}
 }
 
+func TestAssessPlan_ALegUnderWayIsNotCountedBehind(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0) // leg 0 leaves on the 14th, leg 1 on the 15th
+	p.Stops[2].ArriveBy = "2026-11-17T17:00"
+	d := paDeps(&paFake{underway: &planUnderway{Lat: p.Stops[0].Lat, Lon: p.Stops[0].Lon}})
+	d.now = func() time.Time { return paAt(15, 8, 0) }
+	got := assessPlan(t.Context(), p, legs, d, planAssessOptions{})
+	if got.Slack == nil || got.Slack.BehindDays != 0 || got.Slack.Days != 2 {
+		t.Fatalf("slack = %+v, want on time with 2 days", got.Slack)
+	}
+	d = paDeps(&paFake{})
+	d.now = func() time.Time { return paAt(15, 8, 0) }
+	got = assessPlan(t.Context(), p, legs, d, planAssessOptions{})
+	if got.Slack == nil || got.Slack.BehindDays != 1 {
+		t.Fatalf("slack = %+v, want 1 day behind with nothing under way", got.Slack)
+	}
+}
+
+func TestAssessPlan_APassageUnderWayThatCannotBeReadIsSaidAndSlackIsLeftOut(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[2].ArriveBy = "2026-11-17T17:00"
+	got := paAssess(t, p, legs, &paFake{underwayErr: errors.New("the passage record could not be read: disk")})
+	if got.ProgressError == "" || got.Slack != nil {
+		t.Fatalf("progress error %q, slack %+v", got.ProgressError, got.Slack)
+	}
+}
+
 // ── still in port ───────────────────────────────────────────────────────
 
 func atStop(p plan, i int) func() (float64, float64, error) {
@@ -125,6 +152,21 @@ func TestAssessPlan_StillInPortAnHourAfterTheOperatorsTime(t *testing.T) {
 	}
 	if l := stillAt(t, paAt(14, 8, 59), &paFake{}, "08:00"); l.StillInPort {
 		t.Fatalf("59 minutes is not an hour: %+v", l)
+	}
+}
+
+func TestAssessPlan_StillInPortSaysSoWhenAStopsZoneCannotBeLoaded(t *testing.T) {
+	p, _ := paPlan(t, "2026-11-14", 0, 1, 0)
+	p.Stops[0].Timezone = "Mars/Olympus_Mons"
+	d := paDeps(&paFake{position: atStop(p, 0)})
+	out := planAssessment{Legs: make([]planLegAssessment, 2)}
+	work := []*planLegWork{{res: &out.Legs[0]}, {res: &out.Legs[1]}}
+	d.markStillInPort(p, work, []string{"", ""}, paAt(14, 10, 0), &out)
+	if !strings.Contains(out.Problem, "time zone") || !strings.Contains(out.Problem, "Still in port") {
+		t.Fatalf("problem = %q, want the zone said", out.Problem)
+	}
+	if out.Legs[0].StillInPort {
+		t.Fatal("no prompt without a zone to read the day in")
 	}
 }
 

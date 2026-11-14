@@ -15,7 +15,10 @@ import (
 //
 // A leg is Done when a recorded passage ends within planArrivedNm of the leg's
 // destination any time after the plan's first day and after the passage that
-// reached the previous stop, so leaving early still counts. A passage that ends
+// reached the previous stop, so leaving early still counts. The passage must
+// have begun within planArrivedNm of the last stop reached (the first stop to
+// begin with) and ended further than that from where it began: coming into the
+// start harbour from elsewhere, or moving berth inside it, marks nothing. A passage that ends
 // at a later stop than a leg's destination marks that stop, and the legs into
 // and out of it that no passage ended at, Skipped: the boat went by.
 
@@ -32,6 +35,15 @@ const (
 type planPassageEnd struct {
 	At       time.Time
 	Lat, Lon float64
+	// StartLat and StartLon are where the passage began.
+	StartLat, StartLon float64
+}
+
+// planUnderway is where a passage still being recorded began. It is not a
+// passage yet: it marks nothing Done or Skipped, and says only that the leg
+// leaving there is under way.
+type planUnderway struct {
+	Lat, Lon float64
 }
 
 // withinArrivedNm says whether two places are close enough to count as the same
@@ -43,10 +55,6 @@ func withinArrivedNm(aLat, aLon, bLat, bLon float64) bool {
 // planProgressOf is each leg's progress: "" still to do, planProgressDone or
 // planProgressSkipped.
 func planProgressOf(p plan, ends []planPassageEnd) ([]string, error) {
-	zones, bad, err := planZones(p)
-	if err != nil {
-		return nil, fmt.Errorf("stop %d (%s): %w", bad+1, p.Stops[bad].Name, err)
-	}
 	legs := max(len(p.Stops)-1, 0)
 	// reached[j] says a passage ended at stop j. Passages are taken in time order,
 	// each counting for the first stop after the last one reached that it ends
@@ -54,7 +62,11 @@ func planProgressOf(p plan, ends []planPassageEnd) ([]string, error) {
 	reached := make([]bool, len(p.Stops))
 	last := 0
 	if len(p.Stops) > 0 {
-		first, err := dayStart(p.Stops[0].Arrive, zones[0].Loc)
+		zone, err := planStopZone(p, 0)
+		if err != nil {
+			return nil, err
+		}
+		first, err := dayStart(p.Stops[0].Arrive, zone.Loc)
 		if err != nil {
 			return nil, fmt.Errorf("first stop arrival %q: %w", p.Stops[0].Arrive, err)
 		}
@@ -62,6 +74,13 @@ func planProgressOf(p plan, ends []planPassageEnd) ([]string, error) {
 		slices.SortStableFunc(ordered, func(a, b planPassageEnd) int { return a.At.Compare(b.At) })
 		for _, e := range ordered {
 			if e.At.Before(first) {
+				continue
+			}
+			// A passage counts only when it began at the last stop reached and went
+			// somewhere: one that came into the start harbour from elsewhere, or
+			// shifted a berth inside it, is not a leg of the plan.
+			at := p.Stops[last]
+			if !withinArrivedNm(e.StartLat, e.StartLon, at.Lat, at.Lon) || withinArrivedNm(e.StartLat, e.StartLon, e.Lat, e.Lon) {
 				continue
 			}
 			for j := last + 1; j < len(p.Stops); j++ {
@@ -88,19 +107,27 @@ func planProgressOf(p plan, ends []planPassageEnd) ([]string, error) {
 // readProgress asks for the plan's per-leg progress, one entry for every leg.
 // A read that fails is said once on the assessment and marks nothing, so the
 // legs are judged as still to come rather than guessed done.
-func (d planAssessDeps) readProgress(ctx context.Context, p plan, out *planAssessment) []string {
+func (d planAssessDeps) readProgress(ctx context.Context, p plan, out *planAssessment) ([]string, *planUnderway) {
 	res := make([]string, max(len(p.Stops)-1, 0))
 	if len(res) == 0 {
-		return res
+		return res, nil
 	}
 	got, err := d.progress(ctx, p)
 	if err != nil {
 		log.Printf("plans: progress not read: %v", err)
 		out.ProgressError = err.Error()
-		return res
+		return res, nil
 	}
 	copy(res, got)
-	return res
+	var underway *planUnderway
+	if d.underway != nil {
+		if underway, err = d.underway(ctx); err != nil {
+			log.Printf("plans: passage under way not read: %v", err)
+			out.ProgressError = err.Error()
+			return make([]string, len(res)), nil
+		}
+	}
+	return res, underway
 }
 
 // planLegKey is how a leg is named across edits: its two stops and which trip
@@ -134,8 +161,17 @@ func (d planAssessDeps) markStillInPort(p plan, work []*planLegWork, progress []
 		if progress[i] != "" {
 			continue
 		}
-		zone, err := stayZoneAt(p.Stops[i].Lat, p.Stops[i].Lon)
-		if err != nil || p.Stops[i].Depart != dayAt(zone, now) {
+		zone, err := planStopZone(p, i)
+		if err != nil {
+			// Said once, on the plan: without the zone the day is unknown, and a
+			// missing prompt must not read as "the boat left".
+			log.Printf("plans: still-in-port not checked: %v", err)
+			if out.Problem == "" {
+				out.Problem = "Still in port could not be checked: " + err.Error()
+			}
+			continue
+		}
+		if p.Stops[i].Depart != dayAt(zone, now) {
 			continue
 		}
 		if d.pastDepartureHour(p, i, w, zone, now) {
@@ -202,6 +238,33 @@ func (d planAssessDeps) pastDepartureHour(p plan, i int, w *planLegWork, zone pl
 	return true
 }
 
+// readUnderway is where the passage being recorded now began, nil when the boat
+// is not on one. Only a passage that has ended is in the record and counts for
+// Done or Skipped; this one says only that the leg leaving there is under way.
+func readUnderway(ctx context.Context, store *passageStore) (*planUnderway, error) {
+	if store == nil {
+		return nil, fmt.Errorf("the passage record is not available")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("the passage record was not read: %w", err)
+	}
+	open, err := openPassage(store)
+	if err != nil {
+		return nil, fmt.Errorf("the passage record could not be read: %w", err)
+	}
+	if open == nil {
+		return nil, nil
+	}
+	begin, err := store.FirstTrackPointBetween(open.start, time.UnixMilli(1<<62-1))
+	if err != nil {
+		return nil, fmt.Errorf("the passage record could not be read: %w", err)
+	}
+	if begin == nil {
+		return nil, fmt.Errorf("the passage under way has no fix at its start")
+	}
+	return &planUnderway{Lat: begin.Lat, Lon: begin.Lon}, nil
+}
+
 // visiblePassagesSince is the visible recorded passages that ended since the
 // given time. A store that is missing or cannot be read is an error: without the
 // record every leg would read as still to do, and no speed could be had.
@@ -242,11 +305,15 @@ func readPassageEnds(ctx context.Context, store *passageStore, since time.Time) 
 		if err != nil {
 			return nil, fmt.Errorf("the passage record could not be read: %w", err)
 		}
-		if end == nil {
+		begin, err := store.FirstTrackPointBetween(r.Start, r.End)
+		if err != nil {
+			return nil, fmt.Errorf("the passage record could not be read: %w", err)
+		}
+		if end == nil || begin == nil {
 			log.Printf("plans: passage %s has no fix, so it cannot mark a leg done", r.ID)
 			continue
 		}
-		out = append(out, planPassageEnd{At: r.End, Lat: end.Lat, Lon: end.Lon})
+		out = append(out, planPassageEnd{At: r.End, Lat: end.Lat, Lon: end.Lon, StartLat: begin.Lat, StartLon: begin.Lon})
 	}
 	return out, nil
 }

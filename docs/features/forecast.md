@@ -388,8 +388,9 @@ Here's what the table shows:
 - **A plan that's fallen behind.** If the next leg should have left on a day
   that's already gone, the page counts from today. It moves every leg you
   haven't done forward by the days you're behind, and works out the slack on
-  those dates. The line says so first, for example "Behind plan by 4 days. Late
-  by 1 day". The slips below are measured from the same moved plan, so none of
+  those dates. A leg you've already left on and are still sailing isn't behind;
+  the count starts from the leg after it. The line says so first, for example
+  "Behind plan by 4 days. Late by 1 day". The slips below are measured from the same moved plan, so none of
   them lands on a day that has passed. Your saved dates don't change.
 - **What a slip would meet.** When there's slack, the page works out what
   slipping the plan would do, one day at a time, up to one day past your slack.
@@ -404,8 +405,12 @@ Here's what the table shows:
   reaches.
 - **Done and Skipped.** A leg is Done when a passage Helmcentral recorded ends
   within one and a half nautical miles of the leg's destination, any time after
-  the plan's first day and after the passage that reached the stop before it. So a
-  leg you sail early is Done too. If a passage ends at a later stop, the stops it went
+  the plan's first day and after the passage that reached the stop before it. The
+  passage has to have started within one and a half miles of the last stop you
+  reached, and ended further than that from where it started, so a trip into the
+  start harbour or a move between berths doesn't count as coming home. A leg you
+  sail early is Done too, and a passage still being recorded marks nothing until it
+  ends. If a passage ends at a later stop, the stops it went
   by are Skipped, along with the legs into them. Done and Skipped rows are
   dimmed, have no verdict or suggested time, and are left out of the slips. Your
   plan isn't changed. If Helmcentral can't read the recorded passages, the page

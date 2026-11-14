@@ -387,6 +387,21 @@ func (s *passageStore) LastTrackPointBetween(from, to time.Time) (*recordedTrack
 	return &p, nil
 }
 
+// FirstTrackPointBetween returns the oldest point with from <= time <= to, or nil
+// when there is none.
+func (s *passageStore) FirstTrackPointBetween(from, to time.Time) (*recordedTrackPoint, error) {
+	row := s.db.QueryRow(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms ASC, id ASC LIMIT 1`,
+		from.UnixMilli(), to.UnixMilli())
+	p, err := scanTrackPoint(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("first track point between: %w", err)
+	}
+	return &p, nil
+}
+
 // FirstTrackPointTime returns the oldest point's time, or false for an empty log.
 func (s *passageStore) FirstTrackPointTime() (time.Time, bool, error) {
 	var ms sql.NullInt64

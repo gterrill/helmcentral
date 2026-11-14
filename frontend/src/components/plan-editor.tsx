@@ -233,6 +233,13 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
                     )}
                   </div>
 
+                  {i === 0 && stop.arriveBy !== "" && (
+                    <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+                      The first stop can&apos;t have an arrive-by, so this one will be removed when you
+                      save. Move the stop back to keep it.
+                    </p>
+                  )}
+
                   {!last && (
                     <div className="space-y-1.5">
                       <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

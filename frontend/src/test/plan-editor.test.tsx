@@ -89,6 +89,31 @@ describe("PlanEditor", () => {
     ]);
   });
 
+  const FIRST_STOP_NOTICE =
+    "The first stop can't have an arrive-by, so this one will be removed when you save. Move the stop back to keep it.";
+
+  it("says so on a stop whose arrive-by will be dropped because a move made it the first stop", () => {
+    open();
+    expect(screen.queryByText(FIRST_STOP_NOTICE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Move stop 3 up" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move stop 2 up" }));
+    // C, with its arrive-by, is now stop 1; the notice sits on its row.
+    const notice = screen.getByText(FIRST_STOP_NOTICE);
+    expect(notice.closest("li")).toBe(screen.getByLabelText("Stop 1 name").closest("li"));
+    // Moving it back keeps the arrive-by, and the notice goes.
+    fireEvent.click(screen.getByRole("button", { name: "Move stop 1 down" }));
+    expect(screen.queryByText(FIRST_STOP_NOTICE)).toBeNull();
+    expect(screen.getAllByLabelText("Arrive by")[0]).toHaveValue("2026-11-17T17:00");
+  });
+
+  it("says so when removing the stops before it makes a stop with an arrive-by the first", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Remove stop 1" }));
+    expect(screen.queryByText(FIRST_STOP_NOTICE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove stop 1" }));
+    expect(screen.getByText(FIRST_STOP_NOTICE)).toBeInTheDocument();
+  });
+
   it("keeps a stop's arrive-by when stops are moved, since it belongs to the stop", async () => {
     const onSave = open();
     fireEvent.click(screen.getByRole("button", { name: "Move stop 3 up" }));

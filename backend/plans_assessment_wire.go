@@ -156,6 +156,9 @@ func productionPlanAssessDeps(settingsPath string) planAssessDeps {
 			}
 			return planProgressOf(p, ends)
 		},
+		underway: func(ctx context.Context) (*planUnderway, error) {
+			return readUnderway(ctx, globalPassageStore)
+		},
 		position: func() (float64, float64, error) {
 			state, err := tideVesselState()
 			return boatOwnPosition(state, err)

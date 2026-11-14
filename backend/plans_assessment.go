@@ -73,8 +73,10 @@ type planLegAssessment struct {
 	// Leg is the stop the leg leaves; Date is the day it leaves, at that stop.
 	Leg  int    `json:"leg"`
 	Date string `json:"date"`
-	// Key names the leg across edits, "From → To|date": the change marks keep a
-	// verdict against it (ADR 0288). Renaming or moving the leg gives it a new key.
+	// Key names the leg across edits, "from|to|n": the two stops (URL-escaped) and
+	// which trip between that pair it is, counting from 0. The date is not part of
+	// it. The change marks keep a verdict against it (ADR 0288). Renaming a stop
+	// gives the legs at it a new key.
 	Key string `json:"key"`
 	// Progress is "done" or "skipped" when the recorded passages say so, else "".
 	// Such a leg has no verdict, departure, suggestion or note.
@@ -185,6 +187,9 @@ type planAssessDeps struct {
 	warnings func(now time.Time) (planWarningsReader, error)
 	// progress is each leg's progress from the recorded passages ("" to do).
 	progress func(ctx context.Context, p plan) ([]string, error)
+	// underway is where the passage being recorded now began, nil when none is
+	// under way. Nil reads none.
+	underway func(ctx context.Context) (*planUnderway, error)
 	// position is the boat's own trusted fix, or why there is none.
 	position func() (lat, lon float64, err error)
 	// suggested keeps the first departure suggested for a leg on a day and returns
@@ -269,9 +274,20 @@ func dayStart(day string, loc *time.Location) (time.Time, error) {
 
 func fmtLeg(t time.Time, loc *time.Location) string { return t.In(loc).Format(time.RFC3339) }
 
+// pinned is d with its clock stopped at the instant of the call. One request
+// reads the clock once: a request that straddles midnight must not count the
+// days behind on one day and judge the legs on the next, and a forecast kept
+// during the request must not be stamped later than the readers that want it.
+func (d planAssessDeps) pinned() planAssessDeps {
+	now := d.now()
+	d.now = func() time.Time { return now }
+	return d
+}
+
 // assessPlan judges every leg of a decorated plan and reads the warnings on its
 // stops. legs are the plan's routed legs, in order.
 func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, opts planAssessOptions) planAssessment {
+	d = d.pinned()
 	var env planEnv
 	if opts.Env != nil {
 		env = *opts.Env
@@ -286,14 +302,14 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		Problem: env.problem,
 	}
 	env.verdictsOnly = opts.VerdictsOnly
-	progress := opts.Progress
+	progress, underway := opts.Progress, (*planUnderway)(nil)
 	if progress == nil {
-		progress = d.readProgress(ctx, p, &out)
+		progress, underway = d.readProgress(ctx, p, &out)
 	}
 	// Slack counts from the legs still to do; with the passages unread it would be
 	// counted from a guess, so it is left out and ProgressError says why.
 	if !opts.VerdictsOnly && out.ProgressError == "" {
-		s, ok, _, err := planOutlook(p, progress, now)
+		s, ok, _, err := planOutlook(p, progress, now, underway)
 		switch {
 		case err != nil:
 			// The plan's own dates are not readable: say so, and leave the slack out.
@@ -892,7 +908,7 @@ var planAssessDepsFor = func() planAssessDeps {
 // planAssessmentHandler is GET /api/plans/:id/assessment: each leg's verdict,
 // departure, ETA and current, and the warnings on the stops' nights.
 func planAssessmentHandler(c echo.Context) error {
-	deps := planAssessDepsFor()
+	deps := planAssessDepsFor().pinned()
 	d, ok, err := loadDecoratedPlan(c, deps.now())
 	if !ok {
 		return err

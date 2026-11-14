@@ -126,12 +126,13 @@ func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetu
 		return s, out, true
 	}
 	var scratch planAssessment
-	s.progress = d.readProgress(ctx, p, &scratch)
+	var underway *planUnderway
+	s.progress, underway = d.readProgress(ctx, p, &scratch)
 	if scratch.ProgressError != "" {
 		out.Problem = "Progress could not be read: " + scratch.ProgressError
 		return s, out, true
 	}
-	slack, ok, first, err := planOutlook(p, s.progress, d.now())
+	slack, ok, first, err := planOutlook(p, s.progress, d.now(), underway)
 	if err != nil {
 		out.Problem = "Slack could not be worked out: " + err.Error()
 		return s, out, true
@@ -154,6 +155,7 @@ func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetu
 // only once there is something to price. d is the assessment's readers; the slips
 // judge verdicts alone.
 func slipsFor(ctx context.Context, p plan, d planAssessDeps, route func(context.Context) []planLeg) planSlips {
+	d = d.pinned()
 	setup, out, done := prepareSlips(ctx, p, d)
 	if done {
 		return out
@@ -239,7 +241,7 @@ func (d planAssessDeps) warmForecast(ctx context.Context, p plan, legs []planLeg
 // time up to its slack plus one would meet. Asked apart from the assessment so
 // the table does not wait for it.
 func planSlipsHandler(c echo.Context) error {
-	deps := planAssessDepsFor()
+	deps := planAssessDepsFor().pinned()
 	d, ok, err := loadDecoratedPlan(c, deps.now())
 	if !ok {
 		return err

@@ -26,7 +26,8 @@ be there, as `YYYY-MM-DDTHH:MM` at that stop (`plan_stops.arrive_by`, empty when
 none). The plan starts where the boat already is, so the first stop is never
 "reached" and a slip never moves its arrival: validation refuses an arrive-by on
 it, and the editor hides the field there and sends none for a stop moved to the
-front. The editor's field is a `datetime-local` input, so it speaks the same
+front. A stop that a move or a removal puts first keeps its arrive-by in the
+editor, with a notice on its row that the save will drop it. The editor's field is a `datetime-local` input, so it speaks the same
 format. A stop the operator moves keeps its arrive-by, because the arrive-by
 belongs to the stop and not to its position.
 
@@ -41,7 +42,10 @@ no line.
 
 A plan that has fallen behind is projected forward before slack is counted. When
 the first leg still to do should have left on a day before today (today read in
-the zone of the stop it leaves), the plan is behind by the days between. Every
+the zone the plan was decorated with for the stop it leaves), the plan is behind
+by the days between. When a passage still being recorded began within 1.5 nm of
+that stop, the leg is under way, not late, and the days are counted from the leg
+after it. Every
 leg still to do moves that many days later, and slack is the arrive-by's day less
 the projected arrival's day, which can be negative. The stored dates do not move.
 The line then leads with it: "Behind plan by 4 days. Late by 1 day." Slips are
@@ -88,15 +92,21 @@ kn ahead, No-Go (late by 1 day)."
 A leg is Done when a recorded passage ends within 1.5 nm of the leg's destination
 any time after the plan's first day, and after the passage that reached the
 previous stop. The passages are taken in time order, and each counts for the
-first stop after the last one reached that it ends within 1.5 nm of. The passage's
-end is its last track point inside the passage, and the first day starts at
+first stop after the last one reached that it ends within 1.5 nm of. A passage
+counts only if it began within 1.5 nm of the last stop reached (the first stop to
+begin with) and ended more than 1.5 nm from where it began, so coming into the
+start harbour from elsewhere, or moving berth inside it, never marks a stop at the
+same place later in the plan. The passage's start and end are its first and last
+track points inside the passage, and the first day starts at
 midnight in the zone of the first stop. A boat that leaves a day early, or goes
 straight to a later stop, is therefore marked. A stop that no passage ended at,
 with a later stop that one did, is Skipped, and so are the legs into it and out
 of it that no passage ended at: the boat went by. Stop 0 is never skipped.
 
 - **Recorded passages only.** The operator marks nothing by hand, and the plan is
-  never rewritten. Hidden passages are not read, as everywhere else.
+  never rewritten. Hidden passages are not read, as everywhere else. Only a
+  passage that has ended is in the record, so one still being recorded marks
+  nothing Done or Skipped; its start only says the leg leaving there is under way.
 - **Done and Skipped legs** carry `progress` in the assessment and nothing else:
   no verdict, no note, no departure, no suggestion, no current, and they are left
   out of the slips. Progress is read first and a leg that has it is not assessed. The table shows them dimmed and says Done or Skipped, and the lay

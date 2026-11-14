@@ -430,6 +430,21 @@ func planZones(p plan) (zones []placeZone, stop int, err error) {
 	return zones, -1, nil
 }
 
+// planStopZone is the zone decoratePlan worked out for stop i, read from the
+// stop. A plan that was not decorated, or a zone that cannot be loaded, is an
+// error: a stop's day is never worked out in a guessed zone.
+func planStopZone(p plan, i int) (placeZone, error) {
+	s := p.Stops[i]
+	if s.Timezone == "" {
+		return placeZone{}, fmt.Errorf("the time zone at %s was not worked out", s.Name)
+	}
+	z, err := zoneAtName(s.Timezone)
+	if err != nil {
+		return placeZone{}, fmt.Errorf("the time zone at %s could not be loaded: %w", s.Name, err)
+	}
+	return z, nil
+}
+
 // decoratePlan adds what is worked out on every read: status, first and last
 // dates, each stop's departure date and its zone. A position with no zone is
 // an error, not UTC.

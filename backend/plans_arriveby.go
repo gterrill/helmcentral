@@ -46,8 +46,11 @@ type planSlack struct {
 // planBehindDays is how many days the plan has fallen behind: today, in the zone
 // of the stop the first leg still to do leaves, less that leg's planned
 // departure day, and 0 when the plan is on time, ahead, or has nothing left to
-// do. The stored dates are not moved; the projection is made from this.
-func planBehindDays(p plan, progress []string, now time.Time) (int, error) {
+// do. A leg a passage being recorded has left on is under way, so it is not
+// behind: the count starts from the leg after it. The stored dates are not moved;
+// the projection is made from this. The plan is as decoratePlan left it, with
+// each stop's zone.
+func planBehindDays(p plan, progress []string, now time.Time, underway *planUnderway) (int, error) {
 	first := slices.Index(progress, "")
 	if first < 0 {
 		if progress != nil {
@@ -58,10 +61,18 @@ func planBehindDays(p plan, progress []string, now time.Time) (int, error) {
 	if first >= len(p.Stops)-1 {
 		return 0, nil
 	}
+	// A passage being recorded that began at the stop this leg leaves means the
+	// leg is under way, not late: the plan is measured from the leg after it.
+	if underway != nil && withinArrivedNm(underway.Lat, underway.Lon, p.Stops[first].Lat, p.Stops[first].Lon) {
+		first++
+		if first >= len(p.Stops)-1 {
+			return 0, nil
+		}
+	}
 	stop := p.Stops[first]
-	zone, err := stayZoneAt(stop.Lat, stop.Lon)
+	zone, err := planStopZone(p, first)
 	if err != nil {
-		return 0, fmt.Errorf("the time zone at %s is not known: %w", stop.Name, err)
+		return 0, err
 	}
 	planned, err := time.Parse(planDateLayout, stop.Depart)
 	if err != nil {
@@ -111,8 +122,8 @@ func planSlackOf(p plan, progress []string, behind int) (s planSlack, ok bool, e
 // planOutlook is what the plan has left to do: its tightest slack on the plan
 // moved forward to today, when a stop still ahead has an arrive-by, and the first
 // leg not done or skipped, -1 when there is none.
-func planOutlook(p plan, progress []string, now time.Time) (slack planSlack, haveSlack bool, first int, err error) {
-	behind, err := planBehindDays(p, progress, now)
+func planOutlook(p plan, progress []string, now time.Time, underway *planUnderway) (slack planSlack, haveSlack bool, first int, err error) {
+	behind, err := planBehindDays(p, progress, now, underway)
 	if err != nil {
 		return slack, false, -1, err
 	}

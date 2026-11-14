@@ -67,6 +67,9 @@ type paFake struct {
 	// progress answers the plan's per-leg progress; nil is nothing done.
 	progress    []string
 	progressErr error
+	// underway is where the passage being recorded began; nil is none.
+	underway    *planUnderway
+	underwayErr error
 	// position is the boat's own fix; the default is none.
 	position func() (float64, float64, error)
 	// store keeps the day's first suggestion between assessments; nil keeps none.
@@ -107,6 +110,7 @@ func paDeps(f *paFake) planAssessDeps {
 			return f.speed, f.speedErr
 		},
 		progress: func(context.Context, plan) ([]string, error) { return f.progress, f.progressErr },
+		underway: func(context.Context) (*planUnderway, error) { return f.underway, f.underwayErr },
 		position: func() (float64, float64, error) {
 			if f.position != nil {
 				return f.position()
