@@ -381,9 +381,9 @@ func nightWinds(as *passageAssessor, stops stopForecasts, nights []planNightWork
 				entry.planWindChanges = rowWindChanges(passageHoursAsWeather(point.hours), n.win,
 					n.day, env.now, n.loc, env.limits, env.limitsErr, nil)
 			case stops.err != nil:
-				entry.NotChecked = fmt.Sprintf("The forecast at %s could not be read: %v", n.place.Name, stops.err)
+				entry.NotChecked = fmt.Sprintf("The forecast at %s could not be read: %s", n.place.Name, planForecastReason(stops.err))
 			case stops.failed[passagePointKey(pt)] != nil:
-				entry.NotChecked = fmt.Sprintf("The forecast at %s could not be read: %v", n.place.Name, stops.failed[passagePointKey(pt)])
+				entry.NotChecked = fmt.Sprintf("The forecast at %s could not be read: %s", n.place.Name, planForecastReason(stops.failed[passagePointKey(pt)]))
 			case err != nil:
 				entry.NotChecked = err.Error()
 			default:

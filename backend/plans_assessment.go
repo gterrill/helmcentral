@@ -729,6 +729,22 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	}
 	wg.Wait()
 
+	if forecastErr != nil {
+		log.Printf("plans: forecast failed: %v", forecastErr)
+	}
+	if stops.err != nil && stops.err != forecastErr {
+		log.Printf("plans: stop forecasts failed: %v", stops.err)
+	}
+	if len(stops.failed) > 0 {
+		var firstKey string
+		var first error
+		for key, err := range stops.failed { // any one will do: the reason is the same kind
+			if first == nil || key < firstKey {
+				firstKey, first = key, err
+			}
+		}
+		log.Printf("plans: %d stop forecasts failed, first at %s: %v", len(stops.failed), firstKey, first)
+	}
 	d.judgeLegs(ctx, as, forecastErr, assessable, out)
 	if env.verdictsOnly {
 		return
@@ -743,7 +759,7 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 		w.changesRead = true
 		switch {
 		case forecastErr != nil:
-			w.res.WindChanges = planWindChanges{Changes: []planWindChange{}, NotChecked: "The forecast could not be read: " + forecastErr.Error()}
+			w.res.WindChanges = planWindChanges{Changes: []planWindChange{}, NotChecked: "The forecast could not be read: " + planForecastReason(forecastErr)}
 		default:
 			w.res.WindChanges = legWindChanges(as, w, env)
 		}
@@ -776,8 +792,7 @@ func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, fore
 		return
 	}
 	if forecastErr != nil {
-		log.Printf("plans: forecast for the verdicts failed: %v", forecastErr)
-		note := "Forecast failed: " + forecastErr.Error()
+		note := "Forecast failed: " + planForecastReason(forecastErr)
 		if out.Problem == "" {
 			out.Problem = note
 		}
@@ -798,6 +813,24 @@ func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, fore
 	}
 }
 
+// planSourcesError marks a failure to set up the weather source itself: an
+// unknown or missing provider, unreadable settings, a bad zone. That is the
+// operator's to fix, so it is shown as it is rather than as a fetch failure.
+type planSourcesError struct{ err error }
+
+func (e *planSourcesError) Error() string { return e.err.Error() }
+func (e *planSourcesError) Unwrap() error { return e.err }
+
+// planForecastReason is the reason a plan shows for a forecast it could not
+// read: a setup error as it is, any other failure as a short fixed reason.
+func planForecastReason(err error) string {
+	var se *planSourcesError
+	if errors.As(err, &se) {
+		return firstErrorLine(se.err)
+	}
+	return fetchFailureReason(err)
+}
+
 // fetchForecast fetches the forecast along every assessable leg once, and at the
 // stops whose nights are read. A stop that is a leg's end is already in the
 // assessor and is not asked for again; the rest go through the same source, whose
@@ -809,6 +842,7 @@ func (d planAssessDeps) fetchForecast(ctx context.Context, p plan, legs []*planL
 	firstZone := p.Stops[0].Timezone
 	src, err := d.sources(func() (string, error) { return firstZone, nil }, env.now)
 	if err != nil {
+		err = &planSourcesError{err}
 		return nil, err, stopForecasts{err: err}
 	}
 	as = newPassageAssessor(env.limits, src.fc, src.tides, d.sun)

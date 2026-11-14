@@ -337,7 +337,7 @@ func TestAssessPlan_OneStopThatCannotBeReadDoesNotMarkTheOthers(t *testing.T) {
 		t.Fatal(err)
 	}
 	nc, ok := pwcNightAt(got, 2, c.AddDate(0, 0, 1).Format("2006-01-02"))
-	if !ok || !strings.Contains(nc.NotChecked, "Mooloolaba") || !strings.Contains(nc.NotChecked, "provider is down") {
+	if !ok || !strings.Contains(nc.NotChecked, "Mooloolaba") || !strings.Contains(nc.NotChecked, "the weather service sent an error") {
 		t.Fatalf("C's night = %+v (found %v), want it not checked, naming Mooloolaba", nc, ok)
 	}
 }

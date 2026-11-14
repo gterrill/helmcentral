@@ -729,7 +729,7 @@ const PlanDayRow = memo(function PlanDayRow({
           No forecast yet
         </div>
       ) : forecast.error ? (
-        <div role="cell" className="min-w-0 text-xs text-destructive @[72rem]:col-span-3">
+        <div role="cell" className="min-w-0 break-words text-xs text-destructive @[72rem]:col-span-3">
           Forecast failed: {forecast.error}
         </div>
       ) : (
