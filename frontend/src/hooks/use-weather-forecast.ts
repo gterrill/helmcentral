@@ -55,6 +55,62 @@ export interface WeatherHourlyCloudPoint {
   visibilityNm: number | null;
 }
 
+/**
+ * A change in the wind's direction (ADR 0287). `label` is the boat-clock time
+ * the backend already formatted ("2 PM", "1.30 PM"); show it as given.
+ */
+export interface WindChange {
+  label: string;
+  from: string;
+  to: string;
+  speedMinKn: number;
+  speedMaxKn: number;
+  /** More than about three days out. */
+  lowerConfidence: boolean;
+  /** The wind after it reaches the operator's lowest marginal passage wind. */
+  prominent: boolean;
+}
+
+interface WindChangeApi {
+  label?: string;
+  from?: string;
+  to?: string;
+  speed_min_kn?: number;
+  speed_max_kn?: number;
+  lower_confidence?: boolean;
+  prominent?: boolean;
+}
+
+/**
+ * Maps a day's wind changes. A malformed entry is not shown, and is counted in
+ * `unreadable` so the drawer can say the list is incomplete rather than show
+ * "no change".
+ */
+function mapWindChanges(raw: unknown): { changes: WindChange[]; unreadable: number } {
+  if (!Array.isArray(raw)) return { changes: [], unreadable: 0 };
+  const out: WindChange[] = [];
+  let unreadable = 0;
+  for (const entry of raw as unknown[]) {
+    const c = (typeof entry === 'object' && entry !== null ? entry : {}) as WindChangeApi;
+    if (typeof c.label !== 'string' || typeof c.from !== 'string' || typeof c.to !== 'string'
+      || typeof c.speed_min_kn !== 'number' || typeof c.speed_max_kn !== 'number') {
+      console.error('wind change: malformed entry', c);
+      unreadable += 1;
+      continue;
+    }
+    out.push({
+      label: c.label,
+      from: c.from,
+      to: c.to,
+      speedMinKn: c.speed_min_kn,
+      speedMaxKn: c.speed_max_kn,
+      lowerConfidence: c.lower_confidence === true,
+      prominent: c.prominent === true,
+    });
+  }
+  return { changes: out, unreadable };
+}
+
 export interface WeatherForecastDay {
   dayKey: string;
   date: string;
@@ -80,6 +136,8 @@ export interface WeatherForecastDay {
   hourlyPrecip: WeatherHourlyPrecipPoint[];
   hourlyUV: WeatherHourlyUVPoint[];
   hourlyCloud: WeatherHourlyCloudPoint[];
+  /** Wind changes that start on this day, earliest first. The hook always sets it. */
+  windChanges: WindChange[];
 }
 
 export interface WeatherHourlyEntry {
@@ -154,6 +212,7 @@ interface WeatherForecastDayApi {
   hourly_precip?: WeatherHourlyPrecipApi[];
   hourly_uv?: WeatherHourlyUVApi[];
   hourly_cloud?: WeatherHourlyCloudApi[];
+  wind_changes?: WindChangeApi[];
 }
 
 interface WeatherNextHourPointApi {
@@ -185,6 +244,14 @@ interface WeatherForecastEnvelopeApi {
   }>;
   next_hour?: WeatherNextHourApi;
   summary?: string;
+  /** Why wind changes were not judged against the operator's limits; empty when they were. */
+  wind_changes_problem?: string;
+  /** The boat-clock time of the last hour read for wind changes ("Thu 19 3 AM"), set when the hourly forecast stops early. */
+  wind_changes_checked_to?: string;
+  /** Why the reading stopped there. */
+  wind_changes_checked_reason?: string;
+  /** Changes that fall on a day the forecast has no day card for. */
+  wind_changes_unplaced?: number;
   cached?: boolean;
   updated_at?: string;
   ttl_seconds?: number;
@@ -271,6 +338,12 @@ interface MappedForecast {
   hourlyToday: WeatherHourlyEntry[];
   nextHour: WeatherNextHour | null;
   summary: string | null;
+  windChangesProblem: string | null;
+  /** The boat-clock time of the last hour read for wind changes ("Thu 19 3 AM"), set with its reason when the hourly forecast stops before the forecast does. */
+  windChangesCheckedTo: string | null;
+  windChangesCheckedReason: string | null;
+  /** Set when a wind change in the payload could not be read; the drawer says so. */
+  windChangesUnreadable: string | null;
   provider: string | null;
   isCached: boolean;
   updatedAt: string | null;
@@ -283,10 +356,13 @@ function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEn
     throw new Error('Unexpected weather forecast payload format');
   }
 
+  let unreadableWindChanges = 0;
   const mappedForecast = rawDays
     .slice(0, 10)
     .map((day): WeatherForecastDay => {
       const dayKey = requireDayKey(day.day_key);
+      const { changes: windChanges, unreadable } = mapWindChanges(day.wind_changes);
+      unreadableWindChanges += unreadable;
       const windSpeed = typeof day.wind_speed_kts === 'number' ? day.wind_speed_kts : -1;
       const windGust = typeof day.wind_gust_kts === 'number' ? day.wind_gust_kts : windSpeed;
 
@@ -343,8 +419,22 @@ function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEn
               visibilityNm: sentinelValueOrNull(entry.visibility_nm),
             }))
           : [],
+        windChanges,
       };
     });
+  const unplaced = !Array.isArray(payload) && typeof payload.wind_changes_unplaced === 'number' ? payload.wind_changes_unplaced : 0;
+  const unreadableParts: string[] = [];
+  if (unreadableWindChanges > 0) {
+    unreadableParts.push(`${unreadableWindChanges} of the forecast's wind changes could not be read, so the list may be incomplete`);
+  }
+  if (unplaced > 0) {
+    unreadableParts.push(
+      unplaced === 1
+        ? '1 wind change falls on a day the forecast has no day card for'
+        : `${unplaced} wind changes fall on a day the forecast has no day card for`,
+    );
+  }
+  const windChangesUnreadable = unreadableParts.length > 0 ? unreadableParts.join('; ') : null;
 
   if (Array.isArray(payload)) {
     return {
@@ -352,6 +442,10 @@ function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEn
       hourlyToday: [],
       nextHour: null,
       summary: null,
+      windChangesProblem: null,
+      windChangesCheckedTo: null,
+      windChangesCheckedReason: null,
+      windChangesUnreadable,
       provider: null,
       isCached: false,
       updatedAt: null,
@@ -375,6 +469,10 @@ function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEn
       : [],
     nextHour: mapNextHour(payload.next_hour),
     summary: typeof payload.summary === 'string' ? payload.summary : null,
+    windChangesProblem: typeof payload.wind_changes_problem === 'string' && payload.wind_changes_problem !== '' ? payload.wind_changes_problem : null,
+    windChangesCheckedTo: typeof payload.wind_changes_checked_to === 'string' && payload.wind_changes_checked_to !== '' ? payload.wind_changes_checked_to : null,
+    windChangesCheckedReason: typeof payload.wind_changes_checked_reason === 'string' && payload.wind_changes_checked_reason !== '' ? payload.wind_changes_checked_reason : null,
+    windChangesUnreadable,
     provider: typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null,
     isCached: Boolean(payload.cached),
     updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
@@ -387,6 +485,10 @@ const EMPTY_FORECAST: MappedForecast = {
   hourlyToday: [],
   nextHour: null,
   summary: null,
+  windChangesProblem: null,
+  windChangesCheckedTo: null,
+  windChangesCheckedReason: null,
+  windChangesUnreadable: null,
   provider: null,
   isCached: false,
   updatedAt: null,
@@ -423,12 +525,16 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
   const loading = query.isLoading;
   const refetch = query.refetch;
   return useMemo(() => {
-    const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
+    const { forecast, hourlyToday, nextHour, summary, windChangesProblem, windChangesCheckedTo, windChangesCheckedReason, windChangesUnreadable, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
     return {
       forecast,
       hourlyToday,
       nextHour,
       summary,
+      windChangesProblem,
+      windChangesCheckedTo,
+      windChangesCheckedReason,
+      windChangesUnreadable,
       provider,
       loading,
       error: failure ? failure.message || 'Failed to load forecast data' : null,

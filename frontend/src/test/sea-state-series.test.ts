@@ -58,6 +58,7 @@ function weatherDay(dayKey: string, hourlyWind: WeatherHourlyWindPoint[]): Weath
     hourlyPrecip: [],
     hourlyUV: [],
     hourlyCloud: [],
+    windChanges: [],
   }
 }
 

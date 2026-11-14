@@ -92,6 +92,7 @@ function day(dayName: string, overrides: Partial<WeatherForecastDay> = {}): Weat
     hourlyPrecip: [],
     hourlyUV: [],
     hourlyCloud: [],
+    windChanges: [],
     ...overrides,
   }
 }

@@ -13,7 +13,8 @@ import { WeatherConditionIcon } from '@/components/forecast/weather-condition-ic
 import { WindBarb, WaveDirectionArrow } from '@/components/forecast/direction-glyphs'
 import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
-import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint, WindChange } from '@/hooks/use-weather-forecast'
+import { buildWindChangeSentence, windChangeChipText, windChangesCheckedToText } from '@/lib/forecast-wind-changes'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 import type { UpperAirDay, UpperAirSample, UpperAirWindow } from '@/hooks/use-upper-air'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
@@ -77,6 +78,8 @@ interface ForecastDay {
   hourlyPrecip: WeatherHourlyPrecipPoint[]
   hourlyUV: WeatherHourlyUVPoint[]
   hourlyCloud: WeatherHourlyCloudPoint[]
+  /** Wind changes that start on this day (ADR 0287). */
+  windChanges: WindChange[]
 }
 
 /**
@@ -102,6 +105,14 @@ export interface ForecastDrawerProps {
   stay?: ForecastDrawerStay
   hourlyToday?: WeatherHourlyEntry[]
   summary?: string | null
+  /** Why wind changes were not judged against the operator's limits. */
+  windChangesProblem?: string | null
+  /** The boat-clock time of the last hour read for wind changes ("Thu 19 3 AM"), set when the hourly forecast stops before the forecast does. */
+  windChangesCheckedTo?: string | null
+  /** Why the reading stopped at windChangesCheckedTo. */
+  windChangesCheckedReason?: string | null
+  /** Set when a wind change in the forecast could not be read, so the list may be incomplete. */
+  windChangesUnreadable?: string | null
   loading?: boolean
   error?: string | null
   provider?: string | null
@@ -580,12 +591,17 @@ const EMPTY_DAY: ForecastDay = {
   hourlyPrecip: [],
   hourlyUV: [],
   hourlyCloud: [],
+  windChanges: [],
 }
 
 export function ForecastDrawer({
   forecast,
   hourlyToday = [],
   summary = null,
+  windChangesProblem = null,
+  windChangesCheckedTo = null,
+  windChangesCheckedReason = null,
+  windChangesUnreadable = null,
   loading = false,
   error = null,
   provider = null,
@@ -618,6 +634,8 @@ export function ForecastDrawer({
   const vesselZone = useVesselStateSelector(selectTimeZone)
   // A stay's forecast keeps the stay's time; the boat's forecast keeps the boat's.
   const forecastZone = stay ? stay.timezone : vesselZone
+  // The forecast is held for up to an hour, so "today" is worked out on each draw.
+  const todayKey = forecastZone ? formatDayKey(new Date(), forecastZone) : null
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const windAreaGradientId = useId()
   const waveAreaGradientId = useId()
@@ -834,15 +852,42 @@ export function ForecastDrawer({
       label: upperAirDayLabels.get(day.dayKey) ?? shortDayLabel(day),
       trough: upperAirFlaggedDayKeys.has(day.dayKey),
     }))
-    const summary = buildConditionsSummary(summaryDays)
-    if (!summary) return null
+    // The wind sentence leads: a change in the wind is what the day plan turns on.
+    const windSentence = buildWindChangeSentence(days, todayKey)
+    // With no change there is nothing the limits could have judged.
+    const judgedProblem = days.some((day) => day.windChanges.length > 0) ? windChangesProblem : null
+    const conditions = buildConditionsSummary(summaryDays)
+    const summary = [windSentence, conditions].filter(Boolean).join(' ')
+    if (!summary && !judgedProblem && !windChangesCheckedTo && !windChangesUnreadable) return null
 
     return (
-      <p data-testid="forecast-extended-intro" className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
-        {summary}
-      </p>
+      <>
+        {summary ? (
+          <p data-testid="forecast-extended-intro" className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
+            {summary}
+          </p>
+        ) : null}
+        {/* Changes are still listed when the limits can't be read, but none is judged. Say so. */}
+        {judgedProblem ? (
+          <p data-testid="forecast-wind-changes-problem" className="pr-2 text-xs text-muted-foreground">
+            Wind changes not judged against your limits: {judgedProblem}
+          </p>
+        ) : null}
+        {/* Where the hourly forecast stops, the changes beyond it are not read. */}
+        {windChangesCheckedTo ? (
+          <p data-testid="forecast-wind-changes-checked-to" className="pr-2 text-xs text-muted-foreground">
+            {windChangesCheckedToText(windChangesCheckedTo, windChangesCheckedReason)}
+          </p>
+        ) : null}
+        {/* A change the page could not read is never shown as "no change". */}
+        {windChangesUnreadable ? (
+          <p data-testid="forecast-wind-changes-unreadable" className="pr-2 text-xs text-muted-foreground">
+            Wind changes not shown in full: {windChangesUnreadable}
+          </p>
+        ) : null}
+      </>
     )
-  }, [days, upperAirDayLabels, upperAirFlaggedDayKeys])
+  }, [days, upperAirDayLabels, upperAirFlaggedDayKeys, windChangesProblem, windChangesCheckedTo, windChangesCheckedReason, windChangesUnreadable, todayKey])
 
   const upperAirChartData = useMemo(() => {
     // Carried alongside the raw height rather than replacing it: the trace is
@@ -1578,7 +1623,11 @@ export function ForecastDrawer({
               const isStaySelected = stay ? isStayDay(day.dayKey, stay) : false
               const lightningDay = dayLightning.get(day.dayKey)
               const lightningPeak = lightningDay?.peak ?? null
-              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}`
+              const changes = day.windChanges
+              // The chip is amber when any change that day is prominent, so it shows
+              // the first prominent one, else the first.
+              const firstChange = changes.find((c) => c.prominent) ?? changes[0]
+              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}${changes.map((c) => `, wind change ${c.from} to ${c.to} around ${c.label}${c.prominent ? ', reaches your marginal wind' : ''}${c.lowerConfidence ? ', less certain' : ''}`).join('')}`
 
               return (
                 <button
@@ -1653,6 +1702,28 @@ export function ForecastDrawer({
                     <p className="text-2xs tabular-nums text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
                   </div>
 
+                  {firstChange ? (
+                    // One chip, never a wrapped row: the first change, then "+N" for the rest. The aria label above names them all.
+                    <p data-testid="forecast-day-wind-changes" className="mt-1 flex min-w-0 items-center gap-1">
+                      <span
+                        data-testid="forecast-wind-change-chip"
+                        data-prominent={firstChange.prominent ? 'true' : undefined}
+                        title={firstChange.lowerConfidence ? 'Wind change, less certain this far out' : 'Wind change'}
+                        className={`min-w-0 truncate rounded-sm px-1 py-0.5 text-xs font-semibold tabular-nums ${
+                          firstChange.prominent
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            : 'bg-muted text-muted-foreground'
+                        }${firstChange.lowerConfidence ? ' italic' : ''}`}
+                      >
+                        {windChangeChipText(firstChange)}
+                      </span>
+                      {changes.length > 1 ? (
+                        <span data-testid="forecast-wind-change-more" className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
+                          +{changes.length - 1}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
                   <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs tabular-nums text-muted-foreground">
                     <span className="font-semibold text-foreground">{Math.round(displayTemp(day.high))}</span>
                     <span>{tempUnit}</span>

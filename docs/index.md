@@ -14,6 +14,8 @@ Helmcentral suits your boat.
   and embeds you set up at the helm.
 - [Forecast](features/forecast.md): weather, wind, waves and tide, plus the
   heavy-weather warning signs the wave graph watches for.
+- [Wind changes](features/wind-changes.md): how the forecast marks a turn in the
+  wind, and when the mark turns amber.
 - [Engine Cluster](features/engine-cluster.md): one engine's dial and readouts,
   with fuel and electrical figures along the bottom.
 - [Anchor watch](features/anchor-watch.md): watching the anchor, and the rode

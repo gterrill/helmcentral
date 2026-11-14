@@ -6,6 +6,7 @@ import { useTideSettings } from '@/hooks/use-tide-settings'
 import { usePlanAssessment } from '@/hooks/use-plan-assessment'
 import { usePlanSlips } from '@/hooks/use-plan-slips'
 import { mapPlan } from '@/hooks/use-plans'
+import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { stubApi, type StubRequest } from '@/test/helpers/stub-api'
 
 describe('useSettingsForm', () => {
@@ -90,6 +91,26 @@ describe('useSettingsForm', () => {
 
     await act(async () => { await form.result.current.save({ assistant: { passage_limits: { ahead: { wind_kn_no_go: 20 } } } }) })
     await waitFor(() => expect(slips).toBe(2))
+  })
+
+  it('saving passage limits refetches the weather forecast, whose wind changes are judged against the passage limits', async () => {
+    let forecastReads = 0
+    stubApi({
+      'GET /api/settings': { assistant: { passage_limits: {} } },
+      'POST /api/settings': (req: StubRequest) => req.body,
+      'GET /api/weather-forecast': () => {
+        forecastReads += 1
+        return { days: [], hourly_today: [] }
+      },
+    })
+    const forecast = renderHook(() => useWeatherForecast())
+    const form = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(forecastReads).toBe(1))
+    await waitFor(() => expect(form.result.current.loading).toBe(false))
+
+    await act(async () => { await form.result.current.save({ assistant: { passage_limits: {} } }) })
+    await waitFor(() => expect(forecastReads).toBe(2))
+    expect(forecast.result.current.error).toBeNull()
   })
 
   it('reports loaded only when a settings read succeeded', async () => {

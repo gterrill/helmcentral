@@ -67,6 +67,7 @@ function buildDay(idx: number) {
     hourlyPrecip: [],
     hourlyUV: [],
     hourlyCloud: [],
+    windChanges: [],
   };
 }
 

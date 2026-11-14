@@ -67,6 +67,7 @@ function weatherDay(overrides: Partial<WeatherForecastDay> = {}): WeatherForecas
     hourlyPrecip: Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, hourOfDay: h, precipChancePct: 20, precipIntensityMm: 0 })),
     hourlyUV: [],
     hourlyCloud: [],
+    windChanges: [],
     ...overrides,
   }
 }
