@@ -40,6 +40,18 @@ func marginalOf(noGo float64) float64 {
 	return math.Round(noGo*passageMarginalFraction*1000) / 1000
 }
 
+// lowestNoGoWind is the smallest no-go wind the operator has set in any
+// sector, in knots, 0 when none is set.
+func lowestNoGoWind(l passageLimits) float64 {
+	lowest := 0.0
+	for _, s := range []passageSectorLimits{l.Ahead, l.Abeam, l.Astern} {
+		if s.WindKnNoGo != nil && (lowest == 0 || *s.WindKnNoGo < lowest) {
+			lowest = *s.WindKnNoGo
+		}
+	}
+	return lowest
+}
+
 // passageSectorLimits is one sector's no-go figures. A nil figure is unset,
 // which is not zero.
 type passageSectorLimits struct {

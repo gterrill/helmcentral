@@ -830,6 +830,8 @@ type weatherForecastDayResponse struct {
 	HourlyPrecip         []weatherHourlyPrecipitationResponse `json:"hourly_precip"`
 	HourlyUV             []weatherHourlyUVResponse            `json:"hourly_uv"`
 	HourlyCloud          []weatherHourlyCloudResponse         `json:"hourly_cloud"`
+	// WindChanges are the changes that start on this day (ADR 0287).
+	WindChanges []windChangeResponse `json:"wind_changes"`
 }
 
 // weatherNextHourPointResponse mirrors weatherNextHourPoint for JSON output.
@@ -937,12 +939,25 @@ type weatherForecastResponse struct {
 	// NextHour is the nowcast (see buildWeatherNextHourResponse) - nil, and
 	// therefore omitted, when the configured provider has no next-hour
 	// coverage for this position.
-	NextHour   *weatherNextHourResponse `json:"next_hour,omitempty"`
-	Summary    string                   `json:"summary"`
-	Provider   string                   `json:"provider"`
-	Cached     bool                     `json:"cached"`
-	UpdatedAt  string                   `json:"updated_at"`
-	TTLSeconds int64                    `json:"ttl_seconds"`
+	NextHour *weatherNextHourResponse `json:"next_hour,omitempty"`
+	// WindChangesProblem says why the changes could not be judged against the
+	// operator's passage limits, and is empty when they were. The changes are
+	// still listed per day, with none marked prominent.
+	WindChangesProblem string `json:"wind_changes_problem"`
+	// WindChangesCheckedTo is the boat-clock time of the last hour read for wind
+	// changes ("Thu 19 3 AM") when the hourly forecast stops before the
+	// forecast does, and WindChangesCheckedReason says why; both are empty when
+	// the whole forecast was read.
+	WindChangesCheckedTo     string `json:"wind_changes_checked_to"`
+	WindChangesCheckedReason string `json:"wind_changes_checked_reason"`
+	// WindChangesUnplaced counts changes that fall on a day the forecast has no
+	// day card for, so the drawer can say the list is incomplete.
+	WindChangesUnplaced int    `json:"wind_changes_unplaced"`
+	Summary             string `json:"summary"`
+	Provider            string `json:"provider"`
+	Cached              bool   `json:"cached"`
+	UpdatedAt           string `json:"updated_at"`
+	TTLSeconds          int64  `json:"ttl_seconds"`
 }
 
 func mapWeatherHourlyWindResponse(entries []weatherHourlyWindData) []weatherHourlyWindResponse {
@@ -1117,6 +1132,10 @@ func weatherToday(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
+// forecastNow is the wall clock the wind-change detector reads, as the watch
+// report does. Tests replace it.
+var forecastNow = time.Now
+
 // weatherForecast serves GET /api/weather-forecast: a multi-day forecast
 // bucketed into local days, plus today's next-12-hours strip. No fake
 // defaults: an unknown provider, a fetch failure, or an empty/all-past
@@ -1149,7 +1168,16 @@ func weatherForecast(c echo.Context) error {
 	windByDay, precipByDay, uvByDay, cloudByDay := buildHourlySeriesByDay(bundle.Hourly, localLocation)
 
 	var sunsetAt time.Time
+	// The forecast does not depend on the passage limits. When they can't be
+	// read the changes are still listed, none is prominent, and the reason goes
+	// to the response so the drawer can show it.
+	limits, limitsErr := passageLimitsFromSettingsFile(settingsPath)()
+	// The wall clock, as the watch report reads it: the GNSS datetime can lag.
+	windScan := forecastWindChanges(bundle.Hourly, lastDayStart(bundle.Days), forecastNow(), localLocation, limits, limitsErr)
+	changesByDay := windChangesByDay(windScan.Changes)
+
 	dayResponses := make([]weatherForecastDayResponse, 0, len(bundle.Days))
+	placed := map[string]bool{}
 	for _, dp := range bundle.Days {
 		if dp.Start.IsZero() {
 			continue
@@ -1163,7 +1191,18 @@ func weatherForecast(c echo.Context) error {
 		}
 
 		dayData := buildDayData(dp, referenceDatetime, localLocation, windByDay[dayKey], precipByDay[dayKey], uvByDay[dayKey], cloudByDay[dayKey])
-		dayResponses = append(dayResponses, mapWeatherForecastDayResponse(dayData, dayKey))
+		dayResponse := mapWeatherForecastDayResponse(dayData, dayKey)
+		dayResponse.WindChanges = mapWindChangeResponses(changesByDay[dayKey])
+		dayResponses = append(dayResponses, dayResponse)
+		placed[dayKey] = true
+	}
+	// A change on a day with no card could not be drawn. It is counted, so the
+	// drawer says the list is incomplete rather than leave it out.
+	unplaced := 0
+	for _, c := range windScan.Changes {
+		if !placed[c.DayKey] {
+			unplaced++
+		}
 	}
 	if len(dayResponses) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response contained no days on or after today"})
@@ -1173,14 +1212,19 @@ func weatherForecast(c echo.Context) error {
 	summary := summarizeHourlyForecast(hourlyToday)
 
 	response := weatherForecastResponse{
-		Days:        dayResponses,
-		HourlyToday: mapWeatherHourlyEntryResponse(hourlyToday),
-		NextHour:    buildWeatherNextHourResponse(bundle.NextHour, bundle.NextHourSource),
-		Summary:     summary,
-		Provider:    configuredProvider,
-		Cached:      bundle.Cached,
-		UpdatedAt:   bundle.CachedAt.UTC().Format(time.RFC3339),
-		TTLSeconds:  provider.TTLSeconds(),
+		Days:                 dayResponses,
+		HourlyToday:          mapWeatherHourlyEntryResponse(hourlyToday),
+		NextHour:             buildWeatherNextHourResponse(bundle.NextHour, bundle.NextHourSource),
+		WindChangesProblem:   windScan.Problem,
+		WindChangesCheckedTo: windScan.CheckedTo,
+
+		WindChangesCheckedReason: windScan.CheckedReason,
+		WindChangesUnplaced:      unplaced,
+		Summary:                  summary,
+		Provider:                 configuredProvider,
+		Cached:                   bundle.Cached,
+		UpdatedAt:                bundle.CachedAt.UTC().Format(time.RFC3339),
+		TTLSeconds:               provider.TTLSeconds(),
 	}
 
 	etag, etagErr := weakETagForJSON(response)

@@ -54,6 +54,7 @@ function buildDay(overrides: Record<string, unknown> = {}) {
       humidityPct: 50,
       visibilityNm: 10,
     })),
+    windChanges: [],
     ...overrides,
   }
 }

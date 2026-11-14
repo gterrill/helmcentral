@@ -24,6 +24,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The forecast marks a change in the wind.** When one steady wind gives way
+  to another from 90 degrees or more away, even through a few hours of light
+  air, the day card gets a chip such as "N→SE 2 PM", and the ten-day summary
+  opens with a line like "Northerlies until a SE change Tue 17 around 2 PM,
+  15–20 kn behind it." The chip turns amber when the
+  wind after the change reaches your lowest marginal wind from your passage
+  limits, so set those if you haven't. A change more than about three days out
+  is marked as less certain. The weather section of a watch report gets one
+  line when a change is coming.
 - **Plan a run stop by stop and see every day of it on the Forecast page.** Add
   the places in order with the nights at each, and add a via place on a leg
   where the route needs steering. The table has one row per day with the

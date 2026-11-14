@@ -111,6 +111,7 @@ vi.mock('@/hooks/use-weather-forecast', () => ({
       hourlyPrecip: [],
       hourlyUV: [],
       hourlyCloud: [],
+      windChanges: [],
     }],
     loading: false,
     error: null,

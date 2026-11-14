@@ -14,11 +14,11 @@ import (
 // Reading the boat for a watch report (ADR 0227).
 
 func TestWatchLowestNoGoWind(t *testing.T) {
-	if got := watchLowestNoGoWind(passageLimits{}); got != 0 {
+	if got := lowestNoGoWind(passageLimits{}); got != 0 {
 		t.Fatalf("no limits is 0, not a number to compare with: %v", got)
 	}
 	l := passageLimits{Ahead: passageSectorLimits{WindKnNoGo: fp(22)}, Abeam: passageSectorLimits{WindKnNoGo: fp(15)}, Astern: passageSectorLimits{WindKnNoGo: fp(30)}}
-	if got := watchLowestNoGoWind(l); got != 15 {
+	if got := lowestNoGoWind(l); got != 15 {
 		t.Fatalf("a stay has no course, so the lowest limit is the cautious one: %v", got)
 	}
 }
@@ -47,7 +47,7 @@ func TestWatchStayForecastFor_FindsTheStrongestWindOnTheStayDays(t *testing.T) {
 		{Time: at(2+31, 9), WindSpeedMS: ms(50)}, // after the stay
 	}
 	d := stayForecastDeps(hours, nil, passageLimits{Abeam: passageSectorLimits{WindKnNoGo: fp(22)}})
-	got := watchStayForecastFor(d, stayStatus(), vesselStatusTestNow)
+	got := watchStayForecastFor(resolveWatchForecast(d), stayStatus(), vesselStatusTestNow)
 	if got.Problem != "" || got.Name != "Magnetic Island Marina" || got.NoGoKn != 22 || int(got.MaxWindKn+0.5) != 26 || got.MaxWindDay != "Sat 31 Oct" {
 		t.Fatalf("%+v", got)
 	}
@@ -55,24 +55,52 @@ func TestWatchStayForecastFor_FindsTheStrongestWindOnTheStayDays(t *testing.T) {
 
 func TestWatchStayForecastFor_SaysWhyItCouldNotBeRead(t *testing.T) {
 	now := vesselStatusTestNow
-	if got := watchStayForecastFor(stayForecastDeps(nil, nil, passageLimits{}), vesselStatusStay{Missing: "no stay is planned"}, now); got.Name != "" {
+	if got := watchStayForecastFor(resolveWatchForecast(stayForecastDeps(nil, nil, passageLimits{})), vesselStatusStay{Missing: "no stay is planned"}, now); got.Name != "" {
 		t.Fatalf("no stay, nothing to say: %+v", got)
 	}
-	got := watchStayForecastFor(stayForecastDeps(nil, errors.New("weather plugin offline"), passageLimits{}), stayStatus(), now)
+	got := watchStayForecastFor(resolveWatchForecast(stayForecastDeps(nil, errors.New("weather plugin offline"), passageLimits{})), stayStatus(), now)
 	if !strings.Contains(got.Problem, "weather plugin offline") {
 		t.Fatalf("a provider failure is a problem, not an empty forecast: %+v", got)
 	}
-	got = watchStayForecastFor(stayForecastDeps(nil, nil, passageLimits{}), stayStatus(), now)
+	got = watchStayForecastFor(resolveWatchForecast(stayForecastDeps(nil, nil, passageLimits{})), stayStatus(), now)
 	if !strings.Contains(got.Problem, "does not reach the stay") {
 		t.Fatalf("a forecast that stops short says so: %+v", got)
 	}
 	d := stayForecastDeps(nil, nil, passageLimits{})
 	d.passageLimits = func() (passageLimits, error) { return passageLimits{}, errors.New("passage limits unreadable") }
-	if got := watchStayForecastFor(d, stayStatus(), now); !strings.Contains(got.Problem, "unreadable") {
+	if got := watchStayForecastFor(resolveWatchForecast(d), stayStatus(), now); !strings.Contains(got.Problem, "unreadable") {
 		t.Fatalf("%+v", got)
 	}
-	if got := watchStayForecastFor(assistantToolDeps{}, stayStatus(), now); got.Problem == "" {
+	if got := watchStayForecastFor(resolveWatchForecast(assistantToolDeps{}),stayStatus(), now); got.Problem == "" {
 		t.Fatalf("unwired forecast is said: %+v", got)
+	}
+}
+
+// countingWeatherProvider counts the forecasts asked for.
+type countingWeatherProvider struct {
+	*stubWeatherProvider
+	fetches int
+}
+
+func (c *countingWeatherProvider) FetchForecast(lat, lon float64, days int, timezone string) (weatherForecastBundle, error) {
+	c.fetches++
+	return c.stubWeatherProvider.FetchForecast(lat, lon, days, timezone)
+}
+
+func TestWatchStayForecastFor_BadDatesAreSaidWithoutAProviderCall(t *testing.T) {
+	counter := &countingWeatherProvider{stubWeatherProvider: &stubWeatherProvider{id: "stub"}}
+	d := assistantToolDeps{
+		weather:       func() (weatherProvider, string, error) { return counter, "stub", nil },
+		passageLimits: func() (passageLimits, error) { return passageLimits{}, nil },
+	}
+	stay := stayStatus()
+	stay.Arrive = "next week"
+	got := watchStayForecastFor(resolveWatchForecast(d), stay, vesselStatusTestNow)
+	if !strings.Contains(got.Problem, "dates are unreadable") {
+		t.Fatalf("%+v", got)
+	}
+	if counter.fetches != 0 {
+		t.Fatalf("a stay with bad dates must not call the provider: %d fetches", counter.fetches)
 	}
 }
 

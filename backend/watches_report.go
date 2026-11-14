@@ -122,6 +122,22 @@ type watchStayForecast struct {
 	NoGoKn float64
 }
 
+// watchWindChanges are the wind changes in the forecast at the boat's own
+// position (ADR 0287).
+type watchWindChanges struct {
+	Problem string
+	Changes []windChange
+	// LimitsProblem says why the changes were not judged against the
+	// operator's limits; the changes are still listed, none prominent.
+	LimitsProblem string
+	// CheckedTo names the last hour read ("Thu 19 3 AM") when the hourly
+	// forecast stops before the forecast does, and CheckedReason says why
+	// ("the forecast skips an hour here"); both empty when the whole forecast
+	// was read.
+	CheckedTo     string
+	CheckedReason string
+}
+
 type watchReportInput struct {
 	Now      time.Time
 	Loc      *time.Location
@@ -137,9 +153,10 @@ type watchReportInput struct {
 	Raised        []alarmRaisedGroup
 	RaisedProblem string
 	// Previous is the last run's report and PreviousAt its time.
-	Previous   *watchReport
-	PreviousAt time.Time
-	Stay       watchStayForecast
+	Previous    *watchReport
+	PreviousAt  time.Time
+	Stay        watchStayForecast
+	WindChanges watchWindChanges
 	// Unusual is the window scored against the learned normal, nil when the
 	// watch does not check instruments. Its figures use Status.Units.
 	Unusual *unusualResult
@@ -839,7 +856,49 @@ func watchWeatherSection(w savedWatch, in watchReportInput) (watchReportSection,
 		s.Rows = append(s.Rows, watchReportRow{Label: "Forecast for " + stay.Name,
 			Value: fmt.Sprintf("up to %.0f kn on %s, under your lowest no-go wind of %.0f kn", stay.MaxWindKn, stay.MaxWindDay, stay.NoGoKn)})
 	}
+	// A forecast is not a fault on board, so a change never raises a finding. It
+	// is a line (email, Mate) and a row (the page draws only rows).
+	wc := in.WindChanges
+	switch {
+	case wc.Problem != "":
+		s.Lines = append(s.Lines, "Forecast wind changes were not read: "+wc.Problem)
+		s.Rows = append(s.Rows, s.notChecked("Forecast wind changes", wc.Problem))
+	case len(wc.Changes) > 0:
+		text := watchWindChangeText(wc)
+		s.Lines = append(s.Lines, "Forecast wind change: "+text+".")
+		s.Rows = append(s.Rows, watchReportRow{Label: "Wind change", Value: text})
+	}
+	if wc.Problem == "" && wc.LimitsProblem != "" && len(wc.Changes) > 0 {
+		s.Lines = append(s.Lines, "Wind changes not judged against your limits: "+wc.LimitsProblem)
+		s.Rows = append(s.Rows, s.notChecked("Wind changes not judged against your limits", wc.LimitsProblem))
+	}
+	if wc.Problem == "" && wc.CheckedTo != "" {
+		checked := wc.CheckedTo + ": " + wc.CheckedReason
+		s.Lines = append(s.Lines, "Wind changes checked to "+checked+".")
+		s.Rows = append(s.Rows, watchReportRow{Label: "Wind changes checked to", Value: checked})
+	}
 	return s, findings
+}
+
+// watchWindChangeText says the first change and how many follow, without a
+// full stop: the page row's value and the body of the report line.
+func watchWindChangeText(w watchWindChanges) string {
+	c := w.Changes[0]
+	speed := fmt.Sprintf("%d kn", c.SpeedMaxKn)
+	if c.SpeedMinKn != c.SpeedMaxKn {
+		speed = fmt.Sprintf("%d to %d kn", c.SpeedMinKn, c.SpeedMaxKn)
+	}
+	line := fmt.Sprintf("%s to %s %s around %s, %s behind it", c.From, c.To, c.DayLabel, c.Label, speed)
+	if c.LowerConfidence {
+		line += " (lower confidence)"
+	}
+	if c.Prominent {
+		line += ", at or over your lowest marginal wind"
+	}
+	if more := len(w.Changes) - 1; more > 0 {
+		line += fmt.Sprintf(", and %d more after", more)
+	}
+	return line
 }
 
 // ── instruments ─────────────────────────────────────────────────────────

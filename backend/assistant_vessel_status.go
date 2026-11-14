@@ -342,6 +342,23 @@ type observationNight struct {
 	start, end time.Time
 }
 
+// forecastFix is the place a forecast is asked about: the vessel state's last
+// trusted position, as resolveForecastPoint takes it, however old. The state
+// holds the last trusted fix through a GNSS alert, so only a placeholder such
+// as -1,-1 or 0,0 is refused.
+func forecastFix(state vesselStateData) vesselStatusFix {
+	if !hasUsableVesselPosition(state.Latitude, state.Longitude) {
+		return vesselStatusFix{Missing: "invalid vessel coordinates from SignalK"}
+	}
+	return vesselStatusFix{Lat: state.Latitude, Lon: state.Longitude}
+}
+
+// vesselStatusFix is the boat's position, or why there is none.
+type vesselStatusFix struct {
+	Lat, Lon float64
+	Missing  string
+}
+
 type vesselStatusResult struct {
 	GeneratedAt  string                   `json:"generated_at"`
 	Units        string                   `json:"units"`
@@ -352,6 +369,10 @@ type vesselStatusResult struct {
 	Alarms       vesselStatusAlarms       `json:"alarms"`
 	Anomalies    vesselStatusAnomalies    `json:"anomalies"`
 	PlannedStay  vesselStatusStay         `json:"planned_stay"`
+	// Position is the boat's last trusted fix as the forecast endpoint takes it,
+	// for callers that need the place and must not read the vessel state again.
+	// Not part of the tool result. The status itself judges freshness separately.
+	Position vesselStatusFix `json:"-"`
 	// Observations are the deterministic "worth a second look" findings.
 	// ObservationsUnchecked says which could not be looked at and why, so an
 	// empty observations list is never read as an all-clear for them.
@@ -529,6 +550,7 @@ func (d assistantToolDeps) buildVesselStatus(ctx context.Context) (vesselStatusR
 	}
 
 	lat, lon, noPosition := boatPosition(state)
+	res.Position = forecastFix(state)
 	if res.Boat, err = d.vesselStatusBoatFor(ctx, t, vessel, state, system, lat, lon, noPosition, now); err != nil {
 		return vesselStatusResult{}, err
 	}

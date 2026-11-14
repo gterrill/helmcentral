@@ -238,8 +238,12 @@ export function useSettingsForm(): UseSettingsFormResult {
       // The Offline coastline switch is part of this save; its status line
       // must not keep saying "Off" until the next poll.
       void invalidateQueries(['/api/offline-coastline'])
-      // Plan verdicts are worked out against the passage limits.
-      if (patch.assistant?.passage_limits !== undefined) void invalidatePlanAssessments()
+      // Plan verdicts and the forecast's wind changes are judged against the
+      // passage limits, so a changed limit must reach both at once.
+      if (patch.assistant?.passage_limits !== undefined) {
+        void invalidatePlanAssessments()
+        void invalidateQueries(['/api/weather-forecast'])
+      }
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

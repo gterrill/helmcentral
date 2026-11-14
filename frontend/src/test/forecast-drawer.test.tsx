@@ -116,6 +116,7 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     hourlyPrecip: buildHourlyPrecip(),
     hourlyUV: buildHourlyUV(),
     hourlyCloud: buildHourlyCloud(),
+    windChanges: [],
     ...overrides,
   }
 }

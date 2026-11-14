@@ -67,7 +67,9 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 		in.Raised, in.RaisedProblem = watchRaisedAlarms(d, in.Since, now)
 	}
 	if wants[watchSectionWeather] && in.Status != nil {
-		in.Stay = watchStayForecastFor(d, in.Status.PlannedStay, now)
+		src := resolveWatchForecast(d)
+		in.Stay = watchStayForecastFor(src, in.Status.PlannedStay, now)
+		in.WindChanges = watchWindChangesFor(src, in.Status, now)
 	}
 	// The learned normal's suggestions belong with the instruments. A watch that
 	// does not check them does not pay for the Influx reads.
@@ -119,58 +121,86 @@ func watchRaisedAlarms(d assistantToolDeps, since, now time.Time) ([]alarmRaised
 	return groups, ""
 }
 
-// watchLowestNoGoWind is the smallest no-go wind the operator has set in any
-// sector, in knots, 0 when none is set. A planned stay has no course, so the
-// lowest limit is the cautious reading.
-func watchLowestNoGoWind(l passageLimits) float64 {
-	lowest := 0.0
-	for _, s := range []passageSectorLimits{l.Ahead, l.Abeam, l.Astern} {
-		if s.WindKnNoGo != nil && (lowest == 0 || *s.WindKnNoGo < lowest) {
-			lowest = *s.WindKnNoGo
-		}
+// watchForecastSource is what the weather section reads a forecast with: the
+// operator's limits and the configured provider, resolved once per report.
+// problem says why one is missing, and is empty when both were found.
+type watchForecastSource struct {
+	limits     passageLimits
+	provider   weatherProvider
+	providerID string
+	problem    string
+	// limitsErr is why the passage limits could not be read. The provider is
+	// still resolved: the forecast does not need limits to be read, only to be
+	// judged.
+	limitsErr error
+}
+
+// stayProblem is why the stay's forecast cannot be judged: it needs both the
+// forecast and the limits.
+func (s watchForecastSource) stayProblem() string {
+	if s.problem != "" {
+		return s.problem
 	}
-	return lowest
+	if s.limitsErr != nil {
+		return firstErrorLine(s.limitsErr)
+	}
+	return ""
+}
+
+func resolveWatchForecast(d assistantToolDeps) watchForecastSource {
+	var src watchForecastSource
+	if d.passageLimits == nil || d.weather == nil {
+		src.problem = "the forecast is not wired"
+		return src
+	}
+	var err error
+	src.limits, src.limitsErr = d.passageLimits()
+	if src.provider, src.providerID, err = d.weather(); err != nil {
+		src.problem = firstErrorLine(err)
+	}
+	return src
+}
+
+// fetch reads the forecast at a place. whose names the place's owner in the
+// time-zone problem: "the stay's" or "the boat's".
+func (s watchForecastSource) fetch(lat, lon float64, whose string) (bundle weatherForecastBundle, zone placeZone, problem string) {
+	zone, err := zoneAt(lat, lon)
+	if err != nil {
+		return bundle, zone, "the " + whose + " time zone is not known: " + firstErrorLine(err)
+	}
+	bundle, err = s.provider.FetchForecast(lat, lon, assistantMaxForecastDays, zone.Name)
+	if err != nil {
+		return bundle, zone, fmt.Sprintf("weather provider %q: %s", s.providerID, firstErrorLine(err))
+	}
+	return bundle, zone, ""
 }
 
 // watchStayForecastFor reads the forecast at the planned stay for its dates.
-func watchStayForecastFor(d assistantToolDeps, stay vesselStatusStay, now time.Time) watchStayForecast {
+func watchStayForecastFor(src watchForecastSource, stay vesselStatusStay, now time.Time) watchStayForecast {
 	if stay.Missing != "" || stay.Name == "" {
 		return watchStayForecast{}
 	}
-	out := watchStayForecast{Name: stay.Name}
-	if d.passageLimits == nil || d.weather == nil {
-		out.Problem = "the forecast is not wired"
+	out := watchStayForecast{Name: stay.Name, NoGoKn: lowestNoGoWind(src.limits)}
+	if p := src.stayProblem(); p != "" {
+		out.Problem = p
 		return out
 	}
-	limits, err := d.passageLimits()
-	if err != nil {
-		out.Problem = firstErrorLine(err)
-		return out
-	}
-	out.NoGoKn = watchLowestNoGoWind(limits)
-	provider, providerID, err := d.weather()
-	if err != nil {
-		out.Problem = firstErrorLine(err)
-		return out
-	}
-	stayZone, err := zoneAt(stay.Lat, stay.Lon)
-	if err != nil {
-		out.Problem = "the stay's time zone is not known: " + firstErrorLine(err)
-		return out
-	}
-	loc := stayZone.Loc
-	arrive, err1 := time.ParseInLocation("2006-01-02", stay.Arrive, loc)
-	depart, err2 := time.ParseInLocation("2006-01-02", stay.Depart, loc)
+	// Dates first: a stay with unreadable dates is said without a provider call.
+	_, err1 := time.Parse("2006-01-02", stay.Arrive)
+	_, err2 := time.Parse("2006-01-02", stay.Depart)
 	if err1 != nil || err2 != nil {
 		out.Problem = "the stay's dates are unreadable"
 		return out
 	}
-	end := depart.AddDate(0, 0, 1)
-	bundle, err := provider.FetchForecast(stay.Lat, stay.Lon, assistantMaxForecastDays, stayZone.Name)
-	if err != nil {
-		out.Problem = fmt.Sprintf("weather provider %q: %s", providerID, firstErrorLine(err))
+	bundle, stayZone, problem := src.fetch(stay.Lat, stay.Lon, "stay's")
+	if problem != "" {
+		out.Problem = problem
 		return out
 	}
+	loc := stayZone.Loc
+	arrive, _ := time.ParseInLocation("2006-01-02", stay.Arrive, loc)
+	depart, _ := time.ParseInLocation("2006-01-02", stay.Depart, loc)
+	end := depart.AddDate(0, 0, 1)
 	found := false
 	for _, hp := range bundle.Hourly {
 		if hp.Time.IsZero() || hp.Time.Before(arrive) || !hp.Time.Before(end) || hp.Time.Before(now.Add(-time.Hour)) {
@@ -185,4 +215,22 @@ func watchStayForecastFor(d assistantToolDeps, stay vesselStatusStay, now time.T
 		out.Problem = "the forecast does not reach the stay's dates yet"
 	}
 	return out
+}
+
+// watchWindChangesFor reads the forecast at the boat's own position, taken
+// from the status the report already built, and finds the wind changes in it
+// (ADR 0287). One fetch at the boat: a planned stay is a different place.
+func watchWindChangesFor(src watchForecastSource, status *vesselStatusResult, now time.Time) watchWindChanges {
+	if src.problem != "" {
+		return watchWindChanges{Problem: src.problem}
+	}
+	if status.Position.Missing != "" {
+		return watchWindChanges{Problem: status.Position.Missing}
+	}
+	bundle, zone, problem := src.fetch(status.Position.Lat, status.Position.Lon, "boat's")
+	if problem != "" {
+		return watchWindChanges{Problem: problem}
+	}
+	scan := forecastWindChanges(bundle.Hourly, lastDayStart(bundle.Days), now, zone.Loc, src.limits, src.limitsErr)
+	return watchWindChanges{Changes: scan.Changes, LimitsProblem: scan.Problem, CheckedTo: scan.CheckedTo, CheckedReason: scan.CheckedReason}
 }
