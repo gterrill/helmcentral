@@ -61,6 +61,38 @@ func TestSlipPlan_NamesTheWorstLegForEachSlipFromOneDayToSlackPlusOne(t *testing
 	}
 }
 
+// A plan that has fallen behind is priced from where it now stands: the days
+// since the first leg to do should have left move every leg still to do, and each
+// slip is measured on top of that, so no slipped leg falls on a day that has gone.
+func TestSlipPlan_ABehindPlanIsProjectedFromTodayBeforeItIsSlipped(t *testing.T) {
+	p, legs := slipPlan2(t, "2026-11-17T12:00") // planned to reach stop 2 on the 15th
+	d := paDeps(&paFake{fc: slipWind()})
+	d.now = func() time.Time { return paAt(15, 8, 0) } // leg 0 was to leave on the 14th: a day behind
+	got := slipsOf(context.Background(), p, legs, d)
+	// Projected arrival at stop 2 is the 16th, so the slack is 1 and two slips are priced.
+	if got.Problem != "" || got.SlackDays != 1 || len(got.Slips) != 2 {
+		t.Fatalf("slips = %+v", got)
+	}
+	// Slip 1 is two days on the plan: leg 0 leaves on the 16th, in the 25 kn.
+	if s := got.Slips[0]; s.Days != 1 || s.Leg != 0 || s.Date != "2026-11-16" || s.Verdict != "no_go" || s.LateByDays != 0 {
+		t.Fatalf("slip 1 = %+v", s)
+	}
+	if s := got.Slips[1]; s.Days != 2 || s.Leg != 0 || s.Date != "2026-11-17" || s.LateByDays != 1 {
+		t.Fatalf("slip 2 = %+v", s)
+	}
+}
+
+func TestSlipPlan_ABehindPlanThatTheProjectionMakesLateHasNoSlipsToPrice(t *testing.T) {
+	p, legs := slipPlan2(t, "2026-11-15T12:00") // on time as stored, late once projected
+	f := &paFake{}
+	d := paDeps(f)
+	d.now = func() time.Time { return paAt(15, 8, 0) }
+	got := slipsOf(context.Background(), p, legs, d)
+	if len(got.Slips) != 0 || got.SlackDays != -1 || f.fetches != 0 {
+		t.Fatalf("slips = %+v after %d forecast reads", got, f.fetches)
+	}
+}
+
 func TestSlipPlan_AGoSlipIsNamedToo(t *testing.T) {
 	p, legs := slipPlan2(t, "2026-11-16T12:00")
 	got := slipsOf(context.Background(), p, legs, paDeps(&paFake{})) // 10 kn all through

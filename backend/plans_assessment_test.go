@@ -114,7 +114,13 @@ func paDeps(f *paFake) planAssessDeps {
 			return 0, 0, errors.New("the boat has no usable position fix yet")
 		},
 		suggested: suggested,
-		sun:       pwSun,
+		keptSuggestion: func(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error) {
+			if f.store == nil {
+				return time.Time{}, false, nil
+			}
+			return f.store.KeptSuggestion(planID, legKey, day, loc)
+		},
+		sun: pwSun,
 		dawn: func(date time.Time, lat, lon float64) (time.Time, bool) {
 			y, m, d := date.Date()
 			return time.Date(y, m, d, 5, 15, 0, 0, date.Location()), true

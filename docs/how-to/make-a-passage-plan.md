@@ -101,12 +101,17 @@ a booking, and you want to know how much the run can slip.
 
 1. Choose **Change plan**.
 2. On the stop you have to reach, set **Arrive by** to the date and time. Any
-   stop can have one, not only the last.
+   stop can have one except the first, because the plan starts where the boat
+   already is.
 3. Choose **Save plan**.
 
 A line above the table now says "Slack 1 day", which is the whole days between
 when the plan has you arriving and the day you set. If the plan already has you
-arriving later, it says "Late by 1 day" in red. Below the slack, the page lists
+arriving later, it says "Late by 1 day" in red. If you've fallen behind, the
+line says that first, for example "Behind plan by 4 days. Late by 1 day". The
+page then works out your arrival as if the rest of the plan starts from today,
+not from the dates you saved, so a plan you haven't kept up with doesn't claim
+slack you've already used. Below the slack, the page lists
 what slipping the plan would meet, one day at a time, and names the worst leg
 for each, for example "Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
 ahead, No-Go (late by 1 day)". The slips take a little longer than the table, so

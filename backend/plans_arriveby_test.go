@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // An arrive-by is an optional date and time on any stop, "YYYY-MM-DDTHH:MM" at
 // that stop. Slack is the whole days between the stop's planned arrival and its
@@ -26,6 +29,17 @@ func TestNormalisePlan_ArriveByIsKeptOrRefused(t *testing.T) {
 		if verr == nil || verr.Field != "arrive_by" {
 			t.Errorf("arrive-by %q: err = %v, want a refusal on arrive_by", bad, verr)
 		}
+	}
+}
+
+// The plan starts where the boat already is, so the first stop is never
+// "reached" and cannot carry an arrive-by.
+func TestNormalisePlan_NoArriveByOnTheFirstStop(t *testing.T) {
+	p := validPlan()
+	p.Stops[0].ArriveBy = "2026-11-14T09:00"
+	_, verr := normalisePlan(p)
+	if verr == nil || verr.Field != "arrive_by" {
+		t.Fatalf("first stop arrive-by: err = %v, want a refusal on arrive_by", verr)
 	}
 }
 
@@ -57,19 +71,19 @@ func TestPlanStore_ArriveByRoundTripsAndSurvivesAPatch(t *testing.T) {
 func TestPlanSlack_IsWholeDaysFromPlannedArrivalToArriveBy(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // arrives 14, 16, 17, 18, 19
 	p.Stops[4].ArriveBy = "2026-11-20T17:00"
-	s, ok := planSlackOf(p, nil)
+	s, ok := planSlackOf(p, nil, 0)
 	if !ok || s.Days != 1 || s.Stop != 4 {
 		t.Fatalf("slack = %+v %v, want 1 day at stop 4", s, ok)
 	}
 	// Late: arrive-by is the day before the planned arrival.
 	p.Stops[4].ArriveBy = "2026-11-18T23:00"
-	s, _ = planSlackOf(p, nil)
+	s, _ = planSlackOf(p, nil, 0)
 	if s.Days != -1 {
 		t.Fatalf("late slack = %+v, want -1", s)
 	}
 	// With none anywhere there is no slack to speak of.
 	p.Stops[4].ArriveBy = ""
-	if _, ok := planSlackOf(p, nil); ok {
+	if _, ok := planSlackOf(p, nil, 0); ok {
 		t.Fatal("no arrive-by must give no slack")
 	}
 }
@@ -78,14 +92,67 @@ func TestPlanSlack_TheTightestStopRulesAndAReachedStopIsLeftOut(t *testing.T) {
 	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0)
 	p.Stops[2].ArriveBy = "2026-11-18T12:00" // arrives 17: slack 1
 	p.Stops[4].ArriveBy = "2026-11-25T12:00" // arrives 19: slack 6
-	s, _ := planSlackOf(p, nil)
+	s, _ := planSlackOf(p, nil, 0)
 	if s.Days != 1 || s.Stop != 2 {
 		t.Fatalf("slack = %+v, want the tighter stop 2", s)
 	}
 	// Legs 0 and 1 done: the boat is at stop 2, whose arrive-by no longer binds.
 	done := []string{planProgressDone, planProgressDone, "", ""}
-	s, _ = planSlackOf(p, done)
+	s, _ = planSlackOf(p, done, 0)
 	if s.Days != 6 || s.Stop != 4 {
 		t.Fatalf("slack with stop 2 reached = %+v, want stop 4's 6 days", s)
+	}
+}
+
+// A plan that has fallen behind is projected forward from today (ADR 0288): the
+// days between the first leg to do's planned departure and today move every leg
+// still to do, and slack is counted on the moved dates.
+
+func TestPlanBehindDays_IsTodayPastTheFirstLegToDosDeparture(t *testing.T) {
+	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // leaves stop 0 on the 16th, stop 1 on the 17th
+	// 18 Nov 01:00 at UTC+10 is still the 17th in UTC: the day is the boat's.
+	cases := []struct {
+		name     string
+		now      time.Time
+		progress []string
+		want     int
+	}{
+		{"before the planned day", time.Date(2026, 11, 14, 22, 0, 0, 0, time.UTC), nil, 0},
+		{"on the planned day", time.Date(2026, 11, 15, 22, 0, 0, 0, time.UTC), nil, 0},
+		{"two days on, in the boat's zone", time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), nil, 2},
+		{"counted from the first leg still to do", time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), []string{planProgressDone, "", "", ""}, 1},
+		{"everything done", time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC), []string{planProgressDone, planProgressDone, planProgressSkipped, planProgressDone}, 0},
+	}
+	for _, c := range cases {
+		got, err := planBehindDays(p, c.progress, c.now)
+		if err != nil || got != c.want {
+			t.Errorf("%s: behind %d (%v), want %d", c.name, got, err, c.want)
+		}
+	}
+}
+
+func TestPlanSlack_ABehindPlanIsCountedOnTheProjectedArrival(t *testing.T) {
+	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0) // arrives 14, 16, 17, 18, 19
+	p.Stops[4].ArriveBy = "2026-11-20T17:00"
+	s, ok := planSlackOf(p, nil, 2) // two days behind: arrives the 21st
+	if !ok || s.Days != -1 || s.Stop != 4 || s.BehindDays != 2 {
+		t.Fatalf("slack = %+v %v, want late by 1 day at stop 4, 2 days behind", s, ok)
+	}
+	// A stop already reached does not move with the plan.
+	p.Stops[2].ArriveBy = "2026-11-17T09:00"
+	done := []string{planProgressDone, planProgressDone, "", ""}
+	s, _ = planSlackOf(p, done, 1)
+	if s.Stop != 4 || s.Days != 0 {
+		t.Fatalf("slack = %+v, want stop 4 on its day (arrives 20 against the 20th)", s)
+	}
+}
+
+func TestPlanOutlook_SaysHowFarBehindThePlanIsAndWhetherThatMakesItLate(t *testing.T) {
+	p := planAt(t, "2026-11-14", 2, 1, 1, 1, 0)
+	p.Stops[4].ArriveBy = "2026-11-20T17:00"
+	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
+	s, ok, first, err := planOutlook(p, make([]string, 4), now)
+	if err != nil || !ok || first != 0 || s.Days != -1 || s.BehindDays != 2 {
+		t.Fatalf("outlook = %+v %v first %d (%v)", s, ok, first, err)
 	}
 }

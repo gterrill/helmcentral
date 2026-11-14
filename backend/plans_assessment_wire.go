@@ -21,6 +21,10 @@ import (
 // the refresh finds it kept rather than racing its expiry.
 const planForecastMemoTTL = 12 * time.Minute
 
+// planForecastFetchTimeout bounds one shared read of a point's forecast, which
+// runs apart from the request that started it.
+const planForecastFetchTimeout = 60 * time.Second
+
 // planForecastPoints is the forecast read at every point of every plan's legs,
 // kept for planForecastMemoTTL.
 var planForecastPoints = newPlanForecastMemo(planForecastMemoTTL)
@@ -55,22 +59,32 @@ func (m *planForecastMemo) wrap(fc forecastSource, zone string, now time.Time) f
 		if f, ok := m.kept(key, now); ok {
 			return f, nil
 		}
-		v, err, _ := m.flight.Do(key, func() (any, error) {
+		// The shared read belongs to every reader waiting on it, not to the one that
+		// started it: it runs on a context detached from that caller, with its own
+		// bound, and each caller leaves early on its own context.
+		ch := m.flight.DoChan(key, func() (any, error) {
 			// A reader that waited on an earlier flight finds what it kept.
 			if f, ok := m.kept(key, now); ok {
 				return f, nil
 			}
-			f, err := inner(ctx, lat, lon)
+			fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), planForecastFetchTimeout)
+			defer cancel()
+			f, err := inner(fetchCtx, lat, lon)
 			if err != nil {
 				return nil, err
 			}
 			m.keep(key, now, f)
 			return f, nil
 		})
-		if err != nil {
-			return passageForecast{}, err
+		select {
+		case <-ctx.Done():
+			return passageForecast{}, ctx.Err()
+		case r := <-ch:
+			if r.Err != nil {
+				return passageForecast{}, r.Err
+			}
+			return r.Val.(passageForecast), nil
 		}
-		return v.(passageForecast), nil
 	}
 	return fc
 }
@@ -148,6 +162,9 @@ func productionPlanAssessDeps(settingsPath string) planAssessDeps {
 		},
 		suggested: func(planID int64, legKey, day string, t time.Time) (time.Time, error) {
 			return globalDocumentStore.FirstSuggestion(planID, legKey, day, t)
+		},
+		keptSuggestion: func(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error) {
+			return globalDocumentStore.KeptSuggestion(planID, legKey, day, loc)
 		},
 		sun:          sunTimes,
 		dawn:         civilDawn,

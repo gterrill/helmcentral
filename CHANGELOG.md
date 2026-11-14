@@ -54,7 +54,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   that runs past a day, or a day past the forecast, gets no verdict.
 - **A plan now knows what you've sailed, how much it can slip, and what changed
   since you last looked.** Set **Arrive by** on any stop and a line above the
-  table says "Slack 1 day", or "Late by 1 day" in red. Below it, the page tells
+  table says "Slack 1 day", or "Late by 1 day" in red. The first stop has no
+  arrive-by, since the plan starts where the boat is. A plan you've fallen
+  behind on counts its slack from today and says "Behind plan by 4 days". Below it, the page tells
   you what slipping the plan one day at a time would meet and names the worst
   leg for each, like "Slip 2 days: Mooloolaba → Manly Thu meets wind 18 kn
   ahead, No-Go (late by 1 day)". A leg is marked **Done** when a passage you

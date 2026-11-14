@@ -378,12 +378,19 @@ Here's what the table shows:
   change the plan. While the new answer is being worked out, the verdict and
   current read "…", and Helmcentral never leaves an answer from before your
   change on screen. If the check fails, the page says why.
-- **Arrive by and slack.** On any stop you can set an arrive-by, the latest
-  date and time you want to be there. A line above the table then says "Slack 1
-  day", which is the whole days between when the plan has you arriving and that
-  day. If the plan already has you arriving later, the line says "Late by 1 day"
-  in red. With several arrive-bys, the line follows the tightest one that's still
-  ahead of you. With none, there's no line.
+- **Arrive by and slack.** On any stop but the first you can set an arrive-by,
+  the latest date and time you want to be there. The first stop has none,
+  because the plan starts where the boat already is. A line above the table
+  then says "Slack 1 day", which is the whole days between when the plan has you
+  arriving and that day. If the plan already has you arriving later, the line
+  says "Late by 1 day" in red. With several arrive-bys, the line follows the
+  tightest one that's still ahead of you. With none, there's no line.
+- **A plan that's fallen behind.** If the next leg should have left on a day
+  that's already gone, the page counts from today. It moves every leg you
+  haven't done forward by the days you're behind, and works out the slack on
+  those dates. The line says so first, for example "Behind plan by 4 days. Late
+  by 1 day". The slips below are measured from the same moved plan, so none of
+  them lands on a day that has passed. Your saved dates don't change.
 - **What a slip would meet.** When there's slack, the page works out what
   slipping the plan would do, one day at a time, up to one day past your slack.
   Every leg you haven't done moves later by that many days, the plan is judged
@@ -408,8 +415,9 @@ Here's what the table shows:
   at. **Slip a
   day** adds a night at that stop, the same as **+1 night**, and moves every
   later date. If you didn't set a time, the hour counts from the first time
-  Helmcentral suggested that day. When the day's window has closed, with the boat
-  still there, the row says it straight away. With no usable position fix, there's
+  Helmcentral suggested that day, even once the day's window has closed. Only when
+  the window has closed and Helmcentral never suggested a time that day does the
+  row say it straight away. With no usable position fix, there's
   no prompt, since an unknown position doesn't mean you're in port. Dates never
   move on their own.
 - **What changed since you last looked.** When you open a plan, a leg whose

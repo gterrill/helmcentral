@@ -35,7 +35,7 @@ interface PlanAssessmentApi {
   problem: string;
   warnings_error: string;
   progress_error?: string;
-  slack?: { days: number; stop: number } | null;
+  slack?: { days: number; stop: number; behind_days: number } | null;
   legs: PlanLegAssessmentApi[] | null;
   stops: Array<{ stop: number; nights: Array<{ date: string; warning: string; url: string }> | null }> | null;
 }
@@ -64,7 +64,7 @@ export function mapAssessment(raw: PlanAssessmentApi): PlanAssessment {
     problem: raw.problem,
     warningsError: raw.warnings_error,
     progressError: raw.progress_error ?? "",
-    slack: raw.slack ?? null,
+    slack: raw.slack ? { days: raw.slack.days, stop: raw.slack.stop, behindDays: raw.slack.behind_days } : null,
     legs: (raw.legs ?? []).map(mapLegAssessment),
     stops: (raw.stops ?? []).map((s) => ({ stop: s.stop, nights: s.nights ?? [] })),
   };

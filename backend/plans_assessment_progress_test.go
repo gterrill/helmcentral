@@ -75,6 +75,23 @@ func TestAssessPlan_SlackIsStatedFromTheArriveBy(t *testing.T) {
 	}
 }
 
+func TestAssessPlan_ABehindPlanStatesHowFarBehindAndWhetherItIsLate(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0) // reaches the last stop on the 15th
+	p.Stops[2].ArriveBy = "2026-11-17T17:00"
+	d := paDeps(&paFake{})
+	d.now = func() time.Time { return paAt(16, 8, 0) } // leg 0 was to leave on the 14th
+	got := assessPlan(t.Context(), p, legs, d, planAssessOptions{})
+	// Two days behind: reaches the last stop on the 17th, the arrive-by day.
+	if got.Slack == nil || got.Slack.BehindDays != 2 || got.Slack.Days != 0 {
+		t.Fatalf("slack = %+v", got.Slack)
+	}
+	d.now = func() time.Time { return paAt(17, 8, 0) }
+	got = assessPlan(t.Context(), p, legs, d, planAssessOptions{})
+	if got.Slack == nil || got.Slack.BehindDays != 3 || got.Slack.Days != -1 {
+		t.Fatalf("slack = %+v", got.Slack)
+	}
+}
+
 // ── still in port ───────────────────────────────────────────────────────
 
 func atStop(p plan, i int) func() (float64, float64, error) {
@@ -160,6 +177,70 @@ func TestAssessPlan_ASuggestedLegCountsFromTheDaysFirstSuggestionAcrossARestart(
 	}
 }
 
+// A read that finds the day's suggestion already kept writes nothing, and the old
+// days are cleared once a day, not on every request.
+func TestFirstSuggestion_WritesOnlyWhenTheLegHasNoRowAndPrunesOncePerDay(t *testing.T) {
+	store := newTestDocumentStore(t)
+	const day = "2026-11-14"
+	staleRows := func() int {
+		var n int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM plan_first_suggestions WHERE day < '2026-11-10'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	plantStale := func() {
+		if _, err := store.db.Exec(`INSERT OR REPLACE INTO plan_first_suggestions (plan_id, leg_key, day, depart_ms) VALUES (9, 'old', '2026-11-01', 1)`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plantStale()
+	if _, err := store.FirstSuggestion(1, "A → B|"+day, day, paAt(14, 6, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if staleRows() != 0 {
+		t.Fatal("the first suggestion of the day did not clear the old days")
+	}
+	plantStale()
+	if got, err := store.FirstSuggestion(1, "A → B|"+day, day, paAt(14, 9, 0)); err != nil || !got.Equal(paAt(14, 6, 0)) {
+		t.Fatalf("kept = %v (%v)", got, err)
+	}
+	if staleRows() != 1 {
+		t.Fatal("a request that found its row already kept wrote to the table")
+	}
+	// A leg with no row writes, but the day's pruning is done.
+	if _, err := store.FirstSuggestion(1, "B → C|"+day, day, paAt(14, 9, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if staleRows() != 1 {
+		t.Fatal("old days were cleared twice on one day")
+	}
+	// The next day clears them again.
+	if _, err := store.FirstSuggestion(1, "A → B|2026-11-15", "2026-11-15", paAt(15, 6, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if staleRows() != 0 {
+		t.Fatal("a new day did not clear the old days")
+	}
+}
+
+func TestFirstSuggestion_KeptSuggestionReadsWithoutWriting(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if _, ok, err := store.KeptSuggestion(1, "A → B|2026-11-14", "2026-11-14", paLoc); err != nil || ok {
+		t.Fatalf("nothing kept: ok %v err %v", ok, err)
+	}
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM plan_first_suggestions`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a read wrote %d rows (%v)", n, err)
+	}
+	if _, err := store.FirstSuggestion(1, "A → B|2026-11-14", "2026-11-14", paAt(14, 6, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := store.KeptSuggestion(1, "A → B|2026-11-14", "2026-11-14", paLoc); err != nil || !ok || !got.Equal(paAt(14, 6, 0)) {
+		t.Fatalf("kept = %v %v (%v)", got, ok, err)
+	}
+}
+
 func TestFirstSuggestion_KeepsTheFirstOfADayAndPrunesOldDays(t *testing.T) {
 	store := newTestDocumentStore(t)
 	at := func(day, h int) time.Time { return paAt(day, h, 0) }
@@ -186,5 +267,26 @@ func TestAssessPlan_AWindowThatHasClosedWithTheBoatStillInPortIsPastTheHour(t *t
 	l := stillAt(t, paAt(14, 18, 0), &paFake{}, "")
 	if l.NoteKind != planKindWindowPassed || !l.StillInPort {
 		t.Fatalf("leg = %+v", l)
+	}
+}
+
+func TestAssessPlan_AClosedWindowStillWaitsAnHourPastTheDaysFirstSuggestion(t *testing.T) {
+	const key = "Great Sandy Straits Marina → Pelican Bay|2026-11-14"
+	// The boat was expected away at 5.30 PM; at 6 PM the window has gone, but the
+	// hour is not up.
+	store := newTestDocumentStore(t)
+	if _, err := store.FirstSuggestion(1, key, "2026-11-14", paAt(14, 17, 30)); err != nil {
+		t.Fatal(err)
+	}
+	if l := stillAt(t, paAt(14, 18, 0), &paFake{store: store}, ""); l.NoteKind != planKindWindowPassed || l.StillInPort {
+		t.Fatalf("half an hour past the first suggestion: %+v", l)
+	}
+	// An hour on, it is.
+	if l := stillAt(t, paAt(14, 18, 30), &paFake{store: store}, ""); !l.StillInPort {
+		t.Fatalf("an hour past the first suggestion: %+v", l)
+	}
+	// With no suggestion kept today, the closed window alone counts.
+	if l := stillAt(t, paAt(14, 18, 0), &paFake{store: newTestDocumentStore(t)}, ""); !l.StillInPort {
+		t.Fatalf("no first suggestion kept: %+v", l)
 	}
 }

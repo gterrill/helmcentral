@@ -187,6 +187,9 @@ type planAssessDeps struct {
 	// suggested keeps the first departure suggested for a leg on a day and returns
 	// the one kept (documentStore.FirstSuggestion). Nil keeps nothing.
 	suggested func(planID int64, legKey, day string, t time.Time) (time.Time, error)
+	// keptSuggestion reads the first suggestion kept for a leg on a day, without
+	// writing one (documentStore.KeptSuggestion). Nil reads none.
+	keptSuggestion func(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error)
 }
 
 // planEnv is what every leg of an assessment shares.
@@ -277,7 +280,14 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		progress = d.readProgress(ctx, p, &out)
 	}
 	if !opts.VerdictsOnly {
-		if s, ok, _ := planOutlook(p, progress); ok {
+		s, ok, _, err := planOutlook(p, progress, now)
+		switch {
+		case err != nil:
+			// The plan's own dates are not readable: say so, and leave the slack out.
+			if out.Problem == "" {
+				out.Problem = "Slack could not be worked out: " + err.Error()
+			}
+		case ok:
 			out.Slack = &s
 		}
 	}

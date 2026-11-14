@@ -192,19 +192,28 @@ export interface PlanAssessment {
   stops: Array<{ stop: number; nights: PlanStopWarning[] }>;
 }
 
-/** Whole days between a stop's planned arrival and its arrive-by; negative when late. */
+/**
+ * Whole days between a stop's arrival and its arrive-by; negative when late. A
+ * plan that has fallen behind is counted on its dates moved forward to today.
+ */
 export interface PlanSlack {
   days: number;
   /** The stop whose arrive-by sets it. */
   stop: number;
+  /** How many days the plan has fallen behind its dates; 0 when it is on time. */
+  behindDays: number;
 }
 
 const plural = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
-/** "Slack 1 day", or "Late by 2 days" once the plan is past its arrive-by. */
+/**
+ * "Slack 1 day", or "Late by 2 days" once the plan is past its arrive-by. A plan
+ * that has fallen behind says so first: "Behind plan by 4 days. Late by 1 day".
+ */
 export function slackText(slack: PlanSlack): { text: string; late: boolean } {
-  if (slack.days < 0) return { text: `Late by ${plural(-slack.days)}`, late: true };
-  return { text: `Slack ${plural(slack.days)}`, late: false };
+  const behind = slack.behindDays > 0 ? `Behind plan by ${plural(slack.behindDays)}. ` : "";
+  if (slack.days < 0) return { text: `${behind}Late by ${plural(-slack.days)}`, late: true };
+  return { text: `${behind}Slack ${plural(slack.days)}`, late: false };
 }
 
 /**
@@ -544,7 +553,8 @@ export function draftToInput(name: string, firstArrive: string, stops: DraftStop
         nights: s.nights,
         vias: last ? [] : s.vias,
         departTime: last ? "" : s.departTime,
-        arriveBy: s.arriveBy,
+        // The plan starts where the boat is: the first stop has no arrive-by.
+        arriveBy: i === 0 ? "" : s.arriveBy,
       };
     }),
   };

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"time"
@@ -33,16 +34,54 @@ func checkArriveBy(v string, n int) *planError {
 
 // planSlack is the room a plan has: Days is negative when the stop is already
 // planned to be reached after its arrive-by, and Stop is the stop that sets it.
+// BehindDays is how far the plan has fallen behind its stored dates: the days
+// since the first leg still to do should have left. Days is counted on the plan
+// moved forward by them.
 type planSlack struct {
-	Days int `json:"days"`
-	Stop int `json:"stop"`
+	Days       int `json:"days"`
+	Stop       int `json:"stop"`
+	BehindDays int `json:"behind_days"`
+}
+
+// planBehindDays is how many days the plan has fallen behind: today, in the zone
+// of the stop the first leg still to do leaves, less that leg's planned
+// departure day, and 0 when the plan is on time, ahead, or has nothing left to
+// do. The stored dates are not moved; the projection is made from this.
+func planBehindDays(p plan, progress []string, now time.Time) (int, error) {
+	first := slices.Index(progress, "")
+	if first < 0 {
+		if progress != nil {
+			return 0, nil // every leg is done or skipped
+		}
+		first = 0
+	}
+	if first >= len(p.Stops)-1 {
+		return 0, nil
+	}
+	stop := p.Stops[first]
+	zone, err := stayZoneAt(stop.Lat, stop.Lon)
+	if err != nil {
+		return 0, fmt.Errorf("the time zone at %s is not known: %w", stop.Name, err)
+	}
+	planned, err := time.Parse(planDateLayout, stop.Depart)
+	if err != nil {
+		return 0, fmt.Errorf("the departure from %s, %q, is not a date: %w", stop.Name, stop.Depart, err)
+	}
+	today, err := time.Parse(planDateLayout, dayAt(zone, now))
+	if err != nil {
+		return 0, err
+	}
+	return max(0, planDaysBetween(planned, today)), nil
 }
 
 // planSlackOf is the tightest slack among the stops that have an arrive-by and
 // have not yet been reached. progress is each leg's progress ("" to do, done or
 // skipped), nil when none is known: a stop the boat has reached or passed no
-// longer binds. ok is false when no such stop has an arrive-by.
-func planSlackOf(p plan, progress []string) (s planSlack, ok bool) {
+// longer binds. behind is how many days the plan has fallen behind: every stop
+// after the first leg still to do arrives that many days later than stored. ok
+// is false when no such stop has an arrive-by.
+func planSlackOf(p plan, progress []string, behind int) (s planSlack, ok bool) {
+	first := max(slices.Index(progress, ""), 0)
 	for i, stop := range p.Stops {
 		if stop.ArriveBy == "" || stopReached(progress, i) {
 			continue
@@ -55,21 +94,28 @@ func planSlackOf(p plan, progress []string) (s planSlack, ok bool) {
 		if err != nil {
 			continue
 		}
+		if i > first {
+			arrive = arrive.AddDate(0, 0, behind)
+		}
 		days := planDaysBetween(arrive, by)
 		if !ok || days < s.Days {
-			s, ok = planSlack{Days: days, Stop: i}, true
+			s, ok = planSlack{Days: days, Stop: i, BehindDays: behind}, true
 		}
 	}
 	return s, ok
 }
 
-// planOutlook is what the plan has left to do: its tightest slack, when a stop
-// still ahead has an arrive-by, and the first leg not done or skipped, -1 when
-// there is none.
-func planOutlook(p plan, progress []string) (slack planSlack, haveSlack bool, first int) {
-	slack, haveSlack = planSlackOf(p, progress)
+// planOutlook is what the plan has left to do: its tightest slack on the plan
+// moved forward to today, when a stop still ahead has an arrive-by, and the first
+// leg not done or skipped, -1 when there is none.
+func planOutlook(p plan, progress []string, now time.Time) (slack planSlack, haveSlack bool, first int, err error) {
+	behind, err := planBehindDays(p, progress, now)
+	if err != nil {
+		return slack, false, -1, err
+	}
+	slack, haveSlack = planSlackOf(p, progress, behind)
 	first = slices.Index(progress, "")
-	return slack, haveSlack, first
+	return slack, haveSlack, first, nil
 }
 
 // stopReached says whether the boat has arrived at or passed stop i: the leg

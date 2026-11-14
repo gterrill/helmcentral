@@ -50,7 +50,7 @@ describe("mapAssessment progress, slack and keys", () => {
   const withProgress = {
     ...API_ASSESSMENT,
     progress_error: "",
-    slack: { days: 2, stop: 2 },
+    slack: { days: 2, stop: 2, behind_days: 1 },
     legs: [
       { ...API_ASSESSMENT.legs[0], key: "A → B|2026-11-14", progress: "done", still_in_port: false, note: "", note_kind: "", verdict: "" },
       { ...API_ASSESSMENT.legs[1], key: "B → C|2026-11-15", progress: "", still_in_port: true },
@@ -67,7 +67,7 @@ describe("mapAssessment progress, slack and keys", () => {
   });
 
   it("reads the slack, or null when no stop has an arrive-by", () => {
-    expect(mapAssessment(withProgress as never).slack).toEqual({ days: 2, stop: 2 });
+    expect(mapAssessment(withProgress as never).slack).toEqual({ days: 2, stop: 2, behindDays: 1 });
     expect(mapAssessment({ ...withProgress, slack: null } as never).slack).toBeNull();
   });
 

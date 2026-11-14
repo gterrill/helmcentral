@@ -51,6 +51,59 @@ func TestPlanForecastMemo_ReadersMissingOnTheSamePointAtOnceShareOneRead(t *test
 	}
 }
 
+func TestPlanForecastMemo_ACancelledLeaderDoesNotFailTheReadersSharingItsRead(t *testing.T) {
+	m := newPlanForecastMemo(planForecastMemoTTL)
+	var calls atomic.Int32
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	fc := forecastSource{Provider: "wx", Fetch: func(ctx context.Context, _, _ float64) (passageForecast, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		select {
+		case <-ctx.Done():
+			return passageForecast{}, ctx.Err()
+		case <-release:
+			return passageForecast{FetchedAt: paNow}, nil
+		}
+	}}
+	wrapped := m.wrap(fc, "Australia/Brisbane", paNow)
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := wrapped.Fetch(leaderCtx, -27.0, 153.0)
+		leaderErr <- err
+	}()
+	<-started
+	followerGot := make(chan error, 1)
+	go func() {
+		_, err := wrapped.Fetch(context.Background(), -27.0, 153.0)
+		followerGot <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // the follower is waiting on the leader's read
+	cancelLeader()
+	// The leader's own request is over and says so, without waiting for the read.
+	select {
+	case err := <-leaderErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("leader err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cancelled leader kept waiting")
+	}
+	close(release)
+	select {
+	case err := <-followerGot:
+		if err != nil {
+			t.Fatalf("the follower failed with the leader's cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the follower never got the forecast")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("%d provider reads, want 1 shared", got)
+	}
+}
+
 func TestPlanForecastMemo_ExpiredPointsAreClearedOncePerTTLNotOnEveryMiss(t *testing.T) {
 	m := newPlanForecastMemo(10 * time.Minute)
 	fc := forecastSource{Provider: "wx", Fetch: func(context.Context, float64, float64) (passageForecast, error) {

@@ -102,8 +102,9 @@ const planStillInPortAfter = time.Hour
 
 // markStillInPort flags the legs leaving today whose departure is an hour gone
 // with the boat still at the stop. The reference is the operator's time, else the
-// leg's first suggestion of the day (kept in the database), else (the day's
-// window already closed) now. With no position there is no prompt: an unknown
+// leg's first suggestion of the day (kept in the database, and still the
+// reference once the day's window has closed), else, with the window closed and
+// none kept, now. With no position there is no prompt: an unknown
 // fix is not "in port".
 func (d planAssessDeps) markStillInPort(p plan, work []*planLegWork, progress []string, now time.Time, out *planAssessment) {
 	var late []int
@@ -160,7 +161,23 @@ func (d planAssessDeps) pastDepartureHour(p plan, i int, w *planLegWork, zone pl
 		}
 		return !now.Before(first.Add(planStillInPortAfter))
 	}
-	return res.NoteKind == planKindWindowPassed
+	if res.NoteKind != planKindWindowPassed {
+		return false
+	}
+	// The day's window has closed, so nothing is suggested now. The boat was still
+	// expected to leave an hour after the first suggestion the day had, when one
+	// was kept; the closed window alone counts only when none was.
+	if d.keptSuggestion != nil {
+		first, ok, err := d.keptSuggestion(p.ID, res.Key, s.Depart, zone.Loc)
+		if err != nil {
+			log.Printf("plans: first suggestion for %s not read: %v", res.Key, err)
+			return false
+		}
+		if ok {
+			return !now.Before(first.Add(planStillInPortAfter))
+		}
+	}
+	return true
 }
 
 // visiblePassagesSince is the visible recorded passages that ended since the

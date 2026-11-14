@@ -60,11 +60,17 @@ const VERDICT_CLASS: Record<LegVerdict, string> = {
   no_data: "text-muted-foreground",
 };
 
-/** A change for the worse reads amber, one for the better emerald. */
-const markClass = (mark: ChangeMark) =>
-  VERDICT_ORDER[mark.now] > VERDICT_ORDER[mark.was]
-    ? "text-amber-600 dark:text-amber-400"
-    : "text-emerald-600 dark:text-emerald-400";
+/**
+ * What the change landed on sets the colour: Go is emerald, a fall to No-Go is
+ * critical, a fall to Marginal amber. Any other change (an improvement that
+ * still isn't Go, or a move to No data) is neutral.
+ */
+const markClass = (mark: ChangeMark) => {
+  if (mark.now === "go") return VERDICT_CLASS.go;
+  if (mark.now === "no_go") return VERDICT_CLASS.no_go;
+  if (mark.now === "marginal" && VERDICT_ORDER.marginal > VERDICT_ORDER[mark.was]) return VERDICT_CLASS.marginal;
+  return "text-muted-foreground";
+};
 
 /**
  * The row the operator chose, by its key (PlanRow.key). Its stop and dates are

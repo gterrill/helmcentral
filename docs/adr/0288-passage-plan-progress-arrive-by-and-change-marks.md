@@ -21,19 +21,32 @@ own date rule, and none rewrites the plan.
 
 ### Arrive-by and slack
 
-Any stop may carry an arrive-by, the latest the operator wants to be there, as
-`YYYY-MM-DDTHH:MM` at that stop (`plan_stops.arrive_by`, empty when none). The
-editor's field is a `datetime-local` input, so it speaks the same format. A stop
-the operator moves keeps its arrive-by, because the arrive-by belongs to the
-stop and not to its position.
+Any stop but the first may carry an arrive-by, the latest the operator wants to
+be there, as `YYYY-MM-DDTHH:MM` at that stop (`plan_stops.arrive_by`, empty when
+none). The plan starts where the boat already is, so the first stop is never
+"reached" and a slip never moves its arrival: validation refuses an arrive-by on
+it, and the editor hides the field there and sends none for a stop moved to the
+front. The editor's field is a `datetime-local` input, so it speaks the same
+format. A stop the operator moves keeps its arrive-by, because the arrive-by
+belongs to the stop and not to its position.
 
-Slack is the whole calendar days from the stop's planned arrival to the arrive-by's
-day. The time of day is kept for the operator to read and does not change the
-count. With several arrive-bys the tightest rules, and a stop the boat has
-already reached or passed no longer binds. Slack goes out with the assessment as
-`slack: {days, stop}`, null when no stop still ahead has an arrive-by. The page
-puts a line above the table: "Slack 1 day", or, when the plan is already planned
-past it, "Late by 2 days" in red. With no arrive-by there is no line.
+Slack is the whole calendar days from the stop's arrival to the arrive-by's day.
+The time of day is kept for the operator to read and does not change the count.
+With several arrive-bys the tightest rules, and a stop the boat has already
+reached or passed no longer binds. Slack goes out with the assessment as
+`slack: {days, stop, behind_days}`, null when no stop still ahead has an
+arrive-by. The page puts a line above the table: "Slack 1 day", or, when the plan
+is already planned past it, "Late by 2 days" in red. With no arrive-by there is
+no line.
+
+A plan that has fallen behind is projected forward before slack is counted. When
+the first leg still to do should have left on a day before today (today read in
+the zone of the stop it leaves), the plan is behind by the days between. Every
+leg still to do moves that many days later, and slack is the arrive-by's day less
+the projected arrival's day, which can be negative. The stored dates do not move.
+The line then leads with it: "Behind plan by 4 days. Late by 1 day." Slips are
+measured on top of the projected plan, so none of them leaves a leg on a day that
+has gone. A plan on time or ahead has a projection of zero days.
 
 ### Slip cost
 
@@ -105,10 +118,13 @@ their own.
   has moved. The box therefore keeps the first suggestion the assessment made for
   the leg that day (`plan_first_suggestions`, in the documents database, by plan,
   leg key and the stop's local date) and counts the hour from it. A restart keeps
-  it. Days older than two are pruned, a plan's rows go with the plan, and the
-  slips never write it. If the row cannot be kept, there is no prompt, and the
-  log says why. A day whose window has closed with the boat still at the stop
-  counts as past the hour.
+  it. A request writes only when the leg has no row for the day, and then prunes
+  the days older than two, at most once for each day. A plan's rows go with the
+  plan, and the slips never write it. If the row cannot be kept, there is no
+  prompt, and the log says why. A day whose window has closed with the boat still
+  at the stop counts the hour from the day's first suggestion when one was kept,
+  read without writing; with none kept, the closed window alone counts as past
+  the hour.
 - **The position** is the boat's trusted fix (`boatOwnPosition`). A critical GNSS
   alert and the -1, -1 pair are refused as everywhere else. With no position there
   is no prompt: an unknown fix is not "in port". It is read only when some leg
@@ -126,11 +142,14 @@ factor under the same verdict is no change.
   one. An edit that renames a stop or moves the leg's day gives it a new key and
   no mark, which is right: it is not the leg that was looked at. A key the plan no
   longer has is gone when the next snapshot is saved, and a plan's snapshot
-  goes with the plan.
+  goes with the plan. A current leg that has no verdict in a save keeps the one it
+  had, so a leg that briefly says nothing is still compared with its last verdict
+  when it speaks again.
 - **The visit.** The page reads `GET /api/plans/{id}/seen` once when the plan
   opens and never again that visit, and marks each leg whose level differs from it
-  ("was Go, now Marginal"). The first time the plan has a verdict on the page it
-  replaces the whole snapshot with what is on screen, `PUT /api/plans/{id}/seen`
+  ("was Go, now Marginal"), in the colour of what it landed on: Go emerald, a fall
+  to No-Go red, a fall to Marginal amber, anything else neutral. The first time the plan has a verdict on the page it
+  saves what is on screen as the snapshot, `PUT /api/plans/{id}/seen`
   (write tier), in one transaction and only if it differs from the saved one. It
   saves once per visit. A viewer who cannot write sees the marks and saves nothing.
 - **When it fails.** A snapshot that cannot be read is said once above the table

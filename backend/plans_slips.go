@@ -115,7 +115,7 @@ type planSlipSetup struct {
 func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetup, out planSlips, done bool) {
 	out = planSlips{Slips: []planSlip{}}
 	// A plan with no arrive-by has nothing to price: the passages are not read.
-	if _, ok := planSlackOf(p, nil); !ok {
+	if _, ok := planSlackOf(p, nil, 0); !ok {
 		return s, out, true
 	}
 	var scratch planAssessment
@@ -124,7 +124,11 @@ func prepareSlips(ctx context.Context, p plan, d planAssessDeps) (s planSlipSetu
 		out.Problem = "Progress could not be read: " + scratch.ProgressError
 		return s, out, true
 	}
-	slack, ok, first := planOutlook(p, s.progress)
+	slack, ok, first, err := planOutlook(p, s.progress, d.now())
+	if err != nil {
+		out.Problem = "Slack could not be worked out: " + err.Error()
+		return s, out, true
+	}
 	if !ok {
 		return s, out, true
 	}
@@ -166,7 +170,8 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			sp, err := shiftedPlan(p, s.first, n)
+			// A slip is measured on top of the plan projected from today.
+			sp, err := shiftedPlan(p, s.first, s.slack.BehindDays+n)
 			if err != nil {
 				problems[n-1] = "A slipped plan could not be dated: " + err.Error()
 				return

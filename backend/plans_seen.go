@@ -60,21 +60,29 @@ func (s *documentStore) planSeenLocked(planID int64) (map[string]string, error) 
 	return out, rows.Err()
 }
 
-// SavePlanSeen replaces a plan's whole snapshot with the given verdicts, keeping
-// only those whose key is one of the plan's current legs (currentKeys). A
-// snapshot that is the one already saved writes nothing.
+// SavePlanSeen saves the given verdicts as a plan's snapshot, keeping only those
+// whose key is one of the plan's current legs (currentKeys). A current leg the
+// save carries no verdict for keeps the one it had, so a leg with nothing to say
+// for a visit is still compared with its last verdict when it speaks again; a
+// key that is no longer a leg is dropped. A snapshot that is the one already
+// saved writes nothing.
 func (s *documentStore) SavePlanSeen(planID int64, currentKeys []string, seen []planSeenVerdict) error {
-	want := map[string]string{}
-	for _, v := range seen {
-		if slices.Contains(currentKeys, v.Key) {
-			want[v.Key] = v.Verdict
-		}
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	have, err := s.planSeenLocked(planID)
 	if err != nil {
 		return err
+	}
+	want := map[string]string{}
+	for _, k := range currentKeys {
+		if v, ok := have[k]; ok {
+			want[k] = v
+		}
+	}
+	for _, v := range seen {
+		if slices.Contains(currentKeys, v.Key) {
+			want[v.Key] = v.Verdict
+		}
 	}
 	if maps.Equal(have, want) {
 		return nil

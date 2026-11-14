@@ -330,7 +330,7 @@ describe("PlanTable progress, slack, slips and change marks", () => {
   });
 
   it("states the slack above the table, and nothing when no stop has an arrive-by", () => {
-    show(assessment({ slack: { days: 1, stop: 2 } }));
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
     expect(screen.getByTestId("plan-slack")).toHaveTextContent("Slack 1 day");
     expect(screen.getByTestId("plan-slack")).not.toHaveClass("text-destructive");
     cleanup();
@@ -340,7 +340,7 @@ describe("PlanTable progress, slack, slips and change marks", () => {
 
   it("says Late by in red once the plan is past its arrive-by, and prices no slips", () => {
     vi.mocked(usePlanSlips).mockClear();
-    show(assessment({ slack: { days: -2, stop: 2 } }));
+    show(assessment({ slack: { days: -2, stop: 2, behindDays: 0 } }));
     expect(screen.getByTestId("plan-slack")).toHaveTextContent("Late by 2 days");
     expect(screen.getByTestId("plan-slack")).toHaveClass("text-destructive");
     expect(usePlanSlips).not.toHaveBeenCalled();
@@ -358,7 +358,7 @@ describe("PlanTable progress, slack, slips and change marks", () => {
       loading: false,
       error: null,
     });
-    show(assessment({ slack: { days: 1, stop: 2 } }));
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
     const items = screen.getAllByTestId("plan-slip").map((i) => i.textContent);
     expect(items).toEqual([
       "Slip 1 day: Bravo → Charlie Mon, Go.",
@@ -368,22 +368,22 @@ describe("PlanTable progress, slack, slips and change marks", () => {
 
   it("says the slips are being priced, and why they could not be, without holding up the rows", () => {
     vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: true, error: null });
-    show(assessment({ slack: { days: 1, stop: 2 } }));
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
     expect(screen.getByText("Pricing the slips…")).toBeInTheDocument();
     expect(rows()).toHaveLength(3);
     cleanup();
     vi.mocked(usePlanSlips).mockReturnValue({ slips: null, loading: false, error: "router down" });
-    show(assessment({ slack: { days: 1, stop: 2 } }));
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
     expect(screen.getByText(/Slips could not be priced: router down/)).toBeInTheDocument();
   });
 
   it("says when the slips stop at the forecast's reach, and a problem that stopped them", () => {
     vi.mocked(usePlanSlips).mockReturnValue({ slips: { problem: "", capped: true, slips: [slipOf()] }, loading: false, error: null });
-    show(assessment({ slack: { days: 12, stop: 2 } }));
+    show(assessment({ slack: { days: 12, stop: 2, behindDays: 0 } }));
     expect(screen.getByText(/Slips are checked as far as the forecast reaches/)).toBeInTheDocument();
     cleanup();
     vi.mocked(usePlanSlips).mockReturnValue({ slips: { problem: "Progress could not be read: disk", capped: false, slips: [] }, loading: false, error: null });
-    show(assessment({ slack: { days: 1, stop: 2 } }));
+    show(assessment({ slack: { days: 1, stop: 2, behindDays: 0 } }));
     expect(screen.getByText("Progress could not be read: disk")).toBeInTheDocument();
   });
 
@@ -427,6 +427,22 @@ describe("PlanTable progress, slack, slips and change marks", () => {
     show(assessment({ legs: [legAssessment({ verdict: "marginal", limiting: "wind 15 kn ahead" }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }));
     expect(rows()[0]).toHaveTextContent("was Go, now Marginal");
     expect(rows()[1]).not.toHaveTextContent("was ");
+  });
+
+  it.each([
+    ["go", "marginal", "text-amber-600"],
+    ["go", "no_go", "text-red-600"],
+    ["marginal", "no_go", "text-red-600"],
+    ["marginal", "go", "text-emerald-600"],
+    ["no_go", "go", "text-emerald-600"],
+    ["no_go", "marginal", "text-muted-foreground"],
+    ["no_data", "marginal", "text-muted-foreground"],
+    ["marginal", "no_data", "text-muted-foreground"],
+    ["no_go", "no_data", "text-muted-foreground"],
+  ] as const)("colours a change from %s to %s as %s", (was, now, cls) => {
+    vi.mocked(usePlanChangeMarks).mockReturnValue({ marks: new Map([["k0", { was, now }]]), error: null });
+    show(assessment({ legs: [legAssessment({ verdict: now }), legAssessment({ leg: 1, date: "2026-11-16", key: "k1" })] }));
+    expect(screen.getAllByTestId("change-mark")[0]).toHaveClass(cls);
   });
 
   it("says when the change marks could not be read", () => {

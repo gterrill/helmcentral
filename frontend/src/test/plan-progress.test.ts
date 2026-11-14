@@ -50,14 +50,19 @@ describe("verdict and note kind parsing", () => {
 
 describe("slackText", () => {
   it("says the slack in days, singular for one", () => {
-    expect(slackText({ days: 1, stop: 2 })).toEqual({ text: "Slack 1 day", late: false });
-    expect(slackText({ days: 3, stop: 2 })).toEqual({ text: "Slack 3 days", late: false });
-    expect(slackText({ days: 0, stop: 2 })).toEqual({ text: "Slack 0 days", late: false });
+    expect(slackText({ days: 1, stop: 2, behindDays: 0 })).toEqual({ text: "Slack 1 day", late: false });
+    expect(slackText({ days: 3, stop: 2, behindDays: 0 })).toEqual({ text: "Slack 3 days", late: false });
+    expect(slackText({ days: 0, stop: 2, behindDays: 0 })).toEqual({ text: "Slack 0 days", late: false });
   });
 
   it("says Late by when the plan is already past the arrive-by", () => {
-    expect(slackText({ days: -1, stop: 2 })).toEqual({ text: "Late by 1 day", late: true });
-    expect(slackText({ days: -4, stop: 2 })).toEqual({ text: "Late by 4 days", late: true });
+    expect(slackText({ days: -1, stop: 2, behindDays: 0 })).toEqual({ text: "Late by 1 day", late: true });
+    expect(slackText({ days: -4, stop: 2, behindDays: 0 })).toEqual({ text: "Late by 4 days", late: true });
+  });
+
+  it("says first that the plan is behind, then what that leaves", () => {
+    expect(slackText({ days: 1, stop: 2, behindDays: 1 })).toEqual({ text: "Behind plan by 1 day. Slack 1 day", late: false });
+    expect(slackText({ days: -1, stop: 2, behindDays: 4 })).toEqual({ text: "Behind plan by 4 days. Late by 1 day", late: true });
   });
 });
 

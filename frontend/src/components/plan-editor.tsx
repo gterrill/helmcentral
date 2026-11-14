@@ -220,15 +220,17 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
                         />
                       </Field>
                     )}
-                    <Field className="w-52">
-                      <FieldLabel htmlFor={`plan-arrive-by-${i}`}>Arrive by</FieldLabel>
-                      <Input
-                        id={`plan-arrive-by-${i}`}
-                        type="datetime-local"
-                        value={stop.arriveBy}
-                        onChange={(e) => patchStop(i, { arriveBy: e.target.value })}
-                      />
-                    </Field>
+                    {i > 0 && (
+                      <Field className="w-52">
+                        <FieldLabel htmlFor={`plan-arrive-by-${i}`}>Arrive by</FieldLabel>
+                        <Input
+                          id={`plan-arrive-by-${i}`}
+                          type="datetime-local"
+                          value={stop.arriveBy}
+                          onChange={(e) => patchStop(i, { arriveBy: e.target.value })}
+                        />
+                      </Field>
+                    )}
                   </div>
 
                   {!last && (

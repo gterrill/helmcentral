@@ -258,6 +258,9 @@ func normaliseStop(s *planStop, i, last int) *planError {
 	if s.DepartTime != "" && !planTimePattern.MatchString(s.DepartTime) {
 		return perr("depart_time", "stop %d: departure time must be HH:MM", n)
 	}
+	if i == 0 && s.ArriveBy != "" {
+		return perr("arrive_by", "the plan starts where the boat is, so the first stop has no arrive-by")
+	}
 	if e := checkArriveBy(s.ArriveBy, n); e != nil {
 		return e
 	}

@@ -24,8 +24,8 @@ func TestPlanSeen_SavedVerdictsComeBackAndReplaceOlderOnes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[keys[0]] != "no_go" {
-		t.Fatalf("seen = %v: the second snapshot replaces the first whole", got)
+	if got[keys[0]] != "no_go" || got[keys[1]] != "marginal" || len(got) != 2 {
+		t.Fatalf("seen = %v: the second snapshot replaces the verdicts it carries and keeps the rest", got)
 	}
 	if other, _ := store.PlanSeen(8); len(other) != 0 {
 		t.Fatalf("another plan sees %v", other)
@@ -68,6 +68,38 @@ func TestPlanSeen_AKeyTheLegsNoLongerHaveIsDropped(t *testing.T) {
 	got, _ := store.PlanSeen(7)
 	if len(got) != 1 || got[now] != "marginal" {
 		t.Fatalf("seen = %v: only the plan's current legs are kept", got)
+	}
+}
+
+func TestPlanSeen_ALegThatBrieflyHasNoVerdictKeepsItsLastSeenOne(t *testing.T) {
+	store := newTestDocumentStore(t)
+	key := "A → B|2026-11-14"
+	other := "B → C|2026-11-15"
+	keys := []string{key, other}
+	if err := store.SavePlanSeen(7, keys, []planSeenVerdict{{Key: key, Verdict: "go"}, {Key: other, Verdict: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A visit where the forecast was down: the first leg has no verdict to save.
+	if err := store.SavePlanSeen(7, keys, []planSeenVerdict{{Key: other, Verdict: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.PlanSeen(7)
+	if got[key] != "go" {
+		t.Fatalf("seen = %v: the leg lost its last-seen Go while it had no verdict", got)
+	}
+	// It comes back as No-Go, and is then compared with the Go it last had.
+	if err := store.SavePlanSeen(7, keys, []planSeenVerdict{{Key: key, Verdict: "no_go"}, {Key: other, Verdict: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = store.PlanSeen(7); got[key] != "no_go" {
+		t.Fatalf("seen = %v", got)
+	}
+	// A key the plan no longer has is dropped even when nothing replaces it.
+	if err := store.SavePlanSeen(7, []string{other}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = store.PlanSeen(7); len(got) != 1 || got[other] != "go" {
+		t.Fatalf("seen = %v: a key that is no longer a leg is dropped", got)
 	}
 }
 
