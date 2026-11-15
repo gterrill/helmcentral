@@ -254,12 +254,12 @@ func (s *documentStore) RecordHandHourReadingCmd(today time.Time, equipmentID st
 // ── handlers ─────────────────────────────────────────────────────────────
 
 // recordHandHourReadingHandler is POST
-// /api/inventory/equipment/:id/maintenance/hour-readings?today=: {read_on,
+// /api/inventory/equipment/:id/maintenance/hour-readings: {read_on,
 // gauge, note?}.
 func recordHandHourReadingHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req handHourReadingRequest

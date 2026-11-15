@@ -50,23 +50,23 @@ func TestRuleRoutesDecodeAnEncodedJobID(t *testing.T) {
 	}
 	base := "/api/inventory/maintenance/rules/" + enc
 
-	rec := routeRule(t, http.MethodGet, base+today, "")
+	rec := routeRule(t, http.MethodGet, base, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = routeRule(t, http.MethodPut, base+"/overrides"+today, `{"interval_hours": 400}`)
+	rec = routeRule(t, http.MethodPut, base+"/overrides", `{"interval_hours": 400}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overrides PUT: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = routeRule(t, http.MethodDelete, base+"/overrides/interval_hours"+today, "")
+	rec = routeRule(t, http.MethodDelete, base+"/overrides/interval_hours", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("override reset: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = routeRule(t, http.MethodPost, base+"/complete"+today, `{"performed_at":"2026-06-01","hours":100}`)
+	rec = routeRule(t, http.MethodPost, base+"/complete", `{"performed_at":"2026-06-01","hours":100}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = routeRule(t, http.MethodPost, base+"/acknowledge"+today, `{"reason":"deferred"}`)
+	rec = routeRule(t, http.MethodPost, base+"/acknowledge", `{"reason":"deferred"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("acknowledge: %d %s", rec.Code, rec.Body.String())
 	}
@@ -76,7 +76,7 @@ func TestRuleRoutesRefuseAMalformedEscape(t *testing.T) {
 	scheduleFixture(t)
 	// httptest.NewRequest refuses a bad escape, so plant it in RawPath the
 	// way a hand-rolled client's request line would arrive.
-	req := httptest.NewRequest(http.MethodGet, "/api/inventory/maintenance/rules/x"+today, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory/maintenance/rules/x", nil)
 	req.URL.RawPath = "/api/inventory/maintenance/rules/job%3Abad%ZZ"
 	rec := httptest.NewRecorder()
 	maintenanceRuleRouter().ServeHTTP(rec, req)

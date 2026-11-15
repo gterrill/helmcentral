@@ -441,7 +441,7 @@ func TestOpenJobHandlers_RoundTrip(t *testing.T) {
 	withTestDocumentStore(t)
 	pump := mustCreateHandlerTestEquipment(t, "Shower pump")
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs?today=2026-11-07",
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs",
 		`{"equipment_id":"`+pump.ID+`","title":"Leaks at the outlet","before_on":"2026-12-01"}`, "")
 	if err := createOpenJobHandler(c); err != nil {
 		t.Fatalf("createOpenJobHandler: %v", err)
@@ -496,35 +496,39 @@ func TestOpenJobHandlers_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestOpenJobHandlers_CreateAndDropNeedTheOperatorsDate(t *testing.T) {
+// The job is opened and dropped on the boat's day, never a client's, and with
+// no boat day nothing is written.
+func TestOpenJobHandlers_CreateAndDropUseTheBoatsDay(t *testing.T) {
 	store := withTestDocumentStore(t)
 
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs", `{"title":"Leaks"}`, "")
+	useNoBoatDay(t)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs?today=2026-11-07", `{"title":"Leaks"}`, "")
 	if err := createOpenJobHandler(c); err != nil {
 		t.Fatalf("createOpenJobHandler: %v", err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 with no today, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 with no boat day, got %d: %s", rec.Code, rec.Body.String())
 	}
 	jobs, _ := store.ListOpenJobs(openJobFilter{})
 	if len(jobs) != 0 {
 		t.Fatalf("a refused create writes nothing, got %+v", jobs)
 	}
 
-	job := mustOpenJob(t, store, "2026-11-07", openJobReq("Leaks"))
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/drop", `{"reason":"gone"}`, job.ID)
-	if err := dropOpenJobHandler(c); err != nil {
-		t.Fatalf("dropOpenJobHandler: %v", err)
+	useBoatDay(t, "2026-11-08")
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs?today=2030-01-01", `{"title":"Leaks"}`, "")
+	if err := createOpenJobHandler(c); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("createOpenJobHandler: %v, %d: %s", err, rec.Code, rec.Body.String())
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 with no today, got %d: %s", rec.Code, rec.Body.String())
+	job := decodeJob(t, rec.Body.Bytes())
+	if job.OpenedOn != "2026-11-08" {
+		t.Fatalf("opened_on = %q, want the boat's day 2026-11-08", job.OpenedOn)
 	}
 
-	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/drop?today=2026-11-09", `{"reason":"gone"}`, job.ID)
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs/"+job.ID+"/drop", `{"reason":"gone"}`, job.ID)
 	if err := dropOpenJobHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("dropOpenJobHandler: %v, %d: %s", err, rec.Code, rec.Body.String())
 	}
-	if got := decodeJob(t, rec.Body.Bytes()); got.Status != openJobDropped || got.DropReason != "gone" {
+	if got := decodeJob(t, rec.Body.Bytes()); got.Status != openJobDropped || got.DropReason != "gone" || got.ClosedOn != "2026-11-08" {
 		t.Fatalf("unexpected dropped job: %+v", got)
 	}
 }
@@ -542,7 +546,7 @@ func TestOpenJobHandlers_UnknownIDIs404(t *testing.T) {
 
 func TestOpenJobHandlers_ValidationNamesTheField(t *testing.T) {
 	withTestDocumentStore(t)
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs?today=2026-11-07", `{"title":""}`, "")
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/open-jobs", `{"title":""}`, "")
 	if err := createOpenJobHandler(c); err != nil {
 		t.Fatalf("createOpenJobHandler: %v", err)
 	}

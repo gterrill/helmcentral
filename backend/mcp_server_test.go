@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -371,5 +372,22 @@ func TestMCPToolDeps_TodayOnlyForMaintenance(t *testing.T) {
 	}
 	if got := svc.toolDeps("list_maintenance"); got.today.IsZero() {
 		t.Error("list_maintenance has no date")
+	}
+}
+
+// A saved zone that can't be read is not "no position yet": the outside
+// assistant is told what the Maintenance page shows.
+func TestMCPToolDeps_AnUnreadableZoneGivesItsReason(t *testing.T) {
+	env := newMCPTestEnv(t)
+	path := useFreshBoatZone(t)
+	if err := os.WriteFile(path, []byte(`{"zone":"Not/AZone"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := env.deps
+	deps.vesselState = func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil }
+	svc := newMCPService(env.store, func() assistantToolDeps { return deps })
+	_, err := svc.toolDeps("list_maintenance").requireToday("list_maintenance")
+	if err == nil || !strings.Contains(err.Error(), "Not/AZone") || strings.Contains(err.Error(), "has not reported a position") {
+		t.Fatalf("err = %v, want the unreadable zone's reason", err)
 	}
 }

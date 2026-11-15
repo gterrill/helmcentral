@@ -145,7 +145,7 @@ describe('OpenJobsGroup', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(posted).toBeDefined())
-    expect(posted!.url).toContain('today=2026-11-07')
+    expect(posted!.url).not.toContain('today=')
     expect(posted!.body).toMatchObject({ title: 'Cycles too often', equipment_id: 'eq-9', before_on: '2026-12-01' })
   })
 
@@ -212,7 +212,7 @@ describe('OpenJobsGroup', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /drop job/i }))
 
     await waitFor(() => expect(dropped).toBeDefined())
-    expect(dropped!.url).toContain('today=2026-11-07')
+    expect(dropped!.url).not.toContain('today=')
     expect(dropped!.body).toEqual({ reason: 'Fixed itself' })
   })
 

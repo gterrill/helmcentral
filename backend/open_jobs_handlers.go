@@ -13,9 +13,9 @@ import (
 
 // The Open jobs REST surface (ADR 0269), under /api/inventory/open-jobs. Each
 // write runs the same command Mate's changeset runs (open_jobs.go). The
-// operator's own date comes in as ?today= wherever a job is opened or dropped,
-// the way every maintenance write takes it; nothing here reads the server's
-// clock for a date.
+// date is the boat's calendar day, which the server works out (boat_today.go)
+// wherever a job is opened or dropped; nothing here reads the server's clock
+// for a date, and a client cannot supply one.
 
 type openJobDropRequest struct {
 	Reason string `json:"reason"`
@@ -55,9 +55,9 @@ func getOpenJobHandler(c echo.Context) error {
 }
 
 func createOpenJobHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req openJobRequest
@@ -102,9 +102,9 @@ func completeOpenJobHandler(c echo.Context) error {
 // dropOpenJobHandler is POST /api/inventory/open-jobs/:id/drop, with an
 // optional {"reason"}.
 func dropOpenJobHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req openJobDropRequest

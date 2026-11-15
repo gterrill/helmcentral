@@ -39,6 +39,11 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("BOAT_ZONE_FILE", filepath.Join(dir, "boat_zone.json"))
 
+	// The boat's calendar day (ADR 0230) is fixed for the suite so a due date
+	// does not move with the clock; a test that needs another day uses
+	// useBoatDay, and one about the real lookup restores boatToday itself.
+	boatToday = func() (time.Time, error) { return time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), nil }
+
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

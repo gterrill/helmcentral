@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 
 import { MateSheet } from '@/components/mate-sheet'
-import { todayISO } from '@/lib/local-date'
 import { controllableSseStream, flushMicrotasks, recordingBody } from './helpers/fake-sse'
 
 // ADR 0093 voice phase: the Mate sheet owns its own conversations/chat hooks
@@ -238,7 +237,7 @@ describe('MateSheet', () => {
 
     await waitFor(() => expect(postedCreateCalls).toBeGreaterThan(0))
     // From the Logs page or a text selection: read, not heard.
-    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', today: todayISO(), screen: { panel: 'forecast' } }))
+    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', screen: { panel: 'forecast' } }))
   })
 
   it('Open the Mate page hands the active conversation to the panel and closes the sheet', async () => {
@@ -301,7 +300,6 @@ describe('MateSheet', () => {
 
     await waitFor(() => expect(sentBody).toEqual({
       content: 'How does tomorrow look?',
-      today: todayISO(),
       spoken: true,
       screen: { panel: 'forecast' },
     }))
@@ -331,7 +329,6 @@ describe('MateSheet', () => {
 
     await waitFor(() => expect(sentBody).toEqual({
       content: 'What does this say about the membrane?',
-      today: todayISO(),
       screen: screenContext,
     }))
     expect(await screen.findByText('Replace the membrane.')).toBeInTheDocument()

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
-import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import { mapMessage, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
 import { refreshMemoriesForReply } from '@/hooks/use-mate-memories'
@@ -59,8 +58,6 @@ export interface AssistantSendOptions {
   onRefused?: () => void
 }
 
-const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
-
 /** What the operator reads when a question arrives while Mate is still
  * answering the last one: the server's 409 on a send, and a Mate session
  * refusing a second question itself (use-mate-session.ts). */
@@ -72,11 +69,7 @@ export const MATE_BUSY_MESSAGE = 'Mate is still answering the last question.'
 // malformed body throw past the caller.
 async function readErrorMessage(response: Response): Promise<string> {
   try {
-    const data = (await response.json()) as { error?: string; field?: string }
-    // A page opened before the server started requiring `today` posts
-    // without it. The server's wording is for engineers; the operator's fix
-    // is to reload, so say that. No server-side date is ever substituted.
-    if (response.status === 400 && data.field === 'today') return STALE_PAGE_MESSAGE
+    const data = (await response.json()) as { error?: string }
     if (typeof data.error === 'string' && data.error !== '') return data.error
   } catch {
     // Not JSON - fall through to the generic message below.
@@ -320,10 +313,9 @@ export function useAssistantChat() {
       // them - an ordinary panel send (no options at all) posts the same
       // `{ content }` body it always has, so the backend only sees a voice
       // question or a screen context when one genuinely applies.
-      // `today` is always sent: the maintenance tools compute due/overdue
-      // against the operator's own local date, and the server refuses to
-      // guess one (400 naming the field).
-      const body: { content: string; today: string; spoken?: boolean; screen?: AssistantScreenContext; attachments?: string[] } = { content, today: todayISO() }
+      // No date is sent: the server works out the boat's day for the
+      // maintenance tools (ADR 0230).
+      const body: { content: string; spoken?: boolean; screen?: AssistantScreenContext; attachments?: string[] } = { content }
       if (options?.spoken !== undefined) body.spoken = options.spoken
       if (options?.screen !== undefined) body.screen = options.screen
       if (options?.attachments !== undefined) body.attachments = options.attachments

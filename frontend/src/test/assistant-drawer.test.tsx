@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 
 import { AssistantDrawer } from '@/components/assistant-drawer'
-import { todayISO } from '@/lib/local-date'
 import { controllableSseStream, flushMicrotasks as flush, recordingBody } from './helpers/fake-sse'
 
 // ADR 0093: the assistant panel owns its own hooks (status, conversations,
@@ -399,7 +398,7 @@ describe('AssistantDrawer', () => {
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    await waitFor(() => expect(sent).toEqual({ content: 'What about the wind tomorrow?', today: todayISO() }))
+    await waitFor(() => expect(sent).toEqual({ content: 'What about the wind tomorrow?' }))
   })
 
   it('shows the status line while a status frame is pending, then resolves', async () => {

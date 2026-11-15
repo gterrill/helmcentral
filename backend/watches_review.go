@@ -334,8 +334,9 @@ const watchCostLookupTimeout = 30 * time.Second
 // run beside the report.
 func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report watchReport, findings []watchFinding, now time.Time, loc *time.Location) watchReviewOutcome {
 	var tools *watchReviewTools
+	today, todayErr := boatDayAt(now, loc, nil)
 	turn := runUnattendedReview(ctx, unattendedTurn{
-		Cfg: cfg, Now: now, Loc: loc, WebSearch: true,
+		Cfg: cfg, Now: now, Today: today, TodayErr: todayErr, WebSearch: true,
 		ConversationID: "watch-" + w.ID, LogPrefix: "watches", Name: w.Name,
 		Build: func(ctx context.Context, deps assistantToolDeps, units string, pc assistantPromptContext) (unattendedInput, string) {
 			tools = &watchReviewTools{assistantToolDeps: deps, findings: findings}

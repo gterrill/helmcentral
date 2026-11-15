@@ -1,9 +1,28 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { readServerClock, subscribeServerClock } from '@/lib/server-clock'
 import { useSelection } from '@/lib/selection'
-import { formatClock, formatDate, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
+import { formatClock, formatDate, formatDayKey, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
+
+/**
+ * The boat's calendar day (YYYY-MM-DD) on the server clock in the boat's zone,
+ * or null until both are known. Before the first fix the server sends UTC as a
+ * stand-in zone with source "none"; that is no boat day, so this is null then
+ * too. It re-renders the caller only when the day turns. A refetch key, never
+ * a value sent to the server: the server works out the day a due date is
+ * judged on for itself (ADR 0230).
+ */
+export function useBoatDayKey(): string | null {
+  const timeZone = useVesselStateSelector(selectTimeZone)
+  const timeZoneSource = useVesselStateSelector(selectTimeZoneSource)
+  const known = timeZone !== undefined && timeZoneSource !== 'none' && !unknownZoneMessage(timeZone)
+  const select = useCallback(
+    (now: Date | null) => (now === null || !known || timeZone === undefined ? null : formatDayKey(now, timeZone)),
+    [known, timeZone],
+  )
+  return useSelection({ subscribe: subscribeServerClock, getSnapshot: readServerClock, select })
+}
 
 /**
  * The boat's time as the clock surfaces show it (ADR 0218), re-rendering the

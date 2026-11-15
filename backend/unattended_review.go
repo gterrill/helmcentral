@@ -33,8 +33,11 @@ type unattendedInput struct {
 type unattendedTurn struct {
 	Cfg watchConfig
 	Now time.Time
-	// Loc is the zone the turn's "today" is read in; nil is UTC.
-	Loc *time.Location
+	// Today is the boat's day for the turn's tools. Zero means it is not known,
+	// and TodayErr says why; a tool that needs the day refuses with that reason
+	// rather than judge due dates on UTC (ADR 0230).
+	Today    time.Time
+	TodayErr error
 	// WebSearch lets the turn search the web when the operator's setting is on.
 	WebSearch bool
 	// Deadline ends the turn; zero means the caller's context decides.
@@ -69,13 +72,8 @@ func runUnattendedReview(ctx context.Context, t unattendedTurn) unattendedOutcom
 	if err != nil {
 		return unattendedOutcome{Problem: "Mate's settings could not be read: " + firstErrorLine(err), CostKnown: true}
 	}
-	loc := t.Loc
-	if loc == nil {
-		loc = time.UTC
-	}
-	local := t.Now.In(loc)
-	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
-	deps := assistantTurnToolDeps(cfg.APIKey, cfg.SettingsPath, t.WebSearch && params.webSearch, today)
+	deps := assistantTurnToolDeps(cfg.APIKey, cfg.SettingsPath, t.WebSearch && params.webSearch, t.Today)
+	deps.todayErr = t.TodayErr
 	units := "metric"
 	if u, err := deps.displayUnits(); err == nil {
 		units = u

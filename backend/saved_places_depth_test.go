@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -216,12 +217,15 @@ func TestSavePlaceTool_CarriesAStatedDepthAndShowsTheOldOneBeingReplaced(t *test
 	}
 }
 
-func TestSavePlaceTool_ADepthNeedsTheOperatorsDate(t *testing.T) {
+// A depth is dated with the boat's day; with none, save_place refuses with the
+// same reason every other tool that needs the day gives.
+func TestSavePlaceTool_ADepthNeedsTheBoatsDay(t *testing.T) {
 	env := newProposalEnv(t)
 	env.deps.today = time.Time{}
+	env.deps.todayErr = &boatZoneUnreadable{errors.New("boat_zone.json: bad json")}
 	_, _, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"Cove","lat":-20,"lon":149,"depth_m":3}`))
-	if err == nil || !strings.Contains(err.Error(), "date") {
-		t.Fatalf("want an error naming the missing date, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "save_place: the boat's time zone can't be worked out (boat_zone.json: bad json)") {
+		t.Fatalf("want the boat day's own reason, got %v", err)
 	}
 }
 

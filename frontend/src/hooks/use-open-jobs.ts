@@ -1,14 +1,12 @@
 import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
-import { todayISO } from '@/lib/local-date'
 import type { MaintenanceLogEntry, MaintenanceLogEntryInput } from '@/hooks/use-maintenance'
 
 // ADR 0269: Open jobs - a known problem that is not fixed yet. One-off, with
 // a done column, unlike a maintenance rule. Never called a "job" alone in
 // code: use-maintenance.ts's "profile job" is a recurring service.
 //
-// The server never guesses the operator's date: opening and dropping a job
-// carry `?today=` from the browser's local clock, the way every maintenance
-// write does.
+// The dates a job carries are the boat's day, which the server works out.
+// The browser sends none.
 
 export type OpenJobStatus = 'open' | 'done' | 'dropped'
 export type OpenJobSource = 'manual' | 'mate' | 'watch_finding' | 'alarm' | 'checklist_line'
@@ -65,10 +63,6 @@ const LOG = '/api/inventory/maintenance/log'
 const RULES = '/api/inventory/maintenance/rules'
 const NO_JOBS: OpenJob[] = []
 
-function withToday(url: string): string {
-  return `${url}${url.includes('?') ? '&' : '?'}today=${encodeURIComponent(todayISO())}`
-}
-
 /** GET /api/inventory/open-jobs. `filter === null` fetches nothing. */
 export function useOpenJobs(filter: OpenJobFilter | null) {
   const params = new URLSearchParams()
@@ -90,7 +84,7 @@ export function useOpenJobs(filter: OpenJobFilter | null) {
 
 /** POST /api/inventory/open-jobs */
 export async function createOpenJob(input: OpenJobInput): Promise<OpenJob> {
-  const data = await apiRequest<{ job: OpenJob }>(withToday(JOBS), { method: 'POST', json: input })
+  const data = await apiRequest<{ job: OpenJob }>(JOBS, { method: 'POST', json: input })
   invalidateQueries([JOBS])
   return data.job
 }
@@ -122,7 +116,7 @@ export async function completeOpenJob(
  * The reason is optional. */
 export async function dropOpenJob(id: string, reason: string): Promise<OpenJob> {
   const data = await apiRequest<{ job: OpenJob }>(
-    withToday(`${JOBS}/${encodeURIComponent(id)}/drop`), { method: 'POST', json: { reason } },
+    `${JOBS}/${encodeURIComponent(id)}/drop`, { method: 'POST', json: { reason } },
   )
   invalidateQueries([JOBS])
   return data.job

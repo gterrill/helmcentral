@@ -530,21 +530,21 @@ func TestApplyAssistantProposalHandler_StatusCodes(t *testing.T) {
 	env := newProposalEnv(t)
 	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"Registration renewal","interval_months":12}}]}`)
 
-	// today is required, like every maintenance write.
+	// No boat day yet: nothing is applied.
+	useNoBoatDay(t)
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
 	if err := applyAssistantProposalHandler(c); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	var resp map[string]string
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if rec.Code != http.StatusBadRequest || resp["field"] != "today" {
-		t.Fatalf("expected 400 naming today, got %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 with no boat day, got %d %s", rec.Code, rec.Body.String())
 	}
 	if got, _ := env.asst.GetProposal(p.ID); got.Status != assistantProposalPending {
-		t.Fatalf("a 400 must not apply, got %q", got.Status)
+		t.Fatalf("a 503 must not apply, got %q", got.Status)
 	}
+	useBoatDay(t, "2026-09-30")
 
-	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply?today=2026-09-30", "", p.ID)
+	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
 	if err := applyAssistantProposalHandler(c); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -557,7 +557,7 @@ func TestApplyAssistantProposalHandler_StatusCodes(t *testing.T) {
 
 	// A second tap is the same 200 with no write.
 	rows := env.counts(t)
-	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply?today=2026-09-30", "", p.ID)
+	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
 	_ = applyAssistantProposalHandler(c)
 	if rec.Code != http.StatusOK || env.counts(t) != rows {
 		t.Fatalf("expected an idempotent 200, got %d", rec.Code)
@@ -570,7 +570,7 @@ func TestApplyAssistantProposalHandler_StatusCodes(t *testing.T) {
 		t.Fatalf("expected 409 dismissing an applied proposal, got %d %s", rec.Code, rec.Body.String())
 	}
 
-	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/nope/apply?today=2026-09-30", "", "nope")
+	c, rec = newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/nope/apply", "", "nope")
 	_ = applyAssistantProposalHandler(c)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for an unknown proposal, got %d", rec.Code)
@@ -587,7 +587,7 @@ func TestApplyAssistantProposalHandler_StaleIs409WithTheReason(t *testing.T) {
 		t.Fatalf("Acknowledge: %v", err)
 	}
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply?today=2026-09-30", "", p.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
 	_ = applyAssistantProposalHandler(c)
 	var resp map[string]string
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
@@ -603,7 +603,7 @@ func TestApplyAssistantProposalHandler_ConflictNamesTheProposalStatus(t *testing
 		t.Fatalf("dismiss: %v", err)
 	}
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply?today=2026-09-30", "", p.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/proposals/"+p.ID+"/apply", "", p.ID)
 	_ = applyAssistantProposalHandler(c)
 	var resp map[string]string
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)

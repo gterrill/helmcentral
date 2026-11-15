@@ -66,7 +66,7 @@ describe('AssistantProposalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', status: 'applied' })))
-    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/apply?today=2026-09-30', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/apply', expect.objectContaining({ method: 'POST' }))
   })
 
   it('Apply confirms with a toast that counts the changes', async () => {

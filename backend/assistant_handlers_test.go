@@ -1013,35 +1013,12 @@ func TestPostAssistantMessageHandler_TooLongContentReturns400(t *testing.T) {
 	}
 }
 
-func TestPostAssistantMessageHandler_TodayRequiredAndValidated(t *testing.T) {
+// The boat's day is the server's to work out, never the message body's
+// (ADR 0230): a body that names another day does not move it, and with no
+// position yet the run still starts, with the day left unset.
+func TestPostAssistantMessageHandler_TodayIsTheBoatsNotTheBodys(t *testing.T) {
 	_, _, conv := postAssistantMessageTestSetup(t)
-
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
-		t.Errorf("no run may start when today is missing or malformed")
-		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "x", Model: "openai/gpt-4o"}}
-	})
-
-	for name, body := range map[string]string{
-		"missing":   `{"content":"hi"}`,
-		"blank":     `{"today":"  ","content":"hi"}`,
-		"malformed": `{"today":"30/09/2026","content":"hi"}`,
-		"datetime":  `{"today":"2026-09-30T10:00:00Z","content":"hi"}`,
-	} {
-		c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
-		if err := postAssistantMessageHandler(c); err != nil {
-			t.Fatalf("%s: handler returned error: %v", name, err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("%s: expected 400, got %d: %s", name, rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "today") {
-			t.Fatalf("%s: expected the error to name the today field, got %s", name, rec.Body.String())
-		}
-	}
-}
-
-func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
-	_, _, conv := postAssistantMessageTestSetup(t)
+	useBoatDay(t, "2026-10-03")
 
 	var got time.Time
 	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
@@ -1049,7 +1026,7 @@ func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
 	})
 
-	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-10-03","content":"hi"}`, conv.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2030-01-01","content":"hi"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1057,7 +1034,52 @@ func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	if got.Format("2006-01-02") != "2026-10-03" {
-		t.Fatalf("expected the runner to receive today=2026-10-03, got %v", got)
+		t.Fatalf("expected the runner to receive the boat's day 2026-10-03, got %v", got)
+	}
+}
+
+func TestPostAssistantMessageHandler_NoBoatDayStillRuns(t *testing.T) {
+	_, _, conv := postAssistantMessageTestSetup(t)
+	useNoBoatDay(t)
+
+	ran := false
+	var got time.Time
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
+		ran, got = true, tools.today
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
+	})
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !ran || !got.IsZero() {
+		t.Fatalf("code %d ran %v today %v; want a run with today unset", rec.Code, ran, got)
+	}
+}
+
+// Mate's maintenance tools give the reason the day is not known, the same one
+// the Maintenance page shows, not a fixed sentence that can be wrong.
+func TestPostAssistantMessageHandler_NoBoatDayKeepsTheReason(t *testing.T) {
+	_, _, conv := postAssistantMessageTestSetup(t)
+	reason := errors.New("the boat's time zone can't be worked out (boat_zone.json: bad json), so today's date on the boat is not known")
+	prev := boatToday
+	t.Cleanup(func() { boatToday = prev })
+	boatToday = func() (time.Time, error) { return time.Time{}, reason }
+
+	var toolErr error
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
+		_, toolErr = tools.requireToday("list_maintenance")
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
+	})
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || toolErr == nil || !strings.Contains(toolErr.Error(), "boat_zone.json: bad json") {
+		t.Fatalf("code %d, tool error %v; want the boat day's own reason", rec.Code, toolErr)
+	}
+	if strings.Contains(toolErr.Error(), "has not reported a position") {
+		t.Fatalf("tool error %q claims no position when the zone is the problem", toolErr)
 	}
 }
 

@@ -527,6 +527,44 @@ func TestAssistantRun_TheReviewDeadlineStartsAfterTheInputIsBuilt(t *testing.T) 
 	}
 }
 
+// An unattended review hands its tools the boat's day, or the reason there is
+// none (an alarm review before any fix), so the maintenance tools refuse with
+// that reason rather than judge due dates on UTC (ADR 0230).
+func TestUnattendedReview_HandsItsToolsTheBoatsDayOrWhyNot(t *testing.T) {
+	day := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
+	reason := &boatZoneUnreadable{errors.New("boat_zone.json: bad json")}
+	for _, tc := range []struct {
+		name    string
+		today   time.Time
+		why     error
+		wantErr string
+	}{
+		{"no day", time.Time{}, reason, "boat_zone.json: bad json"},
+		{"boat day", day, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var deps assistantToolDeps
+			runUnattendedReview(context.Background(), unattendedTurn{
+				Cfg: reviewConfig(t), Now: time.Now(), Today: tc.today, TodayErr: tc.why, Deadline: time.Minute, ConversationID: "c", LogPrefix: "test", Name: "n",
+				Build: func(ctx context.Context, d assistantToolDeps, units string, pc assistantPromptContext) (unattendedInput, string) {
+					deps = d
+					return unattendedInput{}, "stop here"
+				},
+			})
+			got, err := deps.requireToday("list_maintenance")
+			if tc.wantErr == "" {
+				if err != nil || !got.Equal(tc.today) {
+					t.Fatalf("today = %v, %v; want %v", got, err, tc.today)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want the reason %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // ignoringTools is a tool whose work does not stop when it is told to.
 type ignoringTools struct{ fakeToolExecutor }
 

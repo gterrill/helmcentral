@@ -314,9 +314,8 @@ func assistantWatchClock(t time.Time, loc *time.Location) string {
 type assistantWatchRequest struct {
 	ConversationID string
 	Args           assistantStartWatchArgs
-	// Today is the operator's own date from the run that started the watch,
-	// carried to the follow-up turn (the maintenance tools need it, and the
-	// server's clock is not the boat's date).
+	// Today is the boat's day from the run that started the watch. The
+	// follow-up turn reads the boat's day afresh when it runs.
 	Today         time.Time
 	Location      *time.Location
 	TimezoneLabel string
@@ -1175,7 +1174,9 @@ func assistantWatchFollowUp(info assistantWatchInfo, content string, release fun
 		log.Printf("assistant: watch %s for conversation %s finished but settings could not be read; no follow-up: %v", info.ID, id, err)
 		return false
 	}
-	params.today = info.Today
+	// The boat's day when the report arrives, not when the watch began: a
+	// watch can run past the boat's midnight (ADR 0230).
+	params.today, params.todayErr = boatToday()
 
 	if _, ok, err := globalAssistantStore.GetConversation(id); err != nil {
 		log.Printf("assistant: watch %s finished but conversation %s could not be read; no follow-up: %v", info.ID, id, err)

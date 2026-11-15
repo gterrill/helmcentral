@@ -13,7 +13,7 @@ import (
 // Mate's maintenance read tools (ADR 0145): find_equipment, list_maintenance
 // and get_maintenance_log. All three only read. The status on every rule row
 // is the one resolveMaintenanceRuleView computes (ADR 0138) against the
-// operator's own local date, which arrives on the message POST as today;
+// boat's calendar day (boat_today.go);
 // nothing here works out due or overdue for itself.
 //
 // resolveMaintenanceRuleView and equipmentHourReading read globalDocumentStore,
@@ -53,12 +53,18 @@ func (d assistantToolDeps) maintenanceStore(toolName string) (*documentStore, er
 	return store, nil
 }
 
-// requireToday is the maintenance tools' own fail-fast: with no date from the
-// operator's browser there is nothing to compute a status against, and the
-// server's clock is not the boat's date (ADR 0138's today amendment).
+// requireToday is the fail-fast of every tool that needs the boat's day: until
+// the boat has reported a position there is no zone to read the date in, and
+// the server's clock is not the boat's date (ADR 0230). The refusal carries the
+// reason the day lookup gave (todayErr), the same words the Maintenance page
+// shows.
 func (d assistantToolDeps) requireToday(toolName string) (time.Time, error) {
 	if d.today.IsZero() {
-		return time.Time{}, fmt.Errorf("%s: the operator's date (today) was not supplied with this message, so no status can be worked out", toolName)
+		reason := d.todayErr
+		if reason == nil {
+			reason = errBoatDayUnknown
+		}
+		return time.Time{}, fmt.Errorf("%s: %w", toolName, reason)
 	}
 	return d.today, nil
 }

@@ -22,6 +22,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Maintenance due dates follow the boat's clock.** Whether a service is due,
+  due soon or overdue, and the date Mate works from, now come from today's date
+  on the boat, not from the phone, tablet or wall screen you're using. A device
+  set to another time zone no longer moves a due date by a day. Until the boat
+  has reported a position, the Maintenance page says the boat's date isn't known
+  and shows no statuses, saving a rule, a service or a hand reading stops with
+  the same words, and Mate can't keep a fact, suggest a change or save a place
+  with a depth. A Maintenance
+  page left open overnight now moves to the new day at the boat's midnight.
+  Nothing to do on upgrade.
 - **"In your plan" on forecast days.** A screen reader now says "in your
   plan" for a forecast day that a passage plan covers, where it used to say
   "planned stay".

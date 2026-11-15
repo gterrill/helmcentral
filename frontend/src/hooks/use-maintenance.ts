@@ -1,25 +1,9 @@
+import { useEffect, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import { todayISO } from '@/lib/local-date'
 import { formatDataAge } from '@/lib/staleness'
-
-// ADR 0138's 2026-09-27 amendment: every endpoint below that returns a rule
-// view with a computed status requires the operator's own local calendar
-// date as a `today` query param (maintenance_handlers.go's
-// requireTodayParam) - never left for the server to guess at from its own
-// clock. todayFromClock() is the one place this file reads it, from
-// lib/local-date.ts's todayISO (the browser's own local date, never UTC).
-function todayFromClock(): string {
-  return todayISO()
-}
-
-// withToday appends `today=<local date>` to url, using `&` when url already
-// carries a query string and `?` otherwise - every write below that answers
-// with a freshly recomputed rule view needs this.
-function withToday(url: string): string {
-  const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}today=${encodeURIComponent(todayFromClock())}`
-}
 
 // ADR 0138: the Maintenance section's data layer - service rules and the
 // log they're completed into. Reads go through useApiQuery and writes through
@@ -299,21 +283,30 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
   if (filter?.equipment) params.set('equipment', filter.equipment)
   if (filter?.system) params.set('system', filter.system)
   if (filter?.includeStored) params.set('include_stored', 'true')
-  params.set('today', todayFromClock())
+  const query = params.toString()
 
-  // `today` is in the key because it is in the path: two views of different
-  // dates are different reads, and a refresh must refetch each with its own.
   const { data, error, isLoading, refetch } = useApiQuery<RulesResponse>({
-    queryKey: [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false, today: params.get('today') }],
-    path: `${RULES}?${params.toString()}`,
+    queryKey: [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false }],
+    path: query ? `${RULES}?${query}` : RULES,
     enabled: filter !== null,
-    // The day is read from the clock as the hook renders, so a view open over
-    // midnight moves to the new day's key on its next render. Rendering when
-    // its own read leaves moves it there while that day's read is still in
-    // flight, so it shares that read. Rendering only when the read lands
-    // would move it after, and fetch the new day a second time.
-    trackFetching: true,
   })
+
+  // The server judges every status on the boat's day. The browser's reading of
+  // that day is never sent: it only tells a view left open over the boat's
+  // midnight to read the list again. The first reading, which arrives after
+  // the first render on a cold load, is not a turn of the day, unless the
+  // list was refused for want of one: then the first fix is what it waited for.
+  const boatDay = useBoatDayKey()
+  const lastBoatDay = useRef(boatDay)
+  const failed = error !== null && error !== undefined
+  useEffect(() => {
+    if (boatDay === null) return
+    const previous = lastBoatDay.current
+    lastBoatDay.current = boatDay
+    const turned = previous !== null && previous !== boatDay
+    const arrived = previous === null && failed
+    if (turned || arrived) void refetch()
+  }, [boatDay, failed, refetch])
 
   return {
     rules: data?.rules ?? NO_RULES,
@@ -327,14 +320,14 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
 
 /** POST /api/inventory/maintenance/rules */
 export async function createMaintenanceRule(input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await apiRequest<{ rule: MaintenanceRule }>(withToday(RULES), { method: 'POST', json: input })
+  const data = await apiRequest<{ rule: MaintenanceRule }>(RULES, { method: 'POST', json: input })
   invalidateQueries([RULES])
   return data.rule
 }
 
 /** PUT /api/inventory/maintenance/rules/:id */
 export async function updateMaintenanceRule(id: string, input: MaintenanceRuleInput): Promise<MaintenanceRule> {
-  const data = await apiRequest<{ rule: MaintenanceRule }>(withToday(`${RULES}/${encodeURIComponent(id)}`), { method: 'PUT', json: input })
+  const data = await apiRequest<{ rule: MaintenanceRule }>(`${RULES}/${encodeURIComponent(id)}`, { method: 'PUT', json: input })
   invalidateQueries([RULES])
   return data.rule
 }
@@ -349,7 +342,7 @@ export async function deleteMaintenanceRule(id: string): Promise<void> {
  * clears the acknowledgement. */
 export async function acknowledgeMaintenanceRule(id: string, reason: string): Promise<MaintenanceRule> {
   const data = await apiRequest<{ rule: MaintenanceRule }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/acknowledge`), { method: 'POST', json: { reason } },
+    `${RULES}/${encodeURIComponent(id)}/acknowledge`, { method: 'POST', json: { reason } },
   )
   invalidateQueries([RULES])
   return data.rule
@@ -363,7 +356,7 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
   if (lastDoneAt !== undefined) body.last_done_at = lastDoneAt
   if (lastDoneHours !== undefined) body.last_done_hours = lastDoneHours
   const data = await apiRequest<{ rule: MaintenanceRule }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/last-done`), { method: 'POST', json: body },
+    `${RULES}/${encodeURIComponent(id)}/last-done`, { method: 'POST', json: body },
   )
   invalidateQueries([RULES])
   // The server keeps the hours typed here as a hand reading when the item has no meter.
@@ -376,7 +369,7 @@ export async function setMaintenanceRuleLastDone(id: string, lastDoneAt?: string
  * clears any acknowledgement. */
 export async function completeMaintenanceRule(id: string, input: Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'>): Promise<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }> {
   const data = await apiRequest<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/complete`), { method: 'POST', json: input },
+    `${RULES}/${encodeURIComponent(id)}/complete`, { method: 'POST', json: input },
   )
   invalidateQueries([RULES])
   invalidateQueries([LOG])
@@ -387,7 +380,7 @@ export async function completeMaintenanceRule(id: string, input: Omit<Maintenanc
  * blank clears the link. */
 export async function setMaintenanceRuleProcedureNote(id: string, noteId: string): Promise<MaintenanceRule> {
   const data = await apiRequest<{ rule: MaintenanceRule }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/procedure-note`), { method: 'PUT', json: { note_id: noteId } },
+    `${RULES}/${encodeURIComponent(id)}/procedure-note`, { method: 'PUT', json: { note_id: noteId } },
   )
   invalidateQueries([RULES])
   return data.rule
@@ -397,7 +390,7 @@ export async function setMaintenanceRuleProcedureNote(id: string, noteId: string
  * fresh Procedure note titled from the rule and links it. */
 export async function createMaintenanceProcedureNote(id: string): Promise<{ rule: MaintenanceRule; note: { id: string; title: string } }> {
   const data = await apiRequest<{ rule: MaintenanceRule; note: { id: string; title: string } }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/procedure-note`), { method: 'POST' },
+    `${RULES}/${encodeURIComponent(id)}/procedure-note`, { method: 'POST' },
   )
   invalidateQueries([RULES])
   return data
@@ -407,7 +400,7 @@ export async function createMaintenanceProcedureNote(id: string): Promise<{ rule
  * change a profile job (ADR 0148). */
 export async function setMaintenanceRuleOverrides(id: string, input: MaintenanceOverridesInput): Promise<MaintenanceRule> {
   const data = await apiRequest<{ rule: MaintenanceRule }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/overrides`), { method: 'PUT', json: input },
+    `${RULES}/${encodeURIComponent(id)}/overrides`, { method: 'PUT', json: input },
   )
   invalidateQueries([RULES])
   return data.rule
@@ -417,7 +410,7 @@ export async function setMaintenanceRuleOverrides(id: string, input: Maintenance
  * profile" for one field. */
 export async function resetMaintenanceRuleOverride(id: string, field: MaintenanceOverrideField): Promise<MaintenanceRule> {
   const data = await apiRequest<{ rule: MaintenanceRule }>(
-    withToday(`${RULES}/${encodeURIComponent(id)}/overrides/${encodeURIComponent(field)}`), { method: 'DELETE' },
+    `${RULES}/${encodeURIComponent(id)}/overrides/${encodeURIComponent(field)}`, { method: 'DELETE' },
   )
   invalidateQueries([RULES])
   return data.rule
@@ -485,7 +478,7 @@ export function useHourMeterResets(equipmentId: string | null) {
  * an hour meter. */
 export async function recordHandHourReading(equipmentId: string, input: HandHourReadingInput): Promise<HandHourReading> {
   const data = await apiRequest<{ reading: HandHourReading }>(
-    withToday(`${equipmentMaintenance(equipmentId)}/hour-readings`), { method: 'POST', json: input },
+    `${equipmentMaintenance(equipmentId)}/hour-readings`, { method: 'POST', json: input },
   )
   invalidateQueries([`${equipmentMaintenance(equipmentId)}/hour-readings`])
   invalidateQueries([RULES])

@@ -204,13 +204,15 @@ type assistantToolDeps struct {
 	// see queryInfluxPathFirstLast's own doc comment (influx.go) for why the
 	// two are not the same timestamp. Production wires queryInfluxPathFirstLast.
 	influxPathHistoryFirstLast func(ctx context.Context, path, source string, start, stop time.Time) (first, last time.Time, found bool, err error)
-	// today is the operator's own local calendar date (YYYY-MM-DD at UTC
-	// midnight), taken from the message POST's required today field
-	// (postAssistantMessageHandler) - never the server's clock. The
-	// maintenance tools compute every rule status against it (ADR 0145). The
-	// zero value means "not supplied", and list_maintenance then fails
-	// rather than guess.
+	// today is the boat's calendar day (UTC midnight), worked out by the
+	// server from the boat's zone (boat_today.go, ADR 0230) - never the
+	// server's own date and never supplied by a client. The maintenance tools
+	// compute every rule status against it (ADR 0145). The zero value means
+	// the day is not known, and list_maintenance then fails rather than guess.
 	today time.Time
+	// todayErr is why today is zero, when the day lookup said why: no fix
+	// yet, or a zone that can't be worked out. requireToday refuses with it.
+	todayErr error
 	// watches is start_watch's registry (ADR 0160). Production wires
 	// globalAssistantWatches; nil (a test that never sets it) makes the tool
 	// fail plainly rather than start nothing.
