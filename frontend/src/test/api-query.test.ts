@@ -9,6 +9,7 @@ import {
   declareQuery,
   getQueryData,
   invalidateQueries,
+  refetchQueryOnce,
   resetQueryStore,
   setQueryData,
   useApiQuery,
@@ -136,6 +137,30 @@ describe('query store', () => {
     const handler = () => new Promise<Response>((resolve) => pending.push((body) => resolve(jsonResponse(body))))
     return { handler, pending }
   }
+
+  it('refetchQueryOnce shares one request per reason, and tries again after a failure', async () => {
+    let calls = 0
+    const fetchMock = vi.fn(async () => {
+      calls += 1
+      return calls === 2 ? ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) } as Response) : jsonResponse([calls])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useApiQuery<number[]>(opts()))
+    await waitFor(() => expect(result.current.data).toEqual([1]))
+
+    await act(async () => { await Promise.all([refetchQueryOnce(['items'], '/api/items', 'day-2'), refetchQueryOnce(['items'], '/api/items', 'day-2')]) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current.error?.message).toBe('boom')
+
+    // The same reason, but the answer it started was an error: the next ask retries.
+    await act(async () => { await refetchQueryOnce(['items'], '/api/items', 'day-2') })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.current.data).toEqual([3])
+
+    // And once it has landed, the same reason is answered.
+    await act(async () => { await refetchQueryOnce(['items'], '/api/items', 'day-2') })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
 
   it('refetch after a write supersedes a read already in flight', async () => {
     const route = deferredRoute()

@@ -6,6 +6,9 @@ export const selectTimeZone = (state: VesselStateValue): string | undefined => s
 /** Where the boat's zone came from; null until the server has said. */
 export const selectTimeZoneSource = (state: VesselStateValue): VesselStateValue['timeZoneSource'] => state.timeZoneSource
 
+/** The boat's calendar day as the server states it; null before any fix. */
+export const selectBoatDate = (state: VesselStateValue): string | null => state.boatDate ?? null
+
 // A zone name Intl does not know throws a RangeError, and nothing is cached for
 // it: the server contract is a real IANA name, and a clock in another zone
 // would be a wrong time shown as right. Only an absent zone (the boat has not

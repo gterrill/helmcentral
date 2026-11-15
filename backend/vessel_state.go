@@ -302,7 +302,16 @@ func buildVesselStatePayload() map[string]any {
 	// fix, or UTC when no fix has ever been seen. timezone_source says which.
 	boat := boatTimeForState(state, nil)
 
+	// The boat's calendar day at this event's datetime, so a browser whose
+	// zone data lacks the boat's zone still learns when the day turns. Null
+	// before any fix: UTC is a stand-in then, not the boat's day.
+	var boatDate any
+	if !boat.NoFix {
+		boatDate = state.Datetime.In(boat.Loc).Format("2006-01-02")
+	}
+
 	return map[string]any{
+		"boat_date":                      boatDate,
 		"name":                           state.Name,
 		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
