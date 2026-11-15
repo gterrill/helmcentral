@@ -13,6 +13,9 @@
 # session's unfinished work (AGENTS.md, Shared Working Tree). main, the
 # checked-out branch, the main checkout's branch and the worktree this runs
 # from are never touched.
+#
+# At the end it also reports worktrees with uncommitted changes whose branch
+# has no open PR ("uncommitted, no PR: <path> (<branch>)"). Report only.
 set -eu
 
 command -v gh >/dev/null 2>&1 || { echo "prune-merged: gh is required to tell which PRs are merged" >&2; exit 1; }
@@ -124,3 +127,27 @@ if [ "$confirm" = 1 ]; then
 else
   echo "prune-merged: $removed to remove, $skipped skipped. Run with CONFIRM=1 to delete."
 fi
+
+# Orphans: worktrees holding uncommitted work on a branch with no open PR, or on
+# a detached HEAD. They may be abandoned or may be a session's work not yet
+# shipped, so this only reports them and never deletes, whatever CONFIRM says.
+# It runs after the summary, so a gh failure here cannot hide what was removed.
+if ! open_heads="$(gh pr list --state open --limit 200 --json headRefName -q '.[].headRefName')"; then
+  echo "prune-merged: could not list open PRs, so uncommitted worktrees are not reported" >&2
+  exit 1
+fi
+git worktree list --porcelain | awk '
+  /^worktree / { path = substr($0, 10) }
+  /^branch refs\/heads\// { print path "\t" substr($0, 19) }
+  /^detached/ { print path "\t" }' |
+  while IFS="$(printf '\t')" read -r wt branch; do
+    [ "$wt" = "$main_wt" ] && continue
+    [ -d "$wt" ] || continue
+    [ -n "$(git -C "$wt" status --porcelain)" ] || continue
+    if [ -z "$branch" ]; then
+      echo "uncommitted, detached HEAD: $wt"
+      continue
+    fi
+    printf '%s\n' "$open_heads" | grep -qxF "$branch" && continue
+    echo "uncommitted, no open PR: $wt ($branch)"
+  done

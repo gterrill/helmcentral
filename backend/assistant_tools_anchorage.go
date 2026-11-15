@@ -197,17 +197,17 @@ type AnchorageFeaturesBody struct {
 }
 
 type assistantAnchorageDetailsResult struct {
-	Name           string  `json:"name,omitempty"`
-	Lat            float64 `json:"lat"`
-	Lon            float64 `json:"lon"`
+	Name string  `json:"name,omitempty"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
 	// Arrive and Leave are boat-time labels on the anchorage's clock;
 	// ArriveISO and LeaveISO are the instants, for passing to another tool.
-	Arrive         string  `json:"arrive"`
-	ArriveISO      string  `json:"arrive_iso"`
-	Leave          string  `json:"leave"`
-	LeaveISO       string  `json:"leave_iso"`
-	LeaveDefaulted bool    `json:"leave_defaulted,omitempty"`
-	Timezone       string  `json:"timezone"`
+	Arrive         string `json:"arrive"`
+	ArriveISO      string `json:"arrive_iso"`
+	Leave          string `json:"leave"`
+	LeaveISO       string `json:"leave_iso"`
+	LeaveDefaulted bool   `json:"leave_defaulted,omitempty"`
+	Timezone       string `json:"timezone"`
 	// Shelter is required: when it cannot be made the whole call fails.
 	Shelter  *shelterResult           `json:"shelter"`
 	Forecast anchorageForecastSection `json:"forecast"`

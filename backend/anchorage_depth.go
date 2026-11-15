@@ -70,10 +70,10 @@ type anchorageClearanceCheck struct {
 	LowestWaterAt  string   `json:"lowest_water_at"`
 	LowestWaterISO string   `json:"lowest_water_iso"`
 	LowestWaterM   *float64 `json:"lowest_water_height_m"`
-	DepthAtLowM   *float64 `json:"depth_at_low_m"`
-	DraftM        *float64 `json:"draft_m"`
-	ClearanceM    *float64 `json:"clearance_m"`
-	WantedM       *float64 `json:"wanted_m"`
+	DepthAtLowM    *float64 `json:"depth_at_low_m"`
+	DraftM         *float64 `json:"draft_m"`
+	ClearanceM     *float64 `json:"clearance_m"`
+	WantedM        *float64 `json:"wanted_m"`
 	// TideCheckedUntil is when the tide prediction ends, as a boat-time label,
 	// when it ends before the stay does: a lower or higher water may follow.
 	// Empty otherwise. TideCheckedUntilISO is the instant, RFC 3339, for the card.
@@ -87,13 +87,13 @@ type anchorageRodeCheck struct {
 	HighestWaterAt  string   `json:"highest_water_at"`
 	HighestWaterISO string   `json:"highest_water_iso"`
 	HighestWaterM   *float64 `json:"highest_water_height_m"`
-	DepthAtHighM   *float64 `json:"depth_at_high_m"`
-	Method         string   `json:"method"`
-	WindKts        *float64 `json:"wind_kts"`
-	RodeNeededM    *float64 `json:"rode_needed_m"`
-	ScopeRatio     *float64 `json:"scope_ratio"`
-	ChainAboardM   *float64 `json:"chain_onboard_m"`
-	ShortByM       *float64 `json:"short_by_m"`
+	DepthAtHighM    *float64 `json:"depth_at_high_m"`
+	Method          string   `json:"method"`
+	WindKts         *float64 `json:"wind_kts"`
+	RodeNeededM     *float64 `json:"rode_needed_m"`
+	ScopeRatio      *float64 `json:"scope_ratio"`
+	ChainAboardM    *float64 `json:"chain_onboard_m"`
+	ShortByM        *float64 `json:"short_by_m"`
 	// TideCheckedUntil is as for the clearance check: the highest water was
 	// found only in the predicted part of the stay.
 	TideCheckedUntil    string `json:"tide_checked_until"`

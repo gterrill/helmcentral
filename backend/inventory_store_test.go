@@ -796,15 +796,15 @@ func TestEquipmentMatchesQuery_EveryWordMustHitSomeField(t *testing.T) {
 		q    string
 		want bool
 	}{
-		{"volvo penta d2-40", true},      // make and model, spread over two fields
-		{"VOLVO d2-40", true},            // case-insensitive
-		{"engine room", true},            // the zone name
-		{"penta room", true},             // words from different fields
-		{"d2-40 volvo", true},            // word order differs from the row
-		{"room port", true},              // zone word before name word
-		{"genset volvo", true},           // alias plus make
-		{"volvo yanmar", false},          // one word hits nothing
-		{"volvo  penta", true},           // runs of spaces do not matter
+		{"volvo penta d2-40", true}, // make and model, spread over two fields
+		{"VOLVO d2-40", true},       // case-insensitive
+		{"engine room", true},       // the zone name
+		{"penta room", true},        // words from different fields
+		{"d2-40 volvo", true},       // word order differs from the row
+		{"room port", true},         // zone word before name word
+		{"genset volvo", true},      // alias plus make
+		{"volvo yanmar", false},     // one word hits nothing
+		{"volvo  penta", true},      // runs of spaces do not matter
 	}
 	for _, c := range cases {
 		q := strings.ToLower(strings.TrimSpace(c.q))

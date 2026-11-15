@@ -1,0 +1,8 @@
+extends: substitution
+message: "House style: '%s', not '%s'."
+level: warning
+# Case-sensitive: "Underway" is also the name of a dashboard page.
+ignorecase: false
+swap:
+  per cent: percent
+  underway: under way

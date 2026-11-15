@@ -158,7 +158,7 @@ describe("ForecastDrawer stay view", () => {
       name: /Select forecast day .* Jun 22,/,
     });
     expect(tab22).toHaveAttribute("data-stay", "true");
-    expect(tab22.getAttribute("aria-label")).toMatch(/planned stay/);
+    expect(tab22.getAttribute("aria-label")).toMatch(/, in your plan,/);
     expect(
       screen.getByRole("button", { name: /Select forecast day .* Jun 21,/ }),
     ).not.toHaveAttribute("data-stay");

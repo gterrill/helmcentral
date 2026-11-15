@@ -69,6 +69,9 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
+      - name: Format
+        run: sh scripts/gofmt-check.sh
+
       # govulncheck reports only vulnerabilities on call paths this code
       # actually reaches, so it stays quiet enough to gate a merge - unlike a
       # blanket dependency scanner. The first audit (2026-09-19) found 23
@@ -249,7 +252,7 @@ jobs:
       # checked against the release's published sha256 before it runs.
       - name: Install Vale
         run: |
-          curl -fsSLo vale.tar.gz https://github.com/errata-ai/vale/releases/download/v3.25.1/vale_3.25.1_Linux_64-bit.tar.gz
+          curl -fsSL --retry 5 --retry-all-errors -o vale.tar.gz https://github.com/errata-ai/vale/releases/download/v3.25.1/vale_3.25.1_Linux_64-bit.tar.gz
           echo "4bf5c5176b682b1da0830f471584d3494f1c2e27ee3029e1ad6f6661d4962182  vale.tar.gz" | sha256sum -c -
           sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
 

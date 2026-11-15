@@ -1627,7 +1627,7 @@ export function ForecastDrawer({
               // The chip is amber when any change that day is prominent, so it shows
               // the first prominent one, else the first.
               const firstChange = leadWindChange(changes)
-              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}${changes.map((c) => `, wind change ${c.from} to ${c.to} around ${c.label}${c.prominent ? ', reaches your marginal wind' : ''}${c.lowerConfidence ? ', less certain' : ''}`).join('')}`
+              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', in your plan' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}${lightningPeak ? `, lightning chance up to ${lightningPercent(lightningPeak)}%` : ''}${changes.map((c) => `, wind change ${c.from} to ${c.to} around ${c.label}${c.prominent ? ', reaches your marginal wind' : ''}${c.lowerConfidence ? ', less certain' : ''}`).join('')}`
 
               return (
                 <button

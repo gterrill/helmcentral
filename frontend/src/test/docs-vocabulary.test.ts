@@ -51,7 +51,7 @@ function markdownFilesUnder(dir: string): string[] {
   return files
 }
 
-function offendingLines(): string[] {
+function offendingLines(pattern: RegExp = /widget/i): string[] {
   const root = docsRoot()
   const pages = [
     ...USER_FACING_DIRS.flatMap((d) => markdownFilesUnder(join(root, d))),
@@ -72,13 +72,57 @@ function offendingLines(): string[] {
       continue
     }
     body.split('\n').forEach((line, i) => {
-      if (/widget/i.test(line)) {
+      if (pattern.test(line)) {
         offences.push(`${relative(repoRoot(), page)}:${i + 1}: ${line.trim()}`)
       }
     })
   }
   return offences
 }
+
+// ADR 0285: passage Plans replaced the planned stay, and "Plan a stay" went
+// with it. The old words in a help page or a string the operator reads say the
+// product still has a feature it no longer has.
+const RETIRED_PLAN_WORDS = /plan a stay|planned stay/i
+
+function sourceFilesUnder(dir: string): string[] {
+  const files: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name !== 'test') files.push(...sourceFilesUnder(full))
+    } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+      files.push(full)
+    }
+  }
+  return files
+}
+
+// A comment explaining the history is not a string the operator reads.
+function isCommentLine(line: string): boolean {
+  return /^\s*(\/\/|\/\*|\*)/.test(line)
+}
+
+describe('retired planned-stay wording (ADR 0285)', () => {
+  it('is gone from the help pages and the README', () => {
+    const offences = offendingLines(RETIRED_PLAN_WORDS)
+    expect(offences, `Say "plan" or "passage plan", not "Plan a stay" or "planned stay".\n\n${offences.join('\n')}\n`).toEqual([])
+  })
+
+  it('is gone from the strings the frontend shows', () => {
+    const srcDir = join(resolve(repoRoot(), 'frontend'), 'src')
+    const offences: string[] = []
+    for (const file of sourceFilesUnder(srcDir)) {
+      const rel = relative(join(repoRoot(), 'frontend'), file)
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (!isCommentLine(line) && RETIRED_PLAN_WORDS.test(line)) offences.push(`${rel}:${i + 1}: ${line.trim()}`)
+        })
+    }
+    expect(offences, `Say "plan" or "passage plan", not "Plan a stay" or "planned stay".\n\n${offences.join('\n')}\n`).toEqual([])
+  })
+})
 
 describe('operator-facing docs vocabulary', () => {
   it('never says "widget" - a component on a dashboard page is a tile (ADR 0109)', () => {

@@ -13,6 +13,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **"In your plan" on forecast days.** A screen reader now says "in your
+  plan" for a forecast day that a passage plan covers, where it used to say
+  "planned stay".
 - **Plans sit beside the forecast.** On a wide screen the Forecast page shows
   your passage plans in a column on the right, so the forecast starts at the
   top of the page. Beside the forecast, each day of a plan is a card with its
@@ -24,8 +27,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The lightning key no longer talks about a stay.** When you open the
   forecast for a stop in a passage plan, or for the middle of a leg, the key
   now reads "Lightning is for the boat's position, not this place."
-### Fixed
-
 - **A forecast that fails now says why in a few words.** The Forecast Offline
   panel in the Forecast drawer and the rows on the Plans page give a reason,
   such as the forecast not arriving in time, instead of a page of technical

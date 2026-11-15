@@ -151,8 +151,8 @@ func TestPlanBehindDays_IsTodayPastTheFirstLegToDosDeparture(t *testing.T) {
 // A long leg left on time and is still being sailed: it is under way, not behind.
 
 func TestPlanBehindDays_ALegUnderWayIsNotBehindAndTheNextOneSetsTheClock(t *testing.T) {
-	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0) // leaves stop 0 on the 16th, stop 1 on the 17th, stop 2 on the 18th
-	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC)              // 18 Nov at UTC+10
+	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0)      // leaves stop 0 on the 16th, stop 1 on the 17th, stop 2 on the 18th
+	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
 	atStop0 := &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon}
 	got, err := planBehindDays(p, nil, now, atStop0)
 	// Leg 0 left on the 16th and is under way; leg 1 was to leave on the 17th, a day ago.
@@ -221,7 +221,7 @@ func TestPlanSlack_ABehindPlanIsCountedOnTheProjectedArrival(t *testing.T) {
 func TestPlanOutlook_SaysHowFarBehindThePlanIsAndWhetherThatMakesItLate(t *testing.T) {
 	p := decoratedAt(t, "2026-11-14", 2, 1, 1, 1, 0)
 	p.Stops[4].ArriveBy = "2026-11-20T17:00"
-	now :=time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
+	now := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC) // 18 Nov at UTC+10
 	s, ok, first, err := planOutlook(p, make([]string, 4), now, nil)
 	if err != nil || !ok || first != 0 || s.Days != -1 || s.BehindDays != 2 {
 		t.Fatalf("outlook = %+v %v first %d (%v)", s, ok, first, err)

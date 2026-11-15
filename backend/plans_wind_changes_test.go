@@ -549,7 +549,7 @@ func TestAssessPlan_NightsAreSentForTheRowsTheTableHas(t *testing.T) {
 	// The first stop's nights are the 14th and 15th; the second stop's one night is
 	// the night of arrival, which the passage row carries, and the last stop's is the
 	// night it arrives. Both are sent after the lay-day nights.
-	if want := []string{"0|2026-11-14", "0|2026-11-15", "1|2026-11-16", "2|2026-11-17"};!sameStrings(dates, want) {
+	if want := []string{"0|2026-11-14", "0|2026-11-15", "1|2026-11-16", "2|2026-11-17"}; !sameStrings(dates, want) {
 		t.Fatalf("nights = %v, want %v", dates, want)
 	}
 }

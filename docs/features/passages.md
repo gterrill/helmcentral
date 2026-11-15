@@ -48,7 +48,7 @@ every passage not yet in a cruise. Tap the arrow at the top of that pane
 the strip (**Show cruises**) to bring it back. Helmcentral remembers which you chose on that
 device. On a phone the pane isn't on the page. Tap **Cruises** to open it. The
 list shows the newest first, with the
-date, where the passage went from and to, the distance, the time underway and
+date, where the passage went from and to, the distance, the time under way and
 its cruise. Dates and times on this page are the boat's own local time, taken
 from where the passage began, with daylight saving where the place has it. A time
 that appears with a zone label such as UTC+10 or UTC+9:30 is in that zone.
@@ -379,7 +379,7 @@ map, even though it's one passage.
 
 Under the map are the passage's figures:
 
-- distance and time underway
+- distance and time under way
 - mean and maximum speed
 - fuel burned
 - mean wind and the strongest gust
@@ -399,9 +399,9 @@ described above. A cruise's
 page replays all its passages one after another, and adds the figures that
 only make sense across a whole trip:
 
-- first departure to last arrival, time underway and the number of nights
+- first departure to last arrival, time under way and the number of nights
 - total distance and fuel
-- wind while underway and wind while at anchor, each as a mean and the
+- wind while under way and wind while at anchor, each as a mean and the
   strongest gust
 - generator hours across the whole span, anchorages included
 - the lowest the house battery went, and its charge at dawn on each night
@@ -487,9 +487,9 @@ the satellite photographs when the map is showing them, with the credit added
 along the bottom. The blog map is always the chart.
 
 The strip of figures on the still pictures, the blog card and the end of an
-exported video gives distance, time underway, the nights, fuel and the
+exported video gives distance, time under way, the nights, fuel and the
 strongest gust. When the export holds more than one passage, it also says how
-many, after the time underway. For a cruise that is the cruise's own count of
+many, after the time under way. For a cruise that is the cruise's own count of
 passages, the same as on the cruise page. For a selection it is the passages
 that have a track, which are the ones the distance beside it adds up. Where
 the strip is short of room, figures drop off its end, so the strongest gust

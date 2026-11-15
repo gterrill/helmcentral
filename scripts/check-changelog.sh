@@ -61,4 +61,19 @@ if ! diff -u "$tmp/tagged.block" "$tmp/work.block"; then
   exit 1
 fi
 
+# The union merge driver also lets two branches each add their own "### Added"
+# to the same section. A section gets each "### " heading once.
+if ! awk '
+  /^## / { section = $0; delete seen; next }
+  /^### / {
+    if ($0 in seen) {
+      printf "check-changelog: %s has \"%s\" twice (lines %d and %d); merge them into one.\n", section, $0, seen[$0], NR
+      bad = 1
+    } else seen[$0] = NR
+  }
+  END { exit bad }
+' "$file" >&2; then
+  exit 1
+fi
+
 echo "check-changelog: released sections unchanged since $tag"

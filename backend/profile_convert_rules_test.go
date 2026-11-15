@@ -224,8 +224,12 @@ func scheduleFromDB(t *testing.T, e *legacyFixtureEnv) maintenanceSchedule {
 
 func TestConvertMaintenance_UnresolvedProfileAbortsUnlessDetaching(t *testing.T) {
 	for name, setup := range map[string]func(t *testing.T, e *legacyFixtureEnv){
-		"no profile":      func(t *testing.T, e *legacyFixtureEnv) { mustExec(t, e.ds.db, `UPDATE equipment SET profile_id = '' WHERE id = ?`, e.item.ID) },
-		"missing profile": func(t *testing.T, e *legacyFixtureEnv) { mustExec(t, e.ds.db, `UPDATE equipment SET profile_id = 'gone' WHERE id = ?`, e.item.ID) },
+		"no profile": func(t *testing.T, e *legacyFixtureEnv) {
+			mustExec(t, e.ds.db, `UPDATE equipment SET profile_id = '' WHERE id = ?`, e.item.ID)
+		},
+		"missing profile": func(t *testing.T, e *legacyFixtureEnv) {
+			mustExec(t, e.ds.db, `UPDATE equipment SET profile_id = 'gone' WHERE id = ?`, e.item.ID)
+		},
 		"invalid profile": func(t *testing.T, e *legacyFixtureEnv) {
 			mustExec(t, e.ds.db, `INSERT INTO equipment_profiles (id, kind, body, created_at, updated_at) VALUES ('broken', 'engine', '{"id":"broken"', 0, 0)`)
 			mustExec(t, e.ds.db, `UPDATE equipment SET profile_id = 'broken' WHERE id = ?`, e.item.ID)

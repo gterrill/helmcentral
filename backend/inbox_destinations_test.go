@@ -477,10 +477,10 @@ func TestInboxPhotoBodyRejectsUnknownKeysAndWrongTypes(t *testing.T) {
 	id := uploadForFiling(t, 82, nil)
 	items := `"items":[{"id":"` + id + `"}]`
 	for name, body := range map[string]string{
-		"misspelt key":   `{"equpiment_id":"` + pump.ID + `",` + items + `}`,
-		"other target":   `{"equipment_id":"` + pump.ID + `","job_id":"x",` + items + `}`,
-		"wrong type":     `{"equipment_id":5,` + items + `}`,
-		"items not list": `{"equipment_id":"` + pump.ID + `","items":"x"}`,
+		"misspelt key":     `{"equpiment_id":"` + pump.ID + `",` + items + `}`,
+		"other target":     `{"equipment_id":"` + pump.ID + `","job_id":"x",` + items + `}`,
+		"wrong type":       `{"equipment_id":5,` + items + `}`,
+		"items not list":   `{"equipment_id":"` + pump.ID + `","items":"x"}`,
 		"unknown item key": `{"equipment_id":"` + pump.ID + `","items":[{"id":"` + id + `","idd":"x"}]}`,
 	} {
 		code, resp := send(t, fileInboxToEquipmentHandler, http.MethodPost, body)

@@ -71,7 +71,7 @@ func TestWatchStayForecastFor_SaysWhyItCouldNotBeRead(t *testing.T) {
 	if got := watchStayForecastFor(resolveWatchForecast(d), stayStatus(), now); !strings.Contains(got.Problem, "unreadable") {
 		t.Fatalf("%+v", got)
 	}
-	if got := watchStayForecastFor(resolveWatchForecast(assistantToolDeps{}),stayStatus(), now); got.Problem == "" {
+	if got := watchStayForecastFor(resolveWatchForecast(assistantToolDeps{}), stayStatus(), now); got.Problem == "" {
 		t.Fatalf("unwired forecast is said: %+v", got)
 	}
 }
@@ -198,7 +198,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 func TestGatherWatchReportInput_NoLiveDataIsAReasonNotAnEmptyBoat(t *testing.T) {
 	env := newProposalEnv(t)
 	w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Sections: []string{"power"}, Thresholds: defaultWatchThresholds()}
-	in, err := gatherWatchReportInput(context.Background(), assistantToolDeps{},env.docs, w, vesselStatusTestNow, time.UTC)
+	in, err := gatherWatchReportInput(context.Background(), assistantToolDeps{}, env.docs, w, vesselStatusTestNow, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

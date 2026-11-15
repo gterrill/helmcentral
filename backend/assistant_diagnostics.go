@@ -104,16 +104,16 @@ type assistantSignalKConnection struct {
 }
 
 type assistantSignalKPathMatch struct {
-	Path       string   `json:"path"`
-	Value      any      `json:"value"`
-	Units      string   `json:"units,omitempty"`
-	Source     string   `json:"source,omitempty"`
+	Path   string `json:"path"`
+	Value  any    `json:"value"`
+	Units  string `json:"units,omitempty"`
+	Source string `json:"source,omitempty"`
 	// Timestamp is the SignalK update time as a boat-time label; TimestampISO is
 	// the instant as SignalK gave it, for a later get_path_history call.
 	Timestamp    string   `json:"timestamp,omitempty"`
 	TimestampISO string   `json:"timestamp_iso,omitempty"`
 	AgeSeconds   *float64 `json:"age_seconds,omitempty"`
-	Stale      bool     `json:"stale"`
+	Stale        bool     `json:"stale"`
 }
 
 // assistantSignalKSourceSummary is one $source label's standing across the
@@ -196,10 +196,10 @@ func (d assistantToolDeps) executeCheckSignalKPaths(ctx context.Context, raw jso
 		matchCount++
 
 		m := assistantSignalKPathMatch{
-			Path:      s.Path,
-			Value:     s.Value,
-			Units:     s.Units,
-			Source:    s.Source,
+			Path:   s.Path,
+			Value:  s.Value,
+			Units:  s.Units,
+			Source: s.Source,
 		}
 		if s.Timestamp != "" {
 			// An update time that does not parse gets no label rather than a guess;
@@ -347,9 +347,9 @@ type assistantGetLastRecordedArgs struct {
 }
 
 type assistantLastRecordedRow struct {
-	Path       string  `json:"path"`
-	Source     string  `json:"source,omitempty"`
-	LastSeenAt string  `json:"last_seen_at"`
+	Path       string `json:"path"`
+	Source     string `json:"source,omitempty"`
+	LastSeenAt string `json:"last_seen_at"`
 	// LastSeenISO is the same instant in UTC, for the start or end of a
 	// get_path_history call. Never quoted.
 	LastSeenISO string  `json:"last_seen_iso"`
@@ -427,8 +427,8 @@ func (d assistantToolDeps) executeGetLastRecorded(ctx context.Context, raw json.
 			Source:      r.Source,
 			LastSeenAt:  boat.DayClock(r.Time),
 			LastSeenISO: r.Time.UTC().Format(time.RFC3339),
-			AgeDays:    roundTo1(now.Sub(r.Time).Hours() / 24),
-			LastValue:  r.Value,
+			AgeDays:     roundTo1(now.Sub(r.Time).Hours() / 24),
+			LastValue:   r.Value,
 		})
 	}
 

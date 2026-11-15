@@ -75,6 +75,10 @@ before commit. Lint errors fail CI.
   the first time with the everyday thing it means.
 - **Contractions.** "It's", "you're", "doesn't".
 - **British/NZ spelling.** Colour, behaviour, metres, centre. "Whilst" is fine.
+- **House style.** "Percent" (not "per cent"), "under way" (not "underway"),
+  no Oxford comma.
+- **Line length is free.** Wrap the Markdown source wherever reads well;
+  it renders the same. A review does not flag line length.
 - **The operator's words.** "Tile" for anything placed on a dashboard page,
   every time. "Gauge", "dial" and "lamp" are right for the tiles that are
   those things.

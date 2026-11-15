@@ -48,11 +48,11 @@ type signalKSnapshot struct {
 	// ("chargers.0" -> "Shore charger"): the name a Victron GX gives its own
 	// devices. Kept for the same reason as batteryPublishers: a silent device
 	// must keep the name it had.
-	deviceNames map[string]map[string]string
-	selfCtx           string // which context is this vessel, per the stream's hello frame
-	connected         bool
-	lastMessage       time.Time
-	lastSelfMessage   time.Time // last delta for this vessel's own context, not other vessels' AIS
+	deviceNames     map[string]map[string]string
+	selfCtx         string // which context is this vessel, per the stream's hello frame
+	connected       bool
+	lastMessage     time.Time
+	lastSelfMessage time.Time // last delta for this vessel's own context, not other vessels' AIS
 
 	// sentenceSeen tracks, per NMEA 0183 sentence type ("APB", "RMC", ...),
 	// the receive time of the latest live (not cached-replay) update that
@@ -78,15 +78,15 @@ type signalKSnapshot struct {
 	// (zero while disconnected). contextHeard is the latest receive time of
 	// any delta per vessel context; it dies with the context on eviction.
 	// distressCleared latches AIS distress labels declared gone (ADR 0185).
-	connectedSince  time.Time
-	contextHeard    map[string]time.Time
+	connectedSince time.Time
+	contextHeard   map[string]time.Time
 	// positionHeard is, per non-self vessel context, when a LIVE position last
 	// arrived (a cached value replayed on reconnect is skipped, as for
 	// sentenceSeen). It is the AIS feed's heartbeat. Eviction of a silent
 	// vessel's tree does not clear it, so the heartbeat can still say how long
 	// the receiver has been quiet; entries are dropped after
 	// positionHeardKeepFor to bound the map.
-	positionHeard map[string]time.Time
+	positionHeard   map[string]time.Time
 	distressCleared map[string]struct{}
 }
 
