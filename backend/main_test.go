@@ -870,6 +870,48 @@ func TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone(t *testing.T) {
 	}
 }
 
+// boat_date is the boat's calendar day on the event's own datetime, so a
+// browser that cannot format the zone still learns when the day turns.
+func TestBuildVesselStatePayload_BoatDateIsTheDayInTheBoatsZone(t *testing.T) {
+	useFreshBoatZone(t)
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	server := trustedSignalKPayloadServer(t, -21.1113, 148.9) // UTC+10
+	defer server.Close()
+	host, port := hostPort(t, server.URL)
+	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
+
+	payload := buildVesselStatePayload()
+
+	datetime, err := time.Parse(time.RFC3339, payload["datetime"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := datetime.In(time.FixedZone("AEST", 10*3600)).Format("2006-01-02")
+	if got := payload["boat_date"]; got != want {
+		t.Fatalf("boat_date: got %v, want %q", got, want)
+	}
+}
+
+// Before any fix the zone is a UTC stand-in, which is no boat day.
+func TestBuildVesselStatePayload_BoatDateIsNullBeforeAnyFix(t *testing.T) {
+	useFreshBoatZone(t)
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	server := trustedSignalKPayloadServer(t, -1, -1)
+	defer server.Close()
+	host, port := hostPort(t, server.URL)
+	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
+
+	payload := buildVesselStatePayload()
+
+	if got, present := payload["boat_date"]; !present || got != nil {
+		t.Fatalf("boat_date: got %v (present %v), want null", got, present)
+	}
+}
+
 // TestBuildVesselStatePayload_TimezoneFallsBackToUTCForSentinelPosition is
 // the no-masking-fallback half: when the position resolves to the -1,-1
 // sentinel, the payload must report the honest UTC fallback rather than
@@ -909,6 +951,9 @@ func TestBuildVesselStatePayload_TimezoneStaysOnTheLastFixWhenTheFixIsLost(t *te
 	payload := buildVesselStatePayload()
 	if payload["timezone"] != "Australia/Brisbane" || payload["timezone_source"] != "last_fix" {
 		t.Fatalf("timezone %v source %v", payload["timezone"], payload["timezone_source"])
+	}
+	if payload["boat_date"] == nil {
+		t.Fatal("boat_date: want the day in the last fix's zone, got null")
 	}
 }
 

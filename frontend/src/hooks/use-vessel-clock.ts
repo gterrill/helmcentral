@@ -1,27 +1,21 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { readServerClock, subscribeServerClock } from '@/lib/server-clock'
 import { useSelection } from '@/lib/selection'
-import { formatClock, formatDate, formatDayKey, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
+import { formatClock, formatDate, selectBoatDate, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
 
 /**
- * The boat's calendar day (YYYY-MM-DD) on the server clock in the boat's zone,
- * or null until both are known. Before the first fix the server sends UTC as a
- * stand-in zone with source "none"; that is no boat day, so this is null then
- * too. It re-renders the caller only when the day turns. A refetch key, never
- * a value sent to the server: the server works out the day a due date is
- * judged on for itself (ADR 0230).
+ * The boat's calendar day (YYYY-MM-DD) as the server states it in the
+ * vessel-state event, or null until it has. The server works the day out in the
+ * boat's zone, so a zone this browser's Intl data lacks cannot stop it turning.
+ * Before the first fix the zone is a UTC stand-in, and the server sends no day.
+ * It re-renders the caller only when the day turns. A refetch key, never a
+ * value sent to the server: the server works out the day a due date is judged
+ * on for itself (ADR 0230).
  */
 export function useBoatDayKey(): string | null {
-  const timeZone = useVesselStateSelector(selectTimeZone)
-  const timeZoneSource = useVesselStateSelector(selectTimeZoneSource)
-  const known = timeZone !== undefined && timeZoneSource !== 'none' && !unknownZoneMessage(timeZone)
-  const select = useCallback(
-    (now: Date | null) => (now === null || !known || timeZone === undefined ? null : formatDayKey(now, timeZone)),
-    [known, timeZone],
-  )
-  return useSelection({ subscribe: subscribeServerClock, getSnapshot: readServerClock, select })
+  return useVesselStateSelector(selectBoatDate)
 }
 
 /**

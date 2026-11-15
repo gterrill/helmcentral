@@ -32,7 +32,6 @@ is how it is kept:
 type watchOneOffConfig struct {
 	Paths         []assistantWatchPathArg `json:"paths"`
 	Reason        string                  `json:"reason"`
-	Today         string                  `json:"today"`
 	TimezoneLabel string                  `json:"timezone_label"`
 	ZoneName      string                  `json:"zone_name"`
 	OffsetSeconds int                     `json:"offset_seconds"`
@@ -80,7 +79,7 @@ func (s *watchOneOffStore) Start(info assistantWatchInfo) error {
 	}
 	_, offset := info.StartedAt.In(loc).Zone()
 	config, err := json.Marshal(watchOneOffConfig{
-		Paths: info.Paths, Reason: info.Reason, Today: info.Today.Format("2006-01-02"),
+		Paths: info.Paths, Reason: info.Reason,
 		TimezoneLabel: info.TimezoneLabel, ZoneName: loc.String(), OffsetSeconds: offset,
 	})
 	if err != nil {
@@ -303,10 +302,6 @@ func oneOffInfo(w savedWatch, cfg watchOneOffConfig) (assistantWatchInfo, error)
 	if w.StartedAt == nil || w.EndsAt == nil {
 		return assistantWatchInfo{}, fmt.Errorf("watch %s has no start or end time", w.ID)
 	}
-	today, err := time.Parse("2006-01-02", cfg.Today)
-	if err != nil {
-		return assistantWatchInfo{}, fmt.Errorf("watch %s: the saved date is unreadable: %w", w.ID, err)
-	}
 	loc, err := cfg.location()
 	if err != nil {
 		return assistantWatchInfo{}, fmt.Errorf("watch %s: %w", w.ID, err)
@@ -318,7 +313,7 @@ func oneOffInfo(w savedWatch, cfg watchOneOffConfig) (assistantWatchInfo, error)
 	return assistantWatchInfo{
 		ID: w.ID, ConversationID: w.ConversationID, Subject: assistantWatchSubject(labels), Labels: labels, Minutes: w.DurationMinutes,
 		StartedAt: *w.StartedAt, EndsAt: *w.EndsAt, EndsAtLocal: assistantWatchClock(*w.EndsAt, loc), Status: assistantWatchStatusWatching,
-		Reason: cfg.Reason, Paths: cfg.Paths, Today: today, Location: loc, TimezoneLabel: cfg.TimezoneLabel,
+		Reason: cfg.Reason, Paths: cfg.Paths, Location: loc, TimezoneLabel: cfg.TimezoneLabel,
 	}, nil
 }
 
