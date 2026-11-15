@@ -293,7 +293,6 @@ type assistantWatchInfo struct {
 
 	Reason        string                  `json:"-"`
 	Paths         []assistantWatchPathArg `json:"-"`
-	Today         time.Time               `json:"-"`
 	Location      *time.Location          `json:"-"`
 	TimezoneLabel string                  `json:"-"`
 	// StartReadings are the readings start() checked, one per path, set
@@ -314,11 +313,8 @@ func assistantWatchClock(t time.Time, loc *time.Location) string {
 type assistantWatchRequest struct {
 	ConversationID string
 	Args           assistantStartWatchArgs
-	// Today is the boat's day from the run that started the watch. The
-	// follow-up turn reads the boat's day afresh when it runs.
-	Today         time.Time
-	Location      *time.Location
-	TimezoneLabel string
+	Location       *time.Location
+	TimezoneLabel  string
 }
 
 type assistantWatch struct {
@@ -532,7 +528,6 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 		Status:         assistantWatchStatusWatching,
 		Reason:         req.Args.Reason,
 		Paths:          req.Args.Paths,
-		Today:          req.Today,
 		Location:       loc,
 		TimezoneLabel:  req.TimezoneLabel,
 	}
@@ -1323,7 +1318,6 @@ func (d assistantToolDeps) executeStartWatch(ctx context.Context, raw json.RawMe
 	info, err := d.watches.start(assistantWatchRequest{
 		ConversationID: conversationID,
 		Args:           args,
-		Today:          d.today,
 		Location:       loc,
 		TimezoneLabel:  tzLabel,
 	})
