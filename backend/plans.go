@@ -227,7 +227,7 @@ func normaliseVia(v *planVia, stopNo, viaNo int) *planError {
 		return perr("vias", "stop %d: via place %d name is longer than %d characters", stopNo, viaNo, planNameMax)
 	}
 	if axis, why := checkLatLon(v.Lat, v.Lon); axis != "" {
-		return perr("vias","stop %d via %d: %s", stopNo, viaNo, why)
+		return perr("vias", "stop %d via %d: %s", stopNo, viaNo, why)
 	}
 	return nil
 }

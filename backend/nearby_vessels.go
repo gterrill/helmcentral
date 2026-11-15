@@ -2,8 +2,8 @@ package main
 
 import (
 	"math"
-	"sort"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/labstack/echo/v4"

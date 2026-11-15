@@ -322,7 +322,7 @@ func groupWindSegs(segs []windSeg, day windDay) []windSeg {
 	var out []windSeg
 	var cur *windGroup
 	var prev *windPeriod
-	var pending []int // variable hours seen before any group, for the first
+	var pending []int  // variable hours seen before any group, for the first
 	var openVars []int // variable hours since the last period, as positions in out
 	afterCalm := false
 	for _, s := range segs {

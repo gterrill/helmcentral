@@ -195,18 +195,18 @@ type overnightResult struct {
 	// ChargingChecked is false when they name no inverter or the inverter has
 	// no history, so a zero count beside either means "not checked", not
 	// "none found".
-	ShoreChecked           bool      `json:"shore_checked"`
-	ChargingChecked        bool      `json:"charging_checked"`
-	NightsExcludedShore    int       `json:"nights_excluded_shore"`
-	NightsExcludedCharging int       `json:"nights_excluded_charging"`
+	ShoreChecked           bool `json:"shore_checked"`
+	ChargingChecked        bool `json:"charging_checked"`
+	NightsExcludedShore    int  `json:"nights_excluded_shore"`
+	NightsExcludedCharging int  `json:"nights_excluded_charging"`
 	// NightsExcludedChargingUnchecked counts nights left out because the
 	// inverter logged nothing inside them, though it did on other nights.
-	NightsExcludedChargingUnchecked int `json:"nights_excluded_charging_unchecked"`
-	NightsExcludedGap      int       `json:"nights_excluded_gap"`
-	NightsExcludedRise     int       `json:"nights_excluded_rise"`
-	OldestNightStart       time.Time `json:"oldest_night_start"`
-	Reason                 *string   `json:"reason"`
-	ComputedAt             time.Time `json:"computed_at"`
+	NightsExcludedChargingUnchecked int       `json:"nights_excluded_charging_unchecked"`
+	NightsExcludedGap               int       `json:"nights_excluded_gap"`
+	NightsExcludedRise              int       `json:"nights_excluded_rise"`
+	OldestNightStart                time.Time `json:"oldest_night_start"`
+	Reason                          *string   `json:"reason"`
+	ComputedAt                      time.Time `json:"computed_at"`
 
 	// The overnight_draw rule's own comparison, which measures each night from
 	// 22:00 boat time to dawn rather than over the whole night above.

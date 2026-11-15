@@ -180,7 +180,7 @@ func readChunks(t *testing.T, src normalSource, window time.Duration) []chunkSpa
 		spans = append(spans, chunkSpan{from, to})
 		return nil, nil
 	})()
-	if _, err := queryNormalMinutes(context.Background(), "settings.yaml", src,[]string{"p"}, minutesStart, minutesStart.Add(window)); err != nil {
+	if _, err := queryNormalMinutes(context.Background(), "settings.yaml", src, []string{"p"}, minutesStart, minutesStart.Add(window)); err != nil {
 		t.Fatal(err)
 	}
 	return spans
