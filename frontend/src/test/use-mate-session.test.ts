@@ -4,7 +4,6 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { useMateSession, type MateSendResult } from '@/hooks/use-mate-session'
 import { useMateMemories } from '@/hooks/use-mate-memories'
 import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
-import { todayISO } from '@/lib/local-date'
 import { removeMateWatch } from '@/lib/mate-watch-store'
 import { controllableSseStream, flushMicrotasks, sseFrame, sseStream } from './helpers/fake-sse'
 
@@ -164,7 +163,7 @@ describe('useMateSession', () => {
 
       expect(result.current.activeId).toBe('new-1')
       expect(server.posts).toEqual([
-        { conversationId: 'new-1', body: expect.objectContaining({ content: 'Anchorage for tonight?', today: todayISO() }) },
+        { conversationId: 'new-1', body: expect.objectContaining({ content: 'Anchorage for tonight?' }) },
       ])
       expect(outcome.answered).toBe(true)
       expect(outcome.message?.content).toBe('Aye.')
@@ -239,7 +238,7 @@ describe('useMateSession', () => {
         await result.current.send('Plain question', { attachments: [] })
       })
 
-      expect(server.posts[0].body).toEqual({ content: 'Plain question', today: todayISO() })
+      expect(server.posts[0].body).toEqual({ content: 'Plain question' })
     })
 
     it('reads the thread again when a question gets no answer, and the run replaces the live notice', async () => {

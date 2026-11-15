@@ -956,21 +956,6 @@ func assistantTurnToolDeps(apiKey, settingsPath string, webSearch bool, today ti
 	return tools
 }
 
-// parseAssistantToday validates the message body's today field, the same
-// rule requireTodayParam applies to the maintenance endpoints: present and
-// YYYY-MM-DD, never a fallback to the server's own clock.
-func parseAssistantToday(raw string) (time.Time, *inventoryValidationError) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's"}
-	}
-	today, err := time.Parse("2006-01-02", raw)
-	if err != nil {
-		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today must be YYYY-MM-DD"}
-	}
-	return today, nil
-}
-
 // POST /api/assistant/conversations/:id/messages
 //
 // Order matters here (ADR 0093): validate the request body before touching
@@ -1013,12 +998,6 @@ func postAssistantMessageHandler(c echo.Context) error {
 		// globalDocumentStore below before readiness is even checked - see
 		// resolveAssistantMessageAttachments.
 		Attachments []string `json:"attachments"`
-		// Today is the operator's own local calendar date (YYYY-MM-DD,
-		// frontend lib/local-date.ts todayISO), required for the same
-		// reason the maintenance endpoints require ?today= (ADR 0138's
-		// "today" amendment): the maintenance tools compute due/overdue
-		// against it, and the server's own clock is not the boat's date.
-		Today string `json:"today"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -1044,11 +1023,6 @@ func postAssistantMessageHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content is required"})
 	}
 
-	today, verr := parseAssistantToday(body.Today)
-	if verr != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": verr.Message, "field": verr.Field})
-	}
-
 	settingsPath := assistantSettingsPath()
 	readiness, apiKey, err := checkAssistantReadiness(settingsPath)
 	if err != nil {
@@ -1061,7 +1035,9 @@ func postAssistantMessageHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	params.today = today
+	// The boat's day is the server's to work out (ADR 0230). With no position
+	// yet it stays zero, and a tool that needs it refuses with the reason.
+	params.today, params.todayErr = boatToday()
 	params.spoken = body.Spoken
 	if body.Screen != nil {
 		params.screen = &assistantScreenContext{
@@ -1138,6 +1114,7 @@ type assistantTurnParams struct {
 	options      assistantRunnerOptions
 	webSearch    bool
 	today        time.Time
+	todayErr     error // why today is zero, for the tools that need it
 	spoken       bool
 	screen       *assistantScreenContext
 }
@@ -1180,6 +1157,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	// One construction of the turn's tools: the prompt, the version stamped on
 	// the answer and the runner that sends them to the model all read this.
 	toolDeps := assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today)
+	toolDeps.todayErr = p.todayErr
 	pc.WebSearch = mateToolAvailable(toolDeps, "search_web")
 	if p.screen != nil {
 		pc.Screen = *p.screen

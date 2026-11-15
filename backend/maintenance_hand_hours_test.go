@@ -52,9 +52,9 @@ func TestHandEquipmentHours(t *testing.T) {
 	}
 }
 
-func recordHandHoursRequest(t *testing.T, equipmentID, today, body string) (int, string) {
+func recordHandHoursRequest(t *testing.T, equipmentID, body string) (int, string) {
 	t.Helper()
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+equipmentID+"/maintenance/hour-readings?today="+today, body, equipmentID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment/"+equipmentID+"/maintenance/hour-readings", body, equipmentID)
 	if err := recordHandHourReadingHandler(c); err != nil {
 		t.Fatalf("recordHandHourReadingHandler: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestRecordHandHourReading_StoresGaugeAndTrueHours(t *testing.T) {
 		t.Fatalf("RecordHourMeterReset: %v", err)
 	}
 
-	code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-02-01","gauge":50,"note":"Read at the panel"}`)
+	code, body := recordHandHoursRequest(t, maker.ID, `{"read_on":"2026-02-01","gauge":50,"note":"Read at the panel"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", code, body)
 	}
@@ -103,26 +103,25 @@ func TestRecordHandHourReading_Validation(t *testing.T) {
 	maker := mustCreateHandlerTestEquipment(t, "Watermaker")
 
 	cases := []struct {
-		name, today, body string
-		want              int
-		wantField         string
+		name, body string
+		want       int
+		wantField  string
 	}{
-		{"bad date", "2026-06-15", `{"read_on":"yesterday","gauge":10}`, http.StatusBadRequest, "read_on"},
-		{"future date", "2026-06-15", `{"read_on":"2026-06-16","gauge":10}`, http.StatusBadRequest, "read_on"},
-		{"negative gauge", "2026-06-15", `{"read_on":"2026-06-15","gauge":-1}`, http.StatusBadRequest, "gauge"},
-		{"missing gauge", "2026-06-15", `{"read_on":"2026-06-15"}`, http.StatusBadRequest, "gauge"},
-		{"no today", "", `{"read_on":"2026-06-15","gauge":10}`, http.StatusBadRequest, "today"},
+		{"bad date", `{"read_on":"yesterday","gauge":10}`, http.StatusBadRequest, "read_on"},
+		{"future date", `{"read_on":"2026-06-16","gauge":10}`, http.StatusBadRequest, "read_on"},
+		{"negative gauge", `{"read_on":"2026-06-15","gauge":-1}`, http.StatusBadRequest, "gauge"},
+		{"missing gauge", `{"read_on":"2026-06-15"}`, http.StatusBadRequest, "gauge"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			code, body := recordHandHoursRequest(t, maker.ID, tc.today, tc.body)
+			code, body := recordHandHoursRequest(t, maker.ID, tc.body)
 			if code != tc.want || !strings.Contains(body, tc.wantField) {
 				t.Fatalf("expected %d naming %q, got %d: %s", tc.want, tc.wantField, code, body)
 			}
 		})
 	}
 
-	code, body := recordHandHoursRequest(t, "no-such-item", "2026-06-15", `{"read_on":"2026-06-15","gauge":10}`)
+	code, body := recordHandHoursRequest(t, "no-such-item", `{"read_on":"2026-06-15","gauge":10}`)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected 404 for an unknown item, got %d: %s", code, body)
 	}
@@ -137,7 +136,7 @@ func TestRecordHandHourReading_RefusedOnItemWithMeterSource(t *testing.T) {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 
-	code, body := recordHandHoursRequest(t, engine.ID, "2026-06-15", `{"read_on":"2026-06-15","gauge":10}`)
+	code, body := recordHandHoursRequest(t, engine.ID, `{"read_on":"2026-06-15","gauge":10}`)
 	if code != http.StatusConflict || !strings.Contains(body, "hour meter") {
 		t.Fatalf("expected 409 naming the hour meter, got %d: %s", code, body)
 	}
@@ -186,7 +185,7 @@ func TestRuleView_HandReadingStandsInForMissingMeter(t *testing.T) {
 		t.Fatalf("a baseline alone is not a current reading: hours stay unknown, got %+v", view)
 	}
 
-	if code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-06-10","gauge":120}`); code != http.StatusCreated {
+	if code, body := recordHandHoursRequest(t, maker.ID, `{"read_on":"2026-06-10","gauge":120}`); code != http.StatusCreated {
 		t.Fatalf("record: %d %s", code, body)
 	}
 	view, err = resolveMaintenanceRuleView(rule.ID, today)
@@ -210,11 +209,11 @@ func TestRuleView_LatestDatedFigureWinsAcrossEverySource(t *testing.T) {
 	rule := handHoursRule(t, maker.ID)
 	today := mustParseDate(t, "2026-06-15")
 
-	if code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-03-01","gauge":100}`); code != http.StatusCreated {
+	if code, body := recordHandHoursRequest(t, maker.ID, `{"read_on":"2026-03-01","gauge":100}`); code != http.StatusCreated {
 		t.Fatalf("record: %d %s", code, body)
 	}
 	// A Complete form on a later date.
-	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete?today=2026-06-15", `{"performed_at":"2026-04-01","hours":130,"description":"Filter"}`, rule.ID)
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/complete", `{"performed_at":"2026-04-01","hours":130,"description":"Filter"}`, rule.ID)
 	if err := completeMaintenanceRuleHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("complete: %v %d %s", err, rec.Code, rec.Body.String())
 	}
@@ -238,7 +237,7 @@ func TestRuleView_LatestDatedFigureWinsAcrossEverySource(t *testing.T) {
 	assertCurrent(150, "2026-05-20")
 
 	// An older reading entered afterwards does not displace it.
-	if code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-05-01","gauge":999}`); code != http.StatusCreated {
+	if code, body := recordHandHoursRequest(t, maker.ID, `{"read_on":"2026-05-01","gauge":999}`); code != http.StatusCreated {
 		t.Fatalf("record: %d %s", code, body)
 	}
 	assertCurrent(150, "2026-05-20")
@@ -292,7 +291,7 @@ func TestSetLastDoneHours_ASecondSetOnTheSameDayReplacesTheFirst(t *testing.T) {
 		}
 	}
 	// A reading logged by hand the same day, with its own note, stays.
-	if code, body := recordHandHoursRequest(t, maker.ID, "2026-06-15", `{"read_on":"2026-05-01","gauge":100,"note":"gauge photo"}`); code != http.StatusCreated {
+	if code, body := recordHandHoursRequest(t, maker.ID, `{"read_on":"2026-05-01","gauge":100,"note":"gauge photo"}`); code != http.StatusCreated {
 		t.Fatalf("record: %d %s", code, body)
 	}
 	readings, err := globalDocumentStore.ListHandHourReadings(maker.ID)

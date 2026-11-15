@@ -11,14 +11,12 @@
  * `getDate()` read the browser's own local clock instead - the one on the
  * wall at the helm.
  *
- * Every maintenance API call that needs "today" (use-maintenance.ts) calls
- * this exactly once and sends the result as the backend's required
- * `?today=` query param (maintenance_handlers.go's requireTodayParam) -
- * the server never computes its own "today" and refuses to guess when it
- * isn't told one.
+ * This is the device's date, for what a form starts on and for ages shown
+ * beside a date. It is never sent to the server as the day: the boat's day
+ * comes from the server (ADR 0230), which works it out from the boat's zone.
  */
 export function todayISO(date: Date = new Date()): string {
-  // helm-browser-zone: maintenance due dates are wall-calendar dates read on the operator's own device (ADR 0138).
+  // helm-browser-zone: a form's starting date and ages beside a date are the operator's own device date; due dates use the boat's day (ADR 0230).
   const local = { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() }
   return `${local.year}-${String(local.month).padStart(2, '0')}-${String(local.day).padStart(2, '0')}`
 }

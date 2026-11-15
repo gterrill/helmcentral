@@ -432,10 +432,8 @@ func productionWatchReport(ctx context.Context, settingsPath string, w savedWatc
 	if store == nil {
 		return watchReport{}, nil, errWatchesNoStore
 	}
-	local := now.In(loc)
-	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 	d := assistantProductionToolDeps(settingsPath)
-	d.today = today
+	d.today = civilDateUTC(now.In(loc))
 	in, err := gatherWatchReportInput(ctx, d, store, w, now, loc)
 	if err != nil {
 		return watchReport{}, nil, err

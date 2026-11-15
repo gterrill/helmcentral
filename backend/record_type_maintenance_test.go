@@ -114,7 +114,7 @@ func TestRuleValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
-			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules?today=2026-09-30", string(body), "")
+			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules", string(body), "")
 			if err := createMaintenanceRuleHandler(c); err != nil {
 				t.Fatalf("createMaintenanceRuleHandler: %v", err)
 			}
@@ -174,7 +174,7 @@ func TestLastDoneValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(maintenanceLastDoneRequest{LastDoneAt: tc.at, LastDoneHours: tc.hours})
-			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done?today=2026-09-30", string(body), rule.ID)
+			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+rule.ID+"/last-done", string(body), rule.ID)
 			if err := setMaintenanceRuleLastDoneHandler(c); err != nil {
 				t.Fatalf("handler: %v", err)
 			}
@@ -221,7 +221,7 @@ func TestCompleteValidation_HandlerAndProposalRefuseTheSameCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(tc.req)
-			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+tc.rule.ID+"/complete?today=2026-09-30", string(body), tc.rule.ID)
+			c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/maintenance/rules/"+tc.rule.ID+"/complete", string(body), tc.rule.ID)
 			if err := completeMaintenanceRuleHandler(c); err != nil {
 				t.Fatalf("handler: %v", err)
 			}

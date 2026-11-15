@@ -58,28 +58,7 @@ describe('useAssistantChat', () => {
     expect(result.current.sending).toBe(false)
   })
 
-  it('tells the operator to reload when the server rejects the missing today field, not the raw validation text', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({
-        error: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's",
-        field: 'today',
-      }),
-    }))
-
-    const { result } = renderHook(() => useAssistantChat())
-
-    let reply: unknown
-    await act(async () => {
-      reply = await result.current.send('c1', 'hello')
-    })
-
-    expect(reply).toBeNull()
-    expect(result.current.error).toBe('Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.')
-  })
-
-  it('keeps the server text for a 400 that is about some other field', async () => {
+  it('keeps the server text for a 400', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 400,

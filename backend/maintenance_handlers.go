@@ -118,27 +118,6 @@ type maintenanceRuleView struct {
 	HoursReadOn string `json:"hours_read_on"`
 }
 
-// requireTodayParam reads and validates the ?today=YYYY-MM-DD query param
-// every rule-view-returning endpoint requires - the operator's own local
-// calendar date (frontend: lib/local-date.ts's todayISO, read from the
-// browser's own clock), never derived from the server's own wall clock.
-// AGENTS.md fail-fast: missing or malformed is a 400 naming the field,
-// never a silent fallback to the server's own time.Now() - a boat well
-// east of UTC would otherwise have every due/overdue decision computed
-// against the WRONG calendar date whenever it's evening in the server's own
-// UTC day but already tomorrow, or still yesterday, at the helm.
-func requireTodayParam(c echo.Context) (time.Time, *inventoryValidationError) {
-	raw := strings.TrimSpace(c.QueryParam("today"))
-	if raw == "" {
-		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today is required and must be YYYY-MM-DD - the operator's own local date, not the server's"}
-	}
-	today, err := time.Parse("2006-01-02", raw)
-	if err != nil {
-		return time.Time{}, &inventoryValidationError{Field: "today", Message: "today must be YYYY-MM-DD"}
-	}
-	return today, nil
-}
-
 // parseMaintenanceDate parses a YYYY-MM-DD column into a *time.Time for the
 // status engine, nil for blank. A value that fails to parse is treated the
 // same as blank (excluded from the calendar axis) rather than failing the
@@ -160,7 +139,7 @@ func parseMaintenanceDate(s string) *time.Time {
 
 // buildMaintenanceRuleView composes rule's stored fields with a fresh
 // status computation. eq is nil for a calendar-only rule. today is the
-// operator's own local calendar date (requireTodayParam) - never an
+// boat's calendar day (boatToday) - never an
 // instant, and never the server's own clock; see
 // maintenanceRuleStatusInput.Today's own doc comment (maintenance_status.go)
 // for why.
@@ -297,8 +276,8 @@ func convertGaugeHoursToTrue(equipmentID string, gauge float64, atDate time.Time
 // endpoint answers with this, so the frontend always sees status
 // recomputed against the CURRENT live reading right after its own write,
 // never a value that could already be stale by the time the response
-// arrives. today is the operator's own local calendar date
-// (requireTodayParam), used only for the status engine's calendar axis;
+// arrives. today is the boat's calendar day
+// (boatToday), used only for the status engine's calendar axis;
 // the hours axis still reads the actual wall-clock instant (time.Now()
 // here) for staleness, which is a real elapsed-time question independent
 // of which calendar day it is at the helm.
@@ -568,9 +547,9 @@ func checkMaintenancePartsExist(parts []maintenanceLogPartInput) error {
 // per rule the way resolveMaintenanceRuleView does for a single-rule
 // response.
 func listMaintenanceRulesHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 
 	filter := maintenanceRuleFilter{
@@ -637,9 +616,9 @@ func getMaintenanceRuleHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	view, err := resolveMaintenanceRuleView(c.Param("id"), today)
 	if err != nil {
@@ -651,9 +630,9 @@ func getMaintenanceRuleHandler(c echo.Context) error {
 // ── rules: write ─────────────────────────────────────────────────────────
 
 func createMaintenanceRuleHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceRuleRequest
@@ -675,9 +654,9 @@ func updateMaintenanceRuleHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceRuleRequest
@@ -716,9 +695,9 @@ func setMaintenanceRuleOverridesHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var raw map[string]json.RawMessage
@@ -746,9 +725,9 @@ func resetMaintenanceRuleOverrideHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	rule, err := globalDocumentStore.ResetMaintenanceRuleOverrideCmd(c.Param("id"), c.Param("field"))
 	if err != nil {
@@ -851,9 +830,9 @@ func acknowledgeMaintenanceRuleHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceAckRequest
@@ -884,9 +863,9 @@ func setMaintenanceRuleLastDoneHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceLastDoneRequest
@@ -912,9 +891,9 @@ func completeMaintenanceRuleHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceLogEntryRequest
@@ -945,9 +924,9 @@ func setMaintenanceRuleProcedureNoteHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	limitNoteRequestBody(c)
 	var req maintenanceProcedureNoteRequest
@@ -1074,9 +1053,9 @@ func createMaintenanceProcedureNoteHandler(c echo.Context) error {
 	if err := decodeRuleIDParam(c); err != nil {
 		return writeMaintenanceCommandError(c, err)
 	}
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	// The effective description titles the note; a job the profile cannot
 	// supply refuses here, before a note is made for it.

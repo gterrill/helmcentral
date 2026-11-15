@@ -141,7 +141,7 @@ describe('MaintenanceSection', () => {
       const post = fetchMock.mock.calls.find(([u, init]) => String(u).includes('/equipment/eq-1/maintenance/hour-readings') && (init as RequestInit)?.method === 'POST')
       expect(post).toBeTruthy()
       expect(JSON.parse(String((post![1] as RequestInit).body))).toMatchObject({ gauge: 130, read_on: todayISO() })
-      expect(String(post![0])).toContain(`today=${todayISO()}`)
+      expect(String(post![0])).not.toContain('today=')
     })
   })
 

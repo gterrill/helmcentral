@@ -191,10 +191,7 @@ func (m *mcpService) toolDeps(tool string) assistantToolDeps {
 	if d.now != nil {
 		now = d.now()
 	}
-	if bt := d.boatTime(); !bt.NoFix && bt.Err == nil && bt.Loc != nil {
-		y, mo, day := now.In(bt.Loc).Date()
-		d.today = time.Date(y, mo, day, 0, 0, 0, 0, time.UTC)
-	}
+	d.today, d.todayErr = boatCalendarDay(d.boatTime(), now)
 	return d
 }
 

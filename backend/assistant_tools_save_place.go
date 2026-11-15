@@ -78,11 +78,12 @@ func (d assistantToolDeps) executeSavePlace(ctx context.Context, raw json.RawMes
 	}
 	candidate := savedPlace{Name: args.Name, Lat: *args.Lat, Lon: *args.Lon, Note: args.Note}
 	if args.DepthM != nil {
-		// The date is the operator's own calendar date, never the server's clock.
-		if d.today.IsZero() {
-			return "", errors.New("save_place: today's date is not known, so a depth cannot be dated")
+		// The depth is dated with the boat's day, never the server's clock.
+		today, err := d.requireToday("save_place")
+		if err != nil {
+			return "", err
 		}
-		candidate.DepthM, candidate.DepthSource, candidate.DepthDate = args.DepthM, savedPlaceDepthCharted, d.today.Format("2006-01-02")
+		candidate.DepthM, candidate.DepthSource, candidate.DepthDate = args.DepthM, savedPlaceDepthCharted, today.Format("2006-01-02")
 	}
 	if err := validateSavedPlace(&candidate); err != nil {
 		return "", fmt.Errorf("save_place: %w", err)

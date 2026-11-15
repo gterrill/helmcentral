@@ -7,18 +7,17 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// POST /api/assistant/proposals/:id/apply?today=YYYY-MM-DD (ADR 0146)
+// POST /api/assistant/proposals/:id/apply (ADR 0146)
 //
-// The operator's Apply tap on a maintenance proposal card. today is required
-// for the same reason every maintenance write requires it: an hours-only
-// baseline is converted at the operator's own date, not the server's.
+// The operator's Apply tap on a maintenance proposal card. An hours-only
+// baseline is converted at the boat's date, which the server works out.
 // Answers {proposal} with the stored result; a proposal already applied
 // answers the same and writes nothing; a stale or dismissed one is a 409 and
 // nothing is written.
 func applyAssistantProposalHandler(c echo.Context) error {
-	today, verr := requireTodayParam(c)
-	if verr != nil {
-		return writeInventoryValidationError(c, verr)
+	today, err := boatToday()
+	if err != nil {
+		return writeBoatDayError(c, err)
 	}
 	p, err := applyAssistantProposal(globalAssistantStore, globalDocumentStore, c.Param("id"), today)
 	if errors.Is(err, errAlarmRulesNotReloaded) {

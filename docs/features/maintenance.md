@@ -203,7 +203,9 @@ Deleting the item never rewrites what was actually fitted on the day.
 Mate can read the schedule. Ask it what's overdue, what's coming up on the
 generator, or when the raw water impeller was last done. It answers from this
 list rather than from memory. The status it quotes is the one shown here,
-worked out against today's date at the helm.
+worked out against today's date on the boat. Helmcentral takes that date from
+the boat's own clock, so a phone or tablet set to another time zone never moves
+a due date. See [the boat's time](../reference/boat-time.md).
 
 If you ask it to review a schedule, it compares your rules with two things:
 the manufacturer's recommended services on the item's profile, and the manuals

@@ -90,6 +90,56 @@ The offset is worked out at that instant, because daylight saving makes it
 depend on the date. Tool results use a label computed the same way at the time
 being shown: `AEDT (UTC+11)`, or `UTC+11` offshore where the zone has no name.
 
+### The boat's calendar day
+
+Maintenance due dates and Mate's "today" are calendar days read off the boat's
+wall. The server works the day out from the boat's zone in `boat_today.go`:
+`boatToday` takes the zone `boatTimeForState` gives and returns the date `now`
+falls on there. The day is never the server's UTC date, and no client supplies
+it. This replaces the required `?today=YYYY-MM-DD` of ADR 0138, ADR 0145, ADR
+0146 and ADR 0269, and the `today` field on Mate's message body.
+
+- **Where it applies.** Every endpoint that took `?today=` now asks the server:
+  the maintenance rule reads and writes, hand hour readings, opening and
+  dropping an open job, and applying a Mate proposal. Mate's message handler
+  reads the day once per turn and hands it, with the reason when there is
+  none, to the tools. A watch's follow-up turn reads it afresh when the report
+  arrives, since a watch can run past midnight. The MCP server computes the
+  same day with `boatCalendarDay`; the watch report, watch reviews and alarm
+  reviews read it from the scheduler's zone with `boatDayAt`, which maps the
+  scheduler's errors to the same two reasons. Each hands its tools the reason
+  along with the day.
+- **Where the day comes from.** The last-fix rule above still holds. A boat
+  that has lost its fix keeps the day in the zone of its last trusted fix.
+- **Before any fix.** There is no zone, so there is no day. `errBoatDayUnknown`
+  is the answer: every endpoint above answers 503 with the words "the boat has
+  not reported a position yet, so today's date on the boat is not known", and
+  the Maintenance page shows them as they are. Nothing falls back to UTC, to
+  the server's date or to the device's. An alarm review before any fix has no
+  day either, where it once read the day in UTC.
+- **A zone that can't be read.** A damaged saved zone, or one this build
+  doesn't know, is a different fault from no fix. `boatZoneUnreadable` still
+  matches `errBoatDayUnknown`, but its words name the cause: "the boat's time
+  zone can't be worked out (…), so today's date on the boat is not known".
+- **What Mate can still do.** Mate's message still starts, because a question
+  about the weather needs no date. Every tool that needs the day refuses with
+  the reason the lookup gave: `list_maintenance`, `remember_fact` and
+  `propose_changes`, because a changeset is prepared against the day and its
+  Apply needs one anyway, and `save_place` when it dates a depth. Before the
+  first fix Mate can't keep a fact, suggest a change or save a depth. That
+  window is short, since the saved zone outlives a restart, and the help page
+  says so.
+- **A view left open overnight.** The browser keeps its own reading of the
+  boat's day, from the server clock in the boat's zone (`useBoatDayKey`), and
+  never sends it. When a known day turns to the next, the Maintenance list
+  reads itself again, so a wall screen shows a service that fell due
+  overnight. The first reading on a cold load is not a turn, so it costs no
+  second read, unless the list was refused for want of a day: then the first
+  fix is what it waited for, and the list reads again. The UTC stand-in zone
+  the stream sends before any fix (source `none`) is no boat day.
+- **No old parameter.** A request that still carries `?today=` has it ignored.
+  The browser no longer sends it.
+
 ## What was rejected
 
 - **An operator-set zone setting.** One more thing to forget to change. A boat
@@ -139,9 +189,13 @@ being shown: `AEDT (UTC+11)`, or `UTC+11` offshore where the zone has no name.
   `Intl.DateTimeFormat` and the local-zone getters (`getHours`, `getDate` and
   so on) unless a zone is named. A deliberate device-clock reading opts out with
   `// helm-browser-zone: <reason>` on the line before. Document timestamps (when
-  the operator uploaded or ticked something) use it, as do the maintenance
-  "today" date (ADR 0138) and the vessel-time formatter's fallback before the
-  first vessel frame.
+  the operator uploaded or ticked something) use it, as do the date a
+  maintenance form starts on and the vessel-time formatter's fallback before
+  the first vessel frame. Those are defaults for the operator's own typing. The
+  day a due date is judged on is the server's (see "The boat's calendar day").
+  A form that starts on a device date later than the boat's, then saves a
+  reading dated in the boat's future, is refused by the server with its own
+  words.
 - **Exports keep one offset.** The standalone passage player counts days with a
   single fixed offset. It takes the offset in force at the first passage's
   departure, in the passage's zone, so a passage that crosses a daylight-saving

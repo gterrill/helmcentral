@@ -564,6 +564,9 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 	h.reg.watches[conv.ID].info.Status = assistantWatchStatusReporting
 	h.reg.mu.Unlock()
 
+	// The watch started on the 4th and reports after the boat's midnight: the
+	// follow-up works on the boat's day when it runs, not the day it began.
+	useBoatDay(t, "2026-10-05")
 	info := assistantWatchInfo{ID: "w1", ConversationID: conv.ID, Subject: "Port load", Minutes: 5, Today: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)}
 	if !assistantWatchFollowUp(info, "Watch finished: Port load (5 min)\nreport", nil) {
 		t.Fatal("expected the follow-up turn to start")
@@ -591,8 +594,8 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 	if gotConversation != conv.ID {
 		t.Fatalf("expected the run's context to carry the conversation for start_watch, got %q", gotConversation)
 	}
-	if !gotToday.Equal(info.Today) {
-		t.Fatalf("expected the watch's date to reach the runner, got %v", gotToday)
+	if want := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC); !gotToday.Equal(want) {
+		t.Fatalf("expected the boat's day when the follow-up runs (%v) to reach the runner, got %v", want, gotToday)
 	}
 	waitForConditionT(t, time.Second, func() bool { _, busy := globalAssistantRuns.get(conv.ID); return !busy })
 }

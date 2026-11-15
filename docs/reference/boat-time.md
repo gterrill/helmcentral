@@ -56,6 +56,7 @@ above.
 
 - **Times you recorded yourself:** When a document was uploaded, indexed or
   added, and when you ticked a checklist step, show on the device you're using.
+  The same goes for the date a maintenance form starts on.
   Those times record when you did something, not where the boat was.
 - **Before the boat has reported a zone:** For a moment after you open
   Helmcentral, times that need the zone show as "--". They fill in as soon as
@@ -72,6 +73,20 @@ above.
   Mon 2 Nov 3.30 AM UTC, so it can't be mistaken for boat time. The clock tile shows "UTC · no position yet". Watches
   don't run until the first fix, because a schedule can't be read without a
   clock.
+- **Dates in Maintenance and Mate:** Whether a service is due, due soon or
+  overdue depends on today's date on the boat. Helmcentral works that date out
+  from the boat's zone, and Mate uses the same one. Until the boat has reported
+  a position, the Maintenance page shows "the boat has not reported a position
+  yet, so today's date on the boat is not known" instead of any statuses, and
+  Mate says it can't work out a status. Saving a rule, a service or a hand
+  reading, opening or dropping a job, and applying a change from Mate stop with
+  the same words. Mate can't keep a fact for you, suggest a change or save a
+  place with a depth either, because every change it makes is dated. Helmcentral doesn't fall back to the
+  date on your device. If the boat has had a fix but its saved time zone can't
+  be read, the words say that instead, with the reason.
+- **After midnight on the boat:** A Maintenance page left open, on the wall
+  screen for one, reads the list again when the boat's date turns over, so a
+  service that falls due overnight shows as due.
 
 A change of zone while under way shows up as soon as the boat crosses the line.
 A passage keeps the zone of the place it began.

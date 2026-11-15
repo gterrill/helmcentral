@@ -39,8 +39,6 @@ func callHandler(t *testing.T, h echo.HandlerFunc, method, target, body string, 
 
 func idParam(id string) paramPair { return paramPair{"id", id} }
 
-const today = "?today=2026-06-15"
-
 func decodeRule(t *testing.T, rec *httptest.ResponseRecorder) maintenanceRuleView {
 	t.Helper()
 	var resp struct {
@@ -60,7 +58,7 @@ type listResponse struct {
 
 func listRules(t *testing.T, query string) listResponse {
 	t.Helper()
-	rec := callHandler(t, listMaintenanceRulesHandler, http.MethodGet, "/api/inventory/maintenance/rules"+today+query, "")
+	rec := callHandler(t, listMaintenanceRulesHandler, http.MethodGet, "/api/inventory/maintenance/rules"+query, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -82,7 +80,7 @@ func viewByID(rules []maintenanceRuleView, id string) *maintenanceRuleView {
 
 func TestListHandler_ShowsProfileJobsWithSourceAndStatus(t *testing.T) {
 	_, item := scheduleFixture(t)
-	resp := listRules(t, "&equipment="+item.ID)
+	resp := listRules(t, "?equipment="+item.ID)
 	oil := viewByID(resp.Rules, maintenanceJobID(item.ID, "engine-oil"))
 	imp := viewByID(resp.Rules, maintenanceJobID(item.ID, "impeller"))
 	if oil == nil || imp == nil {
@@ -107,7 +105,7 @@ func TestListHandler_MissingProfileIsAScheduleErrorNotASnapshot(t *testing.T) {
 	if _, err := store.db.Exec(`UPDATE equipment SET profile_id = 'gone' WHERE id = ?`, item.ID); err != nil {
 		t.Fatal(err)
 	}
-	rec := callHandler(t, listMaintenanceRulesHandler, http.MethodGet, "/api/inventory/maintenance/rules"+today, "")
+	rec := callHandler(t, listMaintenanceRulesHandler, http.MethodGet, "/api/inventory/maintenance/rules", "")
 	var resp listResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -123,18 +121,18 @@ func TestListHandler_MissingProfileIsAScheduleErrorNotASnapshot(t *testing.T) {
 func TestGetHandler_AnUntouchedJobResolvesAndAnUnavailableOneIsA409(t *testing.T) {
 	store, item := scheduleFixture(t)
 	id := maintenanceJobID(item.ID, "engine-oil")
-	rec := callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x"+today, "", idParam(id))
+	rec := callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x", "", idParam(id))
 	if rec.Code != http.StatusOK || decodeRule(t, rec).ID != id {
 		t.Fatalf("expected the job, got %d %s", rec.Code, rec.Body.String())
 	}
-	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x"+today, "", idParam(maintenanceJobID(item.ID, "nope")))
+	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x", "", idParam(maintenanceJobID(item.ID, "nope")))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for a job id that matches nothing, got %d", rec.Code)
 	}
 	if _, err := store.db.Exec(`UPDATE equipment SET profile_id = 'gone' WHERE id = ?`, item.ID); err != nil {
 		t.Fatal(err)
 	}
-	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x"+today, "", idParam(id))
+	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x", "", idParam(id))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d %s", rec.Code, rec.Body.String())
 	}
@@ -143,7 +141,7 @@ func TestGetHandler_AnUntouchedJobResolvesAndAnUnavailableOneIsA409(t *testing.T
 func TestPutAndDeleteOnALiveJobAreRefusedWithAPointerToOverrides(t *testing.T) {
 	_, item := scheduleFixture(t)
 	id := maintenanceJobID(item.ID, "engine-oil")
-	rec := callHandler(t, updateMaintenanceRuleHandler, http.MethodPut, "/x"+today,
+	rec := callHandler(t, updateMaintenanceRuleHandler, http.MethodPut, "/x",
 		`{"equipment_id":"`+item.ID+`","description":"x","interval_hours":10}`, idParam(id))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "overrides") {
 		t.Fatalf("PUT on a job: %d %s", rec.Code, rec.Body.String())
@@ -157,24 +155,24 @@ func TestPutAndDeleteOnALiveJobAreRefusedWithAPointerToOverrides(t *testing.T) {
 func TestDeleteOfARemovedJobKeepsItsLogHistory(t *testing.T) {
 	store, item := scheduleFixture(t)
 	impeller := maintenanceJobID(item.ID, "impeller")
-	rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-01"}`, idParam(impeller))
+	rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-01"}`, idParam(impeller))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
 	replaceProfile(t, globalProfileStore, `{"schema_version":1,"kind":"engine","id":"sched-a","name":"Engine A","manufacturer":"Acme",
 	  "service":[{"id":"engine-oil","description":"Engine oil and filter","interval_hours":250,"interval_months":12}]}`)
 
-	resp := listRules(t, "&equipment="+item.ID)
+	resp := listRules(t, "?equipment="+item.ID)
 	gone := viewByID(resp.Removed, impeller)
 	if gone == nil || !gone.RemovedFromProfile || gone.Status != "" || gone.Description != "Raw water impeller" {
 		t.Fatalf("expected the removed group to hold the impeller, got %+v", resp.Removed)
 	}
-	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x"+today, "", idParam(impeller))
+	rec = callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x", "", idParam(impeller))
 	if rec.Code != http.StatusOK || !decodeRule(t, rec).RemovedFromProfile {
 		t.Fatalf("a removed job still resolves for display: %d %s", rec.Code, rec.Body.String())
 	}
 	// Writes to it are refused.
-	rec = callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"x"}`, idParam(impeller))
+	rec = callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"x"}`, idParam(impeller))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("writes to a removed job: %d %s", rec.Code, rec.Body.String())
 	}
@@ -191,13 +189,13 @@ func TestDeleteOfARemovedJobKeepsItsLogHistory(t *testing.T) {
 
 func TestCreateRuleCannotNameAProfileService(t *testing.T) {
 	_, item := scheduleFixture(t)
-	rec := callHandler(t, createMaintenanceRuleHandler, http.MethodPost, "/x"+today,
+	rec := callHandler(t, createMaintenanceRuleHandler, http.MethodPost, "/x",
 		`{"equipment_id":"`+item.ID+`","description":"Sneaky","interval_months":3,"profile_service_id":"engine-oil"}`)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "profile_service_id") {
 		t.Fatalf("expected 400 naming the field, got %d %s", rec.Code, rec.Body.String())
 	}
 	// And a rule by hand can no longer be an empty slot.
-	rec = callHandler(t, createMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"equipment_id":"`+item.ID+`","description":"Slot"}`)
+	rec = callHandler(t, createMaintenanceRuleHandler, http.MethodPost, "/x", `{"equipment_id":"`+item.ID+`","description":"Slot"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -207,7 +205,7 @@ func TestOverridesEndpoints(t *testing.T) {
 	_, item := scheduleFixture(t)
 	id := maintenanceJobID(item.ID, "engine-oil")
 	put := func(body string) *httptest.ResponseRecorder {
-		return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, body, idParam(id))
+		return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", body, idParam(id))
 	}
 
 	rec := put(`{"interval_hours": 400, "interval_months": null, "description": "Oil, the boat's way"}`)
@@ -239,7 +237,7 @@ func TestOverridesEndpoints(t *testing.T) {
 	}
 
 	reset := func(field string) *httptest.ResponseRecorder {
-		return callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x"+today, "", idParam(id), paramPair{"field", field})
+		return callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x", "", idParam(id), paramPair{"field", field})
 	}
 	rec = reset("interval_months")
 	if rec.Code != http.StatusOK {
@@ -261,11 +259,11 @@ func TestOverridesAreForJobsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, `{"interval_months": 3}`, idParam(hand.ID))
+	rec := callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", `{"interval_months": 3}`, idParam(hand.ID))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("overrides on a hand rule: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x"+today, "", idParam(hand.ID), paramPair{"field", "interval_months"})
+	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x", "", idParam(hand.ID), paramPair{"field", "interval_months"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("reset on a hand rule: %d", rec.Code)
 	}
@@ -275,23 +273,23 @@ func TestNotApplicableJobsListButNeverGoDue(t *testing.T) {
 	_, item := scheduleFixture(t)
 	id := maintenanceJobID(item.ID, "engine-oil")
 	// Done long ago: would be overdue.
-	rec := callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x"+today, `{"last_done_at":"2020-01-01"}`, idParam(id))
+	rec := callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x", `{"last_done_at":"2020-01-01"}`, idParam(id))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("last-done: %d %s", rec.Code, rec.Body.String())
 	}
 	if got := decodeRule(t, rec).Status; got != string(maintenanceStatusOverdue) {
 		t.Fatalf("expected overdue first, got %q", got)
 	}
-	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, `{"not_applicable": true}`, idParam(id))
+	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", `{"not_applicable": true}`, idParam(id))
 	v := decodeRule(t, rec)
 	if v.Status != string(maintenanceStatusNotApplicable) || !v.NotApplicable {
 		t.Fatalf("expected not_applicable, got %+v", v)
 	}
-	if viewByID(listRules(t, "&equipment="+item.ID).Rules, id) == nil {
+	if viewByID(listRules(t, "?equipment="+item.ID).Rules, id) == nil {
 		t.Errorf("a not-applicable job still lists")
 	}
 	// false is a reset.
-	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, `{"not_applicable": false}`, idParam(id))
+	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", `{"not_applicable": false}`, idParam(id))
 	if v := decodeRule(t, rec); v.NotApplicable || v.Status != string(maintenanceStatusOverdue) || len(v.OverriddenFields) != 0 {
 		t.Fatalf("expected the job back and overdue, got %+v", v)
 	}
@@ -302,34 +300,34 @@ func TestStateWritesOnAnUntouchedJobCreateItsRow(t *testing.T) {
 	oil := maintenanceJobID(item.ID, "engine-oil")
 	impeller := maintenanceJobID(item.ID, "impeller")
 
-	rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"after haul-out"}`, idParam(oil))
+	rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"after haul-out"}`, idParam(oil))
 	if rec.Code != http.StatusOK || !decodeRule(t, rec).Acknowledged {
 		t.Fatalf("ack: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x"+today, `{"last_done_at":"2026-06-01","last_done_hours":100}`, idParam(oil))
+	rec = callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x", `{"last_done_at":"2026-06-01","last_done_hours":100}`, idParam(oil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("last-done: %d %s", rec.Code, rec.Body.String())
 	}
 	// Completion needs hours because the PROFILE's interval is in hours.
-	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-10"}`, idParam(oil))
+	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-10"}`, idParam(oil))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "hours") {
 		t.Fatalf("complete without hours: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-10","hours":120}`, idParam(oil))
+	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-10","hours":120}`, idParam(oil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
 	// A months-only override makes hours unnecessary.
-	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, `{"interval_hours": null}`, idParam(oil))
+	rec = callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", `{"interval_hours": null}`, idParam(oil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("override: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-11"}`, idParam(oil))
+	rec = callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-11"}`, idParam(oil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete after the override: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x"+today, "", idParam(impeller))
+	rec = callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x", "", idParam(impeller))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("procedure note: %d %s", rec.Code, rec.Body.String())
 	}
@@ -354,19 +352,19 @@ func TestWritesTo409WhenTheProfileIsUnavailable(t *testing.T) {
 	}
 	for name, run := range map[string]func() *httptest.ResponseRecorder{
 		"acknowledge": func() *httptest.ResponseRecorder {
-			return callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"x"}`, idParam(id))
+			return callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"x"}`, idParam(id))
 		},
 		"last-done": func() *httptest.ResponseRecorder {
-			return callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x"+today, `{"last_done_at":"2026-06-01"}`, idParam(id))
+			return callHandler(t, setMaintenanceRuleLastDoneHandler, http.MethodPost, "/x", `{"last_done_at":"2026-06-01"}`, idParam(id))
 		},
 		"complete": func() *httptest.ResponseRecorder {
-			return callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-01","hours":1}`, idParam(id))
+			return callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-01","hours":1}`, idParam(id))
 		},
 		"overrides": func() *httptest.ResponseRecorder {
-			return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, `{"interval_hours":5}`, idParam(id))
+			return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", `{"interval_hours":5}`, idParam(id))
 		},
 		"procedure-note": func() *httptest.ResponseRecorder {
-			return callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x"+today, "", idParam(id))
+			return callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x", "", idParam(id))
 		},
 	} {
 		if rec := run(); rec.Code != http.StatusConflict {
@@ -405,7 +403,7 @@ func TestProfileChangePreviewHandler(t *testing.T) {
 func TestCSVExportLabelsJobsFromTheirEffectiveDescription(t *testing.T) {
 	_, item := scheduleFixture(t)
 	impeller := maintenanceJobID(item.ID, "impeller")
-	rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-01"}`, idParam(impeller))
+	rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-01"}`, idParam(impeller))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
@@ -446,7 +444,7 @@ const scheduleProfileAWithoutImpeller = `{
 func TestProfilePutThatStrandsJobStateIs409UnlessConfirmed(t *testing.T) {
 	_, item := scheduleFixture(t)
 	impeller := maintenanceJobID(item.ID, "impeller")
-	if rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"later"}`, idParam(impeller)); rec.Code != http.StatusOK {
+	if rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"later"}`, idParam(impeller)); rec.Code != http.StatusOK {
 		t.Fatalf("ack: %d", rec.Code)
 	}
 
@@ -471,7 +469,7 @@ func TestProfilePutThatStrandsJobStateIs409UnlessConfirmed(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("confirmed edit: %d %s", rec.Code, rec.Body.String())
 	}
-	resp := listRules(t, "&equipment="+item.ID)
+	resp := listRules(t, "?equipment="+item.ID)
 	if viewByID(resp.Removed, impeller) == nil {
 		t.Errorf("the confirmed removal should park the job: %+v", resp)
 	}
@@ -498,7 +496,7 @@ func TestProfilePutRemovingAServiceNoItemHoldsStateForIsFree(t *testing.T) {
 
 func TestProfilePutStateOnAnotherProfilesItemsDoesNotBlock(t *testing.T) {
 	store, item := scheduleFixture(t)
-	if rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"later"}`, idParam(maintenanceJobID(item.ID, "impeller"))); rec.Code != http.StatusOK {
+	if rec := callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"later"}`, idParam(maintenanceJobID(item.ID, "impeller"))); rec.Code != http.StatusOK {
 		t.Fatal(rec.Code)
 	}
 	if _, err := store.db.Exec(`UPDATE equipment SET profile_id = 'sched-b' WHERE id = ?`, item.ID); err != nil {
@@ -564,7 +562,7 @@ func TestOverridesAlsoCarryPerItemStateWithoutMarkingOverrides(t *testing.T) {
 	store, item := scheduleFixture(t)
 	id := maintenanceJobID(item.ID, "engine-oil")
 	put := func(body string) *httptest.ResponseRecorder {
-		return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x"+today, body, idParam(id))
+		return callHandler(t, setMaintenanceRuleOverridesHandler, http.MethodPut, "/x", body, idParam(id))
 	}
 	rec := put(`{"due_soon_hours": 30, "due_soon_months": 2, "fixed_due_date": "2027-01-31"}`)
 	if rec.Code != http.StatusOK {
@@ -591,11 +589,11 @@ func TestOverridesAlsoCarryPerItemStateWithoutMarkingOverrides(t *testing.T) {
 		t.Fatalf("null should clear, got %q", v.FixedDueDate)
 	}
 	// Resetting an override leaves the state alone; state has no reset field.
-	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x"+today, "", idParam(id), paramPair{"field", "due_soon_months"})
+	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x", "", idParam(id), paramPair{"field", "due_soon_months"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("no reset for state fields: %d", rec.Code)
 	}
-	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x"+today, "", idParam(id), paramPair{"field", "interval_hours"})
+	rec = callHandler(t, resetMaintenanceRuleOverrideHandler, http.MethodDelete, "/x", "", idParam(id), paramPair{"field", "interval_hours"})
 	if v := decodeRule(t, rec); v.DueSoonMonths == nil || *v.DueSoonMonths != 2 {
 		t.Fatalf("reset must keep state, got %+v", v.DueSoonMonths)
 	}
@@ -608,7 +606,7 @@ func TestOverridesAlsoCarryPerItemStateWithoutMarkingOverrides(t *testing.T) {
 
 func TestUntouchedJobsHaveNullTimestamps(t *testing.T) {
 	_, item := scheduleFixture(t)
-	rec := callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x"+today, "", idParam(maintenanceJobID(item.ID, "engine-oil")))
+	rec := callHandler(t, getMaintenanceRuleHandler, http.MethodGet, "/x", "", idParam(maintenanceJobID(item.ID, "engine-oil")))
 	var raw struct {
 		Rule map[string]any `json:"rule"`
 	}
@@ -621,7 +619,7 @@ func TestUntouchedJobsHaveNullTimestamps(t *testing.T) {
 	if v, ok := raw.Rule["updated_at"]; !ok || v != nil {
 		t.Errorf("updated_at should be null, got %v", v)
 	}
-	rec = callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"reason":"x"}`, idParam(maintenanceJobID(item.ID, "engine-oil")))
+	rec = callHandler(t, acknowledgeMaintenanceRuleHandler, http.MethodPost, "/x", `{"reason":"x"}`, idParam(maintenanceJobID(item.ID, "engine-oil")))
 	if v := decodeRule(t, rec); v.UpdatedAt == nil || v.CreatedAt == nil {
 		t.Errorf("a touched job has timestamps")
 	}
@@ -631,7 +629,7 @@ func TestCreateProcedureNoteForARemovedJobWritesNoNote(t *testing.T) {
 	store, item := scheduleFixture(t)
 	impeller := maintenanceJobID(item.ID, "impeller")
 	// Only a job with stored state outlives its service, so give it some.
-	if rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x"+today, `{"performed_at":"2026-06-01"}`, idParam(impeller)); rec.Code != http.StatusOK {
+	if rec := callHandler(t, completeMaintenanceRuleHandler, http.MethodPost, "/x", `{"performed_at":"2026-06-01"}`, idParam(impeller)); rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
 	replaceProfile(t, globalProfileStore, `{"schema_version":1,"kind":"engine","id":"sched-a","name":"Engine A","manufacturer":"Acme",
@@ -640,7 +638,7 @@ func TestCreateProcedureNoteForARemovedJobWritesNoNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x"+today, "", idParam(impeller))
+	rec := callHandler(t, createMaintenanceProcedureNoteHandler, http.MethodPost, "/x", "", idParam(impeller))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d %s", rec.Code, rec.Body.String())
 	}

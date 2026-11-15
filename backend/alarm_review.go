@@ -557,8 +557,10 @@ func (t *alarmReviewTools) submission() *alarmReviewSubmission {
 func (r *alarmReviewer) run(rev alarmReview, event alarmEvent, cfg watchConfig) {
 	now := r.now()
 	// The turn's "today" and the prompt's times are the boat's. With no fix the
-	// boat's zone is not known, so they are UTC and the prompt says so.
+	// boat's zone is not known: the prompt's times are UTC and it says so, and
+	// the turn has no day, so the maintenance tools refuse (ADR 0230).
 	loc, locErr := watchBoatLocation()
+	today, todayErr := boatDayAt(now, loc, locErr)
 	boatKnown := locErr == nil
 	if !boatKnown {
 		loc = time.UTC
@@ -566,7 +568,7 @@ func (r *alarmReviewer) run(rev alarmReview, event alarmEvent, cfg watchConfig) 
 	var tools *alarmReviewTools
 	turn := runUnattendedReview(r.ctx, unattendedTurn{
 		// WebSearch is off: a review reads the boat and nothing else.
-		Cfg: cfg, Now: now, Loc: loc, Deadline: r.deadline,
+		Cfg: cfg, Now: now, Today: today, TodayErr: todayErr, Deadline: r.deadline,
 		ConversationID: "alarm-review-" + rev.ID, LogPrefix: "alarm review", Name: rev.Title,
 		Build: func(ctx context.Context, deps assistantToolDeps, units string, pc assistantPromptContext) (unattendedInput, string) {
 			alarmContext, err := r.contextFor(ctx, deps, rev.RuleID)

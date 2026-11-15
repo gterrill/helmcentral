@@ -1,6 +1,5 @@
 import { ApiError, apiRequest, invalidateQueries, refetchQuery } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type AssistantProposalOp, type ProposalApi } from '@/hooks/use-assistant-conversations'
-import { todayISO } from '@/lib/local-date'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 import { SAVED_PLACES_PATH } from '@/hooks/use-saved-places'
 import { WATCHES_PATH } from '@/hooks/use-watches'
@@ -52,9 +51,8 @@ function refreshPagesFor(proposal: AssistantProposal | undefined): void {
 
 /**
  * Apply and Dismiss on a maintenance proposal card (ADR 0146). Apply is the
- * one place Mate's proposed changes are written, so it carries the same
- * `?today=` every maintenance write does (the operator's own local date, never
- * the server's).
+ * one place Mate's proposed changes are written. The server works out the
+ * boat's day for it (ADR 0230); nothing is sent.
  */
 
 /** A refused apply or dismiss: an ApiError carrying the server's own reason,
@@ -88,7 +86,7 @@ export function appliedProposalOf(err: unknown): AssistantProposal | undefined {
 export async function applyAssistantProposal(id: string): Promise<AssistantProposal> {
   let applied: AssistantProposal
   try {
-    applied = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/apply?today=${encodeURIComponent(todayISO())}`)
+    applied = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/apply`)
   } catch (err) {
     refreshPagesFor(appliedProposalOf(err))
     throw err

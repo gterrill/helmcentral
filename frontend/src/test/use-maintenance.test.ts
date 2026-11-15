@@ -18,7 +18,15 @@ import {
   MAINTENANCE_DEFAULT_DUE_SOON_MONTHS,
 } from '@/hooks/use-maintenance'
 
-afterEach(() => { vi.restoreAllMocks() })
+// The boat's calendar day as the browser reads it from the server clock and the
+// boat's zone. It is never sent; it only tells the list when the day has turned.
+let boatDay: string | null = '2026-11-15'
+vi.mock('@/hooks/use-vessel-clock', () => ({ useBoatDayKey: () => boatDay }))
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  boatDay = '2026-11-15'
+})
 
 function jsonResponse(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response
@@ -39,25 +47,62 @@ describe('useMaintenanceRules', () => {
     expect(url).toContain('include_stored=true')
   })
 
-  it('keeps a rule view for each date in its own entry, and refreshes each on a write', async () => {
+  it('never sends the device date: the server works out the boat\'s day', async () => {
     const fetchMock = stubApi({
       'GET /api/inventory/maintenance/rules': { rules: [] },
       'PUT /api/inventory/maintenance/rules/r1/overrides': { rule: { id: 'r1' } },
     })
-    vi.useFakeTimers({ toFake: ['Date'] })
-    try {
-      vi.setSystemTime(new Date(2026, 9, 13, 12))
-      renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-      vi.setSystemTime(new Date(2026, 9, 14, 12))
-      renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-      await setMaintenanceRuleOverrides('r1', {} as never)
-      await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-13'))).toHaveLength(2))
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-14'))).toHaveLength(2)
-    } finally {
-      vi.useRealTimers()
-    }
+    renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await setMaintenanceRuleOverrides('r1', {} as never)
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?'))).toHaveLength(2))
+    for (const call of fetchMock.mock.calls) expect(String(call[0])).not.toContain('today')
+  })
+
+  it('reads the list again when the boat\'s day turns, so a view left open overnight moves to the new day', async () => {
+    const fetchMock = stubApi({ 'GET /api/inventory/maintenance/rules': { rules: [] } })
+    const { rerender } = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    boatDay = '2026-11-16'
+    rerender()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    for (const call of fetchMock.mock.calls) expect(String(call[0])).not.toContain('today')
+  })
+
+  it('reads the list once on a cold load, when the boat\'s day arrives after the first render', async () => {
+    boatDay = null
+    const fetchMock = stubApi({ 'GET /api/inventory/maintenance/rules': { rules: [] } })
+    const { rerender } = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    boatDay = '2026-11-15'
+    rerender()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the list again when the first fix arrives after the boat\'s day was not known', async () => {
+    boatDay = null
+    const reason = 'the boat has not reported a position yet, so today\'s date on the boat is not known'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(503, { error: reason }))
+      .mockResolvedValue(jsonResponse(200, { rules: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result, rerender } = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(result.current.error).toBe(reason))
+    boatDay = '2026-11-15'
+    rerender()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.error).toBeNull())
+  })
+
+  it('says plainly that the boat\'s day is not known yet, with no date of its own to fall back on', async () => {
+    const reason = 'the boat has not reported a position yet, so today\'s date on the boat is not known'
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(503, { error: reason }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useMaintenanceRules({ system: 'propulsion' }))
+    await waitFor(() => expect(result.current.error).toBe(reason))
+    expect(result.current.rules).toEqual([])
   })
 
   it('exposes removed jobs and schedule errors from the response', async () => {
@@ -107,14 +152,14 @@ describe('due-soon defaults', () => {
 })
 
 describe('profile job writes', () => {
-  it('setMaintenanceRuleOverrides PUTs the subset with today and returns the rule', async () => {
+  it('setMaintenanceRuleOverrides PUTs the subset and returns the rule', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rule: { id: 'job:eq-1:oil' } }))
     vi.stubGlobal('fetch', fetchMock)
 
     const rule = await setMaintenanceRuleOverrides('job:eq-1:oil', { interval_hours: 100, not_applicable: false })
 
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toMatch(/\/rules\/job%3Aeq-1%3Aoil\/overrides\?today=\d{4}-\d{2}-\d{2}$/)
+    expect(String(url)).toMatch(/\/rules\/job%3Aeq-1%3Aoil\/overrides$/)
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body)).toEqual({ interval_hours: 100, not_applicable: false })
     expect(rule.id).toBe('job:eq-1:oil')
@@ -127,7 +172,7 @@ describe('profile job writes', () => {
     await resetMaintenanceRuleOverride('job:eq-1:oil', 'interval_hours')
 
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toContain('/overrides/interval_hours?today=')
+    expect(String(url)).toMatch(/\/overrides\/interval_hours$/)
     expect(init.method).toBe('DELETE')
   })
 
