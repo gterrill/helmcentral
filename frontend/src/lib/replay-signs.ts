@@ -3,6 +3,7 @@
 // screen at a given moment of watching. Everything here is pure.
 
 import { positionAt, type Timeline } from '@/lib/passages'
+import { entryAt } from '@/lib/replay-clock'
 import { PHOTO_ASPECT, type Rect } from '@/lib/replay-time'
 
 export type SignVisibility = 'always' | 'passing' | 'after'
@@ -72,7 +73,7 @@ export const MAX_SIGN_CARDS = 2
  * position, or null in a trimmed-out stretch, a gap, or where the track has no
  * position. The one rule for "does this moment land in the replay". */
 export function placeAt(at: number, timeline: Timeline) {
-  const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
+  const entry = entryAt(timeline, at)
   if (!entry) return null
   const pos = positionAt(entry.segments, at)
   return pos ? { entry, pos } : null

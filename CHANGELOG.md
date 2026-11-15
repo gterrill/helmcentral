@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Move a camera shot in time, and pick shots from a row of buttons.** With a
+  shot picked in the replay's **Camera** editor, **Move shot here** puts it at
+  the moment the slider is on, and **−1 min**, **−10 s**, **+10 s** and
+  **+1 min** shift it a little at a time. The editor also lists every shot as a
+  button with its number, mode and time, so you no longer have to find its mark
+  on the slider.
+
 ### Changed
 
 - **"In your plan" on forecast days.** A screen reader now says "in your
@@ -29,6 +38,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The replay slider keeps its width while you edit.** Opening **Camera** or
+  **Signs** used to squeeze the slider to a sliver. Play, the slider and the
+  time now have a row to themselves, with the length, **Camera**, **Signs** and
+  **Overview map** controls underneath.
 - **The lightning key no longer talks about a stay.** When you open the
   forecast for a stop in a passage plan, or for the middle of a leg, the key
   now reads "Lightning is for the boat's position, not this place."

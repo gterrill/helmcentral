@@ -34,13 +34,21 @@ export interface ResolvedShot {
   entryId: string
 }
 
+/** The replayed passage whose span covers an instant, or undefined in a
+ * trimmed-out stretch or the gap between passages. It says nothing about
+ * whether that passage has a track; a shot plays only where it does (see
+ * `playableEntryAt` in replay-plan). */
+export function entryAt(timeline: Timeline, at: number) {
+  return timeline.entries.find((e) => at >= e.start && at <= e.end)
+}
+
 /** The shots whose time falls inside a replayed passage, oldest first. A shot
  * in a trimmed-out stretch or in the gap between passages is not played. */
 export function resolveShots(shots: readonly CameraShot[], timeline: Timeline): ResolvedShot[] {
   const out: ResolvedShot[] = []
   for (const shot of shots) {
     const at = shot.t_ms / 1000
-    const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
+    const entry = entryAt(timeline, at)
     if (!entry) continue
     out.push({ shot, at, entryId: entry.id, clock: entry.offset + (at - entry.start) })
   }

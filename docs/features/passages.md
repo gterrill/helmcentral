@@ -171,7 +171,10 @@ flattening out as it comes in, then runs the replay with a boat marker. If you
 touch the map while it comes down, the move stops where you are and the replay
 carries on from the start. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
-point. The length list sets how long the replay takes to sail, 60, 30, 15 or 8
+point. Play, the slider and the readout have a row to themselves, so the slider
+keeps its width while the Camera or Signs editor is open. The length list,
+**Camera**, **Signs** and the **Overview map** switch sit on a row underneath.
+The length list sets how long the replay takes to sail, 60, 30, 15 or 8
 seconds, however long the passage was. A cruise, or passages you select
 together, also offer 2 and 3 minutes, as described under Cruises below. A sign's photo moment, described under
 Signs, adds a couple of seconds of watching on top of that, and the slider still
@@ -218,12 +221,23 @@ full, half or quarter speed. At half pace the passage runs half as fast for as
 long as the shot lasts, so the replay takes longer to watch. The slider stays
 in passage time.
 
-Shots show as marks on the slider. Pick one to jump to it and edit it. The
-picked mark is larger and ringed, and a line above its settings names it, for
+Shots show as marks on the slider, and as a row of buttons in the editor, one
+for each shot in time order. Each button gives the shot's number, its mode and
+its time. Pick a mark or a button to jump to the shot and edit it. The picked
+mark is larger and ringed, and a line above its settings names it, for
 example "Shot 2 of 3 · from 9.41 AM to 10.20 AM". Hover a mark to see its number
 and time, and on a replay that spans more than one day the date too. The
 camera eases into each shot over about a second and a half. Scrubbing puts the
 camera straight into the shot you land in.
+
+You can change when a shot starts without deleting it. With the shot picked,
+**Move shot here** puts it at the moment the slider is on. The four buttons
+beside it, **−1 min**, **−10 s**, **+10 s** and **+1 min**, shift it a little
+at a time, and the replay jumps to the new moment so you can see where it
+lands. **Move shot here** is greyed out while the replay plays, so pause it on
+the moment you want first. A shot only plays where the replay has a recorded
+track, so Helmcentral won't move it outside the replay, into a passage with no
+track, or onto the moment another shot starts. It says why when it refuses.
 
 If you drag, zoom or tilt the map yourself during playback (a simple tap doesn't
 count), the replay leaves the camera with you. It stays with you until the next

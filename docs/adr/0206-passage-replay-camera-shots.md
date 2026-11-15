@@ -94,8 +94,18 @@ passages themselves: the passage finder splits, the operator merges and trims
     shot here" creates a Follow shot at the replay's current instant with the map's
     present zoom and pitch. Each shot is a mark on the scrubber; clicking one
     seeks to it and opens its fields: mode, zoom, pitch, angle (Follow), orbit
-    rate (Orbit), pace, "Use current view", Delete. The overview map in the corner
-    is untouched.
+    rate (Orbit), pace, "Use current view", Delete. The editor also lists every
+    playable shot as a button (number, mode, time) in time order, and picking
+    one does what clicking its mark does. "Move shot here" patches the picked
+    shot's `t_ms` to the cursor, and −1 min, −10 s, +10 s and +1 min shift it
+    from its last saved time, using the same steps as the sign editor; a nudge
+    seeks the replay to the new moment. The client refuses a move to an instant
+    with no playable passage (outside every passage, or in one with no track),
+    or onto another shot's `t_ms`, because the shot would be kept but never
+    play. Shot writes run one at a time, in order. The marks, the shot buttons
+    and the shot's fields stay locked while one runs; the move buttons do not,
+    so a press keeps keyboard focus and repeated nudges queue and add up. The
+    overview map in the corner is untouched.
 
 ## Rejected
 
