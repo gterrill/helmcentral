@@ -116,3 +116,5 @@ This project's Baseline target is Baseline 2024.
 ## Papercuts
 
 - Maintain ~/papercuts.md, a global log shared by all sessions of anything that slowed down development. When you lose time to one mid-session, append date · symptom · fix · project. Check this file first when tooling fails mysteriously.
+- When a papercut appears for the third time, tell the operator and propose a
+  fix instead of logging it again.

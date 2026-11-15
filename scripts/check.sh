@@ -82,6 +82,7 @@ mkdir -p "$logdir"
 case $target in
 backend)
 	step go-vet backend go vet ./...
+	step gofmt backend sh ../scripts/gofmt-check.sh
 	# Shuffled, like main's "Backend tests (shuffled)" job, so a test that
 	# leaks state into the next fails here rather than after the merge. The
 	# log holds the seed as "-test.shuffle <seed>".
@@ -104,6 +105,7 @@ all)
 	step docs-lint-changed . make --no-print-directory docs-lint-changed
 	step changelog . sh scripts/check-changelog.sh
 	step commit-messages . sh scripts/check-commit-messages.sh
+	step hook-tests . sh scripts/hooks/refuse-piped-checks-test.sh
 	;;
 *)
 	echo "usage: check.sh backend|frontend|all" >&2

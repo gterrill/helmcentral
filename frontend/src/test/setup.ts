@@ -123,6 +123,16 @@ if (typeof globalThis.WebSocket === 'function') {
   } as unknown as typeof WebSocket
 }
 
+// A test that reaches fetch without stubbing it would make a real request to
+// the environment's origin and fail under load with ECONNREFUSED, or pass by
+// luck on a machine with something listening. Reject loudly instead, naming
+// the URL. A test stubs fetch with vi.stubGlobal or vi.spyOn, which replace
+// this default and put it back afterwards.
+globalThis.fetch = (input: RequestInfo | URL) => {
+  const url = input instanceof Request ? input.url : String(input)
+  return Promise.reject(new Error(`unstubbed fetch: ${url}`))
+}
+
 // jsdom doesn't implement window.matchMedia or window.innerWidth changes; stub both via
 // setViewportWidth so components that key off viewport width (useIsMobile, the RGL vs.
 // stacked-list split in DashboardBentoGrid) can mount and react in tests. 1280 matches

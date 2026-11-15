@@ -108,11 +108,9 @@ test-first, then go back to step 4. Test-first means the new test has been run
 and seen failing on the unfixed code; a builder subagent's brief asks for that
 run and its hand-back shows it.
 
-A builder's brief is self-contained and says: run tests only through `make
-check` (or `make check-frontend` and `make check-backend`), or `npx vitest run <file>` from
-`<worktree>/frontend` and `go -C <worktree>/backend test -short ./...`; edit
-with the Edit tool only. Start a fresh builder for each review round; never
-`SendMessage` to the old one.
+Every builder prompt starts with `builder-brief.md` (in this skill's
+directory) pasted verbatim, worktree path filled in. Start a fresh builder for
+each review round; never `SendMessage` to the old one.
 
 When the second `/code-review` pass still finds bugs in the function or
 mechanism the first pass flagged, the design is the problem, not the next

@@ -73,7 +73,7 @@ above.
   don't run until the first fix, because a schedule can't be read without a
   clock.
 
-A change of zone while underway shows up as soon as the boat crosses the line.
+A change of zone while under way shows up as soon as the boat crosses the line.
 A passage keeps the zone of the place it began.
 
 ## Where the zone data comes from

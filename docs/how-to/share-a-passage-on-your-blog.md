@@ -8,7 +8,7 @@ needs to reach the boat.
 ## Before you start
 
 - The blog needs to be a Ghost site where you can add an HTML card to a post.
-- Only finished passages can be exported. A leg that's still underway isn't
+- Only finished passages can be exported. A leg that's still under way isn't
   stored until it ends.
 - Set the passage titles, cruise names and place names the way you want your
   readers to see them first. See [Edit a passage](edit-passages.md).
@@ -19,7 +19,7 @@ needs to reach the boat.
    several passages together, select them in the list and open them together.
 2. Press **Export**.
 3. Under **Play length**, choose 15, 30 or 60 seconds. This is how long the
-   boat takes to cover the time actually spent underway. Each stay between
+   boat takes to cover the time actually spent under way. Each stay between
    passages, and each photo moment, adds a short hold on top.
 4. Tick or untick **Overview map in the corner**. It's the small map that shows
    where the coast and the track sit in the wider country. Its corner and zoom
@@ -147,7 +147,7 @@ ticked.
 - **Reduced motion:** If a reader's device asks for it, cards appear without
   fading in.
 
-Under the map, a row of figures shows distance, time underway, nights, fuel and
+Under the map, a row of figures shows distance, time under way, nights, fuel and
 the highest gust, in your Units setting, with the number of passages on a cruise
 or selection. For cruises and selections, nights are
 counted as midnights since the first departure, as on the cruise page. A figure

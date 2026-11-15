@@ -198,7 +198,7 @@ sign editor uses, and the photo leaves the Inbox. Signs are described under
 - Photos not on a passage: The row asks where it goes. The nearest passage start
   or end is chosen for you, and you can pick any other from the list.
 - Photos with no time: You have to choose a passage start or end by hand.
-- Photos taken underway: The button stays off until the passage is recorded.
+- Photos taken under way: The button stays off until the passage is recorded.
 - PDFs: Only a photo can be a sign, so the button stays off if a PDF is marked.
 - One photo at a time: If a photo can't be added, it stays in the Inbox with the
   reason beside it. An example is a time that isn't on any passage. The rest

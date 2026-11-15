@@ -13,6 +13,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **"In your plan" on forecast days.** A screen reader now says "in your
+  plan" for a forecast day that a passage plan covers, where it used to say
+  "planned stay".
 - **Plans sit beside the forecast.** On a wide screen the Forecast page shows
   your passage plans in a column on the right, so the forecast starts at the
   top of the page. Beside the forecast, each day of a plan is a card with its
