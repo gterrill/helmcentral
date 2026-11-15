@@ -110,6 +110,8 @@ interface Entry {
   error: Error | null
   status: 'pending' | 'success' | 'error'
   inflight: Promise<void> | undefined
+  /** The reason of the last refetchQueryOnce that started a request. */
+  refetchToken: string | undefined
   requestId: number
   subscribers: Set<Subscription>
   listeners: Set<() => void>
@@ -159,6 +161,7 @@ function ensureEntry(key: QueryKey): Entry {
       error: null,
       status: 'pending',
       inflight: undefined,
+      refetchToken: undefined,
       requestId: 0,
       subscribers: new Set(),
       listeners: new Set(),
@@ -355,6 +358,19 @@ export function refetchQuery(key: QueryKey, path: string): Promise<void> {
   entry.path = path
   if (entry.subscribers.size === 0) scheduleGc(entry)
   return startFetch(entry, path)
+}
+
+// A refetch that several readers of one key all ask for for the same reason
+// (the boat's day turned) starts one request, not one each. The reason is a
+// token: the first ask with a token starts the request and later asks with the
+// same token are answered by it, in flight or already landed, unless it
+// failed. A different token starts a new one.
+export function refetchQueryOnce(key: QueryKey, path: string, token: string): Promise<void> {
+  const entry = ensureEntry(key)
+  // An answer that failed is not an answer: the next ask tries again.
+  if (entry.refetchToken === token && (entry.inflight !== undefined || entry.status !== 'error')) return entry.inflight ?? Promise.resolve()
+  entry.refetchToken = token
+  return refetchQuery(key, path)
 }
 
 function updatePolling(entry: Entry) {

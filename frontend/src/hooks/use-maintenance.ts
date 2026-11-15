@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { useBoatDayKey } from '@/hooks/use-vessel-clock'
-import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
+import { apiRequest, invalidateQueries, refetchQueryOnce, useApiQuery } from '@/lib/api-query'
 import { todayISO } from '@/lib/local-date'
 import { formatDataAge } from '@/lib/staleness'
 
@@ -285,11 +285,9 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
   if (filter?.includeStored) params.set('include_stored', 'true')
   const query = params.toString()
 
-  const { data, error, isLoading, refetch } = useApiQuery<RulesResponse>({
-    queryKey: [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false }],
-    path: query ? `${RULES}?${query}` : RULES,
-    enabled: filter !== null,
-  })
+  const queryKey = [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false }]
+  const path = query ? `${RULES}?${query}` : RULES
+  const { data, error, isLoading, refetch } = useApiQuery<RulesResponse>({ queryKey, path, enabled: filter !== null })
 
   // The server judges every status on the boat's day. The browser's reading of
   // that day is never sent: it only tells a view left open over the boat's
@@ -305,8 +303,12 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
     lastBoatDay.current = boatDay
     const turned = previous !== null && previous !== boatDay
     const arrived = previous === null && failed
-    if (turned || arrived) void refetch()
-  }, [boatDay, failed, refetch])
+    // Every view of this list sees the same turn; the first starts the read
+    // and the rest share it.
+    if ((turned || arrived) && filter !== null) void refetchQueryOnce(queryKey, path, boatDay)
+    // queryKey is a fresh array each render; path says which list it is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boatDay, failed, path, filter === null])
 
   return {
     rules: data?.rules ?? NO_RULES,
