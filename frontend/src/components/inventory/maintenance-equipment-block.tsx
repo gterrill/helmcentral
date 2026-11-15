@@ -13,7 +13,7 @@ import { OpenJobsGroup } from '@/components/inventory/open-jobs-group'
 import { MaintenanceStatusBadge } from '@/components/inventory/maintenance-status-badge'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { formatAppLocation } from '@/lib/app-location'
-import { todayISO } from '@/lib/local-date'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { cn } from '@/lib/utils'
 import {
   createMaintenanceLogEntry,
@@ -92,7 +92,10 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
   const [showMeterForm, setShowMeterForm] = useState(false)
   const [oldReading, setOldReading] = useState('')
   const [newReading, setNewReading] = useState('0')
-  const [meterDate, setMeterDate] = useState(todayISO())
+  // The meter-replacement date starts on the boat's day; unknown, it starts blank.
+  const boatDay = useBoatDayKey()
+  const [pickedMeterDate, setMeterDate] = useState<string | null>(null)
+  const meterDate = pickedMeterDate ?? boatDay ?? ''
   const [meterSaving, setMeterSaving] = useState(false)
   const [meterError, setMeterError] = useState<string | null>(null)
 
@@ -122,6 +125,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
     try {
       await recordHourMeterReset(equipmentId, Number(oldReading), Number(newReading), meterDate)
       setShowMeterForm(false)
+      setMeterDate(null)
       setOldReading('')
       setNewReading('0')
     } catch (err) {
@@ -323,7 +327,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
           <div className="flex items-center justify-between gap-2">
             <FieldLabel>Hour meter</FieldLabel>
             {canWrite && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setShowMeterForm((v) => !v)}>
+              <Button type="button" variant="ghost" size="sm" onClick={() => { setMeterDate(null); setShowMeterForm((v) => !v) }}>
                 Record meter replacement
               </Button>
             )}
@@ -347,7 +351,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
                 <FieldLabel htmlFor="meter-date">Date</FieldLabel>
                 <Input id="meter-date" type="date" value={meterDate} onChange={(e) => setMeterDate(e.target.value)} />
               </Field>
-              <Button type="button" size="sm" className="col-span-3" disabled={meterSaving || oldReading.trim() === ''} onClick={() => { void handleRecordMeterReset() }}>
+              <Button type="button" size="sm" className="col-span-3" disabled={meterSaving || oldReading.trim() === '' || meterDate === ''} onClick={() => { void handleRecordMeterReset() }}>
                 {meterSaving ? 'Saving...' : 'Save'}
               </Button>
               {meterError && <p role="alert" className="col-span-3 text-sm text-destructive">{meterError}</p>}

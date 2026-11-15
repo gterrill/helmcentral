@@ -5,6 +5,9 @@ import type { OpenJob } from '@/hooks/use-open-jobs'
 import { openJobAgeDays } from '@/hooks/use-open-jobs'
 import { stubApi } from '@/test/helpers/stub-api'
 
+// The service log form starts on the boat's day, which a test has to supply.
+vi.mock('@/hooks/use-vessel-clock', () => ({ useBoatDayKey: () => '2026-11-07' }))
+
 // ADR 0269: the Open jobs group at the top of Inventory, Maintenance and on
 // an item's page. A list of known problems with an age and a before-date,
 // Done (the service log form) and Dropped (one tap, optional reason).

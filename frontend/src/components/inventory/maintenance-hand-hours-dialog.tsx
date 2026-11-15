@@ -13,7 +13,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import type { HandHourReadingInput } from '@/hooks/use-maintenance'
 import { errorMessage } from '@/lib/errors'
-import { todayISO } from '@/lib/local-date'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 
 // ADR 0268: Log a reading. For gear with no hour meter, the operator reads the
 // gauge and types the figure here. Hours-based rules on the item count from
@@ -29,7 +29,11 @@ interface HandHoursDialogProps {
 }
 
 export function HandHoursDialog({ equipmentName, open, onCancel, onSave }: HandHoursDialogProps) {
-  const [readOn, setReadOn] = useState(todayISO())
+  // The server refuses a date after the boat's day, so the date starts there and
+  // goes no later. Until the boat's day is known there is no default and no cap.
+  const boatDay = useBoatDayKey()
+  const [pickedOn, setPickedOn] = useState<string | null>(null)
+  const readOn = pickedOn ?? boatDay ?? ''
   const [gauge, setGauge] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -37,13 +41,13 @@ export function HandHoursDialog({ equipmentName, open, onCancel, onSave }: HandH
 
   useEffect(() => {
     if (!open) return
-    setReadOn(todayISO())
+    setPickedOn(null)
     setGauge('')
     setNote('')
     setError(null)
   }, [open])
 
-  const canSave = gauge.trim() !== '' && readOn !== '' && Number(gauge) >= 0
+  const canSave = gauge.trim() !== '' && readOn !== '' && (boatDay === null || readOn <= boatDay) && Number(gauge) >= 0
 
   const handleSave = async () => {
     setSaving(true)
@@ -81,7 +85,7 @@ export function HandHoursDialog({ equipmentName, open, onCancel, onSave }: HandH
         </Field>
         <Field>
           <FieldLabel htmlFor="hand-hours-date">Date read</FieldLabel>
-          <Input id="hand-hours-date" type="date" max={todayISO()} value={readOn} onChange={(e) => setReadOn(e.target.value)} />
+          <Input id="hand-hours-date" type="date" max={boatDay ?? undefined} value={readOn} onChange={(e) => setPickedOn(e.target.value)} />
         </Field>
         <Field>
           <FieldLabel htmlFor="hand-hours-note">Note (optional)</FieldLabel>
