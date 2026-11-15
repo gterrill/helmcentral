@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { ForecastPage } from "@/components/forecast-page";
+import { saveForecastPlansOpen } from "@/lib/forecast-plans-preference";
 import { usePlanAssessment } from "@/hooks/use-plan-assessment";
 import { usePlanLegs, usePlans } from "@/hooks/use-plans";
 import { usePlanDayForecast } from "@/hooks/use-plan-day-forecast";
@@ -200,6 +201,10 @@ const drawerForecast = () =>
 describe("ForecastPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // localStorage.clear() leaves the preference's in-page copy behind; saving
+    // first resets it to the default.
+    saveForecastPlansOpen(true);
+    localStorage.clear();
     mockFeeds();
     // The forecast horizon is counted from today.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -248,11 +253,73 @@ describe("ForecastPage", () => {
     const { unmount } = render(
       <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
     );
-    expect(screen.getByTestId("forecast-layout").className).not.toContain("xl:grid-cols-");
+    expect(screen.getByTestId("forecast-layout").className).not.toContain("xl:flex-row");
+    expect(screen.queryByRole("button", { name: "Hide plans" })).not.toBeInTheDocument();
     unmount();
     plansState([PLAN], 1, LEGS);
     render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
-    expect(screen.getByTestId("forecast-layout").className).toContain("xl:grid-cols-");
+    expect(screen.getByTestId("forecast-layout").className).toContain("xl:flex-row");
+  });
+
+  describe("plans sidebar", () => {
+    it("opens by default and collapses to a rail that hides the plan table", () => {
+      plansState([PLAN], 1, LEGS);
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Hide plans" }));
+      expect(screen.getByRole("button", { name: "Show plans" })).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.getByTestId("drawer")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Show plans" }));
+      expect(screen.getByRole("table", { name: "Home run day by day" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Hide plans" })).toBeInTheDocument();
+    });
+
+    it("remembers the choice", () => {
+      plansState([PLAN], 1, LEGS);
+      const first = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      fireEvent.click(screen.getByRole("button", { name: "Hide plans" }));
+      expect(localStorage.getItem("forecast.plans.open")).toBe("0");
+      first.unmount();
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      expect(screen.getByRole("button", { name: "Show plans" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Show plans" }));
+      expect(localStorage.getItem("forecast.plans.open")).toBe("1");
+    });
+
+    it("opens a hidden sidebar when a link names a plan", () => {
+      plansState([PLAN, PAST], 1, LEGS);
+      const first = render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      fireEvent.click(screen.getByRole("button", { name: "Hide plans" }));
+      first.unmount();
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite focusPlanId={2} />);
+      expect(screen.getByRole("table", { name: "Old run day by day" })).toBeInTheDocument();
+    });
+
+    it("still shows a plans error while the sidebar is hidden", () => {
+      plansState([PLAN], 1, LEGS);
+      vi.mocked(usePlans).mockReturnValue({
+        ...vi.mocked(usePlans)(),
+        error: "Plans could not be loaded",
+      } as never);
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      fireEvent.click(screen.getByRole("button", { name: "Hide plans" }));
+      expect(screen.getByRole("button", { name: "Show plans" })).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("Plans could not be loaded");
+    });
+
+    it("names the plan chooser apart from the landmark", () => {
+      plansState([PLAN], 1, LEGS);
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      expect(screen.getByRole("group", { name: "Choose a plan" })).toBeInTheDocument();
+      expect(screen.getAllByRole("complementary", { name: "Plans" })).toHaveLength(1);
+    });
+
+    it("is a labelled landmark", () => {
+      plansState([PLAN], 1, LEGS);
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      expect(screen.getByRole("complementary", { name: "Plans" })).toBeInTheDocument();
+    });
   });
 
   it("scrolls the forecast heading into view when a row is picked, not on first render", () => {

@@ -286,8 +286,10 @@ no data for are hatched, and the key under the chart says what's wrong.
 The week before a run, you want to see every day of it at once: where you'll be,
 how far each leg is, and what the wind and sea will do. A plan is your run as a
 list of stops with the nights at each, and the forecast page lays it out one row
-per day. On a wide screen your plans sit in a column to the right of the
-forecast. On a smaller screen they sit above it.
+per day. On a wide screen your plans sit in a sidebar to the right of the
+forecast, and you can collapse it to a narrow strip to give the forecast the
+whole width. Each screen remembers whether you left it open. On a smaller
+screen the plans sit above the forecast.
 
 Plans are kept on the boat's server, so every phone, tablet and wall display
 sees the same ones. You can keep several. The page opens on the plan whose dates

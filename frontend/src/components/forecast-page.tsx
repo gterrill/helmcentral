@@ -1,15 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Route, Trash2 } from "lucide-react";
 
 import {
   ForecastDrawer,
   type ForecastDrawerProps,
 } from "@/components/forecast-drawer";
 import { ConfirmDelete } from "@/components/patterns";
+import { SidebarPaneHeader, SidebarPaneRail } from "@/components/patterns/sidebar-pane";
 import { PlanEditor } from "@/components/plan-editor";
 import { PlanTable, type PlanPlaceSelection } from "@/components/plan-table";
 import { Button } from "@/components/ui/button";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+} from "@/components/ui/sidebar";
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
 import { useForecastWarnings } from "@/hooks/use-forecast-warnings";
 import { usePlanLegs, usePlans } from "@/hooks/use-plans";
@@ -22,6 +29,7 @@ import {
 } from "@/lib/forecast-drawer-props";
 import { errorMessage } from "@/lib/errors";
 import { findPlanRow, legForecastPlace, type Plan } from "@/lib/plans";
+import { useForecastPlansOpen } from "@/lib/forecast-plans-preference";
 import { formatStayRange } from "@/lib/stay";
 import { cn } from "@/lib/utils";
 import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
@@ -39,11 +47,14 @@ interface ForecastPageProps {
   onPlanLinkFollowed?: () => void;
 }
 
+const PLANS_CONTENT_ID = "forecast-plans-content";
+
 const planRange = (plan: Plan) => formatStayRange(plan.firstDate, plan.lastDate);
 
 /**
- * The Forecast page: the boat's forecast, with the passage plans beside it
- * from xl up and above it on a smaller screen.
+ * The Forecast page: the boat's forecast, with the passage plans in a
+ * collapsible right-hand sidebar from xl up (like the Rode Planner) and above
+ * it on a smaller screen.
  *
  * It opens on the boat. Choosing a row in the table shows that row's place in
  * the drawer and a Boat button returns; the header always names which place is
@@ -65,6 +76,7 @@ export function ForecastPage({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [plansOpen, setPlansOpen] = useForecastPlansOpen();
 
   // A link is followed once: it picks its plan, closes any editor and delete
   // prompt that belonged to the plan on show, and has the app drop ?plan from the
@@ -74,10 +86,12 @@ export function ForecastPage({
     if (focusPlanId === undefined) return;
     setPickedId(focusPlanId);
     setSelection(null);
+    // A hidden sidebar would leave the linked plan picked but out of sight.
+    setPlansOpen(true);
     setEditing(null);
     setConfirmDelete(false);
     onPlanLinkFollowed?.();
-  }, [focusPlanId, onPlanLinkFollowed]);
+  }, [focusPlanId, onPlanLinkFollowed, setPlansOpen]);
 
   // The plan on show is the one the operator picked, else the one the server
   // names as current. A picked plan that was deleted drops back to current.
@@ -126,7 +140,7 @@ export function ForecastPage({
   })();
   const selectedRowKey = selection?.rowKey ?? null;
 
-  // Picking a row far down the plans column, or on a phone where plans sit
+  // Picking a row far down the plans sidebar, or on a phone where plans sit
   // above the forecast, brings the forecast it opened into view. Nothing
   // scrolls on first render or when the selection is cleared.
   const placeLabelRef = useRef<HTMLHeadingElement>(null);
@@ -239,140 +253,195 @@ export function ForecastPage({
   const open = useMemo(() => plans.filter((p) => p.status !== "past"), [plans]);
   const past = useMemo(() => plans.filter((p) => p.status === "past"), [plans]);
 
+  const newPlanButton = canWrite && (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-8 text-xs"
+      onClick={() => {
+        setEditing("new");
+      }}
+    >
+      <Plus size={13} aria-hidden className="mr-1" />
+      New plan
+    </Button>
+  );
+
+  const errorLine = plansError && (
+    <p role="alert" className="text-xs text-destructive">
+      {plansError}
+    </p>
+  );
+
+  const hasPlans = plans.length > 0;
+
   return (
-    // Plans sit in a right-hand column from xl up, where the forecast still
-    // keeps about 600 px beside the app sidebar. The aside comes first in the
-    // DOM so a phone shows plans above the forecast. With no plans there is no
-    // column to fill: the Plans heading and New plan button sit full width above
-    // the forecast.
+    // From xl up the forecast keeps the left and the plans sit in a right-hand
+    // sidebar, built like the Rode Planner's: 24rem open, a 2.5rem rail when
+    // collapsed, so a collapsed sidebar gives the forecast the full width. The
+    // sidebar comes first in the DOM so a smaller screen shows plans above the
+    // forecast. With no plans there is nothing to fill a sidebar: the Plans
+    // heading and New plan button sit full width above the forecast.
     <div
       data-testid="forecast-layout"
-      className={cn(
-        "grid gap-4",
-        plans.length > 0 &&
-          "xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] xl:items-start",
-      )}
+      className={cn("flex flex-col gap-4", hasPlans && "xl:flex-row xl:items-start")}
     >
-      <aside className="min-w-0 space-y-3 xl:col-start-2 xl:row-start-1">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Plans</h2>
-          {canWrite && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs"
-              onClick={() => {
-                setEditing("new");
-              }}
-            >
-              <Plus size={13} aria-hidden className="mr-1" />
-              New plan
-            </Button>
-          )}
+      {!hasPlans && (
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Plans</h2>
+            {newPlanButton}
+          </div>
+          {errorLine}
         </div>
+      )}
 
-        {plansError && (
-          <p role="alert" className="text-xs text-destructive">
-            {plansError}
-          </p>
-        )}
+      {/* Stretches to the forecast's height from xl up, so the rail reads as
+          a strip down the page, as the Rode Planner's does. */}
+      {hasPlans && !plansOpen && (
+        <div className="flex xl:order-2 xl:self-stretch">
+          <SidebarPaneRail
+            side="right"
+            icon={Route}
+            label="Show plans"
+            onShow={() => setPlansOpen(true)}
+          />
+        </div>
+      )}
+      {hasPlans && plansOpen && (
+        <div
+          className="w-full min-w-0 shrink-0 xl:order-2 xl:w-(--sidebar-width)"
+          style={{ "--sidebar-width": "24rem" } as CSSProperties}
+        >
+          <Sidebar
+            side="right"
+            collapsible="none"
+            role="complementary"
+            aria-label="Plans"
+            className="h-full w-full rounded-xl border"
+          >
+            <SidebarPaneHeader
+              side="right"
+              icon={Route}
+              label="Plans"
+              hideLabel="Hide plans"
+              controlsId={PLANS_CONTENT_ID}
+              onHide={() => setPlansOpen(false)}
+            />
 
-        {plans.length > 0 && (
-          <section aria-label="Passage plans" className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div
-                className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
-                role="group"
-                aria-label="Plans"
-              >
-                {open.map((p) => (
-                  <Button
-                    key={p.id}
-                    type="button"
-                    size="sm"
-                    variant={plan?.id === p.id ? "secondary" : "ghost"}
-                    className="h-8 min-w-0 max-w-64 text-xs"
-                    aria-pressed={plan?.id === p.id}
-                    onClick={() => pick(p.id)}
-                  >
-                    <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
-                  </Button>
-                ))}
-              </div>
-              {canWrite && plan && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 text-xs"
-                    onClick={() => setEditing("change")}
-                  >
-                    <Pencil size={13} aria-hidden className="mr-1" />
-                    Change plan
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 text-xs"
-                    onClick={() => setConfirmDelete(true)}
-                  >
-                    <Trash2 size={13} aria-hidden className="mr-1" />
-                    Delete plan
-                  </Button>
-                </div>
+            <SidebarContent id={PLANS_CONTENT_ID}>
+              <SidebarGroup>
+                <SidebarGroupContent className="space-y-3">
+                  {newPlanButton && <div>{newPlanButton}</div>}
+                  {errorLine}
+                  <section aria-label="Passage plans" className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div
+                        className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
+                        role="group"
+                        aria-label="Choose a plan"
+                      >
+                        {open.map((p) => (
+                          <Button
+                            key={p.id}
+                            type="button"
+                            size="sm"
+                            variant={plan?.id === p.id ? "secondary" : "ghost"}
+                            className="h-8 min-w-0 max-w-64 text-xs"
+                            aria-pressed={plan?.id === p.id}
+                            onClick={() => pick(p.id)}
+                          >
+                            <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                          </Button>
+                        ))}
+                      </div>
+                      {canWrite && plan && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs"
+                            onClick={() => setEditing("change")}
+                          >
+                            <Pencil size={13} aria-hidden className="mr-1" />
+                            Change plan
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs"
+                            onClick={() => setConfirmDelete(true)}
+                          >
+                            <Trash2 size={13} aria-hidden className="mr-1" />
+                            Delete plan
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {past.length > 0 && (
+                      <details className="text-sm">
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                          Past ({past.length})
+                        </summary>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {past.map((p) => (
+                            <Button
+                              key={p.id}
+                              type="button"
+                              size="sm"
+                              variant={plan?.id === p.id ? "secondary" : "outline"}
+                              className="h-8 min-w-0 max-w-64 text-xs"
+                              aria-pressed={plan?.id === p.id}
+                              onClick={() => pick(p.id)}
+                            >
+                              <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                            </Button>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+
+                    {actionError && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {actionError}
+                      </p>
+                    )}
+                  </section>
+                </SidebarGroupContent>
+              </SidebarGroup>
+
+              {plan && (
+                <SidebarGroup>
+                  {/* The table sizes itself to its pane; if a row is still too
+                      wide it scrolls here rather than widening the sidebar. */}
+                  <SidebarGroupContent className="min-w-0 overflow-x-auto">
+                    <PlanTable
+                      plan={plan}
+                      legs={legs}
+                      legsLoading={legsLoading}
+                      legsError={legsError}
+                      canWrite={canWrite}
+                      selectedRowKey={selectedRowKey}
+                      addingNight={addingNight}
+                      onSelect={selectRow}
+                      onAddNight={addNight}
+                    />
+                  </SidebarGroupContent>
+                </SidebarGroup>
               )}
-            </div>
+            </SidebarContent>
+          </Sidebar>
+        </div>
+      )}
 
-            {past.length > 0 && (
-              <details className="text-sm">
-                <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                  Past ({past.length})
-                </summary>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {past.map((p) => (
-                    <Button
-                      key={p.id}
-                      type="button"
-                      size="sm"
-                      variant={plan?.id === p.id ? "secondary" : "outline"}
-                      className="h-8 min-w-0 max-w-64 text-xs"
-                      aria-pressed={plan?.id === p.id}
-                      onClick={() => pick(p.id)}
-                    >
-                      <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
-                    </Button>
-                  ))}
-                </div>
-              </details>
-            )}
+      <div className="min-w-0 space-y-3 xl:order-1 xl:flex-1">
+        {/* The sidebar shows the error while open; hidden, it shows here. */}
+        {hasPlans && !plansOpen && errorLine}
 
-            {actionError && (
-              <p role="alert" className="text-xs text-destructive">
-                {actionError}
-              </p>
-            )}
-
-            {plan && (
-              <PlanTable
-                plan={plan}
-                legs={legs}
-                legsLoading={legsLoading}
-                legsError={legsError}
-                canWrite={canWrite}
-                selectedRowKey={selectedRowKey}
-                addingNight={addingNight}
-                onSelect={selectRow}
-                onAddNight={addNight}
-              />
-            )}
-          </section>
-        )}
-      </aside>
-
-      <div className="min-w-0 space-y-3 xl:col-start-1 xl:row-start-1">
         {zoneProblem && (
           <p
             data-testid="forecast-stay-zone-error"
@@ -438,6 +507,8 @@ export function ForecastPage({
                 ? await update(plan.id, input)
                 : await create(input);
             pick(saved.id);
+            // A plan just saved shows, even if the sidebar was hidden.
+            setPlansOpen(true);
           }}
         />
       )}
