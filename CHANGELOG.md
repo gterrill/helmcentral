@@ -27,8 +27,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The lightning key no longer talks about a stay.** When you open the
   forecast for a stop in a passage plan, or for the middle of a leg, the key
   now reads "Lightning is for the boat's position, not this place."
-### Fixed
-
 - **A forecast that fails now says why in a few words.** The Forecast Offline
   panel in the Forecast drawer and the rows on the Plans page give a reason,
   such as the forecast not arriving in time, instead of a page of technical
