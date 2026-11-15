@@ -55,38 +55,38 @@ describe('forecast wind change wording', () => {
     expect(windChangeChipText(change({ label: '1.30 PM' }))).toBe('N→SE 1.30 PM')
   })
 
-  it('leads with the wind until the change, then the wind behind it', () => {
+  it('says only the first change, with the singular name of the wind it brings', () => {
     expect(buildWindChangeSentence([day(0), day(1), day(2, [change()])], null)).toBe(
-      'Northerlies until a SE change Tue 16 around 2 PM, 15–20 kn behind it.',
+      'A South-easterly change expected Tue 16 around 2 PM.',
     )
+    expect(buildWindChangeSentence([day(0, [change({ to: 'N' })])], null)).toBe('A Northerly change expected Sun 14 around 2 PM.')
+    expect(buildWindChangeSentence([day(0, [change({ to: 'NW' })])], null)).toBe('A North-westerly change expected Sun 14 around 2 PM.')
   })
 
-  it('says "an" before a change to a point that starts with E, read as "east"', () => {
+  it('says "An" before a change to a point that starts with E, read as "east"', () => {
     expect(buildWindChangeSentence([day(2, [change({ from: 'NNW', to: 'ESE' }), change({ from: 'ESE', to: 'E', label: '9 PM' })])], null)).toBe(
-      'NNW winds until an ESE change Tue 16 around 2 PM, 15–20 kn behind it, then an E change Tue 16 around 9 PM.',
+      'An ESE change expected Tue 16 around 2 PM.',
     )
+    expect(buildWindChangeSentence([day(0, [change({ to: 'E' })])], null)).toBe('An Easterly change expected Sun 14 around 2 PM.')
   })
 
   it('words today and tomorrow from the boat\'s date at the time of drawing, not the time of the response', () => {
-    const days = [day(0, [change({ speedMinKn: 18, speedMaxKn: 18 })]), day(1, [change({ from: 'SE', to: 'W', label: '1 AM' })])]
-    expect(buildWindChangeSentence(days, '2026-06-14')).toBe(
-      'Northerlies until a SE change today around 2 PM, 18 kn behind it, then a W change tomorrow around 1 AM.',
-    )
+    const days = [day(0, [change({ to: 'S' })]), day(1, [change({ from: 'SE', to: 'W', label: '1 AM' })])]
+    expect(buildWindChangeSentence(days, '2026-06-14')).toBe('A Southerly change expected today around 2 PM.')
     // The same response, drawn the next morning: Sunday's change is no longer today.
-    expect(buildWindChangeSentence(days, '2026-06-15')).toBe(
-      'Northerlies until a SE change Sun 14 around 2 PM, 18 kn behind it, then a W change today around 1 AM.',
+    expect(buildWindChangeSentence(days, '2026-06-15')).toBe('A Southerly change expected Sun 14 around 2 PM.')
+    expect(buildWindChangeSentence([day(1, [change({ to: 'S', label: '1 AM' })])], '2026-06-14')).toBe(
+      'A Southerly change expected tomorrow around 1 AM.',
     )
   })
 
-  it('words a lower-confidence change as less certain and lists later ones', () => {
+  it('does not add a note to a lower-confidence first change, and leaves the later ones out', () => {
     const sentence = buildWindChangeSentence([
       day(0),
-      day(1, [change({ lowerConfidence: true })]),
-      day(2, [change({ from: 'SE', to: 'W', label: '1 AM' })]),
+      day(1, [change({ to: 'S', lowerConfidence: true })]),
+      day(2, [change({ from: 'S', to: 'W', label: '1 AM', lowerConfidence: true })]),
     ], '2026-06-14')
-    expect(sentence).toBe(
-      'Northerlies until a SE change tomorrow around 2 PM, 15–20 kn behind it (less certain this far out), then a W change Tue 16 around 1 AM.',
-    )
+    expect(sentence).toBe('A Southerly change expected tomorrow around 2 PM.')
   })
 
   it('says nothing when there is no change', () => {
@@ -94,7 +94,9 @@ describe('forecast wind change wording', () => {
   })
 
   it('does not invent a word for a point between the eight', () => {
-    expect(buildWindChangeSentence([day(0, [change({ from: 'NNE' })])], null)).toMatch(/^NNE winds until/)
+    expect(buildWindChangeSentence([day(0, [change({ to: 'SSE' })])], null)).toBe('A SSE change expected Sun 14 around 2 PM.')
+    expect(buildWindChangeSentence([day(0, [change({ to: 'ENE' })])], null)).toBe('An ENE change expected Sun 14 around 2 PM.')
+    expect(buildWindChangeSentence([day(0, [change({ to: 'NE' })])], null)).toBe('A North-easterly change expected Sun 14 around 2 PM.')
   })
 })
 
@@ -206,14 +208,14 @@ describe('ForecastDrawer wind changes', () => {
   it('leads the extended summary with the wind sentence', () => {
     render(<ForecastDrawer forecast={[day(0), day(1), day(2, [change()])]} loading={false} error={null} unit="metric" />)
     const intro = screen.getByTestId('forecast-extended-intro')
-    expect(intro.textContent?.startsWith('Northerlies until a SE change Tue 16 around 2 PM, 15–20 kn behind it.')).toBe(true)
+    expect(intro.textContent?.startsWith('A South-easterly change expected Tue 16 around 2 PM.')).toBe(true)
     expect(within(screen.getByTestId('forecast-panel-extended')).getByTestId('forecast-extended-intro')).toBe(intro)
   })
 
   it('shows no chip and no wind sentence without a change', () => {
     render(<ForecastDrawer forecast={[day(0), day(1)]} loading={false} error={null} unit="metric" />)
     expect(screen.queryByTestId('forecast-wind-change-chip')).not.toBeInTheDocument()
-    expect(screen.getByTestId('forecast-extended-intro').textContent).not.toMatch(/until a/)
+    expect(screen.getByTestId('forecast-extended-intro').textContent).not.toMatch(/change expected/)
   })
 })
 
