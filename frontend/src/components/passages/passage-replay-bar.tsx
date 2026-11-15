@@ -54,6 +54,8 @@ export interface PassageReplayBarProps {
   insetViewError?: string | null
   onInsetViewRetry?: () => void
   shotTicks?: ShotTick[]
+  /** A shot write is under way; picking another mark now would blur whose error it is. */
+  shotTicksDisabled?: boolean
   cameraOpen?: boolean
   onCameraToggle?: () => void
   onTickClick?: (id: string) => void
@@ -70,14 +72,15 @@ export interface PassageReplayBarProps {
 export function PassageReplayBar({
   clock, total, playing, readout, speed, lengths = PASSAGE_REPLAY_LENGTHS, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
   insetView, onInsetViewChange, insetViewError = null, onInsetViewRetry,
-  shotTicks = [], cameraOpen = false, onCameraToggle, onTickClick, editor,
+  shotTicks = [], shotTicksDisabled = false, cameraOpen = false, onCameraToggle, onTickClick, editor,
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
 }: PassageReplayBarProps) {
   // The Select's items, built once for the lengths on offer and not on every frame of the replay.
   const items = useMemo(() => lengths.map((l) => ({ value: l.id, label: l.label })), [lengths])
   return (
     <div className="border-t border-border bg-card" data-testid="passage-replay-bar">
-    <div className="flex flex-wrap items-center gap-2 p-2">
+    <div className="flex flex-col gap-2 p-2">
+    <div className="flex flex-wrap items-center gap-2" data-testid="replay-transport">
       <Button
         type="button"
         size="icon"
@@ -88,7 +91,7 @@ export function PassageReplayBar({
       >
         {playing ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
       </Button>
-      <div className={cn('relative flex min-w-24 flex-1 items-center', onSignsToggle && 'pb-5', shotTicks.length > 0 && 'pt-3')}>
+      <div className={cn('relative flex min-w-24 flex-[1_1_10rem] items-center', onSignsToggle && 'pb-5', shotTicks.length > 0 && 'pt-3')}>
         <input
           type="range"
           aria-label="Replay position"
@@ -107,7 +110,7 @@ export function PassageReplayBar({
             aria-label={t.label}
             title={t.title}
             aria-pressed={t.selected}
-            disabled={disabled}
+            disabled={disabled || shotTicksDisabled}
             className={cn(
               'absolute -translate-x-1/2 rounded-b-sm border border-background',
               t.selected ? 'top-1 z-10 h-3 w-3 bg-foreground ring-2 ring-ring ring-offset-1 ring-offset-background' : 'top-2 h-2.5 w-2 bg-primary',
@@ -137,7 +140,9 @@ export function PassageReplayBar({
           </button>
         ))}
       </div>
-      <span className="min-w-36 truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
+      <span className="min-w-0 max-w-full truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
+    </div>
+    <div className="flex flex-wrap items-center gap-2" data-testid="replay-options">
       <Select
         items={items}
         value={speed}
@@ -203,6 +208,7 @@ export function PassageReplayBar({
           </span>
         )}
       </InputGroup>
+    </div>
     </div>
     {cameraOpen && editor}
     {signsOpen && signsEditor}

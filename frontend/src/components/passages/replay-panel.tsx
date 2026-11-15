@@ -16,17 +16,17 @@ import { passageLabelBox, passageLabelsOf } from '@/lib/replay-passage-label'
 import { useElementSize } from '@/hooks/use-element-size'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useSignMoments } from '@/hooks/use-sign-moments'
-import { useCameraShots } from '@/hooks/use-camera-shots'
+import { cameraShotsKey, useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
 import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
-import { cameraShotsApi } from '@/lib/camera-shots-api'
+import { cameraShotsApi, type CameraShotPatch } from '@/lib/camera-shots-api'
 import { getQueryData, setQueryData } from '@/lib/api-query'
 import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
-import { labelledSigns, legPassages, piecesOf, playableShots, replayItems, wantsHeading } from '@/lib/replay-plan'
+import { labelledSigns, legPassages, piecesOf, playableEntryAt, playableShots, replayItems, wantsHeading } from '@/lib/replay-plan'
 import { boatOffsetHours as boatOffsetOf, staysOf, stayLabelBox } from '@/lib/replay-stay'
 import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_LIFT_PX, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
@@ -35,13 +35,14 @@ import { shotStartState } from '@/lib/replay-camera'
 import { playedIds } from '@/lib/replay-time'
 import { INTRO_MS, introStartCamera } from '@/lib/replay-intro'
 import { ReplayController } from '@/lib/replay-controller'
-import { cruisePaceSpans, type CameraMode } from '@/lib/replay-clock'
+import { cruisePaceSpans, entryAt, type CameraMode, type CameraShot } from '@/lib/replay-clock'
 import { introLanding } from '@/lib/replay-framing'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
 import { useReplay } from '@/hooks/use-replay'
 import { replaySeconds, type ReplayLength, type ReplaySpeedId } from '@/lib/replay-lengths'
 import {
   buildTimeline,
+  clockFor,
   isMultiPassage,
   formatLocalDateTime, localDateTimeParts,
   segmentBounds,
@@ -74,18 +75,44 @@ const round = (v: number, digits: number) => Math.round(v * 10 ** digits) / 10 *
 /** An angle brought into -180..180. */
 const signedDeg = (d: number) => ((((d % 360) + 540) % 360) - 180)
 
+/** Runs writes one at a time, in the order they were asked for, so a title
+ * saved a moment after a move cannot cross it. Each write reports its own
+ * failure; a later success does not wipe it. The old error is dropped only
+ * when a new action starts with nothing else in flight. `writes` is the
+ * number queued or running. */
+function useWriteQueue(setError: (message: string | null) => void) {
+  const [writes, setWrites] = useState(0)
+  const queue = useRef<Promise<void>>(Promise.resolve())
+  const pending = useRef(0)
+  const run = (write: () => Promise<void>) => {
+    if (pending.current === 0) setError(null)
+    pending.current += 1
+    setWrites((n) => n + 1)
+    queue.current = queue.current.then(async () => {
+      try {
+        await write()
+      } catch (err) {
+        setError(errorMessage(err))
+      } finally {
+        pending.current -= 1
+        setWrites((n) => n - 1)
+      }
+    })
+    return queue.current
+  }
+  return { run, writes }
+}
+
 export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthChange, cursorRef }: ReplayPanelProps) {
   const [cameraOpen, setCameraOpen] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
-  const [shotBusy, setShotBusy] = useState(false)
   const [shotError, setShotError] = useState<string | null>(null)
+  const { run: runShotWrite, writes: shotWrites } = useWriteQueue(setShotError)
+  const shotBusy = shotWrites > 0
   const [signsOpen, setSignsOpen] = useState(false)
   const [selectedSignId, setSelectedSignId] = useState<string | null>(null)
-  // Writes run one at a time; busy is the number queued or running.
-  const [signWrites, setSignWrites] = useState(0)
-  const signQueue = useRef<Promise<void>>(Promise.resolve())
-  const signWritesPending = useRef(0)
   const [signError, setSignError] = useState<string | null>(null)
+  const { run: runSignWrite, writes: signWrites } = useWriteQueue(setSignError)
   const [signNotice, setSignNotice] = useState<string | null>(null)
   // A pin the operator opened into its card, and the sign whose photo is open full size.
   const [openPinId, setOpenPinId] = useState<string | null>(null)
@@ -132,7 +159,9 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
       to: Math.max(...built.items.map((i) => i.end)) * 1000,
     }
   }, [built.items])
-  const { shots } = useCameraShots(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+  const shotsFrom = spanMs ? spanMs.from : null
+  const shotsTo = spanMs ? spanMs.to : null
+  const { shots } = useCameraShots(shotsFrom, shotsTo)
 
   // The overview map's corner and zoom step are saved with the replay, keyed by
   // its range (first departure to last arrival). A change shows at once and
@@ -306,32 +335,17 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     setSelectedSignId(id)
     setSignError(null)
   }
-  // One write at a time, in the order the operator made them, so a slow upload
-  // and a title saved a moment later cannot cross. Each write reports its own
-  // failure; a later success does not wipe it. The old error is dropped only
-  // when a new action starts with nothing else in flight.
-  const runSignWrite = (write: () => Promise<void>) => {
-    if (signWritesPending.current === 0) setSignError(null)
-    signWritesPending.current += 1
-    setSignWrites((n) => n + 1)
-    signQueue.current = signQueue.current.then(async () => {
-      try {
-        await write()
-      } catch (err) {
-        setSignError(errorMessage(err))
-      } finally {
-        signWritesPending.current -= 1
-        setSignWrites((n) => n - 1)
-      }
-    })
-    return signQueue.current
+  // Every jump the operator makes: pause, set the clock, and give the camera back to the shots.
+  const seekClock = (clock: number, opts?: Parameters<typeof replay.setClock>[1]) => {
+    replay.setPlaying(false)
+    replay.setClock(clock, opts)
+    setResume((n) => n + 1)
   }
   const seekToSign = (at: number) => {
-    const entry = live.current.timeline.entries.find((e) => at >= e.start && at <= e.end)
-    if (!entry) return
-    replay.setPlaying(false)
-    replay.setClock(entry.offset + (at - entry.start), { onSign: true, at })
-    setResume((n) => n + 1)
+    const entry = entryAt(live.current.timeline, at)
+    const clock = entry ? clockFor(live.current.timeline, entry.id, at) : null
+    if (clock === null) return
+    seekClock(clock, { onSign: true, at })
   }
   const addSign = () => {
     if (!here) return
@@ -394,8 +408,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   // as it is then, and the signs as the server last held them. The patch
   // returns only once the signs have been read again, so the cache is the
   // answer to "where is this sign now".
-  const live = useRef({ timeline, boatOffsetHours, signsFrom, signsTo })
-  useEffect(() => { live.current = { timeline, boatOffsetHours, signsFrom, signsTo } }, [timeline, boatOffsetHours, signsFrom, signsTo])
+  const live = useRef({ timeline, boatOffsetHours, signsFrom, signsTo, shotsFrom, shotsTo })
+  useEffect(() => { live.current = { timeline, boatOffsetHours, signsFrom, signsTo, shotsFrom, shotsTo } }, [timeline, boatOffsetHours, signsFrom, signsTo, shotsFrom, shotsTo])
   const currentSign = (id: string) =>
     getQueryData<{ signs?: ReplaySign[] }>(replaySignsKey(live.current.signsFrom, live.current.signsTo))?.signs?.find((s) => s.id === id)
   // The saved sign goes into the cache at once, so a read that fails after the
@@ -489,17 +503,6 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     setShotError(null)
   }
   const selectedShot = shots.find((s) => s.id === selectedShotId && resolved.some((r) => r.shot.id === s.id)) ?? null
-  const runShotWrite = async (write: () => Promise<void>) => {
-    setShotBusy(true)
-    try {
-      await write()
-      setShotError(null)
-    } catch (err) {
-      setShotError(errorMessage(err))
-    } finally {
-      setShotBusy(false)
-    }
-  }
   const addShot = () => {
     if (!here) return
     const view = mapHandle.current?.getView()
@@ -518,7 +521,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     })
   }
   const changeShot = (change: CameraShotChange) => {
-    if (selectedShot) void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
+    if (selectedShot) void runShotWrite(async () => { await patchShot(selectedShot.id, change) })
   }
   const deleteShot = () => {
     if (!selectedShot) return
@@ -537,23 +540,31 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
       const bow = shotStartState(timeline, rs)?.heading ?? null
       if (bow !== null) change.bearing_offset_deg = round(signedDeg(view.bearing - bow), 1)
     }
-    void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
+    void runShotWrite(async () => { await patchShot(selectedShot.id, change) })
   }
   // Times alone on a one-day replay; the date too once the shots span days.
   const selectedShotId2 = selectedShot?.id
-  const { shotTicks, shotHeading } = useMemo(() => {
+  const { shotTicks, shotHeading, shotChips } = useMemo(() => {
     const parts = resolved.map((r) => localDateTimeParts(r.at, timeZone))
     const oneDay = new Set(parts.map((p) => p.date)).size <= 1
     const short = (p: { date: string; time: string }) => (oneDay ? p.time : `${p.date} ${p.time}`)
-    const ticks = resolved.map((r, i) => ({
+    const chips = resolved.map((r, i) => ({
       id: r.shot.id,
-      fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-      label: `Camera shot ${i + 1}, ${MODE_NAMES[r.shot.mode]}, at ${formatLocalDateTime(r.at, timeZone)}`,
-      title: `Shot ${i + 1} · ${short(parts[i])}`,
+      number: i + 1,
+      modeName: MODE_NAMES[r.shot.mode],
+      timeLabel: formatLocalDateTime(r.at, timeZone),
+      shortTime: short(parts[i]),
       selected: r.shot.id === selectedShotId2,
     }))
+    const ticks = chips.map((c, i) => ({
+      id: c.id,
+      fraction: timeline.total > 0 ? resolved[i].clock / timeline.total : 0,
+      label: `Camera shot ${c.number}, ${c.modeName}, at ${c.timeLabel}`,
+      title: `Shot ${c.number} · ${c.shortTime}`,
+      selected: c.selected,
+    }))
     const idx = resolved.findIndex((r) => r.shot.id === selectedShotId2)
-    if (idx < 0) return { shotTicks: ticks, shotHeading: null }
+    if (idx < 0) return { shotTicks: ticks, shotHeading: null, shotChips: chips }
     // The shot ends at the next shot or where its own passage ends, whichever
     // is first; "end" is only for the last shot of the last passage.
     const entry = timeline.entries.find((e) => e.id === resolved[idx].entryId)
@@ -562,8 +573,54 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     let to: string | null = null
     if (nextAt !== null && (!entry || nextAt <= entry.end)) to = short(parts[idx + 1])
     else if (entry && !(nextAt === null && lastPassage)) to = short(localDateTimeParts(entry.end, timeZone))
-    return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to } }
+    return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to }, shotChips: chips }
   }, [resolved, timeZone, timeline, selectedShotId2])
+  // A mark or a chip: pause, go to the shot, pick it.
+  const pickShot = (id: string) => {
+    const rs = resolved.find((r) => r.shot.id === id)
+    if (!rs) return
+    seekClock(rs.clock)
+    selectShot(id)
+    setCameraOpen(true)
+  }
+  // Where a shot is now: as the server last saved it, written into the cache
+  // at once so a read that fails afterwards cannot leave a move on the old time.
+  const shotsKey = () => cameraShotsKey(live.current.shotsFrom, live.current.shotsTo)
+  const patchShot = async (id: string, patch: CameraShotPatch) => {
+    const saved = await cameraShotsApi.patch(id, patch)
+    setQueryData<{ shots?: CameraShot[] }>(shotsKey(), (prev) => ({
+      ...prev,
+      shots: (prev?.shots ?? []).map((s) => (s.id === id ? saved : s)),
+    }))
+    return saved
+  }
+  // Moves the picked shot. A shot plays wherever the replay has a passage for
+  // its time, so that is the only place a move may land.
+  const moveShotTo = (target: (latestMs: number) => number, seek: boolean) => {
+    if (!selectedShot) return
+    const { id } = selectedShot
+    void runShotWrite(async () => {
+      const all = getQueryData<{ shots?: CameraShot[] }>(shotsKey())?.shots ?? []
+      const shot = all.find((s) => s.id === id)
+      if (!shot) throw new Error('That shot is no longer there.')
+      const tMs = target(shot.t_ms)
+      const at = tMs / 1000
+      if (!playableEntryAt(live.current.timeline, at)) throw new Error('That moment is outside this replay, so the shot was not moved.')
+      // Two shots on one instant: only one of them would ever play.
+      if (all.some((s) => s.id !== id && s.t_ms === tMs)) throw new Error('Another shot starts at that moment, so the shot was not moved.')
+      await patchShot(id, { t_ms: tMs })
+      // The replay may have been rebuilt while the write ran, so the passage is looked up again.
+      const entry = seek ? playableEntryAt(live.current.timeline, at) : undefined
+      const clock = entry ? clockFor(live.current.timeline, entry.id, at) : null
+      if (clock !== null) seekClock(clock)
+    })
+  }
+  const moveShotHere = () => {
+    if (!here) return
+    const tMs = Math.round(here.at * 1000)
+    moveShotTo(() => tMs, false)
+  }
+  const nudgeShot = (seconds: number) => moveShotTo((latest) => latest + seconds * 1000, true)
 
 
   const played = useMemo(() => playedIds(timeline, replay.clock), [timeline, replay.clock])
@@ -653,7 +710,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         insetOn={insetOn}
         disabled={timeline.total <= 0 || flying}
         onToggle={() => void handlePlay()}
-        onScrub={(c) => { replay.setPlaying(false); replay.setClock(c); setResume((n) => n + 1) }}
+        onScrub={(c) => seekClock(c)}
         onSpeed={onLengthChange}
         onInsetChange={setInsetOn}
         insetView={insetView ?? undefined}
@@ -661,17 +718,10 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         onInsetViewRetry={() => void retryInset()}
         onInsetViewChange={changeInsetView}
         shotTicks={shotTicks}
+        shotTicksDisabled={shotBusy}
         cameraOpen={cameraOpen}
         onCameraToggle={() => setCameraOpen((o) => !o)}
-        onTickClick={(id) => {
-          const rs = resolved.find((r) => r.shot.id === id)
-          if (!rs) return
-          replay.setPlaying(false)
-          replay.setClock(rs.clock)
-          setResume((n) => n + 1)
-          selectShot(id)
-          setCameraOpen(true)
-        }}
+        onTickClick={pickShot}
         signTicks={signTicks}
         signsOpen={signsOpen}
         onSignsToggle={() => setSignsOpen((o) => !o)}
@@ -703,6 +753,12 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         editor={
           <CameraEditor
             shot={selectedShot}
+            chips={shotChips}
+            onPick={pickShot}
+            disabled={timeline.total <= 0 || flying}
+            onMoveHere={moveShotHere}
+            moveHereDisabled={!here || replay.playing || (selectedShot !== null && Math.round(here.at * 1000) === selectedShot.t_ms)}
+            onNudge={nudgeShot}
             shotCount={resolved.length}
             heading={shotHeading}
             flat={mapFlat}

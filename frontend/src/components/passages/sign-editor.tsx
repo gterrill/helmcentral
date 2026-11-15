@@ -2,14 +2,15 @@ import { ChevronDown, Clock, Library, MapPin, Plus, Signpost, Trash2, Upload, X 
 import { useEffect, useRef, useState } from 'react'
 
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
+import { ReplayChip, ReplayChipTime } from '@/components/passages/replay-chip'
 import { signPhotoSrc } from '@/components/passages/sign-card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { isSubmitEnter } from '@/lib/keyboard'
-import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
+import { NUDGES } from '@/lib/replay-nudges'
 import { isSignPhotoType, isSignUploadFile, SIGN_UPLOAD_ACCEPT } from '@/lib/sign-photo'
 import {
   photoMomentOn,
@@ -133,25 +134,16 @@ function ChipThumb({ src }: { src: string }) {
 
 function SignChipButton({ chip, disabled, onPick }: { chip: SignChip; disabled: boolean; onPick: (id: string) => void }) {
   return (
-    <button
-      type="button"
-      aria-pressed={chip.selected}
-      aria-label={`Edit sign ${chip.title} at ${chip.timeLabel}`}
+    <ReplayChip
+      selected={chip.selected}
       disabled={disabled}
-      className={cn(
-        'flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-1.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-        chip.selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground',
-      )}
+      label={`Edit sign ${chip.title} at ${chip.timeLabel}`}
+      icon={chip.photoSrc ? <ChipThumb key={chip.photoSrc} src={chip.photoSrc} /> : <Signpost className="h-4 w-4 shrink-0" aria-hidden="true" />}
       onClick={() => onPick(chip.id)}
     >
-      {chip.photoSrc ? (
-        <ChipThumb key={chip.photoSrc} src={chip.photoSrc} />
-      ) : (
-        <Signpost className="h-4 w-4 shrink-0" aria-hidden="true" />
-      )}
       <span className="max-w-40 truncate text-xs font-medium">{chip.title}</span>
-      <span className={cn('text-xs tabular-nums', chip.selected ? 'text-primary-foreground' : 'text-muted-foreground')}>{chip.shortTime}</span>
-    </button>
+      <ReplayChipTime selected={chip.selected}>{chip.shortTime}</ReplayChipTime>
+    </ReplayChip>
   )
 }
 
@@ -187,14 +179,6 @@ export interface SignEditorProps {
   /** Moves the sign to the time its photo was taken. */
   onBackToPhotoTime: () => void
 }
-
-/** The nudge steps, earliest first. */
-const NUDGES: readonly { seconds: number; short: string; words: string }[] = [
-  { seconds: -60, short: '\u22121 min', words: '1 minute earlier' },
-  { seconds: -10, short: '\u221210 s', words: '10 seconds earlier' },
-  { seconds: 10, short: '+10 s', words: '10 seconds later' },
-  { seconds: 60, short: '+1 min', words: '1 minute later' },
-]
 
 const ACCEPT = SIGN_UPLOAD_ACCEPT
 

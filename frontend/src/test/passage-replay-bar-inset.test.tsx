@@ -18,6 +18,24 @@ function bar(over: Partial<PassageReplayBarProps> = {}) {
 
 const open = () => fireEvent.click(screen.getByRole('button', { name: 'Place overview map' }))
 
+describe('the replay bar layout', () => {
+  it('keeps play, the scrubber and the readout on a row of their own, apart from the option controls', () => {
+    bar({ onCameraToggle: () => {}, onSignsToggle: () => {}, readout: '9.04 AM' })
+    const transport = screen.getByTestId('replay-transport')
+    expect(within(transport).getByRole('button', { name: 'Play replay' })).toBeInTheDocument()
+    expect(within(transport).getByLabelText('Replay position')).toBeInTheDocument()
+    expect(within(transport).getByTestId('replay-readout')).toBeInTheDocument()
+    expect(within(transport).queryByRole('button', { name: 'Camera' })).toBeNull()
+    // On a narrow phone the readout wraps to its own line instead of overflowing.
+    expect(transport.className).toContain('flex-wrap')
+    const options = screen.getByTestId('replay-options')
+    expect(within(options).getByLabelText('Replay length')).toBeInTheDocument()
+    expect(within(options).getByRole('button', { name: 'Camera' })).toBeInTheDocument()
+    expect(within(options).getByRole('button', { name: 'Signs' })).toBeInTheDocument()
+    expect(within(options).getByRole('group', { name: 'Overview map' })).toBeInTheDocument()
+  })
+})
+
 describe('the overview map placement controls', () => {
   it('stay in place but disabled while the overview map is off', () => {
     bar({ insetOn: false })

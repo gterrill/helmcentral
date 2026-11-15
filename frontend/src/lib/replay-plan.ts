@@ -11,7 +11,7 @@ import type { BoatHull } from '@/lib/boat-model'
 import { drawnPieces, passageLegs, type DrawnPiece, type LegPassage } from '@/lib/passage-legs'
 import { buildTimeline, segmentBounds, timedSegments, type PassageDetail, type TimedSegment, type Timeline } from '@/lib/passages'
 import { passageBoundsOf, type Bounds } from '@/lib/replay-framing'
-import { cruisePaceSpans, resolveShots, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
+import { cruisePaceSpans, resolveShots, entryAt, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
 import { momentsOf, resolveSigns, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import { passageLabelsAtOffset, type ReplayPassageLabel } from '@/lib/replay-passage-label'
 import { boatOffsetHours, staysAtOffset, type ReplayStay, type StayPassage } from '@/lib/replay-stay'
@@ -46,9 +46,18 @@ export const legPassages = (items: readonly ReplayItem[]): LegPassage[] => items
 export const piecesOf = (items: readonly ReplayItem[], legs?: Parameters<typeof drawnPieces>[1]): DrawnPiece[] =>
   drawnPieces(items.map((i) => ({ id: i.id, segments: i.line })), legs)
 
+const entryHasTrack = (e: Timeline['entries'][number] | undefined): boolean => !!e?.segments.some((s) => s.length > 0)
+
+/** The replayed passage a shot at this instant plays in: one that covers the
+ * instant and has a track. Undefined where no shot would play. */
+export const playableEntryAt = (timeline: Timeline, at: number): Timeline['entries'][number] | undefined => {
+  const entry = entryAt(timeline, at)
+  return entryHasTrack(entry) ? entry : undefined
+}
+
 /** The shots that play: the ones inside the replayed passages. A shot in a trimmed-out stretch is not played. */
 export const playableShots = (shots: readonly CameraShot[], timeline: Timeline): ResolvedShot[] =>
-  resolveShots(shots, timeline).filter((r) => timeline.entries.find((e) => e.id === r.entryId)?.segments.some((s) => s.length > 0))
+  resolveShots(shots, timeline).filter((r) => entryHasTrack(timeline.entries.find((e) => e.id === r.entryId)))
 
 /** The signs that draw something. A join still waiting for its name is listed but draws nothing on the map. */
 export const labelledSigns = (placed: readonly ResolvedSign[]): ResolvedSign[] => placed.filter((r) => r.sign.title !== '')

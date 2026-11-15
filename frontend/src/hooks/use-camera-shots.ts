@@ -4,12 +4,15 @@ import type { CameraShot } from '@/lib/replay-clock'
 
 const NO_SHOTS: CameraShot[] = []
 
+/** The cache key of the shots read for one replay span. */
+export const cameraShotsKey = (fromMs: number | null, toMs: number | null) => [...CAMERA_SHOTS_KEY, fromMs, toMs]
+
 /** The camera shots whose time falls between two Unix-millisecond instants:
  * the span the replay covers. Disabled while there is nothing to replay. */
 export function useCameraShots(fromMs: number | null, toMs: number | null) {
   const enabled = fromMs !== null && toMs !== null
   const query = useApiQuery({
-    queryKey: [...CAMERA_SHOTS_KEY, fromMs, toMs],
+    queryKey: cameraShotsKey(fromMs, toMs),
     path: enabled ? cameraShotsPath(fromMs, toMs) : '',
     enabled,
     select: (raw: { shots?: CameraShot[] }) => raw.shots ?? NO_SHOTS,
