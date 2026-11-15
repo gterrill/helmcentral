@@ -19,6 +19,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Plans sit beside the forecast.** On a wide screen the Forecast page shows
   your passage plans in a column on the right, so the forecast starts at the
   top of the page. Beside the forecast, each day of a plan is a card with its
+- **Plans sit in a sidebar beside the forecast.** On a wide screen the Forecast
+  page shows your passage plans in a sidebar on the right, like the Rode
+  Planner, so the forecast starts at the top of the page. Collapse it to a
+  narrow strip when you want the forecast to have the whole width, and that
+  screen keeps it that way. Beside the forecast, each day of a plan is a card with its
   readings labelled. On a smaller screen the plans still come first, above the
   forecast.
 
