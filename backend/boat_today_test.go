@@ -123,3 +123,67 @@ func TestEveryDayDependentEndpoint_UnknownBoatDayAnswers503(t *testing.T) {
 		})
 	}
 }
+
+// The boat's clock is read from the delta stream's own-ship position, not by
+// building the whole vessel state: a fix in Sydney puts the boat on Sydney's day.
+func TestCurrentBoatTime_ReadsTheOwnShipPositionFromTheStream(t *testing.T) {
+	useFreshBoatZone(t)
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+	orig := globalSignalKSnapshot
+	globalSignalKSnapshot = snapshotWithSelfValues(map[string]any{
+		"navigation.position": map[string]any{"latitude": -33.86, "longitude": 151.21},
+	})
+	t.Cleanup(func() { globalSignalKSnapshot = orig })
+
+	now := time.Date(2026, 6, 15, 23, 30, 0, 0, time.UTC)
+	got, err := boatCalendarDay(currentBoatTime(), now)
+	if err != nil || !got.Equal(time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("boat day = %v, %v; want 16 June", got, err)
+	}
+}
+
+// With no fix ever seen the day is unknown and is not guessed.
+func TestCurrentBoatTime_NoFixIsAnUnknownDay(t *testing.T) {
+	useFreshBoatZone(t)
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+	orig := globalSignalKSnapshot
+	globalSignalKSnapshot = snapshotWithSelfValues(map[string]any{})
+	t.Cleanup(func() { globalSignalKSnapshot = orig })
+
+	if _, err := boatCalendarDay(currentBoatTime(), time.Now()); !errors.Is(err, errBoatDayUnknown) {
+		t.Fatalf("err = %v, want errBoatDayUnknown", err)
+	}
+}
+
+// A critical GNSS verdict or the -1,-1 sentinel is not a fix: the boat keeps
+// the zone of its last fix, and with none the day stays unknown.
+func TestCurrentBoatTime_UnusableFixIsNotAFix(t *testing.T) {
+	cases := map[string]struct {
+		pos      map[string]any
+		critical bool
+	}{
+		"sentinel":      {pos: map[string]any{"latitude": -1.0, "longitude": -1.0}},
+		"critical gnss": {pos: map[string]any{"latitude": -33.86, "longitude": 151.21}, critical: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			useFreshBoatZone(t)
+			resetGNSSPositionValidationState()
+			t.Cleanup(resetGNSSPositionValidationState)
+			if tc.critical {
+				gnssValidationMu.Lock()
+				lastGNSSValidationStatus = "critical"
+				gnssValidationMu.Unlock()
+			}
+			orig := globalSignalKSnapshot
+			globalSignalKSnapshot = snapshotWithSelfValues(map[string]any{"navigation.position": tc.pos})
+			t.Cleanup(func() { globalSignalKSnapshot = orig })
+
+			if _, err := boatCalendarDay(currentBoatTime(), time.Now()); !errors.Is(err, errBoatDayUnknown) {
+				t.Fatalf("err = %v, want errBoatDayUnknown", err)
+			}
+		})
+	}
+}

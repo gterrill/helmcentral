@@ -189,7 +189,7 @@ func TestOneOffWatch_StoredTextNeverExceedsTheLimits(t *testing.T) {
 	now := f.h.t0
 	info := assistantWatchInfo{
 		ID: "w-long", ConversationID: "conv-1", Subject: strings.Repeat("ü", 90), Minutes: 5, StartedAt: now, EndsAt: now.Add(5 * time.Minute),
-		Reason: strings.Repeat("é", 600), Today: now, Location: time.UTC,
+		Reason: strings.Repeat("é", 600), Location: time.UTC,
 	}
 	if err := f.store.Start(info); err != nil {
 		t.Fatal(err)
