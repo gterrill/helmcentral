@@ -69,6 +69,30 @@ describe('useMaintenanceRules', () => {
     for (const call of fetchMock.mock.calls) expect(String(call[0])).not.toContain('today')
   })
 
+  it('sends one request when the day turns under two views of the same list', async () => {
+    const fetchMock = stubApi({ 'GET /api/inventory/maintenance/rules': { rules: [] } })
+    const first = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    const second = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    boatDay = '2026-11-16'
+    first.rerender()
+    second.rerender()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('still reads each list when the day turns under views of different lists', async () => {
+    const fetchMock = stubApi({ 'GET /api/inventory/maintenance/rules': { rules: [] } })
+    const first = renderHook(() => useMaintenanceRules({ equipment: 'eq-1' }))
+    const second = renderHook(() => useMaintenanceRules({ equipment: 'eq-2' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    boatDay = '2026-11-16'
+    first.rerender()
+    second.rerender()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+  })
+
   it('reads the list once on a cold load, when the boat\'s day arrives after the first render', async () => {
     boatDay = null
     const fetchMock = stubApi({ 'GET /api/inventory/maintenance/rules': { rules: [] } })

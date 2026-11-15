@@ -53,6 +53,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A Maintenance page left open overnight now moves to the new day.** It
+  stopped doing so when the browser did not know the boat's time zone, so jobs
+  that fell due at midnight stayed in their old group until you reloaded. The
+  boat now tells the page the date, and the page no longer works it out.
 - **The replay slider keeps its width while you edit.** Opening **Camera** or
   **Signs** used to squeeze the slider to a sliver. Play, the slider and the
   time now have a row to themselves, with the length, **Camera**, **Signs** and

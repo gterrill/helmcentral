@@ -11,6 +11,8 @@ interface VesselState {
   timezone: string
   /** Where that zone came from: the live fix, the last fix, or none (UTC, no fix yet). */
   timezone_source?: 'fix' | 'last_fix' | 'none'
+  /** The boat's calendar day (YYYY-MM-DD) at this event's datetime; null before any fix. */
+  boat_date?: string | null
   name: string
   vessel_prefix: string
   depth: number
@@ -85,6 +87,8 @@ export interface VesselStateValue {
   timeZone: string | null
   /** Where that zone came from: the live fix, the last fix, or none (UTC, no fix yet). Null until the server says. */
   timeZoneSource: 'fix' | 'last_fix' | 'none' | null
+  /** The boat's calendar day (YYYY-MM-DD) as the server works it out; null before any fix. */
+  boatDate: string | null
   latitude: number | null
   longitude: number | null
   gnssQualityIndicator: number | null
@@ -150,6 +154,7 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
   boatName: null,
   timeZone: null,
   timeZoneSource: null,
+  boatDate: null,
   latitude: null,
   longitude: null,
   gnssQualityIndicator: null,
@@ -215,6 +220,7 @@ function parseVesselState(data: VesselState): VesselStateValue {
     boatName: boatName(data.name, data.vessel_prefix),
     timeZone: textOrNull(data.timezone),
     timeZoneSource: data.timezone_source === 'fix' || data.timezone_source === 'last_fix' || data.timezone_source === 'none' ? data.timezone_source : null,
+    boatDate: textOrNull(data.boat_date),
     source: textOrNull(data.source),
     latitude: !noFix && typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
     longitude: !noFix && typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,

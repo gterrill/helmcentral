@@ -1,67 +1,49 @@
 /**
- * The boat's calendar day as the browser reads it (ADR 0230): the server clock
- * in the boat's zone, used only to know when the day has turned.
+ * The boat's calendar day as the server states it (ADR 0230): the browser never
+ * works it out, so a zone its Intl data lacks cannot stop the day turning.
+ * These run through the real vessel-state store, so the field name on the
+ * wire is covered too.
  */
-import { act, renderHook } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 
-import { feedServerTime } from '@/lib/server-clock'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-let zone: string | undefined = 'Australia/Sydney'
-let zoneSource: 'fix' | 'last_fix' | 'none' | undefined = 'fix'
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselStateSelector: <T,>(select: (state: { timeZone?: string; timeZoneSource?: string }) => T) =>
-    select({ timeZone: zone, timeZoneSource: zoneSource }),
-}))
+const stream = installFakeTelemetryStream()
 
-const { useBoatDayKey } = await import('@/hooks/use-vessel-clock')
-
-beforeEach(() => {
-  vi.useFakeTimers()
-  vi.setSystemTime(new Date('2030-01-01T00:00:00Z')) // the browser's clock is deliberately wrong
-})
-
-afterEach(() => {
-  vi.useRealTimers()
-  zone = 'Australia/Sydney'
-  zoneSource = 'fix'
-})
+const event = (extra: Record<string, unknown>) => ({ source: 'signalk', datetime: '2026-11-15T13:59:00Z', ...extra })
 
 describe('useBoatDayKey', () => {
-  it('is the day on the server clock in the boat\'s zone, not the browser\'s', () => {
+  it('is the day the server sent', () => {
+    stream.seed('vessel-state', event({ timezone: 'Australia/Sydney', timezone_source: 'fix', boat_date: '2026-11-16' }))
     const { result } = renderHook(() => useBoatDayKey())
-    // 13:59 UTC on 15 Nov is 00:59 on 16 Nov in Sydney (AEDT, UTC+11).
-    act(() => { feedServerTime('2026-11-15T13:59:00Z') })
     expect(result.current).toBe('2026-11-16')
   })
 
-  it('turns at the boat\'s midnight', () => {
+  it('still has the day when this browser does not know the boat\'s zone', () => {
+    stream.seed('vessel-state', event({ timezone: 'Not/AZone', timezone_source: 'fix', boat_date: '2026-11-16' }))
     const { result } = renderHook(() => useBoatDayKey())
-    act(() => { feedServerTime('2026-11-15T12:59:58Z') })
+    expect(result.current).toBe('2026-11-16')
+  })
+
+  it('follows the server when the day turns', () => {
+    stream.seed('vessel-state', event({ timezone: 'Not/AZone', timezone_source: 'fix', boat_date: '2026-11-15' }))
+    const { result } = renderHook(() => useBoatDayKey())
     expect(result.current).toBe('2026-11-15')
-    act(() => { vi.advanceTimersByTime(3000) })
+    stream.emit('vessel-state', event({ timezone: 'Not/AZone', timezone_source: 'fix', boat_date: '2026-11-16' }))
     expect(result.current).toBe('2026-11-16')
   })
 
-  it('is null before the first fix, when the server sends UTC as a stand-in zone', () => {
-    zone = 'UTC'
-    zoneSource = 'none'
+  it('is null before the first fix, when the server sends no day', () => {
+    stream.seed('vessel-state', event({ timezone: 'UTC', timezone_source: 'none', boat_date: null }))
     const { result } = renderHook(() => useBoatDayKey())
-    act(() => { feedServerTime('2026-11-15T12:00:00Z') })
     expect(result.current).toBeNull()
   })
 
-  it('counts the zone of the last fix', () => {
-    zoneSource = 'last_fix'
+  it('is null from a server that sends no day at all', () => {
+    stream.seed('vessel-state', event({ timezone: 'Australia/Sydney', timezone_source: 'fix' }))
     const { result } = renderHook(() => useBoatDayKey())
-    act(() => { feedServerTime('2026-11-15T13:59:00Z') })
-    expect(result.current).toBe('2026-11-16')
-  })
-
-  it('is null until the boat has a zone', () => {
-    zone = undefined
-    const { result } = renderHook(() => useBoatDayKey())
-    act(() => { feedServerTime('2026-11-15T12:00:00Z') })
     expect(result.current).toBeNull()
   })
 })

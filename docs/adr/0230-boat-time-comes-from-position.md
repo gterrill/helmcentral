@@ -129,14 +129,17 @@ it. This replaces the required `?today=YYYY-MM-DD` of ADR 0138, ADR 0145, ADR
   first fix Mate can't keep a fact, suggest a change or save a depth. That
   window is short, since the saved zone outlives a restart, and the help page
   says so.
-- **A view left open overnight.** The browser keeps its own reading of the
-  boat's day, from the server clock in the boat's zone (`useBoatDayKey`), and
-  never sends it. When a known day turns to the next, the Maintenance list
-  reads itself again, so a wall screen shows a service that fell due
-  overnight. The first reading on a cold load is not a turn, so it costs no
-  second read, unless the list was refused for want of a day: then the first
-  fix is what it waited for, and the list reads again. The UTC stand-in zone
-  the stream sends before any fix (source `none`) is no boat day.
+- **A view left open overnight.** The vessel stream carries the boat's day as
+  `boat_date`, worked out on the server in the boat's zone. The browser reads
+  it (`useBoatDayKey`) and never works out a day itself, so a zone its own
+  time-zone data lacks cannot stop the day turning. It never sends the day
+  back. When a known day turns to the next, the Maintenance list reads itself
+  again, once however many views of the same list are open, so a wall screen
+  shows a service that fell due overnight. The first reading on a cold load is
+  not a turn, so it costs no second read, unless the list was refused for want
+  of a day: then the first fix is what it waited for, and the list reads
+  again. Before any fix (source `none`) the zone is a UTC stand-in, and
+  `boat_date` is null: no boat day.
 - **No old parameter.** A request that still carries `?today=` has it ignored.
   The browser no longer sends it.
 
