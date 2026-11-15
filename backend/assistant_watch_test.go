@@ -123,7 +123,6 @@ func watchRequest(conversationID string, raw string) assistantWatchRequest {
 	return assistantWatchRequest{
 		ConversationID: conversationID,
 		Args:           args,
-		Today:          time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC),
 		Location:       mustZoneAt(-27.5, 153).Loc, // Australia/Brisbane, UTC+10 all year
 		TimezoneLabel:  "UTC+10",
 	}
@@ -508,8 +507,8 @@ func TestExecuteStartWatch_StartsInThisConversation(t *testing.T) {
 		t.Fatalf("unexpected result: %s", out)
 	}
 	info, ok := h.reg.get("conv-1")
-	if !ok || !info.Today.Equal(deps.today) {
-		t.Fatalf("expected the watch registered with the run's date, got %+v ok=%v", info, ok)
+	if !ok {
+		t.Fatalf("expected the watch registered, got %+v ok=%v", info, ok)
 	}
 }
 
@@ -567,7 +566,7 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 	// The watch started on the 4th and reports after the boat's midnight: the
 	// follow-up works on the boat's day when it runs, not the day it began.
 	useBoatDay(t, "2026-10-05")
-	info := assistantWatchInfo{ID: "w1", ConversationID: conv.ID, Subject: "Port load", Minutes: 5, Today: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)}
+	info := assistantWatchInfo{ID: "w1", ConversationID: conv.ID, Subject: "Port load", Minutes: 5}
 	if !assistantWatchFollowUp(info, "Watch finished: Port load (5 min)\nreport", nil) {
 		t.Fatal("expected the follow-up turn to start")
 	}

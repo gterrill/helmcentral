@@ -42,27 +42,38 @@ func boatCalendarDay(bt boatTime, now time.Time) (time.Time, error) {
 }
 
 // boatDayAt is the boat's day from the scheduler's zone reading
-// (watchBoatLocation), with the same reasons boatCalendarDay gives: a damaged
-// or unknown saved zone is boatZoneUnreadable, anything else is no fix yet.
+// (watchBoatLocation). It is boatCalendarDay on that reading, so both give the
+// same day and the same reasons: a damaged or unknown saved zone is
+// boatZoneUnreadable, anything else is no fix yet.
 func boatDayAt(now time.Time, loc *time.Location, locErr error) (time.Time, error) {
 	if locErr != nil {
+		bt := boatTime{NoFix: true}
 		var bz *boatZoneProblem
 		if errors.As(locErr, &bz) {
-			return time.Time{}, &boatZoneUnreadable{bz.cause}
+			bt.Err = bz.cause
 		}
-		return time.Time{}, errBoatDayUnknown
+		return boatCalendarDay(bt, now)
 	}
 	if loc == nil {
-		return time.Time{}, errBoatDayUnknown
+		return boatCalendarDay(boatTime{NoFix: true}, now)
 	}
-	return civilDateUTC(now.In(loc)), nil
+	return boatCalendarDay(boatTime{placeZone: placeZone{Loc: loc}}, now)
+}
+
+// currentBoatTime is the boat's clock read from the delta stream's own-ship
+// position and the last GNSS verdict. It reads one position leaf under a read
+// lock: no SignalK fetch, no settings file, no vessel state to build. The
+// verdict is the one the background pollers last reached, the same one
+// currentVesselLocalLocation relies on.
+func currentBoatTime() boatTime {
+	lat, lon, ok := positionLeaf(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()))
+	return boatTimeAt(lat, lon, ok && hasUsableVesselPosition(lat, lon) && !gnssPositionCritical())
 }
 
 // boatToday is the boat's day now, the day every endpoint that judges a due
 // date works against. A var so a test can fix it.
 var boatToday = func() (time.Time, error) {
-	state, err := fetchSignalKVesselState()
-	return boatCalendarDay(boatTimeForState(state, err), time.Now())
+	return boatCalendarDay(currentBoatTime(), time.Now())
 }
 
 // writeBoatDayError answers a request that needs the boat's day when it is not

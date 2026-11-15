@@ -152,8 +152,7 @@ var telemetryInfluxSolarPositionMissing atomic.Bool
 // solar day-bounded fields as the -1 sentinel for that tick instead of
 // guessing a UTC boundary.
 func currentVesselLocalLocation() (*time.Location, bool) {
-	lat, lon, ok := positionLeaf(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()))
-	boat := boatTimeAt(lat, lon, ok && hasUsableVesselPosition(lat, lon) && !gnssPositionCritical())
+	boat := currentBoatTime()
 	if boat.NoFix {
 		return nil, false
 	}

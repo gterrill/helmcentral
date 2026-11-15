@@ -179,7 +179,7 @@ func TestOneOffWatch_ARebuiltClockCarriesTheZonesOwnAbbreviation(t *testing.T) {
 		}
 		started, ends := c.at, c.at.Add(time.Hour)
 		info, err := oneOffInfo(savedWatch{ID: "w1", StartedAt: &started, EndsAt: &ends},
-			watchOneOffConfig{Today: "2026-01-15", ZoneName: c.zone, OffsetSeconds: 36000})
+			watchOneOffConfig{ZoneName: c.zone, OffsetSeconds: 36000})
 		if err != nil {
 			t.Fatalf("%s: %v", c.zone, err)
 		}
@@ -192,7 +192,7 @@ func TestOneOffWatch_ARebuiltClockCarriesTheZonesOwnAbbreviation(t *testing.T) {
 func TestOneOffWatch_AZoneThatCannotBeLoadedIsAnErrorNotAGuessedLabel(t *testing.T) {
 	started, ends := time.Date(2026, 1, 15, 2, 0, 0, 0, time.UTC), time.Date(2026, 1, 15, 3, 0, 0, 0, time.UTC)
 	_, err := oneOffInfo(savedWatch{ID: "w1", StartedAt: &started, EndsAt: &ends},
-		watchOneOffConfig{Today: "2026-01-15", ZoneName: "Mars/Olympus", OffsetSeconds: 36000})
+		watchOneOffConfig{ZoneName: "Mars/Olympus", OffsetSeconds: 36000})
 	if err == nil || !strings.Contains(err.Error(), "Mars/Olympus") {
 		t.Fatalf("an unreadable zone must fail the resume and name the zone: %v", err)
 	}
