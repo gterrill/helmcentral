@@ -26,6 +26,8 @@ import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { formatDayMonth, formatStayRange, formatWeekday, isStayDay, pendingStayDays } from '@/lib/stay'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { readServerClock, subscribeServerClock } from '@/lib/server-clock'
+import { useSelection } from '@/lib/selection'
 import { calendarDayLabel, formatDayKey, formatHourMinute, formatTimeOfDay, selectTimeZone, zonedWallInstant } from '@/lib/vessel-time'
 import { LegendSwatch } from '@/components/legend-swatch'
 import { DayLightningStrip, LIGHTNING_BAND_HEIGHT, LightningBand, LightningKey } from '@/components/lightning-band'
@@ -43,6 +45,11 @@ import {
 } from '@/lib/lightning-bands'
 
 const NO_LIGHTNING_WINDOWS: LightningWindow[] = []
+
+/** The boat's time to the minute, so a reader redraws once a minute, not each second. */
+function floorToMinute(now: Date | null): number | null {
+  return now === null ? null : Math.floor(now.getTime() / 60_000) * 60_000
+}
 
 /** "Mon 15": how the drawer names a day the Upper Air feed has no label for. */
 function shortDayLabel(day: { dayName: string; date: string }): string {
@@ -634,8 +641,14 @@ export function ForecastDrawer({
   const vesselZone = useVesselStateSelector(selectTimeZone)
   // A stay's forecast keeps the stay's time; the boat's forecast keeps the boat's.
   const forecastZone = stay ? stay.timezone : vesselZone
-  // The forecast is held for up to an hour, so "today" is worked out on each draw.
-  const todayKey = forecastZone ? formatDayKey(new Date(), forecastZone) : null
+  // The forecast is held for up to an hour, so "today" and what is already past
+  // come from the boat's clock, never the device's. Read by the minute: the
+  // summary never needs the seconds, and the drawer should not redraw for them.
+  const boatMinute = useSelection({ subscribe: subscribeServerClock, getSnapshot: readServerClock, select: floorToMinute })
+  const boatNow = useMemo(
+    () => (boatMinute !== null && forecastZone ? { at: new Date(boatMinute), timeZone: forecastZone } : null),
+    [boatMinute, forecastZone],
+  )
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const windAreaGradientId = useId()
   const waveAreaGradientId = useId()
@@ -851,7 +864,7 @@ export function ForecastDrawer({
       trough: upperAirFlaggedDayKeys.has(day.dayKey),
     }))
     // The wind sentence leads: a change in the wind is what the day plan turns on.
-    const windSentence = buildWindChangeSentence(days, todayKey)
+    const windSentence = buildWindChangeSentence(days, boatNow)
     // With no change there is nothing the limits could have judged.
     const judgedProblem = windSentence ? windChangesProblem : null
     const conditions = buildConditionsSummary(summaryDays)
@@ -885,7 +898,7 @@ export function ForecastDrawer({
         ) : null}
       </>
     )
-  }, [days, upperAirDayLabels, upperAirFlaggedDayKeys, windChangesProblem, windChangesCheckedTo, windChangesCheckedReason, windChangesUnreadable, todayKey])
+  }, [days, upperAirDayLabels, upperAirFlaggedDayKeys, windChangesProblem, windChangesCheckedTo, windChangesCheckedReason, windChangesUnreadable, boatNow])
 
   const upperAirChartData = useMemo(() => {
     // Carried alongside the raw height rather than replacing it: the trace is

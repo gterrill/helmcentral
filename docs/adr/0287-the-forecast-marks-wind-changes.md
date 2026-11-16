@@ -69,7 +69,8 @@ per-day copies.
   plugin contract was out of scope. Until a provider sends hourly pressure, a
   change stays a plain wind change, and there is no guessed label.
 - **Each change carries its confidence.** A change more than 72 hours ahead is
-  lower confidence, and the drawer words it that way.
+  lower confidence. The day-card chip and the plan rows say so. The drawer's
+  summary does not (see Surfaces).
 - **Prominent means the operator's own limit.** A change is prominent when the
   top of the wind after it, as shown (rounded to whole knots, the way the plan
   table judges it), reaches the lowest marginal wind across the sectors with a no-go set (`lowestMarginalWind`,
@@ -104,7 +105,8 @@ per-day copies.
   the client for up to an hour, so a label fixed when the server answered would
   call yesterday's change "tomorrow" after midnight. The wire carries no
   relative day: a change sits under its day, and the drawer works out "today",
-  "tomorrow" or "Tue 17" from the boat's date when it draws. The watch report is
+  "tomorrow" or "Tue 17" from the boat's clock (the server's time, never the
+  device's) when it draws. The watch report is
   written once, at its run, and words the day itself with the same three forms.
 - **Why the first rule was replaced.** The first rule asked for a swing of 90
   degrees or more within 3 hours that then held for 6. On the live Mooloolaba
@@ -121,10 +123,25 @@ per-day copies.
 - **Forecast drawer.** A chip on the day card, muted or amber by prominence.
   A day with several changes shows the first prominent one, or the first when
   none is, plus "+N", and the card's spoken label names every change and which
-  reach the marginal wind. The extended summary leads with a wind sentence
-  built from the changes, says when the limits could not be read (only when
-  there is a change they could have judged), and says how far the changes were
-  checked when the hourly forecast stops early. The day's own direction stays on the card.
+  reach the marginal wind. The day's own direction stays on the card.
+- **The drawer summary names one change.** It leads with a single sentence,
+  "A South-easterly change expected tomorrow around 3 AM.", then the weather of
+  the first run of days (#507 cut it from a list of changes). The day-card
+  chip keeps the lower-confidence mark, and the plan rows keep it with the speed
+  range; the summary carries neither, because the operator knows a forecast gets
+  less sure further out. The sentence names the change
+  the chip names, chosen across all days: the first prominent change, else the
+  first change (`leadWindChange`). A change already past is left out first.
+  The response is held for up to an hour, longer when shown stale, so "expected"
+  must not describe 2 AM at 10 AM. A change is past when its time falls before
+  the start of the boat's current hour, as the detector itself judges it. The
+  time comes from the boat's clock, read in the forecast's zone (the stay's
+  zone in the stay view), and the change's time is its label read on its day.
+  With no time for the boat yet, nothing is dropped and the day is written out
+  ("Mon 15"); the clock is never guessed from the device's. Under the summary
+  the drawer still says when the limits could not be read (only when there is a
+  change they could have judged), and how far the changes were checked when the
+  hourly forecast stops early.
 - **Watch report.** The weather section reads the forecast at the boat's own
   position, taken from the status the report already built (the boat's last
   trusted fix, the same place the forecast endpoint uses, however old), and adds one row
@@ -232,5 +249,8 @@ Arrive-by slack is ADR 0288.
 - A slow drift that ends 90 degrees or more from where it began, with a settled
   wind at each end, is a change. The rule judges the two winds, not the speed of
   the turn between them.
+- The summary names one change, so a quiet change earlier in the week no longer
+  hides a prominent one later. Another change worth a look is on its card, not
+  in the sentence.
 - The chip and sentence follow whatever the provider forecasts. A change that
   the model moves tomorrow moves on the card.
