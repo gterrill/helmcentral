@@ -30,6 +30,7 @@ import {
   MAINTENANCE_STATUS_ORDER,
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { documentViewerHref } from '@/lib/document-citation'
 
 // ADR 0138: the Maintenance section - a plain sortable list grouped by
@@ -64,6 +65,8 @@ function groupLabel(system: string): string {
 export function MaintenanceSection({ onOpenEquipment, canWrite = true }: MaintenanceSectionProps) {
   const [system, setSystem] = useState<EquipmentSystem | ''>('')
   const { rules, scheduleErrors, loading, error, refresh } = useMaintenanceRules({ system })
+  // Hand-read figures are aged from the boat's day, never the device's.
+  const boatDay = useBoatDayKey()
 
   const [creatingRule, setCreatingRule] = useState(false)
   const [editingRule, setEditingRule] = useState<MaintenanceRule | null>(null)
@@ -231,9 +234,9 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                               never a staleness warning - a live reading
                               never goes stale (an hour meter only has a
                               reading while its engine runs). */}
-                          {!rule.hours_unknown && rule.interval_hours != null && hoursAgeLabel(rule) && (
+                          {!rule.hours_unknown && rule.interval_hours != null && hoursAgeLabel(rule, boatDay) && (
                             <span className="truncate text-xs text-muted-foreground">
-                              {hoursAgeLabel(rule)}
+                              {hoursAgeLabel(rule, boatDay)}
                             </span>
                           )}
                         </div>

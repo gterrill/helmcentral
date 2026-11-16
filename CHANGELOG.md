@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Maintenance dates now follow the boat's day, not your phone's.** The date
+  on a new service log entry, the age of an open job and its "passed" marker,
+  and the age of a hand-read hours reading all counted from the device's
+  calendar day. A phone a zone ahead of the boat could show a date a day late
+  or early. They now use the boat's day. Until the boat has its first
+  position, the log date stays blank, **Save** waits for you to pick one, and
+  the ages and the "passed" marker are left out.
+
 ## [0.67.0] - 2026-11-16
 
 ### Added

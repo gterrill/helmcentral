@@ -13,7 +13,7 @@ import {
   type OpenJob,
 } from '@/hooks/use-open-jobs'
 import type { EquipmentSystem } from '@/hooks/use-inventory'
-import { todayISO } from '@/lib/local-date'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 
 // ADR 0269: the Open jobs group. A list of known problems that are not fixed
 // yet, at the top of Inventory, Maintenance (above Overdue) and on each
@@ -43,6 +43,11 @@ function sourceLine(job: OpenJob) {
   )
 }
 
+// An open job counts to the boat's day, and with that unknown has no age.
+function ageLabel(job: OpenJob, today: string | null): string {
+  return today === null ? '' : `${openJobAgeDays(job, today)} d`
+}
+
 function closedLine(job: OpenJob): string {
   if (job.status === 'done') return `Done ${job.closed_on ? formatJobDate(job.closed_on) : ''}`.trim()
   const when = `Dropped ${job.closed_on ? formatJobDate(job.closed_on) : ''}`.trim()
@@ -62,7 +67,9 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
   const [finishing, setFinishing] = useState<OpenJob | null>(null)
   const [dropping, setDropping] = useState<OpenJob | null>(null)
 
-  const today = todayISO()
+  // Age and "passed" are counted from the boat's day. Until the boat has one,
+  // they are left out rather than counted from the device's.
+  const today = useBoatDayKey()
   const open = useMemo(() => jobs.filter((j) => j.status === 'open'), [jobs])
   const closed = useMemo(() => jobs.filter((j) => j.status !== 'open').sort((a, b) => b.closed_on.localeCompare(a.closed_on)), [jobs])
 
@@ -97,8 +104,8 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
         id: 'age',
         header: 'Age',
         enableSorting: false,
-        accessorFn: (job) => `${openJobAgeDays(job, today)} d`,
-        cell: ({ row }) => <span className="tabular-nums text-muted-foreground">{openJobAgeDays(row.original, today)} d</span>,
+        accessorFn: (job) => ageLabel(job, today),
+        cell: ({ row }) => <span className="tabular-nums text-muted-foreground">{ageLabel(row.original, today) || '--'}</span>,
       },
       {
         id: 'before',
@@ -110,7 +117,7 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
           if (!before) return <span className="text-muted-foreground">--</span>
           return (
             <span className="tabular-nums text-muted-foreground">
-              {formatJobDate(before)}{before < today ? ' (passed)' : ''}
+              {formatJobDate(before)}{today !== null && before < today ? ' (passed)' : ''}
             </span>
           )
         },
@@ -173,7 +180,7 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
               <span className="font-medium">{job.title}</span>
               <span className="text-xs text-muted-foreground">
                 {job.equipment_name && !equipmentId ? `${job.equipment_name} · ` : ''}
-                {closedLine(job)} · open {openJobAgeDays(job, today)} d
+                {closedLine(job)}{job.closed_on ? ` · open ${openJobAgeDays(job, job.closed_on)} d` : ''}
               </span>
             </li>
           ))}

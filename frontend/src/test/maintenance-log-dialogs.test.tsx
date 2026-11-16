@@ -10,6 +10,9 @@ import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 // dialog enforces hours-required and next-due-date-required the same way
 // the backend does (issues 5/6).
 
+// The service log's date starts on the boat's day, which a test has to supply.
+vi.mock('@/hooks/use-vessel-clock', () => ({ useBoatDayKey: () => '2026-11-16' }))
+
 vi.mock('@/hooks/use-inventory', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/hooks/use-inventory')>()
   return { ...actual, useEquipment: () => ({ items: [], loading: false, error: null, refresh: vi.fn() }) }
