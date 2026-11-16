@@ -1,5 +1,4 @@
 import type { WindChange } from '@/hooks/use-weather-forecast'
-import { formatWindRange } from '@/lib/plans'
 import { calendarDayLabel } from '@/lib/vessel-time'
 
 /** A day as the wind-change wording needs it. */
@@ -39,19 +38,14 @@ export function windChangesCheckedToText(to: string, reason: string | null): str
 }
 
 const ADJECTIVE: Record<string, string> = {
-  N: 'Northerlies',
-  NE: 'North-easterlies',
-  E: 'Easterlies',
-  SE: 'South-easterlies',
-  S: 'Southerlies',
-  SW: 'South-westerlies',
-  W: 'Westerlies',
-  NW: 'North-westerlies',
-}
-
-/** "Northerlies" for a principal point, "NNE winds" for the rest. */
-function windsFrom(point: string): string {
-  return ADJECTIVE[point] ?? `${point} winds`
+  N: 'Northerly',
+  NE: 'North-easterly',
+  E: 'Easterly',
+  SE: 'South-easterly',
+  S: 'Southerly',
+  SW: 'South-westerly',
+  W: 'Westerly',
+  NW: 'North-westerly',
 }
 
 /** "N→SE 2 PM": the chip on a day card. */
@@ -68,24 +62,21 @@ export function leadWindChange<T extends { prominent: boolean }>(changes: T[]): 
 
 /**
  * The wind sentence that leads the extended summary, for example
- * "Northerlies until a SE change Tue 17 around 2 PM, 15–20 kn behind it." Days
- * are named from the day each change sits under and the boat's date now
- * (`todayKey`): "today", "tomorrow" or "Tue 17". Null when the forecast holds no change: nothing is
- * said rather than a guess. Later changes follow as "then a W change Thu 19
- * around 1 AM".
+ * "A South-easterly change expected Tue 17 around 2 PM." It names only the
+ * first change; the day cards carry the rest. The day is named from the day the
+ * change sits under and the boat's date now (`todayKey`): "today", "tomorrow" or
+ * "Tue 17". A principal point reads as its adjective ("A Southerly change"), any
+ * other as the bare point ("A SSE change", "An ENE change"). It never says a
+ * change is less certain: the operator knows a forecast gets less sure further
+ * out. The day-card chip and plan rows still mark it. Null when the
+ * forecast holds no change: nothing is said rather than a guess.
  */
 export function buildWindChangeSentence(days: WindChangeDay[], todayKey: string | null): string | null {
-  const changes = days.flatMap((day) => day.windChanges.map((change) => ({ ...change, dayName: windChangeDayName(day.dayKey, todayKey) })))
-  const first = changes[0]
-  if (!first) return null
-  // Points are read as words, so "an ESE" (an east-south-east) but "a SE".
-  const phrase = (c: (typeof changes)[number]) =>
-    `${c.to.startsWith('E') ? 'an' : 'a'} ${c.to} change ${c.dayName} around ${c.label}`
-  let out = `${windsFrom(first.from)} until ${phrase(first)}, ${formatWindRange(first.speedMinKn, first.speedMaxKn)} behind it`
-  if (first.lowerConfidence) out += ` (${UNSURE})`
-  for (const c of changes.slice(1)) {
-    out += `, then ${phrase(c)}`
-    if (c.lowerConfidence) out += ` (${UNSURE})`
-  }
-  return `${out}.`
+  const day = days.find((d) => d.windChanges.length > 0)
+  if (!day) return null
+  const first = day.windChanges[0]
+  const name = ADJECTIVE[first.to] ?? first.to
+  // Read aloud: "An Easterly", "An ENE".
+  const article = name.startsWith('E') ? 'An' : 'A'
+  return `${article} ${name} change expected ${windChangeDayName(day.dayKey, todayKey)} around ${first.label}.`
 }

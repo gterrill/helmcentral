@@ -837,25 +837,23 @@ export function ForecastDrawer({
 
   // --- What the ten days add up to, in plain conditions ---
   //
-  // The strip shows ten cards, one condition each, and never says what they
-  // add up to as a run - a reader has to scan all ten to notice "it's wet
-  // today and tomorrow, then clear." buildConditionsSummary does that
-  // scanning once, off days[].condition, and is unit-tested on its own in
-  // lib/forecast-condition-summary.ts; this just wires the sentence in as
-  // this panel's intro. Trough days ride along too - the same
-  // upperAirFlaggedDayKeys/upperAirDayLabels the Upper Air intro above uses,
-  // just folded into this sentence instead of a second one.
+  // The strip shows ten cards, one condition each. buildConditionsSummary
+  // names the first run of days only ("Drizzle expected the next 4 days."),
+  // off days[].condition, and is unit-tested on its own in
+  // lib/forecast-condition-summary.ts; this wires the sentence in as this
+  // panel's intro. A trough day inside that first run rides along, using the
+  // same upperAirFlaggedDayKeys/upperAirDayLabels the Upper Air intro above
+  // uses; troughs on later days are not mentioned.
   const extendedIntro = useMemo(() => {
     const summaryDays = days.map((day) => ({
       condition: day.condition,
-      dayName: day.dayName,
       label: upperAirDayLabels.get(day.dayKey) ?? shortDayLabel(day),
       trough: upperAirFlaggedDayKeys.has(day.dayKey),
     }))
     // The wind sentence leads: a change in the wind is what the day plan turns on.
     const windSentence = buildWindChangeSentence(days, todayKey)
     // With no change there is nothing the limits could have judged.
-    const judgedProblem = days.some((day) => day.windChanges.length > 0) ? windChangesProblem : null
+    const judgedProblem = windSentence ? windChangesProblem : null
     const conditions = buildConditionsSummary(summaryDays)
     const summary = [windSentence, conditions].filter(Boolean).join(' ')
     if (!summary && !judgedProblem && !windChangesCheckedTo && !windChangesUnreadable) return null
