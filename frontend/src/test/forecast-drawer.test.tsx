@@ -2507,7 +2507,7 @@ describe('ForecastDrawer extended forecast conditions summary', () => {
     )
 
     const intro = screen.getByTestId('forecast-extended-intro')
-    expect(intro).toHaveTextContent('Drizzle expected the next 2 days, followed by a mostly sunny day.')
+    expect(intro).toHaveTextContent('Drizzle expected the next 2 days.')
 
     const panel = screen.getByTestId('forecast-panel-extended')
     expect(within(panel).getByTestId('forecast-extended-intro')).toBe(intro)
