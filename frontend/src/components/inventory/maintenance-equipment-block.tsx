@@ -296,11 +296,13 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
             <p className="mt-1 text-xs text-muted-foreground">No readings yet.</p>
           ) : (
             <ul className="mt-2 flex flex-col gap-1">
-              {readings.slice(0, 5).map((reading) => (
+              {readings.slice(0, 5).map((reading) => {
+                const age = handReadAge(reading.read_on, boatDay)
+                return (
                 <li key={reading.id} className="flex items-center justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate">
                     <span className="tabular-nums">{reading.gauge} h</span>
-                    <span className="text-xs text-muted-foreground"> - {reading.read_on} ({handReadAge(reading.read_on)}){reading.note ? ` - ${reading.note}` : ''}</span>
+                    <span className="text-xs text-muted-foreground"> - {reading.read_on}{age && ` (${age})`}{reading.note ? ` - ${reading.note}` : ''}</span>
                   </span>
                   {canWrite && (
                     <Button
@@ -315,7 +317,8 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
                     </Button>
                   )}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
           {readingError && <p role="alert" className="mt-2 text-sm text-destructive">{readingError}</p>}

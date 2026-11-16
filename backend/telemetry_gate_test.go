@@ -97,6 +97,26 @@ func TestVesselStateGateKey_SendsOnRealValueChange(t *testing.T) {
 	}
 }
 
+// TestVesselStateGateKey_SendsWhenBoatDateTurns proves the day turn always
+// reaches the browser: datetime is dropped from the key, so boat_date is the
+// only thing that carries the turn when nothing else in the frame changed.
+// The first reading of a day (null before the first fix) counts the same.
+func TestVesselStateGateKey_SendsWhenBoatDateTurns(t *testing.T) {
+	a := vesselStatePayload("2026-09-15T23:59:59Z", 4.2, 1.0, 2.0, 0.5)
+	b := vesselStatePayload("2026-09-16T00:00:00Z", 4.2, 1.0, 2.0, 0.5)
+	a["boat_date"] = "2026-09-15"
+	b["boat_date"] = "2026-09-16"
+
+	if keyA, keyB := gateKeyOf(t, vesselStateGateKey, a), gateKeyOf(t, vesselStateGateKey, b); keyA == keyB {
+		t.Fatalf("expected different gate keys when only boat_date turned, got identical %q", keyA)
+	}
+
+	a["boat_date"] = nil
+	if keyA, keyB := gateKeyOf(t, vesselStateGateKey, a), gateKeyOf(t, vesselStateGateKey, b); keyA == keyB {
+		t.Fatalf("expected different gate keys when boat_date went from null to a day, got identical %q", keyA)
+	}
+}
+
 // TestVesselStateGateKey_SendsWhenAgeCrossesStaleThreshold guards the case
 // the design specifically calls out: an age sitting at "3s" is invisible to
 // the operator, but the moment it crosses STALE_AFTER_SECONDS the UI starts

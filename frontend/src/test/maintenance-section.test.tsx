@@ -11,6 +11,9 @@ import { ITEM_RULE_PROVENANCE, makeProfileJob } from './maintenance-fixtures'
 // same "render the real component against a mocked fetch" idiom
 // equipment-index.test.tsx already uses for the sibling Equipment index.
 
+// The service log's date starts on the boat's day, which a test has to supply.
+vi.mock('@/hooks/use-vessel-clock', () => ({ useBoatDayKey: () => '2026-11-16' }))
+
 function makeRule(overrides: Partial<MaintenanceRule>): MaintenanceRule {
   return {
     id: 'rule-1',

@@ -29,8 +29,9 @@ import {
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
+import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { documentViewerHref } from '@/lib/document-citation'
-import { addMonthsISO, STARTED_AFTER_REPAIR, startedAfterRepair, todayISO } from '@/lib/local-date'
+import { addMonthsISO, STARTED_AFTER_REPAIR, startedAfterRepair } from '@/lib/local-date'
 import { errorMessage } from '@/lib/errors'
 import { matchesAllWords } from '@/lib/word-match'
 
@@ -248,7 +249,8 @@ export function PartsEditor({ parts, onChange, items, itemsLoading, itemsError }
 }
 
 interface LogFormState {
-  performedAt: string
+  /** null until the operator picks a date: the form then follows the boat's day. */
+  performedAt: string | null
   /** A repair's "started showing" date, blank for none. */
   startedAt: string
   hours: string
@@ -261,7 +263,7 @@ interface LogFormState {
 
 function blankForm(prefillHours?: number | null): LogFormState {
   return {
-    performedAt: todayISO(),
+    performedAt: null,
     startedAt: '',
     hours: prefillHours != null ? String(prefillHours) : '',
     description: '',
@@ -300,9 +302,9 @@ function orphanedParts(entry: MaintenanceLogEntry | null): MaintenanceLogEntry['
   return entry ? entry.parts.filter((p) => p.equipment_id === null) : []
 }
 
-function toInput(form: LogFormState): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
+function toInput(form: LogFormState, performedAt: string): Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'> {
   return {
-    performed_at: form.performedAt,
+    performed_at: performedAt,
     hours: form.hours.trim() === '' ? null : Number(form.hours),
     description: form.description.trim(),
     who: form.who.trim(),
@@ -354,6 +356,10 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
   const [newDueDate, setNewDueDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The date starts on the boat's day, the day the server judges it on. With
+  // that day unknown it starts blank, and Complete waits for a typed date.
+  const boatDay = useBoatDayKey()
+  const performedAt = form.performedAt ?? boatDay ?? ''
   const [completedEntry, setCompletedEntry] = useState<MaintenanceLogEntry | null>(null)
   const [completedRule, setCompletedRule] = useState<MaintenanceRule | null>(null)
 
@@ -378,14 +384,14 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
 
   const missingHours = rule != null && requiresHoursNow(rule) && form.hours.trim() === ''
   const missingNewDueDate = rule != null && requiresNewDueDateNow(rule) && newDueDate.trim() === ''
-  const canComplete = !missingHours && !missingNewDueDate
+  const canComplete = !missingHours && !missingNewDueDate && performedAt !== ''
 
   const handleSave = async () => {
     if (!rule || !canComplete) return
     setSaving(true)
     setError(null)
     try {
-      const input = requiresNewDueDateNow(rule) ? { ...toInput(form), new_due_date: newDueDate } : toInput(form)
+      const input = requiresNewDueDateNow(rule) ? { ...toInput(form, performedAt), new_due_date: newDueDate } : toInput(form, performedAt)
       const result = await onComplete(input)
       setCompletedEntry(result.entry)
       setCompletedRule(result.rule)
@@ -433,7 +439,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
               <div className="grid grid-cols-2 gap-3">
                 <Field>
                   <FieldLabel htmlFor="maintenance-complete-date">Date</FieldLabel>
-                  <Input id="maintenance-complete-date" type="date" value={form.performedAt} onChange={(e) => setForm((p) => ({ ...p, performedAt: e.target.value }))} />
+                  <Input id="maintenance-complete-date" type="date" value={performedAt} onChange={(e) => setForm((p) => ({ ...p, performedAt: e.target.value }))} />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="maintenance-complete-hours">
@@ -455,9 +461,9 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                       genuinely never-received reading asks the operator to
                       read the gauge themselves. */}
                   {rule && rule.current_hours != null ? (
-                    hoursAgeLabel(rule) && (
+                    hoursAgeLabel(rule, boatDay) && (
                       <FieldDescription>
-                        {rule.hours_by_hand ? `${hoursAgeLabel(rule)}.` : `Live reading, ${hoursAgeLabel(rule)}.`}
+                        {rule.hours_by_hand ? `${hoursAgeLabel(rule, boatDay)}.` : `Live reading, ${hoursAgeLabel(rule, boatDay)}.`}
                       </FieldDescription>
                     )
                   ) : (
@@ -485,9 +491,9 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
                   </FieldDescription>
                 </Field>
               )}
-              {rule && rule.fixed_due_date !== '' && rule.interval_months != null && (
+              {rule && rule.fixed_due_date !== '' && rule.interval_months != null && performedAt !== '' && (
                 <p className="text-sm text-muted-foreground">
-                  Next due: {addMonthsISO(form.performedAt || todayISO(), rule.interval_months)}
+                  Next due: {addMonthsISO(performedAt, rule.interval_months)}
                 </p>
               )}
               <Field>
@@ -605,7 +611,10 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   }, [open, entry?.id])
 
   const isEditing = Boolean(entry)
-  const startedTooLate = startedAfterRepair(kind, form.startedAt, form.performedAt)
+  // A new entry's date starts on the boat's day; unknown, it starts blank and Save waits.
+  const boatDay = useBoatDayKey()
+  const performedAt = form.performedAt ?? boatDay ?? ''
+  const startedTooLate = startedAfterRepair(kind, form.startedAt, performedAt)
 
   const updateForm = (updater: (prev: LogFormState) => LogFormState) => {
     setForm(updater)
@@ -623,10 +632,12 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     try {
       // Only a repair has a fault to date; the server refuses it on anything else.
       const result = await onSave(
-        { ...toInput(form), started_at: kind === 'repair' ? form.startedAt : '', equipment_id: equipmentId, kind },
+        { ...toInput(form, performedAt), started_at: kind === 'repair' ? form.startedAt : '', equipment_id: equipmentId, kind },
         savedEntry?.id ?? null,
       )
       setSavedEntry(result)
+      // The saved date stays put if the boat's day turns while the dialog is open.
+      setForm((prev) => ({ ...prev, performedAt }))
       setDirty(false)
     } catch (err) {
       setError(errorMessage(err))
@@ -693,7 +704,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
           <div className="grid grid-cols-2 gap-3">
             <Field>
               <FieldLabel htmlFor="maintenance-log-date">Date</FieldLabel>
-              <Input id="maintenance-log-date" type="date" value={form.performedAt} onChange={(e) => updateForm((p) => ({ ...p, performedAt: e.target.value }))} />
+              <Input id="maintenance-log-date" type="date" value={performedAt} onChange={(e) => updateForm((p) => ({ ...p, performedAt: e.target.value }))} />
             </Field>
             <Field>
               <FieldLabel htmlFor="maintenance-log-kind">Kind</FieldLabel>
@@ -715,7 +726,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
               <Input
                 id="maintenance-log-started"
                 type="date"
-                max={form.performedAt || undefined}
+                max={performedAt || undefined}
                 value={form.startedAt}
                 onChange={(e) => updateForm((p) => ({ ...p, startedAt: e.target.value }))}
               />
@@ -784,7 +795,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
             {savedEntry && !dirty ? 'Done' : 'Cancel'}
           </Button>
           {(!savedEntry || dirty) && (
-            <Button type="button" disabled={saving || startedTooLate} onClick={() => { void handleSave() }}>
+            <Button type="button" disabled={saving || startedTooLate || performedAt === ''} onClick={() => { void handleSave() }}>
               {saving ? 'Saving...' : 'Save'}
             </Button>
           )}

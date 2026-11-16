@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { apiRequest, invalidateQueries, refetchQueryOnce, useApiQuery } from '@/lib/api-query'
-import { todayISO } from '@/lib/local-date'
 import { formatDataAge } from '@/lib/staleness'
 
 // ADR 0138: the Maintenance section's data layer - service rules and the
@@ -636,9 +635,10 @@ export function hoursAsOfLabel(hoursAsOf: string | null): string | null {
  * "3 weeks ago" for a hand-read figure's date (ADR 0268) - the
  * hand-read counterpart of hoursAsOfLabel, shown wherever that one shows so a
  * typed figure is never presented as live. null for a missing or future date.
- * today is a parameter so a test can pin it; the app passes nothing.
+ * today is the boat's calendar day; with it unknown there is no age to give.
  */
-export function handReadAge(readOn: string, today: string = todayISO()): string | null {
+export function handReadAge(readOn: string, today: string | null): string | null {
+  if (today === null) return null
   const day = (iso: string) => {
     const [y, m, d] = iso.split('-').map(Number)
     return Date.UTC(y, m - 1, d)
@@ -658,15 +658,18 @@ export function handReadAge(readOn: string, today: string = todayISO()): string 
 }
 
 /** "Read by hand, 3 weeks ago" for a hand-read figure's date. */
-export function handReadLabel(readOn: string, today: string = todayISO()): string | null {
+export function handReadLabel(readOn: string, today: string | null): string | null {
+  // With the boat's day unknown there is no age, but a typed figure is still
+  // marked as typed, never passed off as a live one.
+  if (today === null) return /^\d{4}-\d{2}-\d{2}$/.test(readOn) ? 'Read by hand' : null
   const age = handReadAge(readOn, today)
   return age === null ? null : `Read by hand, ${age}`
 }
 
 /** How old a rule's current hours are: "Read by hand, 3 weeks ago" for a typed
  * figure, "as of 6h ago" for a live one, null when there is no reading. */
-export function hoursAgeLabel(rule: Pick<MaintenanceRule, 'hours_by_hand' | 'hours_read_on' | 'hours_as_of'>): string | null {
-  return rule.hours_by_hand ? handReadLabel(rule.hours_read_on) : hoursAsOfLabel(rule.hours_as_of)
+export function hoursAgeLabel(rule: Pick<MaintenanceRule, 'hours_by_hand' | 'hours_read_on' | 'hours_as_of'>, today: string | null): string | null {
+  return rule.hours_by_hand ? handReadLabel(rule.hours_read_on, today) : hoursAsOfLabel(rule.hours_as_of)
 }
 
 /** A rule on an item with no hour meter can take a hand reading (the server
