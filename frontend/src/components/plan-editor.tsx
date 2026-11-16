@@ -20,8 +20,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { useBoatDayKey } from "@/hooks/use-vessel-clock";
 import { errorMessage } from "@/lib/errors";
-import { todayISO } from "@/lib/local-date";
 import {
   clearMovedLegs,
   draftToInput,
@@ -67,7 +67,12 @@ const toDraft = (plan: Plan): EditorStop[] =>
  */
 export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps) {
   const [name, setName] = useState("");
-  const [firstArrive, setFirstArrive] = useState(todayISO());
+  // null until the operator picks a date or a saved plan supplies one: a new
+  // plan's first arrival then follows the boat's day, and stays blank (Save
+  // waits) until the server has stated it.
+  const [typedArrive, setTypedArrive] = useState<string | null>(null);
+  const boatDay = useBoatDayKey();
+  const firstArrive = typedArrive ?? boatDay ?? "";
   const [stops, setStops] = useState<EditorStop[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +87,7 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
     const p = planRef.current;
     setError(null);
     setName(p?.name ?? "");
-    setFirstArrive(p?.stops[0]?.arrive ?? todayISO());
+    setTypedArrive(p?.stops[0]?.arrive ?? null);
     setStops(p ? toDraft(p) : []);
   }, [open]);
 
@@ -153,7 +158,7 @@ export function PlanEditor({ open, onOpenChange, plan, onSave }: PlanEditorProps
                 id="plan-first-arrive"
                 type="date"
                 value={firstArrive}
-                onChange={(e) => setFirstArrive(e.target.value)}
+                onChange={(e) => setTypedArrive(e.target.value)}
               />
             </Field>
           </div>

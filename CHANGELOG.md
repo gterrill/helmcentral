@@ -20,6 +20,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   or early. They now use the boat's day. Until the boat has its first
   position, the log date stays blank, **Save** waits for you to pick one, and
   the ages and the "passed" marker are left out.
+- **A new plan's first arrival starts on the boat's day, not your phone's.**
+  The **First arrival** date on a new plan used the device's calendar day, so a
+  phone a zone ahead of the boat could start a day late or early. It now starts
+  on the boat's day. Until the boat has its first position the date stays
+  blank, and **Save plan** waits for you to pick one. A saved plan keeps its own
+  first arrival.
 
 ## [0.67.0] - 2026-11-16
 
