@@ -8,6 +8,9 @@ vi.mock("@/components/place-search-field", () => ({
   PlaceSearchField: () => null,
 }));
 
+let boatDay: string | null = "2026-11-16";
+vi.mock("@/hooks/use-vessel-clock", () => ({ useBoatDayKey: () => boatDay }));
+
 const via = { name: "Inskip Point", lat: -25.8, lon: 153 };
 const stop = (name: string, arrive: string, nights: number, extra = {}) => ({
   name,
@@ -39,6 +42,48 @@ function open(onSave = vi.fn().mockResolvedValue(undefined)) {
   render(<PlanEditor open onOpenChange={() => {}} plan={PLAN} onSave={onSave} />);
   return onSave;
 }
+
+describe("PlanEditor first arrival on a new plan", () => {
+  const newPlan = (onSave = vi.fn().mockResolvedValue(undefined)) => {
+    const ui = () => <PlanEditor open onOpenChange={() => {}} plan={null} onSave={onSave} />;
+    const view = render(ui());
+    return { onSave, view, ui };
+  };
+
+  it("starts on the boat's day", () => {
+    boatDay = "2026-11-16";
+    newPlan();
+    expect(screen.getByLabelText("First arrival")).toHaveValue("2026-11-16");
+  });
+
+  it("follows the boat's day until a date is typed", () => {
+    boatDay = "2026-11-16";
+    const { view, ui } = newPlan();
+    boatDay = "2026-11-17";
+    view.rerender(ui());
+    expect(screen.getByLabelText("First arrival")).toHaveValue("2026-11-17");
+    fireEvent.change(screen.getByLabelText("First arrival"), { target: { value: "2026-12-01" } });
+    boatDay = "2026-11-18";
+    view.rerender(ui());
+    expect(screen.getByLabelText("First arrival")).toHaveValue("2026-12-01");
+  });
+
+  it("stays blank while the boat's day is unknown, and Save waits", () => {
+    boatDay = null;
+    newPlan();
+    expect(screen.getByLabelText("First arrival")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Run" } });
+    expect(screen.getByRole("button", { name: "Save plan" })).toBeDisabled();
+    boatDay = "2026-11-16";
+  });
+
+  it("keeps a saved plan's own first arrival", () => {
+    boatDay = "2026-11-20";
+    open();
+    expect(screen.getByLabelText("First arrival")).toHaveValue("2026-11-14");
+    boatDay = "2026-11-16";
+  });
+});
 
 describe("PlanEditor", () => {
   it("keeps a stop's row mounted while its name is typed over", () => {
