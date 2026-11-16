@@ -3,6 +3,7 @@ import { render, screen, within, renderHook, waitFor } from '@testing-library/re
 
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useWeatherForecast, type WindChange } from '@/hooks/use-weather-forecast'
+import { feedServerTime } from '@/lib/server-clock'
 import { buildWindChangeSentence, windChangeChipText } from '@/lib/forecast-wind-changes'
 
 // Wind changes on the forecast (ADR 0287).
@@ -12,8 +13,6 @@ function change(overrides: Partial<WindChange> = {}): WindChange {
     label: '2 PM',
     from: 'N',
     to: 'SE',
-    speedMinKn: 15,
-    speedMaxKn: 20,
     lowerConfidence: false,
     prominent: false,
     ...overrides,
@@ -21,6 +20,11 @@ function change(overrides: Partial<WindChange> = {}): WindChange {
 }
 
 const NAMES = ['Sunday', 'Monday', 'Tuesday']
+
+/** The boat's time, in a zone with no offset. */
+function at(iso: string) {
+  return { at: new Date(iso), timeZone: 'UTC' }
+}
 
 function day(idx: number, windChanges: WindChange[] = []) {
   return {
@@ -72,12 +76,59 @@ describe('forecast wind change wording', () => {
 
   it('words today and tomorrow from the boat\'s date at the time of drawing, not the time of the response', () => {
     const days = [day(0, [change({ to: 'S' })]), day(1, [change({ from: 'SE', to: 'W', label: '1 AM' })])]
-    expect(buildWindChangeSentence(days, '2026-06-14')).toBe('A Southerly change expected today around 2 PM.')
-    // The same response, drawn the next morning: Sunday's change is no longer today.
-    expect(buildWindChangeSentence(days, '2026-06-15')).toBe('A Southerly change expected Sun 14 around 2 PM.')
-    expect(buildWindChangeSentence([day(1, [change({ to: 'S', label: '1 AM' })])], '2026-06-14')).toBe(
+    expect(buildWindChangeSentence(days, at('2026-06-14T09:00:00Z'))).toBe('A Southerly change expected today around 2 PM.')
+    expect(buildWindChangeSentence([day(1, [change({ to: 'S', label: '1 AM' })])], at('2026-06-14T09:00:00Z'))).toBe(
       'A Southerly change expected tomorrow around 1 AM.',
     )
+  })
+
+  it('names the first prominent change across all days, as the day-card chip does', () => {
+    // A light westerly this morning does not hide tomorrow's strong south-easterly.
+    const days = [
+      day(0, [change({ from: 'N', to: 'W', label: '9 AM' })]),
+      day(1, [change({ from: 'W', to: 'SE', label: '3 AM', prominent: true })]),
+      day(2, [change({ from: 'SE', to: 'S', label: '1 PM', prominent: true })]),
+    ]
+    expect(buildWindChangeSentence(days, at('2026-06-14T06:00:00Z'))).toBe('A South-easterly change expected tomorrow around 3 AM.')
+    expect(buildWindChangeSentence(days, null)).toBe('A South-easterly change expected Mon 15 around 3 AM.')
+  })
+
+  it('names the first change when none is prominent', () => {
+    const days = [day(0, [change({ to: 'W', label: '9 AM' })]), day(1, [change({ to: 'SE' })])]
+    expect(buildWindChangeSentence(days, at('2026-06-14T06:00:00Z'))).toBe('A Westerly change expected today around 9 AM.')
+  })
+
+  it('leaves out a change whose time has passed, and names the one that matters among those to come', () => {
+    const days = [
+      day(0, [change({ to: 'SE', label: '2 AM', prominent: true }), change({ from: 'SE', to: 'W', label: '8 PM' })]),
+      day(1, [change({ from: 'W', to: 'N', label: '4 AM' })]),
+    ]
+    // 10 AM: the prominent 2 AM change is behind us.
+    expect(buildWindChangeSentence(days, at('2026-06-14T10:00:00Z'))).toBe('A Westerly change expected today around 8 PM.')
+    // After 8 PM only tomorrow's is left.
+    expect(buildWindChangeSentence(days, at('2026-06-14T21:00:00Z'))).toBe('A Northerly change expected tomorrow around 4 AM.')
+  })
+
+  it('does not call a change past until its hour has gone by', () => {
+    const days = [day(0, [change({ to: 'S', label: '2 PM' })])]
+    expect(buildWindChangeSentence(days, at('2026-06-14T14:59:00Z'))).toBe('A Southerly change expected today around 2 PM.')
+    expect(buildWindChangeSentence(days, at('2026-06-14T15:00:00Z'))).toBeNull()
+  })
+
+  it('reads a change\'s time on the boat\'s clock, minutes included', () => {
+    const days = [day(0, [change({ to: 'S', label: '1.30 PM' })])]
+    // 13:30 in Auckland (UTC+12 in June) is 01:30Z.
+    const auckland = (iso: string) => ({ at: new Date(iso), timeZone: 'Pacific/Auckland' })
+    expect(buildWindChangeSentence(days, auckland('2026-06-14T01:00:00Z'))).toBe('A Southerly change expected today around 1.30 PM.')
+    expect(buildWindChangeSentence(days, auckland('2026-06-14T02:00:00Z'))).toBeNull()
+  })
+
+  it('says nothing when every change is past', () => {
+    expect(buildWindChangeSentence([day(0, [change()]), day(1, [change({ label: '1 AM' })])], at('2026-06-16T00:00:00Z'))).toBeNull()
+  })
+
+  it('writes the day out and drops nothing when the boat\'s time is not known yet', () => {
+    expect(buildWindChangeSentence([day(0, [change({ to: 'S' })])], null)).toBe('A Southerly change expected Sun 14 around 2 PM.')
   })
 
   it('does not add a note to a lower-confidence first change, and leaves the later ones out', () => {
@@ -85,7 +136,7 @@ describe('forecast wind change wording', () => {
       day(0),
       day(1, [change({ to: 'S', lowerConfidence: true })]),
       day(2, [change({ from: 'S', to: 'W', label: '1 AM', lowerConfidence: true })]),
-    ], '2026-06-14')
+    ], at('2026-06-14T09:00:00Z'))
     expect(sentence).toBe('A Southerly change expected tomorrow around 2 PM.')
   })
 
@@ -212,6 +263,22 @@ describe('ForecastDrawer wind changes', () => {
     expect(within(screen.getByTestId('forecast-panel-extended')).getByTestId('forecast-extended-intro')).toBe(intro)
   })
 
+  it('words the summary from the boat\'s clock, leaving out a change already past', () => {
+    // 10 AM on the boat's day: the 2 AM change is behind us, so tomorrow's leads.
+    feedServerTime('2026-06-14T10:00:00Z')
+    const stay = { placeName: 'Test Cove', lat: 0, lon: 0, arrive: '2026-06-14', depart: '2026-06-16', timezone: 'UTC' }
+    render(
+      <ForecastDrawer
+        forecast={[day(0, [change({ label: '2 AM' })]), day(1, [change({ from: 'N', to: 'W', label: '4 AM' })])]}
+        stay={stay}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+    expect(screen.getByTestId('forecast-extended-intro').textContent?.startsWith('A Westerly change expected tomorrow around 4 AM.')).toBe(true)
+  })
+
   it('shows no chip and no wind sentence without a change', () => {
     render(<ForecastDrawer forecast={[day(0), day(1)]} loading={false} error={null} unit="metric" />)
     expect(screen.queryByTestId('forecast-wind-change-chip')).not.toBeInTheDocument()
@@ -249,7 +316,7 @@ describe('useWeatherForecast wind changes', () => {
     const { result } = renderHook(() => useWeatherForecast())
     await waitFor(() => expect(result.current.forecast).toHaveLength(1))
     expect(result.current.forecast[0].windChanges).toEqual([
-      { label: '2 PM', from: 'N', to: 'SE', speedMinKn: 15, speedMaxKn: 20, lowerConfidence: true, prominent: true },
+      { label: '2 PM', from: 'N', to: 'SE', lowerConfidence: true, prominent: true },
     ])
     expect(result.current.windChangesProblem).toBe('assistant.passage_limits is unreadable')
     expect(result.current.windChangesCheckedTo).toBe('Fri 19 3 AM')
@@ -275,6 +342,24 @@ describe('useWeatherForecast wind changes', () => {
     expect(result.current.error).toBeNull()
     expect(result.current.forecast[0].windChanges).toHaveLength(1)
     expect(result.current.windChangesUnreadable).toMatch(/^2 of the forecast's wind changes could not be read/)
+    errorSpy.mockRestore()
+  })
+
+  it('counts a change whose time does not read as a clock as unreadable, so the summary never drops it unseen', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          days: [{ day_key: '2026-06-16', wind_changes: [{ label: 'Sun 2 AM', from: 'N', to: 'SE' }, { label: '2 PM', from: 'N', to: 'SE' }] }],
+        }),
+      }),
+    )
+    const { result } = renderHook(() => useWeatherForecast())
+    await waitFor(() => expect(result.current.forecast).toHaveLength(1))
+    expect(result.current.forecast[0].windChanges).toHaveLength(1)
+    expect(result.current.windChangesUnreadable).toMatch(/^1 of the forecast's wind changes could not be read/)
     errorSpy.mockRestore()
   })
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { declareQuery, useApiQuery, useApiQuerySelector } from '@/lib/api-query';
 import { calendarDayLabel, requireDayKey } from '@/lib/vessel-time';
 import { sameShallow } from '@/lib/same-value'
+import { windChangeLabelReadable } from '@/lib/forecast-wind-changes'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 import type { NowcastPoint } from '@/lib/nowcast';
@@ -63,8 +64,6 @@ export interface WindChange {
   label: string;
   from: string;
   to: string;
-  speedMinKn: number;
-  speedMaxKn: number;
   /** More than about three days out. */
   lowerConfidence: boolean;
   /** The wind after it reaches the operator's lowest marginal passage wind. */
@@ -75,8 +74,6 @@ interface WindChangeApi {
   label?: string;
   from?: string;
   to?: string;
-  speed_min_kn?: number;
-  speed_max_kn?: number;
   lower_confidence?: boolean;
   prominent?: boolean;
 }
@@ -93,7 +90,7 @@ function mapWindChanges(raw: unknown): { changes: WindChange[]; unreadable: numb
   for (const entry of raw as unknown[]) {
     const c = (typeof entry === 'object' && entry !== null ? entry : {}) as WindChangeApi;
     if (typeof c.label !== 'string' || typeof c.from !== 'string' || typeof c.to !== 'string'
-      || typeof c.speed_min_kn !== 'number' || typeof c.speed_max_kn !== 'number') {
+      || !windChangeLabelReadable(c.label)) {
       console.error('wind change: malformed entry', c);
       unreadable += 1;
       continue;
@@ -102,8 +99,6 @@ function mapWindChanges(raw: unknown): { changes: WindChange[]; unreadable: numb
       label: c.label,
       from: c.from,
       to: c.to,
-      speedMinKn: c.speed_min_kn,
-      speedMaxKn: c.speed_max_kn,
       lowerConfidence: c.lower_confidence === true,
       prominent: c.prominent === true,
     });

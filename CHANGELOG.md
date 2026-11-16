@@ -23,10 +23,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Changed
 
 - **A shorter ten-day summary.** The summary above the ten-day forecast now
-  names only the first wind change and the weather of the next few days, such
-  as "A Southerly change expected tomorrow around 1 AM. Drizzle expected the
-  next 4 days." Later changes and days are on the day cards below it. Nothing
-  to do on upgrade.
+  names one wind change, the one that matters most of those still to come, and
+  the weather of the next few days, such as "A Southerly change expected
+  tomorrow around 1 AM. Drizzle expected the next 4 days." It picks the first
+  change that reaches your marginal wind, or the first change if none does, and
+  never names one that has already happened. Other changes and days are on the
+  day cards below it. Nothing to do on upgrade.
 - **Maintenance due dates follow the boat's clock.** Whether a service is due,
   due soon or overdue, and the date Mate works from, now come from today's date
   on the boat, not from the phone, tablet or wall screen you're using. A device

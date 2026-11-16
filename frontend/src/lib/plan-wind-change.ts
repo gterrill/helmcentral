@@ -1,5 +1,7 @@
-import { UNSURE, windChangeChipText } from '@/lib/forecast-wind-changes'
+import { windChangeChipText } from '@/lib/forecast-wind-changes'
 import { formatWindRange, type PlanWindChange } from '@/lib/plans'
+
+const UNSURE = 'less certain this far out'
 
 // The plan table's Wind column words the changes the assessment sends (ADR 0287).
 // The server decides which changes fall in a row, where the wind before and after
