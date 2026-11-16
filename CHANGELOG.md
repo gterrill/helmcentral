@@ -53,6 +53,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Maintenance dates start on the boat's day.** **Log a reading**, **Record
+  meter replacement** and **Mark done** on a job used to start on the date of
+  the phone or tablet you were using. When that device was in a time zone ahead
+  of the boat, the date was a day the boat hadn't reached yet, and saving a
+  reading was refused. They now start on the boat's date, and **Log a reading**
+  won't let you pick a later one. Until the boat has reported a position, the
+  date is left blank and you type it in.
 - **A Maintenance page left open overnight now moves to the new day.** It
   stopped doing so when the browser did not know the boat's time zone, so jobs
   that fell due at midnight stayed in their old group until you reloaded. The

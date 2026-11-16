@@ -18,6 +18,9 @@ vi.mock('@/hooks/use-inventory', async (importOriginal) => {
   return { ...actual, useEquipment: () => ({ items: [], loading: false, error: null, refresh: vi.fn() }) }
 })
 
+// The reading's date starts on the boat's day, which a test has to supply.
+vi.mock('@/hooks/use-vessel-clock', () => ({ useBoatDayKey: () => todayISO() }))
+
 function daysAgo(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
