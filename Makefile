@@ -75,10 +75,8 @@ workflow-lint:
 # the help pages.
 worktree:
 	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name>"; exit 1; fi
-	git fetch origin
-	git worktree add --no-track -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)" origin/main
-	git -C "../$(notdir $(CURDIR))-$(NAME)" config core.hooksPath .githooks
-	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
+	@# One worktree at a time: parallel runs collide on .git/config and skip steps.
+	@sh scripts/worktree.sh "$(NAME)" "$(CURDIR)"
 	@cd "../$(notdir $(CURDIR))-$(NAME)/frontend" && if node "$(CURDIR)/scripts/check-frontend-deps.mjs" .; then \
 		echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"; \
 	else \

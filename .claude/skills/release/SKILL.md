@@ -16,8 +16,9 @@ and take the next SemVer.
 
 ## 2. Review the release
 
-Run `/code-review high` on the commits since the last tag. For a large
-migration (a framework or major dependency upgrade), the operator runs
+Run `/code-review high vX.Y.Z..origin/main`, where `vX.Y.Z` is the last tag;
+the bare tag reviews that tag's own commits instead. For a large migration (a
+framework or major dependency upgrade), the operator runs
 `/code-review ultra` instead. These levels report uncertain findings, so check
 each one against the code. Carry each fix to its own PR with the `ship` skill.
 

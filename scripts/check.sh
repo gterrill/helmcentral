@@ -77,6 +77,20 @@ failures() {
 	fi
 }
 
+case $target in
+backend | frontend | all) ;;
+*)
+	echo "usage: check.sh backend|frontend|all" >&2
+	exit 2
+	;;
+esac
+
+# One check run at a time across every checkout on this machine: two at once
+# overload it and fail tests at random. The outermost run re-runs itself under
+# the lock with HELMCENTRAL_CHECK_LOCK_HELD set, so the runs it starts skip it.
+. "$PWD/scripts/lib/machine-lock.sh"
+machine_lock_reexec HELMCENTRAL_CHECK_LOCK_HELD "${HELMCENTRAL_CHECK_LOCKFILE:-/tmp/helmcentral-check.lock}" check "make check" sh "$PWD/scripts/check.sh" "$target"
+
 mkdir -p "$logdir"
 
 case $target in
@@ -106,15 +120,14 @@ all)
 	step changelog . sh scripts/check-changelog.sh
 	step commit-messages . sh scripts/check-commit-messages.sh
 	step hook-tests . sh scripts/hooks/refuse-piped-checks-test.sh
-	;;
-*)
-	echo "usage: check.sh backend|frontend|all" >&2
-	exit 2
+	step hook-tests-stash . sh scripts/hooks/refuse-git-stash-test.sh
+	step lock-tests . sh scripts/check-lock-test.sh
 	;;
 esac
 
 echo
 echo "== summary ($target)"
+echo "load: $(uptime | sed 's/.*load averages*: *//')"
 failed=0
 for result in $results; do
 	name=${result%:*}

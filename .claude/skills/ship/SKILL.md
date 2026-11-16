@@ -139,7 +139,7 @@ Stage by path and commit. Run `sh scripts/check-commit-messages.sh`, since
 step 4 ran before these commits existed; a hit means reword the commit before
 pushing. Push the branch. Open the PR with `gh pr create
 --body-file <path>`, or, when the branch already has one, the push updates it.
-Write the body to a file in the session's scratchpad: the worktree guard
+Write the body to `<scratchpad>/pr-body-<branch>.md`: the worktree guard
 refuses inline bodies. The body says what the operator will notice, then gives
 each design point agreed in this conversation and where it landed (file,
 screen, or "dropped, because…"). End with the test pass counts. No "Generated
@@ -173,7 +173,8 @@ change. Act on the line, then run it again unless the PR is `MERGED` or
 `CLOSED`. The line reads `state | mergeable | merge state | failed checks |
 checks`, and the last field is `no checks yet`, `no checks after 15 min`,
 `checks running` or `checks done`. A failure you have already told the operator
-about does not wake you again.
+about does not wake you again. A repeated completion notice from a subagent
+whose state has not changed gets no reply turn.
 
 `mergeable` means only that the PR has no conflicts. Call the PR ready to
 merge only when the merge state is `CLEAN`. `no checks yet` means CI is queued,

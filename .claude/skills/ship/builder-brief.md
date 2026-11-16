@@ -14,4 +14,6 @@ worktree.
   the hand-back exactly.
 - A fix is test-first: write the test, run it, show the failing run in the
   hand-back, then fix.
+- Leave all work in the worktree's working tree; the stash is shared by every
+  worktree, so `git stash` is refused.
 - Do not commit, push or open a PR.
