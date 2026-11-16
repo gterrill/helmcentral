@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-16
+
 ### Added
 
 - **Move a camera shot in time, and pick shots from a row of buttons.** With a
@@ -27,45 +29,35 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the weather of the next few days, such as "A Southerly change expected
   tomorrow around 1 AM. Drizzle expected the next 4 days." It picks the first
   change that reaches your marginal wind, or the first change if none does, and
-  never names one that has already happened. Other changes and days are on the
-  day cards below it. Nothing to do on upgrade.
-- **Maintenance due dates follow the boat's clock.** Whether a service is due,
-  due soon or overdue, and the date Mate works from, now come from today's date
-  on the boat, not from the phone, tablet or wall screen you're using. A device
-  set to another time zone no longer moves a due date by a day. Until the boat
-  has reported a position, the Maintenance page says the boat's date isn't known
-  and shows no statuses, saving a rule, a service or a hand reading stops with
-  the same words, and Mate can't keep a fact, suggest a change or save a place
-  with a depth. A Maintenance
-  page left open overnight now moves to the new day at the boat's midnight.
-  Nothing to do on upgrade.
+  skips any whose hour has already gone. Other changes and days are on the day
+  cards below it. Nothing to do on upgrade.
+- **Maintenance follows the boat's calendar day.** Whether a service is due,
+  due soon or overdue, the date Mate works from, and the date that **Log a
+  reading**, **Record meter replacement** and **Mark done** start on now come
+  from today's date on the boat, not from the phone, tablet or wall screen
+  you're using. A device set to another time zone no longer moves a due date by
+  a day, and **Log a reading** won't take a date the boat hasn't reached. A
+  Maintenance page left open overnight moves to the new day at the boat's
+  midnight. Until the boat has reported a position, maintenance waits for it:
+  the Maintenance page says the boat's date isn't known and shows no statuses;
+  saving a rule, a service or a hand reading, adding or dropping a job, and
+  applying a Mate suggestion all stop with the same words; and neither Mate nor
+  an outside assistant can read the maintenance list. Mate also can't keep a
+  fact, suggest a change or save a place with a depth until then. Nothing to do
+  on upgrade.
 - **"In your plan" on forecast days.** A screen reader now says "in your
   plan" for a forecast day that a passage plan covers, where it used to say
   "planned stay".
-- **Plans sit beside the forecast.** On a wide screen the Forecast page shows
-  your passage plans in a column on the right, so the forecast starts at the
-  top of the page. Beside the forecast, each day of a plan is a card with its
 - **Plans sit in a sidebar beside the forecast.** On a wide screen the Forecast
   page shows your passage plans in a sidebar on the right, like the Rode
-  Planner, so the forecast starts at the top of the page. Collapse it to a
-  narrow strip when you want the forecast to have the whole width, and that
-  screen keeps it that way. Beside the forecast, each day of a plan is a card with its
-  readings labelled. On a smaller screen the plans still come first, above the
-  forecast.
+  Planner, so the forecast starts at the top of the page. Each day of a plan
+  is a card with its readings labelled. On a smaller screen the plans come
+  first, above the forecast. Hide them to a narrow strip when you want the
+  forecast to have the whole screen, and that screen keeps them hidden until
+  you tap **Show plans**.
 
 ### Fixed
 
-- **Maintenance dates start on the boat's day.** **Log a reading**, **Record
-  meter replacement** and **Mark done** on a job used to start on the date of
-  the phone or tablet you were using. When that device was in a time zone ahead
-  of the boat, the date was a day the boat hadn't reached yet, and saving a
-  reading was refused. They now start on the boat's date, and **Log a reading**
-  won't let you pick a later one. Until the boat has reported a position, the
-  date is left blank and you type it in.
-- **A Maintenance page left open overnight now moves to the new day.** It
-  stopped doing so when the browser did not know the boat's time zone, so jobs
-  that fell due at midnight stayed in their old group until you reloaded. The
-  boat now tells the page the date, and the page no longer works it out.
 - **The replay slider keeps its width while you edit.** Opening **Camera** or
   **Signs** used to squeeze the slider to a sliver. Play, the slider and the
   time now have a row to themselves, with the length, **Camera**, **Signs** and
@@ -74,9 +66,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   forecast for a stop in a passage plan, or for the middle of a leg, the key
   now reads "Lightning is for the boat's position, not this place."
 - **A forecast that fails now says why in a few words.** The Forecast Offline
-  panel in the Forecast drawer and the rows on the Plans page give a reason,
-  such as the forecast not arriving in time, instead of a page of technical
-  detail that ran out of its row.
+  panel in the Forecast drawer and the plan days beside the forecast give a
+  reason, such as the forecast not arriving in time, instead of a page of
+  technical detail that ran out of its row.
 
 ## [0.66.0] - 2026-11-15
 
@@ -3820,7 +3812,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.66.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.67.0...HEAD
+[0.67.0]: https://github.com/gterrill/helmcentral/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/gterrill/helmcentral/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/gterrill/helmcentral/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/gterrill/helmcentral/compare/v0.63.0...v0.64.0
