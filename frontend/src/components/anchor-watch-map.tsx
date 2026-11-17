@@ -314,7 +314,7 @@ export interface AnchorWatchMapProps {
   // it has the room the tile doesn't.
   expandedControls?: boolean
   // Pins shared across every client. They can be dropped before anchoring and
-  // carry into the next anchoring; Raise clears them all (ADR 0290).
+  // carry into the next anchoring; Raise clears them all (ADR 0291).
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void

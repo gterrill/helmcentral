@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. The session binding and the `409` with no watch are superseded by
-[ADR 0290](0290-pins-without-an-anchor.md): pins can be dropped without an anchor and
+[ADR 0291](0291-pins-without-an-anchor.md): pins can be dropped without an anchor and
 carry into the next anchoring. The record below is kept as written.
 
 ## Context

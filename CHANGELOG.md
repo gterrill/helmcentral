@@ -11,21 +11,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Added
-
-- **Drop pins on the Anchor Watch map before you anchor.** Click open water and
-  choose **Pin** while no watch is set. Each pin shows its range and bearing
-  from the boat, so you can mark both sides of a channel and see how wide it
-  is. Pins you drop this way stay for the next anchoring, and Drop leaves them
-  alone. Raise still clears every pin, and you can remove one by hand at any
-  time.
-
 ### Changed
 
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.
   The Anchor Watch page still shows it.
+
 ### Added
+
+- **Drop pins on the Anchor Watch map before you anchor.** Tap or click open
+  water and choose **Pin** while no watch is set. Each pin shows its range and
+  bearing from the boat, so you can mark both sides of a channel and see how
+  wide it is. Pins you drop this way stay for the next anchoring, and Drop
+  leaves them alone. Raise still clears every pin, and you can remove one by
+  hand at any time.
 
 - **A record of how Helmcentral itself is running.** Helmcentral now keeps track
   of how long its own database work takes and how much memory it uses. It adds

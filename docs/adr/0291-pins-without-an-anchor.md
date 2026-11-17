@@ -1,4 +1,4 @@
-# ADR 0290: Pins without an anchor
+# ADR 0291: Pins without an anchor
 
 ## Status
 
