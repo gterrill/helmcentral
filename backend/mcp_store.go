@@ -94,7 +94,7 @@ func newOutsideAssistantStore(dbPath string) (*outsideAssistantStore, error) {
 }
 
 func newOutsideAssistantStoreSized(dbPath string, buffer int) (*outsideAssistantStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("mcp", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}
@@ -210,20 +210,11 @@ func (s *outsideAssistantStore) Close() error {
 // RunTx runs fn in one transaction, holding the store mutex for its life
 // (ADR 0184). fn gets the store's clock reading for the transaction.
 func (s *outsideAssistantStore) RunTx(op string, fn func(tx *sql.Tx, now time.Time) error) error {
-	s.mu.Lock()
+	lockTimed(&s.mu, op, time.Now, serverVitals)
 	defer s.mu.Unlock()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("%s: begin: %w", op, err)
-	}
-	defer tx.Rollback()
-	if err := fn(tx, s.now()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", op, err)
-	}
-	return nil
+	return runTxTimed(&s.mu, s.db, op, time.Now, serverVitals, func(tx *sql.Tx) error {
+		return fn(tx, s.now())
+	})
 }
 
 func hashMCPToken(secret string) string {

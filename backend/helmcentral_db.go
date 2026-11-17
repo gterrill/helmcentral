@@ -60,50 +60,6 @@ func legacyPluginOverridesDBPath() string {
 	return cacheFilePath("PLUGIN_OVERRIDES_DB_PATH", "data/plugin_overrides.sqlite")
 }
 
-// openHelmcentralDB opens (creating if necessary) a connection to the one
-// business database, configured identically no matter which of the six
-// stores (documentStore, assistantStore, nearbyContactStore, alarmLogStore,
-// webPushSubscriptionStore, pluginOverridesStore) is opening it: foreign
-// keys enforced, a 30-second busy timeout so one store's write never
-// surfaces to another as a bare "database is locked", and WAL with
-// synchronous(NORMAL) so a long document write never blocks a concurrent
-// read from Mate's conversation history or the AIS sighting log - readers
-// under WAL don't wait on a writer the way the default rollback journal
-// does (ADR 0141; nearby_contacts.go's newNearbyContactStore carried this
-// exact WAL/synchronous(NORMAL) reasoning alone before the six stores
-// shared a file).
-//
-// Every caller keeps its own *sql.DB from its own call to this function,
-// each capped at one connection (SetMaxOpenConns(1)): modernc/sqlite
-// surfaces a second concurrent writer as "database is locked" rather than
-// queuing it, so capping each store's own pool at one connection makes
-// database/sql do that queuing for that store's own writes, and it is WAL
-// that then lets a *different* store's one-connection pool read the same
-// file without waiting on it at all.
-//
-// Both pragmas that matter for correctness are read back and verified
-// rather than trusted - modernc's own _pragma DSN parameters are otherwise
-// silently unverified, the same reasoning newDocumentStore has always
-// applied to foreign_keys alone.
-//
-// _txlock=immediate (a modernc/sqlite DSN parameter, not a _pragma - see
-// sqlite.go's own doc comment on Driver.Open) makes every db.Begin() issue
-// "BEGIN IMMEDIATE" instead of the default "BEGIN" (deferred): a deferred
-// transaction takes no lock and no read snapshot until its first statement
-// runs, and a multi-statement transaction that reads before it writes (e.g.
-// AppendMessage, assistant_store.go: SELECT the conversation and its max
-// seq, then INSERT the message) takes that snapshot at the SELECT. If any
-// other connection commits a change before this transaction's later write
-// runs, the write's attempt to upgrade a now-stale snapshot into a writer
-// fails immediately with SQLITE_BUSY_SNAPSHOT - not something busy_timeout
-// retries help with, since the problem isn't a lock to wait out, it's a
-// snapshot that can never become valid by waiting. BEGIN IMMEDIATE closes
-// that window by taking the write lock at BEGIN, before any read in the
-// transaction runs: either it acquires the lock right away, or - if another
-// connection already holds it - it blocks and retries exactly the way
-// busy_timeout is meant to cover, and only then does the transaction's own
-// reads and writes proceed against a snapshot nothing else can invalidate
-// out from under it.
 // resolvedDBPath is the absolute, symlink-free path of an opened database
 // file: what two stores compare to know they share one file. The file exists
 // by the time a store calls it, so a failure is a real error.
@@ -117,44 +73,6 @@ func resolvedDBPath(path string) (string, error) {
 		return "", fmt.Errorf("resolve database path %s: %w", path, err)
 	}
 	return resolved, nil
-}
-
-func openHelmcentralDB(path string) (*sql.DB, error) {
-	dir := filepath.Dir(path)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create helmcentral database directory: %w", err)
-		}
-	}
-
-	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open helmcentral database: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-
-	var fk int
-	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("check foreign_keys pragma: %w", err)
-	}
-	if fk != 1 {
-		db.Close()
-		return nil, fmt.Errorf("foreign_keys pragma did not take effect (got %d, want 1)", fk)
-	}
-
-	var journalMode string
-	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("check journal_mode pragma: %w", err)
-	}
-	if !strings.EqualFold(journalMode, "wal") {
-		db.Close()
-		return nil, fmt.Errorf("journal_mode pragma did not take effect (got %q, want %q)", journalMode, "wal")
-	}
-
-	return db, nil
 }
 
 // checkForLegacyDatabaseFiles is the fail-fast startup guard (ADR 0141): if
@@ -415,7 +333,7 @@ func migrateWithDocumentsFile(helmcentralPath, legacyDocsPath, legacyAssistantPa
 
 	// A hot rollback journal means the last process to hold documents.sqlite
 	// open did not shut down cleanly. Renaming it forward under the new name
-	// would make the very next open (openHelmcentralDB, a few lines down) run
+	// would make the very next open (openSQLite, a few lines down) run
 	// SQLite's own crash recovery against it as a side effect of this
 	// migration, silently taking on whatever that journal was mid-way
 	// through. The fail-fast choice is to stop and have the operator shut
@@ -451,7 +369,7 @@ func migrateWithDocumentsFile(helmcentralPath, legacyDocsPath, legacyAssistantPa
 // old enough to predate the document store (ADR 0106): no documents.sqlite
 // ever existed, but at least one of the other five legacy files does. There
 // is nothing to rename forward, so helmcentralPath is created fresh through
-// openHelmcentralDB and given the documents schema directly
+// openSQLite and given the documents schema directly
 // (createDocumentsSchema, documents_store.go - the same schema
 // newDocumentStore applies on an ordinary open), so the combined database is
 // complete even though no legacy documents.sqlite ever fed it a row. The
@@ -469,7 +387,7 @@ func migrateWithDocumentsFile(helmcentralPath, legacyDocsPath, legacyAssistantPa
 func migrateWithoutDocumentsFile(helmcentralPath, legacyAssistantPath, legacyNearbyPath, legacyAlarmLogPath, legacyWebPushPath, legacyPluginOverridesPath string) (migrateDBResult, error) {
 	var result migrateDBResult
 
-	db, err := openHelmcentralDB(helmcentralPath)
+	db, err := openSQLite("migrate", helmcentralPath, sqliteProfileBusiness)
 	if err != nil {
 		return result, fmt.Errorf("create %s: %w", helmcentralPath, err)
 	}
@@ -559,7 +477,7 @@ func manualMigratedRenameError(legacyPath, helmcentralPath string, err error) er
 // migrateAttachedLegacyData returns: renames helmcentral.sqlite (and any
 // -wal/-shm it now carries) back to documents.sqlite, so a failed migration
 // leaves the install exactly as migrate-db found it, ready to fix the
-// underlying problem and re-run the same command. openHelmcentralDB having
+// underlying problem and re-run the same command. openSQLite having
 // already converted the file to WAL, and the (still-empty, since nothing
 // committed) assistant/nearby-contact tables it created inside it along the
 // way, are both harmless to hand back under the old name: the pre-0141
@@ -595,7 +513,7 @@ func renameDocumentsFileBack(helmcentralPath, legacyDocsPath string) error {
 func migrateAttachedLegacyData(helmcentralPath, legacyAssistantPath, legacyNearbyPath, legacyAlarmLogPath, legacyWebPushPath, legacyPluginOverridesPath string) (migrateDBResult, error) {
 	var result migrateDBResult
 
-	db, err := openHelmcentralDB(helmcentralPath)
+	db, err := openSQLite("migrate", helmcentralPath, sqliteProfileBusiness)
 	if err != nil {
 		return result, fmt.Errorf("open %s: %w", helmcentralPath, err)
 	}

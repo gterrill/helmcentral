@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -244,13 +242,6 @@ func tileCachePath() string {
 const tileCacheMaxOpenConns = 4
 
 func newTileCache(dbPath string) (*tileCache, error) {
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create tile cache directory: %w", err)
-		}
-	}
-
 	// WAL + synchronous(NORMAL) + busy_timeout(5000), via modernc's
 	// "?_pragma=" DSN form (applied per new connection - see
 	// applyQueryParams in modernc.org/sqlite). Without these, this ran in
@@ -260,12 +251,10 @@ func newTileCache(dbPath string) (*tileCache, error) {
 	// failing immediately with SQLITE_BUSY, which is what
 	// TestPrefetchWorldImageryJob_RunsToCompletionWithCorrectCounts used to
 	// hit intermittently before the single-connection cap papered over it.
-	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := openSQLite("tiles", dbPath, sqliteProfileTiles)
 	if err != nil {
 		return nil, fmt.Errorf("open tile cache database: %w", err)
 	}
-	db.SetMaxOpenConns(tileCacheMaxOpenConns)
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tiles (
 		source TEXT NOT NULL,

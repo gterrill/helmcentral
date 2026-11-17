@@ -174,15 +174,12 @@ func newSecretsStore(dbPath, keyPath string) (*secretsStore, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := openSQLite("secrets", dbPath, sqliteProfileSecrets)
 	if err != nil {
 		return nil, fmt.Errorf("open secrets database: %w", err)
 	}
-	// modernc.org/sqlite surfaces concurrent writes as "database is locked"
-	// rather than queueing them itself; capping the pool at one connection
-	// makes database/sql queue callers instead, same reasoning as
-	// nearby_contacts.go and tile_cache.go's single-writer SQLite usage.
-	db.SetMaxOpenConns(1)
+	// The pool is capped at one connection by sqliteProfileSecrets
+	// (sqlite_open.go), which explains why.
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS secrets (
 		key         TEXT PRIMARY KEY,

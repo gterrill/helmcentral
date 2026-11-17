@@ -215,7 +215,7 @@ func TestImportHandlerNoFiles(t *testing.T) {
 
 func TestStoreUpgradesTrackPointsTableWithoutSource(t *testing.T) {
 	path := t.TempDir() + "/old.sqlite"
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
 		t.Fatal(err)
 	}

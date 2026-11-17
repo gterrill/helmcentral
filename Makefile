@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop flux prune-merged check-vite-config check-frontend-deps check-backend check-frontend check hooks
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint docs-lint-changed workflow-lint worktree preview-backend preview-backend-stop flux vitals-summary prune-merged check-vite-config check-frontend-deps check-backend check-frontend check hooks
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -108,6 +108,13 @@ preview-backend-stop:
 flux:
 	@test -n "$(FILE)" || { echo "usage: make flux FILE=<file|->" >&2; exit 2; }
 	@sh scripts/flux.sh "$(FILE)"
+
+# Merges server vitals minute files into one table of p50, p95 and p99 per
+# key, plus heap and GC. FILE is one or more server-vitals-*.jsonl paths or a
+# glob, relative to where make was run; the shell splits and expands it.
+vitals-summary:
+	@test -n "$(FILE)" || { echo "usage: make vitals-summary FILE='<server-vitals-*.jsonl ...>' (several paths or a glob, relative to here)" >&2; exit 2; }
+	@bin=$$(mktemp -t helmcentral-vitals.XXXXXX) && trap 'rm -f "$$bin"' EXIT && go -C backend build -o "$$bin" . && "$$bin" vitals-summary $(FILE)
 
 # Exits 1 and lists each package whose installed version differs from
 # DIR's package-lock.json. DIR defaults to this checkout's frontend.

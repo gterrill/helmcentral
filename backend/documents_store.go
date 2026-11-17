@@ -343,8 +343,8 @@ func createDocumentsSchema(db *sql.DB) error {
 // newDocumentStore opens (creating if necessary) the SQLite database at
 // dbPath - dbPath is helmcentralDBPath() in production, the same file
 // assistantStore and nearbyContactStore also open - and ensures every
-// table, index, and FTS5 trigger exists. Opened through openHelmcentralDB
-// (helmcentral_db.go), which is what actually sets foreign_keys(1) and WAL:
+// table, index, and FTS5 trigger exists. Opened through openSQLite
+// (sqlite_open.go), which is what actually sets foreign_keys(1) and WAL:
 // documents.folder_id's ON DELETE RESTRICT, document_tags/document_chunks'
 // ON DELETE CASCADE, and the FTS5 triggers' correctness after a cascade all
 // depend on foreign_keys actually being enforced, which is why that opener
@@ -377,7 +377,7 @@ func newDocumentStore(dbPath string) (*documentStore, error) {
 // what convert-profile-rules opens, since it is the command that repairs a
 // database those checks refuse.
 func openDocumentStore(dbPath string) (*documentStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("documents", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}
@@ -2501,7 +2501,7 @@ func isForeignKeyConstraintErr(err error) bool {
 
 // chunkEmbeddingsBatchSize bounds how many chunk vectors SetChunkEmbeddings
 // commits per transaction. Six stores share one SQLite file under BEGIN
-// IMMEDIATE (openHelmcentralDB), so a long transaction here would hold the
+// IMMEDIATE (openSQLite), so a long transaction here would hold the
 // write lock against the alarm log, the push queue and the sighting log too.
 // Splitting is safe: ON CONFLICT(chunk_id) DO UPDATE makes each row's write
 // independent and idempotent, so a committed batch is a valid partial result

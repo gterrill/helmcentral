@@ -318,7 +318,7 @@ func reloadAlarmRulesCache(q sqlQueryer) error {
 // reloads the in-memory copy before the store lock is released, so two
 // writers cannot leave the copy older than the database.
 func (s *documentStore) writeAlarmRules(op string, fn func(tx *sql.Tx, now time.Time) error) error {
-	s.lockForTx()
+	s.lockForTx(op)
 	defer s.mu.Unlock()
 	if err := s.runTxLocked(op, fn); err != nil {
 		return err

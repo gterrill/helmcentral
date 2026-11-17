@@ -190,6 +190,14 @@ they're resolved against it.
 | `PLUGINS_FORECAST_WARNINGS_DIR` | `plugins/forecast-warnings` |
 | `WASM_PLUGIN_TIMEOUT_MS` | `15000` |
 
+The `vitals` folder sits beside the business database, so `data/vitals/` by
+default, and moves with `HELMCENTRAL_DB_PATH`. It has no variable of its own.
+Once a minute Helmcentral adds a line to that day's `server-vitals-YYYY-MM-DD.jsonl`
+with how long its own database work took. The date in the name is the UTC date,
+not the boat's, so the file changes over at UTC midnight. Helmcentral deletes
+files older than seven UTC days. The files are safe to copy, read or delete. The last minute and the total
+since start are also at `/api/debug/vitals`.
+
 `ALARM_RULES_FILE` is only read on the first start after upgrading from a
 release that kept your alarm rules in a file. If the file is there, Helmcentral
 copies the rules into `data/helmcentral.sqlite` and renames the file to

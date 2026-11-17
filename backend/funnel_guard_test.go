@@ -24,10 +24,11 @@ type funnelGuardEnv struct {
 
 func newFunnelGuardEnv() *funnelGuardEnv {
 	env := &funnelGuardEnv{clock: time.Date(2026, 10, 30, 2, 0, 0, 0, time.UTC)}
-	g := &funnelGuard{
-		now:  func() time.Time { return env.clock },
-		logf: func(format string, args ...any) { env.logs = append(env.logs, fmt.Sprintf(format, args...)) },
-	}
+	g := &funnelGuard{refusals: rateLimitedLog{
+		now:      func() time.Time { return env.clock },
+		logf:     func(format string, args ...any) { env.logs = append(env.logs, fmt.Sprintf(format, args...)) },
+		interval: funnelLogInterval,
+	}}
 	env.e = echo.New()
 	env.e.Pre(g.middleware())
 	reached := func(c echo.Context) error { return c.String(http.StatusOK, "reached "+c.Request().URL.Path) }

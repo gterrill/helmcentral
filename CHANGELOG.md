@@ -16,6 +16,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.
   The Anchor Watch page still shows it.
+### Added
+
+- **A record of how Helmcentral itself is running.** Helmcentral now keeps track
+  of how long its own database work takes and how much memory it uses. It adds
+  one line a minute to a file in a `vitals` folder beside your database, and
+  keeps seven days. It's there for tracking down slowness, so you don't need to
+  do anything with it.
 
 ### Fixed
 

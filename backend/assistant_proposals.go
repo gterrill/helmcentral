@@ -439,7 +439,7 @@ func applyAssistantProposal(assistant *assistantStore, records *documentStore, i
 // applyAssistantProposalLocked, releasing it by defer so a panic in an
 // operation cannot leave the record store locked.
 func applyAssistantProposalUnderLock(records *documentStore, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
-	records.lockForTx()
+	records.lockForTx("apply assistant proposal")
 	defer records.mu.Unlock()
 	return applyAssistantProposalLocked(records, id, today)
 }

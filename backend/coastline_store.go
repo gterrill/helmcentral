@@ -178,7 +178,7 @@ func (s *coastlineStore) RemoveSquares(squares []coverageSquare) ([]coverageSqua
 }
 
 func newCoastlineStore(dbPath string) (*coastlineStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("coastline", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}
@@ -202,20 +202,9 @@ func (s *coastlineStore) Close() error {
 // RunTx runs fn in one transaction on the store's connection and commits
 // only when fn returns nil. See store_tx.go for the convention.
 func (s *coastlineStore) RunTx(op string, fn func(tx *sql.Tx) error) error {
-	s.mu.Lock()
+	lockTimed(&s.mu, op, time.Now, serverVitals)
 	defer s.mu.Unlock()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("%s: begin: %w", op, err)
-	}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", op, err)
-	}
-	return nil
+	return runTxTimed(&s.mu, s.db, op, time.Now, serverVitals, fn)
 }
 
 type storedShorelineLine struct {

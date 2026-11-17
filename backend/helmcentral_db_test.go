@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-// ── openHelmcentralDB ────────────────────────────────────────────────────
+// ── openSQLite ────────────────────────────────────────────────────
 
 func TestOpenHelmcentralDB_EnablesForeignKeysAndWAL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
 
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
-		t.Fatalf("openHelmcentralDB: %v", err)
+		t.Fatalf("openSQLite: %v", err)
 	}
 	defer db.Close()
 
@@ -40,9 +40,9 @@ func TestOpenHelmcentralDB_EnablesForeignKeysAndWAL(t *testing.T) {
 func TestOpenHelmcentralDB_CreatesParentDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "dir", "helmcentral.sqlite")
 
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
-		t.Fatalf("openHelmcentralDB: %v", err)
+		t.Fatalf("openSQLite: %v", err)
 	}
 	defer db.Close()
 
@@ -63,7 +63,7 @@ func TestOpenHelmcentralDB_CreatesParentDirectory(t *testing.T) {
 // nearbyContactStore's every-5-second AIS poll write is exactly the kind of
 // intervening commit that triggers this against a live Mate conversation.
 //
-// This test opens A the real way (openHelmcentralDB, the fix under test) and
+// This test opens A the real way (openSQLite, the fix under test) and
 // B as a second, independent connection to the same file with its own short
 // busy_timeout (chosen only to keep this test fast if the fix is missing -
 // see below - not because the value itself matters to what's being tested).
@@ -90,9 +90,9 @@ func TestOpenHelmcentralDB_CreatesParentDirectory(t *testing.T) {
 func TestOpenHelmcentralDB_ReadThenWriteTransactionSurvivesInterveningWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
 
-	dbA, err := openHelmcentralDB(path)
+	dbA, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
-		t.Fatalf("openHelmcentralDB: %v", err)
+		t.Fatalf("openSQLite: %v", err)
 	}
 	defer dbA.Close()
 

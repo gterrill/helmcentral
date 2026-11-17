@@ -187,7 +187,7 @@ func (s *alarmLogStore) SaveCollisionProfileState(state string) error {
 }
 
 func newAlarmLogStore(dbPath string) (*alarmLogStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("alarm_log", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}
