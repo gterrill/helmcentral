@@ -18,10 +18,10 @@ export function useWatchAtFix(watch: AnchorWatchRecord, latitude: number | null,
 }
 
 /**
- * The session's pins, polled only while a watch is set: with none there is no
- * session and the server holds no pins. The tile and the page share one query.
+ * The pins, polled whether or not a watch is set: they can be dropped before
+ * anchoring. The tile and the page share one query.
  */
-export function usePins(active: boolean) {
-  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks(active)
+export function usePins() {
+  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks()
   return { placemarks, onPlacemarkCreate: createPlacemark, onPlacemarkRemove: removePlacemark }
 }

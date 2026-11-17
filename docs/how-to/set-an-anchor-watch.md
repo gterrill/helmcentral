@@ -80,8 +80,7 @@ you're lying properly. That's usually simpler than adjusting a long way.
 ## Raise the watch
 
 Open the Anchor Watch page, choose **Raise** (bottom left of the map) and
-confirm. This clears the watch, the trail, the AIS tracks and any pins placed in
-the rode planner for this anchoring. The Anchor Watch tile on a dashboard page has no
+confirm. This clears the watch, the trail, the AIS tracks and every pin. The Anchor Watch tile on a dashboard page has no
 Raise, so a stray touch on the tile can't end the watch.
 
 To have the watch raise itself when you motor away, turn on **Auto-raise anchor
@@ -97,9 +96,13 @@ Watch is on screen.
   outside the circle and doing at least 3 knots for 15 seconds straight.
 - **Slow exits:** Idling out slower than that still needs Raise by hand.
 
-## Mark a hazard with the rode planner
+## Drop a pin on the map
 
-While the rode planner sidebar is open, click open water on its map to drop a
-pin. Use it on a bombie, a mooring block or a stretch of shoreline you want to
-watch your swing against. The pin appears on every device watching the same anchorage
-and clears when you raise the watch.
+Click open water on the Anchor Watch map, then choose **Pin**. Use it on a
+bombie, a mooring block or a stretch of shoreline you want to watch your swing
+against. The pin shows its range and bearing from the boat, and appears on every
+device watching the same anchorage.
+
+You don't need an anchor watch for this. Before you anchor, drop a pin on each
+side of a channel to see how wide it is. Those pins stay for the anchoring that
+follows, and they clear when you raise the watch or remove them one by one.

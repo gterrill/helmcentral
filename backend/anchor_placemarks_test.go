@@ -135,20 +135,48 @@ func TestCreatePlacemark_IsListedBack(t *testing.T) {
 	}
 }
 
-// Placemarks are session-bound: with no anchor watch running there is no
-// session to bind to, so the create fails loudly rather than storing an
-// orphan the next session would inherit.
-func TestCreatePlacemark_RejectedWithoutActiveWatch(t *testing.T) {
+// Pins can be dropped before anchoring, to size up a channel or an anchorage
+// from the boat's range and bearing to each one.
+func TestCreatePlacemark_AllowedWithoutActiveWatch(t *testing.T) {
 	placemarkTestEnv(t)
 
-	code, resp := createPlacemark(t, -21.1120, 149.2280, "")
-	if code != http.StatusConflict {
-		t.Fatalf("expected 409 without an active watch, got %d (%v)", code, resp)
+	code, resp := createPlacemark(t, -21.1120, 149.2280, "channel edge")
+	if code != http.StatusCreated {
+		t.Fatalf("expected 201 without an active watch, got %d (%v)", code, resp)
 	}
 
 	_, listResp := listPlacemarks(t)
-	if n := len(placemarkList(t, listResp)); n != 0 {
-		t.Fatalf("expected nothing stored, got %d", n)
+	if n := len(placemarkList(t, listResp)); n != 1 {
+		t.Fatalf("expected the pin listed back, got %d", n)
+	}
+}
+
+// Pins dropped before anchoring belong to the next anchoring: Drop leaves them.
+func TestDropAnchor_KeepsPinsDroppedBeforeIt(t *testing.T) {
+	anchorTestEnv(t, 0)
+	placemarkTestEnv(t)
+	createPlacemark(t, -21.1120, 149.2280, "a")
+
+	code, resp := postAnchorWatch(t, map[string]any{"lat": -21.1113, "lon": 149.2276})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from the drop, got %d: %+v", code, resp)
+	}
+
+	_, listResp := listPlacemarks(t)
+	if n := len(placemarkList(t, listResp)); n != 1 {
+		t.Fatalf("expected the pin to survive Drop, got %d", n)
+	}
+}
+
+func TestDeletePlacemark_WorksWithoutActiveWatch(t *testing.T) {
+	placemarkTestEnv(t)
+	_, created := createPlacemark(t, -21.1120, 149.2280, "a")
+	id, _ := created["id"].(string)
+
+	code, _ := callPlacemarks(t, http.MethodDelete, "/api/anchor-watch/placemarks/"+id, "",
+		deletePlacemarkHandler, []string{"id"}, []string{id})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from delete, got %d", code)
 	}
 }
 
@@ -204,8 +232,7 @@ func TestDeletePlacemark_UnknownIDIs404(t *testing.T) {
 	}
 }
 
-// Ending the anchor session drops every placemark with it — that is what
-// "session bound" means — and takes the state file with it.
+// Raising the anchor clears every placemark and takes the state file with it.
 func TestDeleteAnchorWatch_ClearsPlacemarks(t *testing.T) {
 	anchorTestEnv(t, 0)
 	placemarkTestEnv(t)
@@ -253,28 +280,24 @@ func TestLoadPlacemarks_SurvivesRestartDuringSession(t *testing.T) {
 	}
 }
 
-// A stale file left behind by a session that ended while the backend was
-// down must not resurrect into the next session.
-func TestLoadPlacemarks_DiscardsFileWhenNoWatchActive(t *testing.T) {
+// Pins dropped with no watch running are real state, so a restart keeps them.
+func TestLoadPlacemarks_SurvivesRestartWithNoWatch(t *testing.T) {
 	placemarkTestEnv(t)
-	activateAnchorWatch(t)
-	createPlacemark(t, -21.1120, 149.2280, "a")
+	_, created := createPlacemark(t, -21.1120, 149.2280, "a")
+	id, _ := created["id"].(string)
 
-	anchorWatchMu.Lock()
-	anchorWatchState = nil
-	anchorWatchMu.Unlock()
 	placemarkMu.Lock()
 	placemarks = nil
 	placemarkMu.Unlock()
-
 	loadAnchorPlacemarks()
 
 	_, resp := listPlacemarks(t)
-	if n := len(placemarkList(t, resp)); n != 0 {
-		t.Fatalf("expected a stale placemark file to be discarded, got %d", n)
+	list := placemarkList(t, resp)
+	if len(list) != 1 {
+		t.Fatalf("expected the pin to survive a restart with no watch, got %d", len(list))
 	}
-	if _, err := os.Stat(anchorPlacemarksFilePath()); !os.IsNotExist(err) {
-		t.Fatalf("expected the stale file removed, stat err = %v", err)
+	if got, _ := list[0].(map[string]any); got["id"] != id {
+		t.Fatalf("restored the wrong placemark: %v", got)
 	}
 }
 

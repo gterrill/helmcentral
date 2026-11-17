@@ -72,7 +72,7 @@ export function AnchorDropRaiseButton({ anchorActive, canDrop, onDrop, onRaise, 
           <AlertDialogHeader>
             <AlertDialogTitle>Raise anchor?</AlertDialogTitle>
             <AlertDialogDescription>
-              This stops the anchor watch and clears the vessel trail and this session&apos;s placemarks.
+              This stops the anchor watch and clears the vessel trail and all placemarks.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

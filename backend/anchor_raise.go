@@ -74,7 +74,7 @@ func raiseAnchorWatch() error {
 	// path, since there is nothing to clear there.
 	clearAnchorWatchLoadFailure()
 
-	// Placemarks are bound to the anchoring session, so they end with it.
+	// Raise ends the pins too: they are cleared with the watch.
 	// This runs before the trail reset and whatever it returns: the watch is
 	// already gone, so nothing would retry the cleanup later.
 	pmErr := clearPlacemarks()

@@ -888,9 +888,6 @@ export function AnchorWatchMap({
         suppressNextMapClickRef.current = false
         return
       }
-      // No active watch: POST /api/anchor-watch/placemarks would 409 (see
-      // backend/anchor_placemarks.go), so don't even raise the tooltip.
-      if (!hasAnchor) return
       // Adjust mode owns every tap/drag on the map for positioning the
       // draft anchor — a click landing here mid-pan (MapLibre can fire a
       // synthetic click alongside a drag that started as one) must not also
@@ -900,7 +897,7 @@ export function AnchorWatchMap({
       setSelectedPlacemarkId(null)
       setPinCandidate({ lat, lon: lng })
     },
-    [hasAnchor, adjustActive],
+    [adjustActive],
   )
 
   // Both tooltip buttons sit inside the map, so their clicks also reach
@@ -1813,7 +1810,7 @@ export function AnchorWatchMap({
           </Marker>
         )}
 
-        {/* Session placemarks — bombies, shoreline, anything worth watching
+        {/* Placemarks — bombies, shoreline, anything worth watching
             the swing against. Range and bearing are recomputed from the live
             vessel fix on every render, so they close up as the boat drifts
             towards the hazard. */}

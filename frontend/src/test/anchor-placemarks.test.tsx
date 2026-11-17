@@ -108,14 +108,23 @@ describe('anchor-watch placemarks', () => {
     expect(screen.getByRole('button', { name: /^pin$/i })).toBeInTheDocument()
   })
 
-  // Without an active watch, POST /api/anchor-watch/placemarks 409s (see
-  // backend/anchor_placemarks.go) — so don't even offer the tooltip.
-  it('offers no Pin tooltip from a map click when no anchor is set', () => {
-    renderMap({ anchorLat: null, anchorLon: null })
+  // Pins can be dropped before anchoring, to judge a channel from the boat.
+  it('offers a Pin tooltip and creates a placemark from a map click when no anchor is set', () => {
+    const onPlacemarkCreate = vi.fn()
+    renderMap({ anchorLat: null, anchorLon: null, onPlacemarkCreate })
 
     clickMapAt(BOMBIE_LAT, BOMBIE_LON)
 
-    expect(screen.queryByTestId('pin-candidate')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pin-candidate')).toHaveTextContent('100 m')
+    fireEvent.click(screen.getByRole('button', { name: /^pin$/i }))
+    expect(onPlacemarkCreate).toHaveBeenCalledWith(BOMBIE_LAT, BOMBIE_LON)
+  })
+
+  it('shows placemarks when no anchor is set', () => {
+    const pin: AnchorPlacemark = { id: 'p1', lat: BOMBIE_LAT, lon: BOMBIE_LON, label: 'channel edge', created_at: '2026-11-18T00:00:00Z' }
+    renderMap({ anchorLat: null, anchorLon: null, placemarks: [pin] })
+
+    expect(screen.getByRole('button', { name: 'Placemark: channel edge' })).toBeInTheDocument()
   })
 
   it('does not let the Pin tooltip expire before it can be clicked', () => {
