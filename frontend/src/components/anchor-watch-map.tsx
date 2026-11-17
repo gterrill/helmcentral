@@ -278,8 +278,11 @@ export interface AnchorWatchMapProps {
   // behavioural gain — the same treatment distanceMeters got when it made
   // the opposite trip out of this panel.
   depthMeters: number | null
-  currentDriftKts: number | null
-  currentSetDeg: number | null
+  // The Anchor Watch page shows the Current row in this HUD; the dashboard
+  // tile leaves current to the Wind tile, so it passes none of these.
+  showCurrent?: boolean
+  currentDriftKts?: number | null
+  currentSetDeg?: number | null
   currentDriftImpactKts?: number | null
   // The boat's live distance from the anchor — this panel's own top row
   // (ADR 0133's amendment), same figure and formatting the old promoted
@@ -405,8 +408,9 @@ export function AnchorWatchMap({
   anchorStateKnown = false,
   radiusMeters,
   // depthMeters intentionally not destructured — see the prop doc above.
-  currentDriftKts,
-  currentSetDeg,
+  showCurrent = false,
+  currentDriftKts = null,
+  currentSetDeg = null,
   currentDriftImpactKts = null,
   distanceMeters,
   bearingDeg: bearingDegProp,
@@ -1909,9 +1913,12 @@ export function AnchorWatchMap({
           KPI showed. Distance, Bearing and Radius are dropped from the row
           list outright with no anchor set (none of the three mean anything
           without one) rather than rendering a dashed placeholder at full
-          visual weight; Current can be genuinely absent for reasons
-          that have nothing to do with anchor state, so it keeps rendering
-          (and dashing) as before.
+          visual weight. Current shows only where the host asks for it
+          (showCurrent: the Anchor Watch page does, the tile leaves current to
+          the Wind tile); once asked for, it renders (and dashes) whatever the
+          anchor state, since it can be absent for reasons that have nothing
+          to do with the anchor. With no header and no rows the panel is
+          empty, and empty:hidden keeps its dark ground off the chart.
           The background is a flat, near-opaque scrim rather than the old
           bg-black/50 (bg-black/35 while editing): measured contrast against
           real satellite imagery came in at 4.1:1, short of the 4.5:1 floor
@@ -1921,7 +1928,7 @@ export function AnchorWatchMap({
       {/* During Adjust these rows follow the draft (see metricsDistanceM). */}
       <div
         ref={metricsPanelRef}
-        className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur-sm"
+        className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur-sm empty:hidden"
         style={{ zIndex: 2000 }}
         data-testid="anchor-watch-metrics"
       >
@@ -1952,12 +1959,16 @@ export function AnchorWatchMap({
                 },
               ]
             : []),
-          {
-            label: 'Current',
-            value: currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—',
-            unit: 'kts',
-            setDeg: currentSetDeg,
-          },
+          ...(showCurrent
+            ? [
+                {
+                  label: 'Current',
+                  value: currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—',
+                  unit: 'kts',
+                  setDeg: currentSetDeg,
+                },
+              ]
+            : []),
         ].map(({ label, value, unit, setDeg }, index) => (
           <div
             key={label}

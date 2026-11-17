@@ -61,9 +61,6 @@ interface AnchorWatchTileProps {
   lat: number | null
   lon: number | null
   depthMeters: number | null
-  currentDriftKts: number | null
-  currentSetDeg: number | null
-  currentDriftImpactKts?: number | null
   isImperial: boolean
   vesselHeadingDeg: number | null
   vesselTrail: TrailPoint[]
@@ -108,9 +105,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   lat,
   lon,
   depthMeters,
-  currentDriftKts,
-  currentSetDeg,
-  currentDriftImpactKts = null,
   isImperial,
   vesselHeadingDeg,
   vesselTrail,
@@ -283,9 +277,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
               anchorStateKnown={loaded}
               radiusMeters={radiusMeters}
               depthMeters={depthMeters}
-              currentDriftKts={currentDriftKts}
-              currentSetDeg={currentSetDeg}
-              currentDriftImpactKts={currentDriftImpactKts}
               distanceMeters={distanceMeters}
               bearingDeg={bearingDeg}
               isImperial={isImperial}
@@ -337,17 +328,17 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
 
 const ANCHOR_FIELDS = [
   'positionLastUpdateAgeS', 'latitude', 'longitude', 'gnssCriticalAlert', 'depth',
-  'currentDriftKts', 'currentSetDeg', 'currentDriftImpactKts', 'headingTrue',
+  'headingTrue',
 ] as const
 
 /**
  * The anchor watch tile. It reads the watch record, applies the live fix to it
- * (distance, bearing, drag state), and adds depth, current, heading, the tide
+ * (distance, bearing, drag state), and adds depth, heading, the tide
  * a drop records, the collision colours, the pins, the trails and the AIS
  * contacts. The trails poll while the tile is mounted.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
-  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
+  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'vesselHeadingDeg'
   | 'vesselTrail' | 'aisTrails' | 'aisAnchorEstimates' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
   | 'aisVessels' | 'tide'>) {
   const watch = useAnchorWatch()
@@ -374,9 +365,6 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
       lat={v.latitude}
       lon={v.longitude}
       depthMeters={v.depth}
-      currentDriftKts={v.currentDriftKts}
-      currentSetDeg={v.currentSetDeg}
-      currentDriftImpactKts={v.currentDriftImpactKts}
       vesselHeadingDeg={v.headingTrue}
       aisCollisionAlarms={aisCollisionAlarms}
     />

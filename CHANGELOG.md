@@ -11,6 +11,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The Anchor Watch tile no longer shows the current.** The Wind tile
+  already shows the set and drift, so the Anchor Watch tile leaves it out.
+  The Anchor Watch page still shows it.
+
 ### Fixed
 
 - **Maintenance dates now follow the boat's day, not your phone's.** The date

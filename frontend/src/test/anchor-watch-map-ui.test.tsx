@@ -113,6 +113,7 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       anchorLon={152.9103}
       radiusMeters={34}
       depthMeters={3.2}
+      showCurrent
       currentDriftKts={0.1}
       currentSetDeg={120}
       distanceMeters={10}
@@ -501,6 +502,15 @@ describe('AnchorWatchMap with no anchor set', () => {
 
     const metrics = screen.getByTestId('anchor-watch-metrics')
     expect(within(metrics).getByText('Current')).toBeInTheDocument()
+  })
+
+  // The dashboard tile leaves current to the Wind tile, so it never opts in.
+  it('has no Current row unless the host asks for it', () => {
+    renderMap(defaultAisVessels, { showCurrent: false })
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    expect(within(metrics).queryByText('Current')).not.toBeInTheDocument()
+    expect(within(metrics).getByText('Distance')).toBeInTheDocument()
   })
 })
 
