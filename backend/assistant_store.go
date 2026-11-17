@@ -139,7 +139,7 @@ var errAssistantConversationNotFound = errors.New("assistant conversation not fo
 // messages/documents - AppendMessage and DeleteConversation manage the rows
 // directly rather than relying on a cascade. That is a schema choice, not a
 // pragma one: the connection this runs on has foreign_keys=1 set (every
-// store sharing the combined file does, via openHelmcentralDB), it is simply
+// store sharing the combined file does, via openSQLite), it is simply
 // that a table with no REFERENCES clause has nothing for the pragma to
 // enforce. Per ADR 0141, a declared FK from message_attachments.document_id
 // to documents is deliberately left for later, not added here.
@@ -290,8 +290,8 @@ func createAssistantSchema(db *sql.DB) error {
 // newAssistantStore opens (creating if necessary) the SQLite database at
 // dbPath - dbPath is helmcentralDBPath() in production, the same file
 // documentStore and nearbyContactStore also open - and ensures every table
-// this store needs exists. Opened through openHelmcentralDB
-// (helmcentral_db.go), which is what sets foreign_keys(1) and WAL: before
+// this store needs exists. Opened through openSQLite
+// (sqlite_open.go), which is what sets foreign_keys(1) and WAL: before
 // ADR 0141 this store opened its own file directly, with no pragmas beyond
 // SetMaxOpenConns(1), because it had no cross-table integrity to enforce and
 // no concurrent reader/writer of its own file to protect against blocking.
@@ -299,7 +299,7 @@ func createAssistantSchema(db *sql.DB) error {
 // schema, but it does now inherit foreign_keys and WAL as a consequence of
 // being one of three stores that opens the same file.
 func newAssistantStore(dbPath string) (*assistantStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("assistant", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

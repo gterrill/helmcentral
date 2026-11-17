@@ -74,7 +74,7 @@ func createWebPushSchema(db *sql.DB) error {
 }
 
 func newWebPushSubscriptionStore(dbPath string) (*webPushSubscriptionStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("webpush", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

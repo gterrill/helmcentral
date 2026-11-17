@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -39,16 +38,11 @@ const (
 )
 
 type funnelGuard struct {
-	now  func() time.Time
-	logf func(format string, args ...any)
-
-	mu         sync.Mutex
-	lastLog    time.Time
-	suppressed int
+	refusals rateLimitedLog
 }
 
 func newFunnelGuard() *funnelGuard {
-	return &funnelGuard{now: time.Now, logf: log.Printf}
+	return &funnelGuard{refusals: rateLimitedLog{now: time.Now, logf: log.Printf, interval: funnelLogInterval}}
 }
 
 // middleware is registered with e.Pre so it runs before routing: a path no
@@ -75,21 +69,7 @@ func (g *funnelGuard) middleware() echo.MiddlewareFunc {
 // correct /mcp mount still forwards /mcp/<anything>, so a refusal on its own
 // is not proof of a mistake; the line says what to check.
 func (g *funnelGuard) logRefusal(req *http.Request) {
-	g.mu.Lock()
-	now := g.now()
-	if !g.lastLog.IsZero() && now.Sub(g.lastLog) < funnelLogInterval {
-		g.suppressed++
-		g.mu.Unlock()
-		return
-	}
-	left := g.suppressed
-	g.lastLog, g.suppressed = now, 0
-	g.mu.Unlock()
-	msg := "funnel guard: refused %s %q from %q: only /mcp, its sign-in paths and the OAuth metadata are served through Tailscale Funnel; if refused paths fall outside those, `tailscale funnel status` shows more than that is shared"
-	args := []any{req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For")}
-	if left > 0 {
-		msg += " (%d more refused since the last line)"
-		args = append(args, left)
-	}
-	g.logf(msg, args...)
+	g.refusals.log(" (%d more refused since the last line)",
+		"funnel guard: refused %s %q from %q: only /mcp, its sign-in paths and the OAuth metadata are served through Tailscale Funnel; if refused paths fall outside those, `tailscale funnel status` shows more than that is shared",
+		req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For"))
 }

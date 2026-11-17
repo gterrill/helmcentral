@@ -51,10 +51,20 @@ func main() {
 		os.Exit(runConvertProfileRulesCommand(os.Args[2:]))
 	}
 
+	// vitals-summary merges the minute files server vitals writes into one
+	// table (ADR 0290). It only reads files.
+	if len(os.Args) > 1 && os.Args[1] == "vitals-summary" {
+		os.Exit(runVitalsSummaryCommand(os.Args[2:]))
+	}
+
 	// flux runs one read-only Flux script against the real InfluxDB.
 	if len(os.Args) > 1 && os.Args[1] == "flux" {
 		os.Exit(runFluxCommand(os.Args[2:]))
 	}
+
+	// Server vitals (ADR 0290) start before any store opens, so the startup
+	// statements are timed too.
+	serverVitals.start(context.Background(), vitalsDir())
 
 	e := echo.New()
 	e.IPExtractor = clientIPExtractor()
@@ -743,6 +753,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, passageDecisionRoutes()...)
 	routes = append(routes, helpRoutes()...)
 	routes = append(routes, logRoutes()...)
+	routes = append(routes, serverVitalsRoutes()...)
 	routes = append(routes, documentRoutes()...)
 	routes = append(routes, noteRoutes()...)
 	routes = append(routes, inboxRoutes()...)

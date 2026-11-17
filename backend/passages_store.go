@@ -104,7 +104,7 @@ type passageStore struct {
 }
 
 func newPassageStore(dbPath string) (*passageStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("passages", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

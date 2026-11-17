@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -78,22 +76,12 @@ type sessionStore struct {
 }
 
 func newSessionStore(dbPath string) (*sessionStore, error) {
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create sessions store directory: %w", err)
-		}
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := openSQLite("sessions", dbPath, sqliteProfileSessions)
 	if err != nil {
 		return nil, fmt.Errorf("open sessions database: %w", err)
 	}
-	// Single connection, same reasoning as secrets_store.go and the other
-	// SQLite stores in this codebase: modernc.org/sqlite surfaces concurrent
-	// writers as "database is locked" rather than queueing them, so capping
-	// the pool at one connection makes database/sql do the queueing instead.
-	db.SetMaxOpenConns(1)
+	// The pool is capped at one connection by sqliteProfileSessions
+	// (sqlite_open.go), which explains why.
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
 		token_hash   TEXT PRIMARY KEY,

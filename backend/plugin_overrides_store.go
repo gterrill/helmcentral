@@ -73,7 +73,7 @@ func createPluginOverridesSchema(db *sql.DB) error {
 // no master-key/encryption integrity check to run at open time - a normal
 // sqlite open failure is the only fail-fast condition here.
 func newPluginOverridesStore(dbPath string) (*pluginOverridesStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("plugin_overrides", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

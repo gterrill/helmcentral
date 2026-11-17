@@ -92,7 +92,7 @@ type inboxStore struct {
 }
 
 func newInboxStore(dbPath string) (*inboxStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("inbox", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

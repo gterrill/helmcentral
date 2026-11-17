@@ -10,7 +10,7 @@ import (
 // opens, and the items already waiting keep reading.
 func TestInboxStoreUpgradesAnOlderTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.sqlite")
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
 		t.Fatal(err)
 	}

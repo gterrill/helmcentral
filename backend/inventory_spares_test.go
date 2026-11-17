@@ -132,7 +132,7 @@ const oldEquipmentDDL = `CREATE TABLE IF NOT EXISTS equipment (
 func openPreSparesDatabase(t *testing.T) (path string) {
 	t.Helper()
 	path = filepath.Join(t.TempDir(), "helmcentral.sqlite")
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestEquipmentSpares_RebuildRefusesADatabaseWithBrokenReferences(t *testing.
 
 	// Plant a dangling reference the way a past bug or a manual edit could
 	// have: foreign keys off, a log part pointing at nothing.
-	db, err := openHelmcentralDB(path)
+	db, err := openSQLite("test", path, sqliteProfileBusiness)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

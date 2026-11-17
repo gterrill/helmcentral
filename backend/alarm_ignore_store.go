@@ -72,7 +72,7 @@ func createAlarmIgnoreSchema(db *sql.DB) error {
 }
 
 func newAlarmIgnoreStore(dbPath string) (*alarmIgnoreStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("alarm_ignore", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}

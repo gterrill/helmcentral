@@ -68,3 +68,12 @@ An alarm that can never be ignored: a kind such as man overboard, fire,
 flooding, collision, distress or anchor dragging, or any alarm the sending
 device marks as an emergency.
 _Avoid_: Critical alarm, emergency alarm
+
+## Server
+
+**Server vitals**:
+How long Helmcentral's own work takes and how its process is doing: SQLite
+statement and transaction times, pool waits, heap, garbage collection and
+goroutines. Recorded always and written once a minute to a file in the data
+folder. They describe the server, never the boat.
+_Avoid_: Telemetry (that is boat data), metrics, performance counters

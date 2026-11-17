@@ -205,7 +205,7 @@ func createNearbyContactSchema(db *sql.DB) error {
 // dbPath - dbPath is helmcentralDBPath() in production, the same file
 // documentStore and assistantStore also open - and ensures the
 // nearby_vessel_contacts table and its indexes exist. Opened through
-// openHelmcentralDB (helmcentral_db.go), which is what actually sets WAL and
+// openSQLite (sqlite_open.go), which is what actually sets WAL and
 // synchronous(NORMAL): before ADR 0141 this store carried that reasoning
 // alone (the default rollback-journal mode blocks every reader behind the
 // poller's writes, recordContactIfNew, tracks.go, every 5s, and summaries()
@@ -213,7 +213,7 @@ func createNearbyContactSchema(db *sql.DB) error {
 // it) - now every store sharing the file gets it, which is exactly what lets
 // a long document write never stall a concurrent AIS poll tick.
 func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
-	db, err := openHelmcentralDB(dbPath)
+	db, err := openSQLite("nearby_contacts", dbPath, sqliteProfileBusiness)
 	if err != nil {
 		return nil, err
 	}
