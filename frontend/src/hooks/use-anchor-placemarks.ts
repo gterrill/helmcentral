@@ -30,6 +30,11 @@ const patch = (fn: (pins: AnchorPlacemark[]) => AnchorPlacemark[]) =>
     placemarks: fn(Array.isArray(prev?.placemarks) ? prev.placemarks : []),
   }))
 
+/** Empties the pins on screen. Raising the anchor clears them on the server. */
+export function clearPlacemarksCache() {
+  patch(() => [])
+}
+
 export interface AnchorPlacemarksResult {
   placemarks: AnchorPlacemark[]
   createPlacemark: (lat: number, lon: number, label?: string) => Promise<void>

@@ -76,6 +76,7 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       aisVessels={[]}
       aisTrails={new Map()}
       isDarkTheme={false}
+      onPlacemarkCreate={() => {}}
       {...overrides}
     />,
   )
@@ -118,6 +119,15 @@ describe('anchor-watch placemarks', () => {
     expect(screen.getByTestId('pin-candidate')).toHaveTextContent('100 m')
     fireEvent.click(screen.getByRole('button', { name: /^pin$/i }))
     expect(onPlacemarkCreate).toHaveBeenCalledWith(BOMBIE_LAT, BOMBIE_LON)
+  })
+
+  it('raises no Pin tooltip when the host gave no way to create a pin', () => {
+    renderMap({ anchorLat: null, anchorLon: null, onPlacemarkCreate: undefined })
+
+    clickMapAt(BOMBIE_LAT, BOMBIE_LON)
+
+    expect(screen.queryByTestId('pin-candidate')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^pin$/i })).not.toBeInTheDocument()
   })
 
   it('shows placemarks when no anchor is set', () => {

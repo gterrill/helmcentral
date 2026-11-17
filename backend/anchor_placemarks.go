@@ -141,7 +141,7 @@ func createPlacemarkHandler(c echo.Context) error {
 	placemarkMu.Lock()
 	if len(placemarks) >= maxPlacemarks {
 		placemarkMu.Unlock()
-		return c.JSON(http.StatusConflict, map[string]string{"error": "placemark limit reached"})
+		return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("%d pins is the limit. Remove one to drop another.", maxPlacemarks)})
 	}
 	placemarks = append(placemarks, pm)
 	err := savePlacemarksLocked()

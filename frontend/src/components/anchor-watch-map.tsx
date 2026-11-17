@@ -313,7 +313,8 @@ export interface AnchorWatchMapProps {
   // change; the fullscreen drawer opts into the full set explicitly, since
   // it has the room the tile doesn't.
   expandedControls?: boolean
-  // Session-bound pins shared across every client watching this anchorage.
+  // Pins shared across every client. They can be dropped before anchoring and
+  // carry into the next anchoring; Raise clears them all (ADR 0290).
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void
@@ -893,11 +894,13 @@ export function AnchorWatchMap({
       // synthetic click alongside a drag that started as one) must not also
       // raise the unrelated "pin a hazard" tooltip on top of it.
       if (adjustActive) return
+      // A host with no way to create a pin gets no Pin tooltip to press.
+      if (!onPlacemarkCreate) return
       const { lat, lng } = e.lngLat
       setSelectedPlacemarkId(null)
       setPinCandidate({ lat, lon: lng })
     },
-    [adjustActive],
+    [adjustActive, onPlacemarkCreate],
   )
 
   // Both tooltip buttons sit inside the map, so their clicks also reach

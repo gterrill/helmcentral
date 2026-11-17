@@ -332,3 +332,23 @@ func TestLoadPlacemarks_CorruptFileLogsWarning(t *testing.T) {
 		t.Fatalf("expected no placemarks from a corrupt file, got %d", n)
 	}
 }
+
+// Pins accumulate across passages, so a full set must tell the operator what
+// to do, not just that a limit was hit.
+func TestCreatePlacemark_AtCapTellsOperatorToRemoveOne(t *testing.T) {
+	placemarkTestEnv(t)
+	for i := 0; i < maxPlacemarks; i++ {
+		if code, resp := createPlacemark(t, -21.1+float64(i)*0.0001, 149.2, ""); code != http.StatusCreated {
+			t.Fatalf("pin %d: expected 201, got %d (%v)", i, code, resp)
+		}
+	}
+
+	code, resp := createPlacemark(t, -21.2, 149.3, "one too many")
+	if code != http.StatusConflict {
+		t.Fatalf("expected 409 at the cap, got %d (%v)", code, resp)
+	}
+	want := fmt.Sprintf("%d pins is the limit. Remove one to drop another.", maxPlacemarks)
+	if resp["error"] != want {
+		t.Fatalf("error = %q, want %q", resp["error"], want)
+	}
+}
