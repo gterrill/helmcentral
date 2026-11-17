@@ -46,8 +46,16 @@ vi.mock('@/components/anchor-watch-map', () => ({
     anchorSetAt?: string | null
     onAnchorReposition?: (lat: number, lon: number) => void
     onRadiusChange?: (radiusMeters: number) => void
+    showCurrent?: boolean
+    currentDriftKts?: number | null
+    currentSetDeg?: number | null
+    currentDriftImpactKts?: number | null
   }) => (
     <div
+      data-show-current={String(props.showCurrent === true)}
+      data-current-props={String(
+        props.currentDriftKts !== undefined || props.currentSetDeg !== undefined || props.currentDriftImpactKts !== undefined,
+      )}
       data-testid="anchor-watch-map"
       data-collision-vessels={[...(props.aisCollisionAlarms?.keys() ?? [])].join(',')}
       data-interactive={String(props.interactive)}
@@ -134,8 +142,6 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     lat: -25.1,
     lon: 152.9,
     depthMeters: 5,
-    currentDriftKts: null,
-    currentSetDeg: null,
     isImperial: false,
     vesselHeadingDeg: null,
     vesselTrail: [],
@@ -167,6 +173,16 @@ describe('AnchorWatchTile', () => {
     render(<AnchorWatchTile {...baseProps()} />)
 
     expect(await screen.findByTestId('anchor-watch-map')).toBeInTheDocument()
+  })
+
+  // The Wind tile already shows current, so the tile's map HUD gets no
+  // Current row: the tile neither opts in nor hands the map any current data.
+  it('leaves the Current row off the map HUD', async () => {
+    render(<AnchorWatchTile {...baseProps()} />)
+
+    const map = await screen.findByTestId('anchor-watch-map')
+    expect(map).toHaveAttribute('data-show-current', 'false')
+    expect(map).toHaveAttribute('data-current-props', 'false')
   })
 
   it('passes aisCollisionAlarms straight through to the map', async () => {

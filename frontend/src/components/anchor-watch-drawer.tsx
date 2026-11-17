@@ -583,6 +583,7 @@ export function AnchorWatchDrawer({
                 anchorStateKnown={anchorStateKnown}
                 radiusMeters={radiusMeters}
                 depthMeters={depthMeters}
+                showCurrent
                 currentDriftKts={currentDriftKts}
                 currentSetDeg={currentSetDeg}
                 currentDriftImpactKts={currentDriftImpactKts}

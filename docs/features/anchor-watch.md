@@ -51,10 +51,11 @@ The low-water clearance warning sits in the same panel, so everything about the
 water you're anchored in reads from one place. If the depth hasn't updated
 recently, the reading is marked stale, so it never looks current when it isn't.
 
-Below those, the panel shows the current set and drift. When an anchor is down,
-it also shows the distance from the anchor, the bearing to it and the alarm
-radius. That's where you check how far you've swung and how much room is left
-before the alarm sounds.
+Below those, when an anchor is down, the panel shows the distance from the
+anchor, the bearing to it and the alarm radius. That's where you check how far
+you've swung and how much room is left before the alarm sounds. Under those,
+the panel shows the current set and drift. The Anchor Watch tile on a dashboard
+leaves the current out, because the Wind tile already shows it.
 
 On a phone the panel is kept short. The quiet low-water clearance line, the one
 that says you have room, is left out, and so are the lines under it that name

@@ -418,6 +418,12 @@ describe('AnchorWatchDrawer header — folded into the map panel', () => {
     expect(panel.textContent!.indexOf('Depth')).toBeLessThan(panel.textContent!.indexOf('Distance'))
     expect(screen.queryByTestId('anchor-watch-header')).not.toBeInTheDocument()
   })
+
+  it('keeps the Current row on the Anchor Watch page', () => {
+    render(<AnchorWatchDrawer {...baseProps} currentDriftKts={0.4} currentSetDeg={90} />)
+
+    expect(hud()).toHaveTextContent('Current')
+  })
 })
 
 describe('AnchorWatchDrawer header — fallback card when there is no map', () => {
