@@ -2,11 +2,14 @@ import { ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Sidebar, SidebarContent, SidebarHeader } from '@/components/ui/sidebar'
 
-// The header and the collapsed rail shared by the Rode Planner (a right-hand
-// pane) and TreeLayout (a left-hand one), so the two read as one control.
-// The chevron points toward the edge the pane hides into: a left pane hides
+// SidebarPane is the collapsible side pane shared by the Rode Planner and the
+// Forecast plans sidebar (right-hand panes) and TreeLayout (a left-hand one):
+// a rail while closed, otherwise a Sidebar with a header and the caller's
+// content. SidebarPaneHeader and SidebarPaneRail are its two parts, exported
+// so the three read as one control. The chevron points toward the edge the pane hides into: a left pane hides
 // with a left chevron and its rail opens with a right one, and a right pane
 // the reverse.
 
@@ -93,17 +96,24 @@ export interface SidebarPaneProps {
   contentId: string
   /** When set, the pane is a labelled complementary landmark. */
   landmarkLabel?: string
-  /** Sets --sidebar-width on the open pane's wrapper, for a `w-(--sidebar-width)` class. */
-  width?: string
+  /** The open pane's width, applied from the named breakpoint up. Without it the caller sizes the pane. */
+  width?: { size: string; from: 'lg' | 'xl' }
   /** Classes on the wrapper around the open pane. */
   paneClassName?: string
   /** Wraps the collapsed rail in a div with these classes. Without it the rail stands alone. */
   railWrapperClassName?: string
   contentClassName?: string
-  /** Rendered inside the Sidebar after the content, e.g. a SidebarFooter. */
-  footer?: ReactNode
-  children: ReactNode
+  /** Rendered inside the Sidebar after the content, e.g. a SidebarFooter. Called only while open. */
+  footer?: () => ReactNode
+  /** The pane's content. Called only while open, so a closed pane builds nothing. */
+  children: () => ReactNode
 }
+
+// Tailwind reads class names from the source, so each is written out whole.
+const WIDTH_CLASS = {
+  lg: 'lg:w-(--sidebar-width)',
+  xl: 'xl:w-(--sidebar-width)',
+} as const
 
 // The whole pane: a rail while closed, otherwise a Sidebar with the shared
 // header and the content. The caller owns the open state and where it is
@@ -130,7 +140,10 @@ export function SidebarPane({
     return railWrapperClassName ? <div className={railWrapperClassName}>{rail}</div> : rail
   }
   return (
-    <div className={paneClassName} style={width ? ({ '--sidebar-width': width } as CSSProperties) : undefined}>
+    <div
+      className={width ? cn(paneClassName, WIDTH_CLASS[width.from]) : paneClassName}
+      style={width ? ({ '--sidebar-width': width.size } as CSSProperties) : undefined}
+    >
       <Sidebar
         side={side}
         collapsible="none"
@@ -147,9 +160,9 @@ export function SidebarPane({
           onHide={() => onOpenChange(false)}
         />
         <SidebarContent id={contentId} className={contentClassName}>
-          {children}
+          {children()}
         </SidebarContent>
-        {footer}
+        {footer?.()}
       </Sidebar>
     </div>
   )

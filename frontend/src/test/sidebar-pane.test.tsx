@@ -49,7 +49,7 @@ function Harness(props: Partial<React.ComponentProps<typeof SidebarPane>>) {
       contentId="plans-content"
       {...props}
     >
-      <p>body</p>
+      {() => <p>body</p>}
     </SidebarPane>
   )
 }
@@ -70,14 +70,48 @@ describe('SidebarPane', () => {
     const { unmount } = render(<Harness />)
     expect(screen.queryByRole('complementary')).toBeNull()
     unmount()
-    render(<Harness landmarkLabel="Plans" width="24rem" paneClassName="w-full" />)
+    render(<Harness landmarkLabel="Plans" width={{ size: '24rem', from: 'xl' }} paneClassName="w-full" />)
     const wrapper = screen.getByRole('complementary', { name: 'Plans' }).parentElement!
-    expect(wrapper).toHaveClass('w-full')
+    expect(wrapper).toHaveClass('w-full', 'xl:w-(--sidebar-width)')
     expect(wrapper.style.getPropertyValue('--sidebar-width')).toBe('24rem')
   })
 
+  it('widens from the breakpoint the caller names', () => {
+    render(<Harness landmarkLabel="Plans" width={{ size: '20rem', from: 'lg' }} />)
+    expect(screen.getByRole('complementary', { name: 'Plans' }).parentElement).toHaveClass('lg:w-(--sidebar-width)')
+  })
+
+  it('never calls its content or footer while closed', () => {
+    const content = vi.fn(() => <p>body</p>)
+    const footer = vi.fn(() => <p>foot</p>)
+    function Closed() {
+      const [open, setOpen] = useState(false)
+      return (
+        <SidebarPane
+          side="right"
+          icon={Link}
+          label="Plans"
+          open={open}
+          onOpenChange={setOpen}
+          hideLabel="Hide plans"
+          showLabel="Show plans"
+          contentId="plans-content"
+          footer={footer}
+        >
+          {content}
+        </SidebarPane>
+      )
+    }
+    render(<Closed />)
+    expect(content).not.toHaveBeenCalled()
+    expect(footer).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show plans' }))
+    expect(content).toHaveBeenCalled()
+    expect(footer).toHaveBeenCalled()
+  })
+
   it('wraps the rail only when given a wrapper class, and renders the footer after the content', () => {
-    const { unmount } = render(<Harness footer={<p>foot</p>} />)
+    const { unmount } = render(<Harness footer={() => <p>foot</p>} />)
     const content = document.getElementById('plans-content')!
     expect(content.compareDocumentPosition(screen.getByText('foot')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Hide plans' }))

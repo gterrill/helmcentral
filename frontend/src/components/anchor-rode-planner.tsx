@@ -507,7 +507,7 @@ export function AnchorRodePlanner({
     return 'From the bow roller, no tide station'
   })()
 
-  const footer = (
+  const footer = () => (
     <>
       <SidebarFooter className="border-t">
         {!loaConfigured && (
@@ -552,10 +552,12 @@ export function AnchorRodePlanner({
       hideLabel="Collapse rode planner"
       showLabel="Expand Rode Planner"
       contentId={RODE_PLANNER_CONTENT_ID}
-      width="20rem"
-      paneClassName="w-full shrink-0 lg:w-(--sidebar-width)"
+      width={{ size: '20rem', from: 'lg' }}
+      paneClassName="w-full shrink-0"
       footer={footer}
     >
+      {() => (
+      <>
       <SidebarGroup>
         <SidebarGroupLabel>Conditions</SidebarGroupLabel>
         {/* 2x2 from `lg` up, where this is a 20rem sidebar: depth beside
@@ -745,6 +747,8 @@ export function AnchorRodePlanner({
           )}
         </SidebarGroupContent>
       </SidebarGroup>
+      </>
+      )}
     </SidebarPane>
   )
 }

@@ -96,7 +96,7 @@ export function TreeLayout({ pane, paneLabel = 'Folders', paneIcon: PaneIcon = F
         paneClassName="w-64 shrink-0"
         contentClassName="p-2"
       >
-        {collapsed ? null : renderPane({ dismiss: () => {} })}
+        {() => renderPane({ dismiss: () => {} })}
       </SidebarPane>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">{children}</div>
     </div>

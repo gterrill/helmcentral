@@ -308,10 +308,12 @@ export function ForecastPage({
           showLabel="Show plans"
           contentId={PLANS_CONTENT_ID}
           landmarkLabel="Plans"
-          width="24rem"
-          paneClassName="w-full min-w-0 shrink-0 xl:order-2 xl:w-(--sidebar-width)"
+          width={{ size: '24rem', from: 'xl' }}
+          paneClassName="w-full min-w-0 shrink-0 xl:order-2"
           railWrapperClassName="flex xl:order-2 xl:self-stretch"
         >
+          {() => (
+          <>
           <SidebarGroup>
             <SidebarGroupContent className="space-y-3">
               {newPlanButton && <div>{newPlanButton}</div>}
@@ -413,6 +415,8 @@ export function ForecastPage({
                 />
               </SidebarGroupContent>
             </SidebarGroup>
+          )}
+          </>
           )}
         </SidebarPane>
       )}
