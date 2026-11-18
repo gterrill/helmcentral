@@ -44,7 +44,7 @@ export interface LightningFeed {
  */
 export type LightningStatus =
   | { kind: 'none' }
-  | { kind: 'stay' }
+  | { kind: 'place' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; error: string | null }
 
@@ -55,7 +55,7 @@ function firstLine(text: string): string {
 
 /**
  * Which of the four things the feed amounts to. Nothing at all until an answer
- * has named a provider. After that a stay only reports that lightning is for
+ * has named a provider. After that a place only reports that lightning is for
  * the boat, and anything else draws the band, with the first line of any
  * request or refresh error carried beside it. Windows are placed in the
  * forecast's zone, so a zone the boat has not reported, or this browser does
@@ -63,12 +63,12 @@ function firstLine(text: string): string {
  */
 export function lightningStatus(
   feed: LightningFeed | undefined,
-  showingStay: boolean,
+  showingPlace: boolean,
   zone: string | undefined,
 ): LightningStatus {
   // The latest answer decides: a plugin removed mid-session goes quiet again.
   if (!feed || !feed.providerSeen || feed.provider === null) return { kind: 'none' }
-  if (showingStay) return { kind: 'stay' }
+  if (showingPlace) return { kind: 'place' }
   if (zone === undefined || !zoneKnown(zone)) {
     return { kind: 'error', message: unknownZoneMessage(zone) ?? 'the boat has not reported its time zone' }
   }
