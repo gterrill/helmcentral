@@ -260,9 +260,9 @@ falling back to something more permissive.
 
 Turn on SignalK's security first, then turn on login in Settings → Security.
 Helmcentral won't save the setting until SignalK security is on. With login
-on, Helmcentral won't start in two cases: when it can't reach SignalK, as
-after a power cut, and when SignalK's security has since been turned off. How
-to get it going again is in
+on, Helmcentral waits for SignalK when it can't reach it, as after a power
+cut, and refuses to start if SignalK's security has since been turned off.
+How to get it going again is in
 [Login and SignalK at startup](docs/reference/configuration.md#login-and-signalk-at-startup),
 on the page that also lists every environment variable, state path and
 startup behaviour.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1109,5 +1110,382 @@ func TestProbeSignalKSecurityEnabled_UnreachableSurfacesErrorNotSwallowed(t *tes
 	_, err := probeSignalKSecurityEnabled(url)
 	if err == nil {
 		t.Fatal("expected an unreachable SignalK to surface an explicit error rather than a guessed answer")
+	}
+	var unreachableErr *signalKUnreachableError
+	if !errors.As(err, &unreachableErr) {
+		t.Fatalf("expected a closed port to be a retryable signalKUnreachableError, got: %v", err)
+	}
+}
+
+// ── SignalK startup wait ─────────────────────────────────────────────────────
+//
+// After a power cut SignalK is often still starting when Helmcentral comes up.
+// An unreachable SignalK is waited on; any answer is judged at once.
+
+func TestCheckAuthModeAtStartup_WaitsForUnreachableSignalKThenSucceeds(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls < 3 {
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return true, nil
+	}
+
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected startup to succeed once SignalK answered, got: %v", err)
+	}
+	if mode != authModeSignalK {
+		t.Fatalf("expected mode %q, got %q", authModeSignalK, mode)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 probes (2 unreachable, 1 answer), got %d", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_SecurityOffAfterWaitingStillFailsFast(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls == 1 {
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return false, nil
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "security is disabled") {
+		t.Fatalf("expected a security-disabled error, got: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected no retry after SignalK answered, got %d probes", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_SecurityOffFirstProbeDoesNotRetry(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return false, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err == nil {
+		t.Fatal("expected security off to refuse to start")
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 probe, got %d", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_NonTransportErrorDoesNotRetry(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return false, errors.New("unusable answer")
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "unusable answer") {
+		t.Fatalf("expected the probe error to surface, got: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 probe, got %d", calls)
+	}
+}
+
+// Any failure where SignalK gives no HTTP answer at all is waited on, whatever
+// the cause, and the underlying error stays in the text for the log.
+func TestProbeSignalKSecurityEnabled_AnyNoAnswerIsUnreachable(t *testing.T) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer tlsSrv.Close()
+
+	cases := map[string]string{
+		"unsupported scheme": "ftp://127.0.0.1:1",
+		"unparseable URL":    "http://127.0.0.1:bad",
+		"untrusted TLS cert": tlsSrv.URL,
+	}
+	for name, address := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := probeSignalKSecurityEnabled(address)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			var unreachable *signalKUnreachableError
+			if !errors.As(err, &unreachable) {
+				t.Fatalf("a no-answer failure must be waited on, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), address) {
+				t.Fatalf("expected the error to name %q, got: %v", address, err)
+			}
+		})
+	}
+}
+
+// The settings are read again on every try, so a fix made while Helmcentral
+// waits takes effect without a restart.
+func TestCheckAuthModeAtStartup_RereadsSignalKAddressWhileWaiting(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://wrong.test", "signalk")
+	var seen []string
+	probe := func(u string) (bool, error) {
+		seen = append(seen, u)
+		if len(seen) == 1 {
+			content := "signalk:\n  address: http://corrected.example.test\n  port: 3000\nauth:\n  mode: signalk\n"
+			if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
+				t.Fatalf("rewrite settings: %v", err)
+			}
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return true, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	want := []string{"http://wrong.test", "http://corrected.example.test"}
+	if len(seen) != 2 || seen[0] != want[0] || seen[1] != want[1] {
+		t.Fatalf("expected probes at %v, got %v", want, seen)
+	}
+}
+
+func TestCheckAuthModeAtStartup_StopsWaitingWhenModeChangesAwayFromSignalK(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		content := "signalk:\n  address: http://signalk.test\n  port: 3000\nauth:\n  mode: none\n"
+		if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("rewrite settings: %v", err)
+		}
+		return false, &signalKUnreachableError{err: errors.New("connection refused")}
+	}
+
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected startup to carry on in mode none, got: %v", err)
+	}
+	if mode != authModeNone {
+		t.Fatalf("expected mode %q, got %q", authModeNone, mode)
+	}
+	if calls != 1 {
+		t.Fatalf("expected no probe after the mode changed, got %d", calls)
+	}
+}
+
+// A settings file that cannot be read has no auth.mode to know, so startup does
+// what it always did: treat the mode as none and carry on. Only signalk mode
+// has a security check to refuse on.
+func TestCheckAuthModeAtStartup_UnreadableSettingsIsModeNoneAsBefore(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte("auth: [unclosed\n"), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected the unreadable file to behave as on main (mode none), got: %v", err)
+	}
+	if mode != authModeNone {
+		t.Fatalf("expected mode %q, got %q", authModeNone, mode)
+	}
+	if calls != 0 {
+		t.Fatalf("expected no probe, got %d", calls)
+	}
+	if got := resolveAuthMode(settingsPath); got != authModeNone {
+		t.Fatalf("resolveAuthMode on an unreadable file = %q, want %q", got, authModeNone)
+	}
+}
+
+// Once startup has seen mode signalk, a settings file that stops being usable
+// while it waits (unreadable, empty or missing) is one more failed try: startup
+// keeps waiting, probes no guessed address, logs the settings problem, and
+// carries on in signalk mode once the file is good again. It neither refuses
+// nor falls back to mode none.
+func TestCheckAuthModeAtStartup_SettingsUnusableWhileWaitingKeepsWaiting(t *testing.T) {
+	cases := []struct {
+		name    string
+		damage  func(t *testing.T, path string)
+		logWord string
+	}{
+		{"unreadable", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("auth: [unclosed\n"), 0o644); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+		{"empty", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+		{"missing", func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+			good, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			logs := captureLog(t)
+			probes := 0
+			var seen []string
+			probe := func(u string) (bool, error) {
+				probes++
+				seen = append(seen, u)
+				if probes == 1 {
+					tc.damage(t, settingsPath)
+					return false, &signalKUnreachableError{err: errors.New("connection refused")}
+				}
+				return true, nil
+			}
+			sleeps := 0
+			clock := &fakeStartupClock{t: time.Unix(0, 0)}
+			w := startupWait{
+				// Each sleep moves the fake clock a full summary interval, so
+				// every failed try writes a log line.
+				retry: time.Second, summary: time.Minute, now: clock.now,
+				sleep: func(time.Duration) {
+					clock.sleep(time.Minute)
+					sleeps++
+					if sleeps == 3 { // two tries read the damaged file, then it is restored
+						if err := os.WriteFile(settingsPath, good, 0o644); err != nil {
+							t.Fatalf("restore settings: %v", err)
+						}
+					}
+				},
+			}
+
+			mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, w)
+			if err != nil {
+				t.Fatalf("expected the wait to survive a damaged settings file, got: %v", err)
+			}
+			if mode != authModeSignalK {
+				t.Fatalf("expected mode %q, got %q", authModeSignalK, mode)
+			}
+			if probes != 2 {
+				t.Fatalf("expected no probe while the file was unusable, got %d probes: %v", probes, seen)
+			}
+			if sleeps < 3 {
+				t.Fatalf("expected the wait to sleep through the damaged reads, got %d sleeps", sleeps)
+			}
+			if !strings.Contains(logs.String(), tc.logWord) || !strings.Contains(logs.String(), "settings") {
+				t.Fatalf("expected the log to name the settings problem, got:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// A file that reads fine, has content and names another mode still ends the
+// wait in that mode.
+func TestCheckAuthModeAtStartup_ContentfulOtherModeEndsWaitAfterSettingsProblem(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	probe := func(string) (bool, error) {
+		if err := os.WriteFile(settingsPath, nil, 0o644); err != nil {
+			t.Fatalf("empty settings: %v", err)
+		}
+		return false, &signalKUnreachableError{err: errors.New("connection refused")}
+	}
+	sleeps := 0
+	w := startupWait{
+		retry: time.Second, summary: time.Minute, now: time.Now,
+		sleep: func(time.Duration) {
+			sleeps++
+			if sleeps == 2 {
+				if err := os.WriteFile(settingsPath, []byte("auth:\n  mode: none\n"), 0o644); err != nil {
+					t.Fatalf("write settings: %v", err)
+				}
+			}
+		},
+	}
+	mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, w)
+	if err != nil || mode != authModeNone {
+		t.Fatalf("expected mode none, no error; got %q, %v", mode, err)
+	}
+}
+
+// ── Wait logging ─────────────────────────────────────────────────────────────
+
+// fakeStartupClock lets a test run many "5 s" tries without waiting: sleeping
+// just moves the clock on.
+type fakeStartupClock struct{ t time.Time }
+
+func (c *fakeStartupClock) now() time.Time        { return c.t }
+func (c *fakeStartupClock) sleep(d time.Duration) { c.t = c.t.Add(d) }
+
+// N failed tries log the first one in full, then one summary per interval,
+// then one line when SignalK answers — never one line per try.
+func TestCheckAuthModeAtStartup_WaitLogIsFirstTryThenOneSummaryPerInterval(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	logs := captureLog(t)
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls <= 25 {
+			return false, &signalKUnreachableError{err: fmt.Errorf("refused %d", calls)}
+		}
+		return true, nil
+	}
+
+	_, err := checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, now: clock.now, sleep: clock.sleep,
+	})
+	if err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	// 25 failed tries at 5 s spacing: tries 1..25 at t=0..120 s. First line at
+	// try 1, summaries at t=60 s and t=120 s, then the answered line.
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 log lines (first, 2 summaries, answered), got %d:\n%s", len(lines), logs.String())
+	}
+	if !strings.Contains(lines[0], "http://signalk.test") || !strings.Contains(lines[0], "refused 1") ||
+		!strings.Contains(lines[0], "login can't start until SignalK answers") {
+		t.Fatalf("first line should name the address, the real error and the consequence: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "refused 13") || !strings.Contains(lines[1], "13 tries") {
+		t.Fatalf("summary should carry the try count and latest error: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], "refused 25") || !strings.Contains(lines[2], "25 tries") {
+		t.Fatalf("summary should carry the try count and latest error: %s", lines[2])
+	}
+	if !strings.Contains(lines[3], "answering") {
+		t.Fatalf("expected a final answered line, got: %s", lines[3])
+	}
+}
+
+// An absent signalk section is not a read failure: the documented default
+// address applies.
+func TestCheckAuthModeAtStartup_AbsentSignalKSettingUsesDocumentedDefault(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte("auth:\n  mode: signalk\n"), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	var seen string
+	probe := func(u string) (bool, error) {
+		seen = u
+		return true, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	if want := buildSignalKURL(defaultSignalKAddress, defaultSignalKPort); seen != want {
+		t.Fatalf("expected the default address %q, got %q", want, seen)
 	}
 }
