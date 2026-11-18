@@ -209,7 +209,7 @@ func TestWatchRows_AlarmSummaryAndRows(t *testing.T) {
 		{Title: "Collision Risk", Count: 211, First: d(3, 9, 47), Last: d(3, 16, 39), Sources: 27, SourceKind: alarmSourceAISClosestApproach,
 			TopSources: []alarmSourceCount{{"Delphi", 13}, {"Chantelleiv", 12}, {"Rummage", 12}}},
 		{Title: "Silent sensor source", Count: 1, First: d(3, 22, 0), Last: d(3, 22, 0)},
-		{Title: "Tide Alarm", Count: 5, First: d(4, 1, 0), Last: d(4, 1, 0)},
+		{Title: "Tide Alarm", Count: 5, First: d(4, 1, 0), Last: d(4, 1, 0), ActiveNow: true},
 	}
 	in.Status.Alarms.Active = []vesselStatusAlarm{{Title: "Tide Alarm"}}
 	in.Status.Alarms.ActiveCount = 1

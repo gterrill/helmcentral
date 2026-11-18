@@ -158,7 +158,20 @@ on a boat without any, just says it isn't available in its own section.
 Helmcentral decides what counts as a finding, using rules you can change on each
 watch. These are the defaults:
 
-- **Alarms:** Any alarm raised since the last report.
+- **Alarms:** Any alarm raised since the last report, except those raised while
+  the boat was under way. Helmcentral notes whether you were under way at the
+  moment an alarm was raised. You're under way when SignalK's navigation state
+  says motoring or sailing, which the autostate plugin keeps, and no anchor
+  watch is set. At anchor or in port, every alarm counts. An alarm that's still
+  active when the report runs counts wherever it was raised, but only its latest
+  raise, and only while that raise is still open. Earlier raises of it that
+  were raised under way are left out, but earlier raises at anchor or in port
+  still count. The finding says how many under way alarms it left out,
+  and the Alarms section still lists all of them. Without a navigation state
+  from SignalK, or with the connection to SignalK down, nothing is left out,
+  and neither are alarms raised before this was added. If Helmcentral can't
+  read the list of active alarms, every alarm counts and the report says so
+  under **Not checked**.
 - **Instruments:** Any frozen, out of range or silent sensor.
 - **Power:** The house bank draining overnight at least one and a half times
   faster than it usually does. The finding shows its working, for example:

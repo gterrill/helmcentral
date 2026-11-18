@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -286,6 +287,16 @@ func isMotoring(status string) bool {
 	return s == "motoring" ||
 		s == "under way using engine" ||
 		s == "under_way_using_engine"
+}
+
+// isSailing is the sailing counterpart of isMotoring: trimmed, case-insensitive,
+// and accepting the spaced and underscored under way spellings.
+func isSailing(status string) bool {
+	switch strings.ToLower(trimEnvValue(status)) {
+	case "sailing", "under way sailing", "under_way_sailing":
+		return true
+	}
+	return false
 }
 
 // ── HTTP handlers ─────────────────────────────────────────────────────────────

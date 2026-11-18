@@ -152,6 +152,10 @@ type watchReportInput struct {
 	// they could not be read.
 	Raised        []alarmRaisedGroup
 	RaisedProblem string
+	// ActiveProblem says why the rule ids of the alarms active now could not be
+	// read. Without them no alarm raised under way can be told apart from one
+	// still going, so none is left out of the finding.
+	ActiveProblem string
 	// Previous is the last run's report and PreviousAt its time.
 	Previous    *watchReport
 	PreviousAt  time.Time
@@ -447,28 +451,27 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		window = "in the last 24 hours"
 	}
 	groups := append([]alarmRaisedGroup(nil), in.Raised...)
-	total := 0
+	total, leftOut, underWay := 0, 0, 0
 	for _, g := range groups {
 		total += g.Count
+		leftOut += g.LeftOut
+		underWay += g.UnderWay
 	}
 	if total == 0 {
 		s.Lines = append(s.Lines, "None raised "+window)
 		s.Summary = "None raised" + activeSummary
 		return s, nil
 	}
-	s.Summary = fmt.Sprintf("%d raised%s", total, activeSummary)
-	sort.SliceStable(groups, func(i, j int) bool {
-		if groups[i].Count != groups[j].Count {
-			return groups[i].Count > groups[j].Count
-		}
-		return groups[i].Last.After(groups[j].Last)
-	})
-	active := map[string]bool{}
-	if in.Status != nil {
-		for _, a := range in.Status.Alarms.Active {
-			active[a.Title] = true
-		}
+	// Without the list of active alarms nothing raised under way can be told
+	// from an alarm still going, so the gatherer left none out. That only matters
+	// when some alarm in the window was raised under way.
+	if in.ActiveProblem != "" && underWay > 0 {
+		s.NotChecked = append(s.NotChecked, "Alarms raised under way: all counted, because "+in.ActiveProblem)
 	}
+	s.Summary = fmt.Sprintf("%d raised%s", total, activeSummary)
+	// in.Raised arrives in alarmGroupLess order from the alarm log. The active
+	// marker is each group's own rule-id answer, the one the finding's
+	// exemption uses, not a match of its title against the capped status list.
 	var titles []map[string]any
 	var parts []string
 	shown := 0
@@ -477,8 +480,11 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 			break
 		}
 		entry := map[string]any{
-			"title": g.Title, "count": g.Count, "active_now": active[g.Title],
+			"title": g.Title, "count": g.Count, "active_now": g.ActiveNow,
 			"first": watchClock(g.First, loc), "last": watchClock(g.Last, loc),
+		}
+		if g.LeftOut > 0 {
+			entry["left_out"] = g.LeftOut
 		}
 		if g.Sources > 0 {
 			entry["sources"] = g.Sources
@@ -490,8 +496,8 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 			}
 		}
 		titles = append(titles, entry)
-		parts = append(parts, watchAlarmGroupText(g, active[g.Title], in.Now, loc))
-		s.Rows = append(s.Rows, watchAlarmRow(g, active[g.Title], in.Now, loc))
+		parts = append(parts, watchAlarmGroupText(g, g.ActiveNow, in.Now, loc))
+		s.Rows = append(s.Rows, watchAlarmRow(g, g.ActiveNow, in.Now, loc))
 		shown += g.Count
 	}
 	others := total - shown
@@ -499,21 +505,34 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		parts = append(parts, fmt.Sprintf("and %d more %s", others, watchPlural(others, "alarm", "alarms")))
 		s.Rows = append(s.Rows, watchReportRow{Label: "Other alarms", Value: strconv.Itoa(others)})
 	}
-	s.Figures = map[string]any{"raised": total, "others_count": others, "titles": titles}
+	s.Figures = map[string]any{"raised": total, "under_way_left_out": leftOut, "others_count": others, "titles": titles}
 	// The line keeps every title's sentence, for the email and Mate. The finding
 	// is short: the page shows the detail as rows.
 	s.Lines = append(s.Lines, fmt.Sprintf("%d %s raised %s: %s", total, watchPlural(total, "alarm", "alarms"), window, strings.Join(parts, "; ")))
-	if total >= w.Thresholds.AlarmsRaised {
-		return s, []watchFinding{ruleFinding(watchSectionAlarms, "alarms_raised", watchAlarmFindingText(total, window, groups[0], activeNow))}
+	// The finding counts what was not raised under way, or is still active
+	// (ADR 0255), and names its top title from those alarms alone.
+	counted := total - leftOut
+	if counted >= w.Thresholds.AlarmsRaised {
+		top := groups[0].counted()
+		for _, g := range groups {
+			if c := g.counted(); alarmGroupLess(c, top) {
+				top = c
+			}
+		}
+		return s, []watchFinding{ruleFinding(watchSectionAlarms, "alarms_raised", watchAlarmFindingText(counted, leftOut, window, top, activeNow))}
 	}
 	return s, nil
 }
 
-// watchAlarmFindingText is the alarms_raised finding: the window, the top
-// title with its count and sources, and the active state. The per-title detail
-// is in the section's rows and lines.
-func watchAlarmFindingText(total int, window string, top alarmRaisedGroup, activeNow string) string {
-	text := fmt.Sprintf("%d %s raised %s.", total, watchPlural(total, "alarm", "alarms"), window)
+// watchAlarmFindingText is the alarms_raised finding: the window, how many
+// raised under way it left out, the top title with its count and sources, and
+// the active state. The per-title detail is in the section's rows and lines.
+func watchAlarmFindingText(total, leftOut int, window string, top alarmRaisedGroup, activeNow string) string {
+	text := fmt.Sprintf("%d %s raised %s", total, watchPlural(total, "alarm", "alarms"), window)
+	if leftOut > 0 {
+		text += fmt.Sprintf(", not counting %d raised under way", leftOut)
+	}
+	text += "."
 	from := watchAlarmSourcesPhrase(top)
 	if top.Count == 1 {
 		if from != "" {
@@ -545,6 +564,9 @@ func watchAlarmRow(g alarmRaisedGroup, activeNow bool, now time.Time, loc *time.
 	var detail []string
 	if d := watchAlarmSourcesDetail(g); d != "" {
 		detail = append(detail, d)
+	}
+	if g.LeftOut > 0 {
+		detail = append(detail, fmt.Sprintf("%d under way not counted", g.LeftOut))
 	}
 	if activeNow {
 		detail = append(detail, "active now")

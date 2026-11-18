@@ -30,6 +30,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and any other connected assistant used to read it in the boat context, and
   they no longer do. Mate's own chats and reviews use it as before. Nothing
   to do on upgrade.
+- **The watch report no longer flags alarms raised while you were under way.**
+  The Alarms finding used to count every alarm since the last report, so a
+  passage with a busy AIS could fill it with collision alarms you had already
+  seen. Helmcentral now notes whether you were under way when each alarm was
+  raised. You're under way when SignalK's navigation state says motoring or
+  sailing, which the autostate plugin keeps, and no anchor watch is set. The
+  finding leaves those alarms out and says how many. At anchor or in port every
+  alarm still counts, and so does the latest raise of an alarm still active
+  when the report runs.
+  The Alarms section still lists everything raised. Without that navigation
+  state nothing is left out, and neither are alarms raised before you update.
 
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.

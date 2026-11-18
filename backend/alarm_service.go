@@ -129,6 +129,7 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 			Message:      event.Status.Message,
 			ValueAtRaise: event.Status.Value,
 			RaisedAt:     now,
+			UnderWay:     boatUnderWayNow(),
 		})
 		if err != nil {
 			log.Printf("alarm log: %v", err)
@@ -160,6 +161,28 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 	if globalAlarmReviewer != nil {
 		globalAlarmReviewer.onRaise(event, now)
 	}
+}
+
+// boatUnderWayNow is what an alarm log row is stamped with when the alarm is
+// raised (ADR 0255). An anchor watch set means at anchor, whatever the state
+// says. Otherwise the answer is SignalK's navigation.state, which
+// signalk-autostate keeps: motoring or sailing is under way, any other state
+// is not. It is nil, never a guess, when there is no state, or when the stream
+// is down and the held state may be hours old.
+func boatUnderWayNow() *bool {
+	var underWay bool
+	if anchorWatchActive() {
+		return &underWay
+	}
+	if connected, _ := globalSignalKSnapshot.status(); !connected {
+		return nil
+	}
+	state := vesselNavigationState(globalSignalKSnapshot)
+	if state == "" {
+		return nil
+	}
+	underWay = isMotoring(state) || isSailing(state)
+	return &underWay
 }
 
 // vesselNameForNotifications labels off-boat notifications, which is the whole

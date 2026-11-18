@@ -120,11 +120,11 @@ func TestWatchRaisedAlarms(t *testing.T) {
 		}
 	}
 	d := assistantToolDeps{alarmLog: func() *alarmLogStore { return store }}
-	got, problem := watchRaisedAlarms(d, now.Add(-3*time.Hour), now)
+	got, problem := watchRaisedAlarms(d, now.Add(-3*time.Hour), now, nil)
 	if problem != "" || len(got) != 1 || got[0].Title != "Anchor Dragging" {
 		t.Fatalf("%v %q", got, problem)
 	}
-	if _, problem := watchRaisedAlarms(assistantToolDeps{alarmLog: func() *alarmLogStore { return nil }}, now.Add(-time.Hour), now); problem != "the alarm log is not open" {
+	if _, problem := watchRaisedAlarms(assistantToolDeps{alarmLog: func() *alarmLogStore { return nil }}, now.Add(-time.Hour), now, nil); problem != "the alarm log is not open" {
 		t.Fatalf("an alarm log that is not open is a reason, never an empty list: %q", problem)
 	}
 }
@@ -143,7 +143,7 @@ func TestWatchRaisedAlarmsCountsEveryRowNotJustTheFirstTwoHundred(t *testing.T) 
 	}
 	store.RecordRaised(alarmLogEntry{RuleID: "b", Label: "Anchor Dragging", State: "alarm", RaisedAt: now.Add(-time.Hour)})
 	d := assistantToolDeps{alarmLog: func() *alarmLogStore { return store }}
-	got, problem := watchRaisedAlarms(d, now.Add(-24*time.Hour), now)
+	got, problem := watchRaisedAlarms(d, now.Add(-24*time.Hour), now, nil)
 	if problem != "" || len(got) != 2 || got[0].Title != "Collision Profile Not Changed" || got[0].Count != 300 || got[1].Count != 1 {
 		t.Fatalf("%+v %q", got, problem)
 	}

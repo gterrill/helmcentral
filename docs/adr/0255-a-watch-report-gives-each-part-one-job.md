@@ -114,8 +114,48 @@ chat does.
 
 ## Limits
 
-- **The any-alarm rule:** One alarm still makes a finding by default, so most
-  mornings still have something to look at. That is a separate decision.
+- **The any-alarm rule:** One alarm still makes a finding by default. The 18 Nov
+  report flagged 245 Collision Risk alarms raised on a passage the operator had
+  watched live, so the finding now leaves out alarms raised while the boat was
+  under way. At anchor or in port every alarm counts, and so does any alarm still
+  active when the report runs. The finding says how many it left out, and the
+  section's rows and lines still list every alarm raised.
+- **Where "under way" comes from:** The alarm log row. When the alarm engine
+  writes a raised row, it stamps the row under way, not under way, or unknown
+  (`alarm_log.under_way`, nullable). An anchor watch that is set settles it as
+  not under way, because a dragging anchor moves. Otherwise the engine reads
+  `navigation.state` from the live snapshot, the same read the collision profile
+  uses, and the signalk-autostate plugin keeps it: `motoring` or `sailing` is
+  under way, and any other state (`moored`, `anchored`) is not. With no state,
+  or with the SignalK stream down so that the held value may be hours old, the
+  stamp is unknown, never a guess. Without the autostate plugin nothing is ever
+  stamped under way and the report leaves nothing out, which is accepted. Two
+  earlier readings kept finding edge cases: rebuilding "under way" from the
+  passages logbook and the anchor history, and then from the recorded track
+  points, where one noisy point, an outage read as at rest and the once-a-minute
+  lag each broke it. The plugin already weighs position, movement and engine
+  state, so the report trusts it.
+- **Old rows count:** A row raised before the column existed has no stamp, and
+  an unknown stamp counts like any alarm at anchor. The first report after the
+  upgrade can still be flooded by alarms raised under way the day before.
+- **Still active is judged by rule id:** The latest raise of a rule raised under
+  way counts when its rule id is in the live active list at report time and
+  that raise has not cleared; the rule's earlier raises made under way do not,
+  while its earlier raises at anchor or in port count as usual. That list is the
+  one the alarm card shows, not the status's list, which stops at ten, and not a
+  match by title, which would let one vessel's open collision alarm keep every
+  other vessel's in. An open row alone is no test, since a row can stay open for
+  good, but a cleared latest raise is never exempt. A title shows "active now"
+  on its row when any of its rule ids is in that list. When the list cannot be
+  read, nothing is left out, and the
+  section's `not_checked` says so if any alarm in the window was raised under
+  way.
+- **One read:** The report reads the grouped rows and each title's counted and
+  left-out figures in one query, so they agree. The finding's top title is the
+  one most raised among the counted alarms, ties going to the latest counted
+  raise, then the title, the same order the log lists them in. Its sources come
+  from the counted rows only. Mate's figures carry
+  `under_way_left_out`, and `left_out` on each title that had some.
 - **Grouping is Mate's call:** A Mate finding that fails to set `extends` counts
   as its own issue, and nothing checks that a parent is really about the same
   thing.
