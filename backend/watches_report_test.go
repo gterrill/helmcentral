@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -359,10 +360,11 @@ func TestWatchReport_AlarmsAreGroupedByTitleAndMarkedActiveNow(t *testing.T) {
 	in.Since = in.Now.Add(-24 * time.Hour) // Wed 28 Oct 06:00
 	in.FirstRun = true
 	day := func(d, h, m int) time.Time { return time.Date(2026, 10, d, h, m, 0, 0, in.Now.Location()) }
+	// In the order the alarm log gives them, with the rule-id answer on the group.
 	in.Raised = []alarmRaisedGroup{
-		{Title: "Anchor Dragging", Count: 1, First: day(28, 7, 0), Last: day(28, 7, 0)},
+		{Title: "Collision Profile Not Changed", Count: 46, First: day(28, 15, 42), Last: day(29, 2, 23), ActiveNow: true},
 		{Title: "House Bank Low", Count: 2, First: day(28, 20, 0), Last: day(28, 21, 0)},
-		{Title: "Collision Profile Not Changed", Count: 46, First: day(28, 15, 42), Last: day(29, 2, 23)},
+		{Title: "Anchor Dragging", Count: 1, First: day(28, 7, 0), Last: day(28, 7, 0)},
 	}
 	in.Status.Alarms.Active = []vesselStatusAlarm{{Title: "Collision Profile Not Changed"}}
 	in.Status.Alarms.ActiveCount = 1
@@ -417,6 +419,7 @@ func TestWatchReport_AlarmTimesCarryTheirDayAndTheListIsCapped(t *testing.T) {
 		in.Raised = append(in.Raised, alarmRaisedGroup{Title: "Alarm " + string(rune('A'+i)), Count: 1, First: at, Last: at})
 	}
 	in.Raised[6].Count, in.Raised[5].Count = 4, 3
+	sort.Slice(in.Raised, func(i, j int) bool { return alarmGroupLess(in.Raised[i], in.Raised[j]) }) // the log's order
 	report, _ := buildWatchReport(baseWatch(), in)
 	s := sectionOf(t, report, "alarms")
 	text := strings.Join(s.Lines, "|")

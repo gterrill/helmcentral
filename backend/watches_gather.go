@@ -64,7 +64,9 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 	}
 
 	if wants[watchSectionAlarms] {
-		in.Raised, in.RaisedProblem = watchRaisedAlarms(d, in.Since, now)
+		var active map[string]bool
+		active, in.ActiveProblem = watchActiveRuleIDs(d)
+		in.Raised, in.RaisedProblem = watchRaisedAlarms(d, in.Since, now, active)
 	}
 	if wants[watchSectionWeather] && in.Status != nil {
 		src := resolveWatchForecast(d)
@@ -108,13 +110,29 @@ func scoreWithAnswers(d assistantToolDeps, ctx context.Context, since, until tim
 	return d.unusualReadings(ctx, since, until, unusualSubject{}, answers)
 }
 
+// watchActiveRuleIDs is the rule id of every alarm active now, from the same
+// list the alarm card shows. It is not the status's list, which stops at ten,
+// and it is matched by rule id, not by title: two vessels' collision alarms
+// share a title. The map is nil, with a reason, when the list cannot be read;
+// a known empty list is an empty map.
+func watchActiveRuleIDs(d assistantToolDeps) (map[string]bool, string) {
+	if d.activeAlarms == nil {
+		return nil, "the list of active alarms could not be read"
+	}
+	ids := map[string]bool{}
+	for _, a := range d.activeAlarms() {
+		ids[a.RuleID] = true
+	}
+	return ids, ""
+}
+
 // watchRaisedAlarms counts the alarms raised in [since, now] by title from the
 // alarm log. A log that is not open is a reason, never an empty list.
-func watchRaisedAlarms(d assistantToolDeps, since, now time.Time) ([]alarmRaisedGroup, string) {
+func watchRaisedAlarms(d assistantToolDeps, since, now time.Time, active map[string]bool) ([]alarmRaisedGroup, string) {
 	if d.alarmLog == nil || d.alarmLog() == nil {
 		return nil, "the alarm log is not open"
 	}
-	groups, err := d.alarmLog().RaisedSummary(since, now)
+	groups, err := d.alarmLog().RaisedSummary(since, now, active)
 	if err != nil {
 		return nil, firstErrorLine(err)
 	}

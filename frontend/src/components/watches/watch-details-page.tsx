@@ -131,7 +131,7 @@ interface ThresholdSpec {
 }
 
 const THRESHOLDS: Partial<Record<(typeof WATCH_SECTIONS)[number]['id'], ThresholdSpec>> = {
-  alarms: { key: 'alarms_raised', label: 'Alarms raised that count', hint: 'Since the last run. 1 means any alarm.', step: '1' },
+  alarms: { key: 'alarms_raised', label: 'Alarms raised that count', hint: 'Since the last run, not counting alarms raised under way. 1 means any other alarm.', step: '1' },
   instruments: { key: 'instrument_issues', label: 'Sensor problems that count', hint: 'Frozen, out of range or silent sensors.', step: '1' },
   tanks: { key: 'tank_change_points', label: 'Tank change that counts (points)', hint: 'Percentage points since the last run.', step: '1' },
   weather: { key: 'pressure_fall_hpa', label: 'Pressure fall that counts (hPa)', hint: 'Fall over 3 hours.', step: '0.5' },

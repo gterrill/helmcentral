@@ -32,6 +32,10 @@ type alarmLogEntry struct {
 	RaisedAt     time.Time  `json:"raised_at"`
 	AckedAt      *time.Time `json:"acked_at,omitempty"`
 	ClearedAt    *time.Time `json:"cleared_at,omitempty"`
+	// UnderWay says whether the boat was under way when the alarm was raised:
+	// nil when that was not known, and for every row raised before the column
+	// existed (ADR 0255).
+	UnderWay *bool `json:"under_way,omitempty"`
 }
 
 type alarmLogStore struct {
@@ -60,9 +64,18 @@ func createAlarmLogSchema(db *sql.DB) error {
 			value_at_raise REAL NOT NULL,
 			raised_at      INTEGER NOT NULL,
 			acked_at       INTEGER,
-			cleared_at     INTEGER
+			cleared_at     INTEGER,
+			under_way      INTEGER
 		)`); err != nil {
 		return fmt.Errorf("create alarm log table: %w", err)
+	}
+
+	// under_way arrived after the table shipped: 1 when the boat was under way
+	// when the alarm was raised, 0 when it was not, NULL when that was not
+	// known. Rows raised before it keep NULL, and the watch report counts them.
+	if _, err := db.Exec(`ALTER TABLE alarm_log ADD COLUMN under_way INTEGER`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add alarm log under_way column: %w", err)
 	}
 
 	// The log is read newest-first and looked up by rule while an alarm is open.
@@ -219,11 +232,18 @@ func (s *alarmLogStore) RecordRaised(entry alarmLogEntry) (string, error) {
 		entry.Source = alarmSourceRule
 	}
 
+	var underWay any // NULL: not known
+	if entry.UnderWay != nil {
+		underWay = 0
+		if *entry.UnderWay {
+			underWay = 1
+		}
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO alarm_log (id, rule_id, source, label, path, state, message, value_at_raise, raised_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO alarm_log (id, rule_id, source, label, path, state, message, value_at_raise, raised_at, under_way)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.RuleID, entry.Source, entry.Label, entry.Path, entry.State,
-		entry.Message, entry.ValueAtRaise, entry.RaisedAt.UTC().Unix())
+		entry.Message, entry.ValueAtRaise, entry.RaisedAt.UTC().Unix(), underWay)
 	if err != nil {
 		return "", fmt.Errorf("record raised alarm: %w", err)
 	}
@@ -375,15 +395,19 @@ func (s *alarmLogStore) Recent(limit int) ([]alarmLogEntry, error) {
 // logRowScanner is what *sql.Row and *sql.Rows share.
 type logRowScanner interface{ Scan(dest ...any) error }
 
-const alarmLogColumns = `id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at, cleared_at`
+const alarmLogColumns = `id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at, cleared_at, under_way`
 
 func scanAlarmLogRow(r logRowScanner) (alarmLogEntry, error) {
 	var entry alarmLogEntry
 	var raised int64
-	var acked, cleared sql.NullInt64
+	var acked, cleared, underWay sql.NullInt64
 	if err := r.Scan(&entry.ID, &entry.RuleID, &entry.Source, &entry.Label, &entry.Path,
-		&entry.State, &entry.Message, &entry.ValueAtRaise, &raised, &acked, &cleared); err != nil {
+		&entry.State, &entry.Message, &entry.ValueAtRaise, &raised, &acked, &cleared, &underWay); err != nil {
 		return alarmLogEntry{}, err
+	}
+	if underWay.Valid {
+		b := underWay.Int64 != 0
+		entry.UnderWay = &b
 	}
 	entry.RaisedAt = time.Unix(raised, 0).UTC()
 	if acked.Valid {
@@ -527,6 +551,24 @@ type alarmRaisedGroup struct {
 	Sources    int
 	SourceKind alarmSourceKind
 	TopSources []alarmSourceCount
+	// UnderWay is how many of Count were raised under way, counted or not.
+	// LeftOut is how many of those the watch report's finding does not count:
+	// every one except the raise still active now. Counted is the group over the
+	// rows that do count; it is nil when none were left out, and then the group
+	// itself is what counts.
+	UnderWay int
+	LeftOut  int
+	Counted  *alarmRaisedGroup
+	// ActiveNow is whether any of the title's rule ids is active now.
+	ActiveNow bool
+}
+
+// counted is the group as the finding counts it.
+func (g alarmRaisedGroup) counted() alarmRaisedGroup {
+	if g.Counted != nil {
+		return *g.Counted
+	}
+	return g
 }
 
 // alarmSourceCount is one named source and how often it raised the alarm.
@@ -542,122 +584,181 @@ const alarmTopSourcesCap = 3
 // often raised first and then most recent. The counting is done in SQL, so a
 // window with thousands of rows is counted whole rather than cut at the
 // ChangedBetween row limit.
-func (s *alarmLogStore) RaisedSummary(from, to time.Time) ([]alarmRaisedGroup, error) {
+//
+// active is the set of rule ids of the alarms active now. A row stamped under
+// way whose rule id is not in it is left out of the group's Counted figures
+// (ADR 0255); a row with no stamp is counted. A nil active means the list could
+// not be read, and then nothing is left out.
+func (s *alarmLogStore) RaisedSummary(from, to time.Time, active map[string]bool) ([]alarmRaisedGroup, error) {
 	if s == nil {
 		return nil, nil
 	}
 	defer lockAlarmLogRaisedSummary.held(&s.mu).release()
-	rows, err := s.db.Query(`SELECT label, COUNT(*), MIN(raised_at), MAX(raised_at) FROM alarm_log
-		WHERE raised_at BETWEEN ? AND ? GROUP BY label
-		ORDER BY COUNT(*) DESC, MAX(raised_at) DESC, label ASC`, from.UTC().Unix(), to.UTC().Unix())
+	byLabel, err := s.raisedRows(from, to, active)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]alarmRaisedGroup, 0, len(byLabel))
+	for label, rows := range byLabel {
+		var counted []raisedRow
+		activeNow := false
+		for _, r := range rows {
+			if !r.leftOut {
+				counted = append(counted, r)
+			}
+			activeNow = activeNow || active[r.ruleID]
+		}
+		g := groupOfRows(label, rows)
+		g.ActiveNow = activeNow
+		if len(counted) != len(rows) {
+			c := groupOfRows(label, counted)
+			g.Counted, g.LeftOut = &c, g.Count-c.Count
+		}
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return alarmGroupLess(out[i], out[j]) })
+	return out, nil
+}
+
+// alarmGroupLess is the one order for raised alarms: most raised first, then
+// the most recent, then by title so that ties never depend on map order. The
+// log's listing, the report's rows and its top title all use it.
+func alarmGroupLess(a, b alarmRaisedGroup) bool {
+	if a.Count != b.Count {
+		return a.Count > b.Count
+	}
+	if !a.Last.Equal(b.Last) {
+		return a.Last.After(b.Last)
+	}
+	return a.Title < b.Title
+}
+
+// raisedRow is the alarms of one label, rule id, wording and stamp in a window.
+type raisedRow struct {
+	ruleID, message string
+	n               int
+	first, last     time.Time
+	underWay        bool
+	leftOut         bool
+}
+
+// raisedRows reads the window as one query, so the whole listing and the
+// counted alarms come from the same rows and agree. It returns, per label, one
+// row per rule id and stamp, with an under-way rule's latest raise on a row of
+// its own, plus one per wording for a rule id with an "@context", whose
+// wordings name the sources.
+// That is bounded by the sources in the window, never by the alarms: a rule
+// that flaps with a new wording each time is still one row. A source is a rule
+// id: two vessels with one name stay two. The caller holds the lock.
+func (s *alarmLogStore) raisedRows(from, to time.Time, active map[string]bool) (map[string][]raisedRow, error) {
+	rows, err := s.db.Query(`SELECT label, rule_id,
+			CASE WHEN instr(rule_id, ?) > 0 THEN message ELSE '' END,
+			under_way, rn = 1 AND cleared_at IS NULL AND COALESCE(under_way, 0) = 1, COUNT(*), MIN(raised_at), MAX(raised_at)
+		FROM (
+			SELECT label, rule_id, message, under_way, raised_at, cleared_at,
+				ROW_NUMBER() OVER (PARTITION BY rule_id ORDER BY raised_at DESC, id DESC) AS rn
+			FROM alarm_log WHERE raised_at BETWEEN ? AND ?
+		)
+		GROUP BY label, rule_id, 3, under_way, 5`,
+		notificationVesselSeparator, from.UTC().Unix(), to.UTC().Unix())
 	if err != nil {
 		return nil, fmt.Errorf("summarise alarm log: %w", err)
 	}
 	defer rows.Close()
-	var out []alarmRaisedGroup
+	byLabel := map[string][]raisedRow{}
 	for rows.Next() {
-		var g alarmRaisedGroup
+		var r raisedRow
+		var label string
+		var underWay sql.NullInt64
+		var latest bool
 		var first, last int64
-		if err := rows.Scan(&g.Title, &g.Count, &first, &last); err != nil {
+		if err := rows.Scan(&label, &r.ruleID, &r.message, &underWay, &latest, &r.n, &first, &last); err != nil {
 			return nil, fmt.Errorf("scan alarm log summary: %w", err)
 		}
-		g.First, g.Last = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
-		out = append(out, g)
+		r.first, r.last = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+		r.underWay = underWay.Valid && underWay.Int64 != 0
+		// Left out: raised under way, and not the raise still active now, which
+		// is the rule's latest and has not cleared. With
+		// no active list (nil) nothing can be told apart from an alarm still
+		// going, so nothing is left out.
+		r.leftOut = r.underWay && active != nil && !(active[r.ruleID] && latest)
+		byLabel[label] = append(byLabel[label], r)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := s.addRaisedSources(out, from, to); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return byLabel, rows.Err()
 }
 
-// addRaisedSources fills Sources, SourceKind and TopSources for the groups whose
-// every row has a rule id carrying a "@context". One SQL row comes back per
-// distinct rule id and message, so the read is bounded by the sources and the
-// wordings in the window, never by the alarms. A source is a rule id: two
-// vessels with one name stay two. The caller holds s.mu.
-func (s *alarmLogStore) addRaisedSources(groups []alarmRaisedGroup, from, to time.Time) error {
-	rows, err := s.db.Query(`SELECT label, rule_id, message, COUNT(*) FROM alarm_log
-		WHERE raised_at BETWEEN ? AND ? AND instr(rule_id, ?) > 0
-		GROUP BY label, rule_id, message`, from.UTC().Unix(), to.UTC().Unix(), notificationVesselSeparator)
-	if err != nil {
-		return fmt.Errorf("summarise alarm sources: %w", err)
-	}
-	defer rows.Close()
-	index := map[string]int{}
-	for i, g := range groups {
-		index[g.Title] = i
-	}
+// groupOfRows is a title's group over some of its rows: how often it was
+// raised and, when every row has a rule id carrying a "@context", the sources
+// that raised it. A source with no context in any one row makes no claim
+// about sources, because "from N" would then undercount.
+func groupOfRows(label string, rows []raisedRow) alarmRaisedGroup {
+	g := alarmRaisedGroup{Title: label}
 	type source struct {
 		count int
 		names map[string]int // named wordings and how often each was raised
 	}
-	sources := map[string]map[string]*source{} // label, then rule id
-	kinds := map[string]alarmSourceKind{}
-	covered := map[string]int{} // alarms per label whose rule id has a context
-	for rows.Next() {
-		var label, ruleID, message string
-		var n int
-		if err := rows.Scan(&label, &ruleID, &message, &n); err != nil {
-			return fmt.Errorf("scan alarm sources: %w", err)
+	sources := map[string]*source{}
+	var kind alarmSourceKind
+	covered := 0 // alarms whose rule id has a context
+	for _, r := range rows {
+		g.Count += r.n
+		if r.underWay {
+			g.UnderWay += r.n
 		}
-		if _, ok := index[label]; !ok {
+		if g.First.IsZero() || r.first.Before(g.First) {
+			g.First = r.first
+		}
+		if r.last.After(g.Last) {
+			g.Last = r.last
+		}
+		if !strings.Contains(r.ruleID, notificationVesselSeparator) {
 			continue
 		}
 		// The kind is the one every source of the label shares. Where they
 		// differ it is left empty, so the report says "sources" and doesn't
 		// call a power fault a vessel.
-		if kind := alarmSourceKindOf(ruleID); sources[label] == nil {
-			sources[label] = map[string]*source{}
-			kinds[label] = kind
-		} else if kinds[label] != kind {
-			kinds[label] = ""
+		if k := alarmSourceKindOf(r.ruleID); len(sources) == 0 {
+			kind = k
+		} else if kind != k {
+			kind = ""
 		}
-		src := sources[label][ruleID]
+		src := sources[r.ruleID]
 		if src == nil {
 			src = &source{names: map[string]int{}}
-			sources[label][ruleID] = src
+			sources[r.ruleID] = src
 		}
-		src.count += n
-		covered[label] += n
-		if name, ok := collisionTargetName(message); ok {
-			src.names[name] += n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for label, bySource := range sources {
-		g := &groups[index[label]]
-		if covered[label] != g.Count {
-			continue
-		}
-		g.Sources, g.SourceKind = len(bySource), kinds[label]
-		for _, src := range bySource {
-			name, best := "", 0
-			for candidate, n := range src.names {
-				if n > best || (n == best && candidate < name) {
-					name, best = candidate, n
-				}
-			}
-			if name != "" {
-				g.TopSources = append(g.TopSources, alarmSourceCount{name, src.count})
-			}
-		}
-		sort.Slice(g.TopSources, func(a, b int) bool {
-			x, y := g.TopSources[a], g.TopSources[b]
-			if x.Count != y.Count {
-				return x.Count > y.Count
-			}
-			return x.Name < y.Name
-		})
-		if len(g.TopSources) > alarmTopSourcesCap {
-			g.TopSources = g.TopSources[:alarmTopSourcesCap]
+		src.count += r.n
+		covered += r.n
+		if name, ok := collisionTargetName(r.message); ok {
+			src.names[name] += r.n
 		}
 	}
-	return nil
+	if len(sources) == 0 || covered != g.Count {
+		return g
+	}
+	g.Sources, g.SourceKind = len(sources), kind
+	for _, src := range sources {
+		name, best := "", 0
+		for candidate, n := range src.names {
+			if n > best || (n == best && candidate < name) {
+				name, best = candidate, n
+			}
+		}
+		if name != "" {
+			g.TopSources = append(g.TopSources, alarmSourceCount{name, src.count})
+		}
+	}
+	sort.Slice(g.TopSources, func(a, b int) bool {
+		x, y := g.TopSources[a], g.TopSources[b]
+		if x.Count != y.Count {
+			return x.Count > y.Count
+		}
+		return x.Name < y.Name
+	})
+	if len(g.TopSources) > alarmTopSourcesCap {
+		g.TopSources = g.TopSources[:alarmTopSourcesCap]
+	}
+	return g
 }
 
 // alarmLogRetention bounds how long an alarm_log row is kept. Unlike

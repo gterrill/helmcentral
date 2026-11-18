@@ -460,7 +460,7 @@ func TestAlarmLog_RaisedSummaryCountsDistinctSourcesAndNamesTheBusiest(t *testin
 	if _, err := store.RecordRaised(raisedEntry("rule-1", alarmNow)); err != nil {
 		t.Fatal(err)
 	}
-	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour))
+	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,7 +507,7 @@ func raiseCollision(t *testing.T, store *alarmLogStore, mmsi, message string, n 
 
 func raisedRisk(t *testing.T, store *alarmLogStore) alarmRaisedGroup {
 	t.Helper()
-	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour))
+	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func TestAlarmLog_RaisedSummaryMixedSourceKindsGetNoKind(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour))
+	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
