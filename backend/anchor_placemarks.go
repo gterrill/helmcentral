@@ -24,7 +24,8 @@ const maxPlacemarks = 50
 
 // placemark is a user-dropped reference point on the anchor-watch map —
 // typically a bombie or the nearest shoreline, so the crew can watch how
-// close the swing is taking them to it.
+// close the swing is taking them to it. Pins may also be dropped before
+// anchoring, to judge a channel or an anchorage from the boat.
 //
 // Only the position is stored. Range and bearing are deliberately NOT
 // persisted: they change every time the boat swings, so each client
@@ -60,10 +61,9 @@ func savePlacemarksLocked() error {
 	return writeJSONFileAtomic(anchorPlacemarksFilePath(), placemarks)
 }
 
-// loadAnchorPlacemarks restores pins on startup. Pins belong to one anchoring
-// session, so a file found with no watch running is a leftover from a session
-// that ended while the backend was down — it is discarded, not inherited.
-// Call it after loadAnchorWatch.
+// loadAnchorPlacemarks restores pins on startup. Pins can be dropped with no
+// watch running, to be carried into the next anchoring, so the file is
+// restored whether or not a watch is active. Only Raise clears it.
 func loadAnchorPlacemarks() {
 	path := anchorPlacemarksFilePath()
 	data, err := os.ReadFile(path)
@@ -71,11 +71,6 @@ func loadAnchorPlacemarks() {
 		if !os.IsNotExist(err) {
 			log.Printf("WARNING: anchor placemarks not restored: reading %s: %v", path, err)
 		}
-		return
-	}
-
-	if !anchorWatchActive() {
-		_ = os.Remove(path)
 		return
 	}
 
@@ -92,8 +87,8 @@ func loadAnchorPlacemarks() {
 	placemarkMu.Unlock()
 }
 
-// clearPlacemarks drops every pin and its state file. Called when the anchor
-// session ends.
+// clearPlacemarks drops every pin and its state file. Called on Raise, the
+// only thing that ends a pin's life besides the operator removing it.
 //
 // A missing file is fine. Any other failure to remove it is returned: the
 // pins would otherwise come back from disk at the next start.
@@ -130,13 +125,6 @@ func createPlacemarkHandler(c echo.Context) error {
 	if !validLatLon(body.Lat, body.Lon) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
-	// A pin is bound to the running session. With no session there is
-	// nothing to bind it to, so say so rather than storing an orphan the
-	// next anchoring would silently inherit.
-	if !anchorWatchActive() {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "no active anchor watch"})
-	}
-
 	label := strings.TrimSpace(body.Label)
 	if len(label) > maxPlacemarkLabelLen {
 		label = label[:maxPlacemarkLabelLen]
@@ -153,7 +141,7 @@ func createPlacemarkHandler(c echo.Context) error {
 	placemarkMu.Lock()
 	if len(placemarks) >= maxPlacemarks {
 		placemarkMu.Unlock()
-		return c.JSON(http.StatusConflict, map[string]string{"error": "placemark limit reached"})
+		return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("%d pins is the limit. Remove one to drop another.", maxPlacemarks)})
 	}
 	placemarks = append(placemarks, pm)
 	err := savePlacemarksLocked()

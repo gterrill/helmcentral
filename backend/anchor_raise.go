@@ -42,7 +42,8 @@ func anchorRaiseFailureStage(err error) anchorRaiseStage {
 
 // raiseAnchorWatch performs the full anchor-raise lifecycle: publish an
 // explicit null anchor position to SignalK, remove the local record, and
-// clear the in-memory watch, its trail and its session placemarks. It is
+// clear the in-memory watch, its trail and every
+// placemark, including those dropped before anchoring. It is
 // the one path both DELETE /api/anchor-watch (anchor.go's deleteAnchorWatch)
 // and the server-side auto-raise watcher (anchor_auto_raise.go, ADR 0099)
 // go through, so an operator's Raise and an automatic one leave SignalK,
@@ -74,7 +75,7 @@ func raiseAnchorWatch() error {
 	// path, since there is nothing to clear there.
 	clearAnchorWatchLoadFailure()
 
-	// Placemarks are bound to the anchoring session, so they end with it.
+	// Raise ends the pins too: they are cleared with the watch.
 	// This runs before the trail reset and whatever it returns: the watch is
 	// already gone, so nothing would retry the cleanup later.
 	pmErr := clearPlacemarks()

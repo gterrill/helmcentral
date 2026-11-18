@@ -3,6 +3,7 @@ import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { apiRequest, declareQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
+import { clearPlacemarksCache } from '@/hooks/use-anchor-placemarks'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { normaliseTideDatum, type TideCapture, type TideDatum } from '@/lib/tide-datum'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
@@ -422,6 +423,7 @@ export async function clearAnchor(): Promise<void> {
   try {
     await apiRequest<void>('/api/anchor-watch', { method: 'DELETE' })
     land(INACTIVE)
+    clearPlacemarksCache()
   } catch (error) {
     toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
   }

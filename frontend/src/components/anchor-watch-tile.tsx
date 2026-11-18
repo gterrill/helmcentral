@@ -350,7 +350,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
   const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
   const aisTrails = useAisTrails(TRAIL_POLL_MS)
   const aisAnchorEstimates = useAisAnchorEstimates()
-  const pins = usePins(watch.active)
+  const pins = usePins()
   return (
     <AnchorWatchTile
       {...props}

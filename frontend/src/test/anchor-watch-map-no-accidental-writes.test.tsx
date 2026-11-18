@@ -130,7 +130,7 @@ describe('AnchorWatchMap: no accidental writes (Phase 1, impeccable P0s)', () =>
     // The marker swallows the click (stopPropagation + suppressNextMapClickRef)
     // so it never falls through to the map's own "place a pin here" handler —
     // the same treatment every other marker on this map gets.
-    render(<AnchorWatchMap {...baseProps} />)
+    render(<AnchorWatchMap {...baseProps} onPlacemarkCreate={() => {}} />)
 
     fireEvent.click(screen.getByLabelText('Anchor position'))
 
@@ -153,7 +153,7 @@ describe('AnchorWatchMap: no accidental writes (Phase 1, impeccable P0s)', () =>
   it('does not swallow a later, unrelated map click after tapping the anchor marker', () => {
     vi.useFakeTimers()
     try {
-      render(<AnchorWatchMap {...baseProps} />)
+      render(<AnchorWatchMap {...baseProps} onPlacemarkCreate={() => {}} />)
 
       fireEvent.click(screen.getByLabelText('Anchor position'))
 

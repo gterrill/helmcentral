@@ -30,6 +30,11 @@ const patch = (fn: (pins: AnchorPlacemark[]) => AnchorPlacemark[]) =>
     placemarks: fn(Array.isArray(prev?.placemarks) ? prev.placemarks : []),
   }))
 
+/** Empties the pins on screen. Raising the anchor clears them on the server. */
+export function clearPlacemarksCache() {
+  patch(() => [])
+}
+
 export interface AnchorPlacemarksResult {
   placemarks: AnchorPlacemark[]
   createPlacemark: (lat: number, lon: number, label?: string) => Promise<void>
@@ -37,13 +42,11 @@ export interface AnchorPlacemarksResult {
 }
 
 /**
- * Polls the session's placemarks so pins dropped on one device show up on
- * every other device watching the same anchorage.
- *
- * `active` gates the polling: with no anchor watch running there is no
- * session, the server holds no pins, and polling would be pure noise.
+ * Polls the placemarks so pins dropped on one device show up on every other
+ * device watching the same anchorage. Pins can be dropped before anchoring, so
+ * the poll runs with or without a watch.
  */
-export function useAnchorPlacemarks(active: boolean, refreshIntervalSeconds = 10): AnchorPlacemarksResult {
+export function useAnchorPlacemarks(refreshIntervalSeconds = 10): AnchorPlacemarksResult {
   // A dropped poll is transient: the query keeps the last known pins rather
   // than blinking them off the chart. Writes below do surface their failures,
   // because a pin the user thinks they dropped and didn't is a hazard they'd
@@ -51,7 +54,6 @@ export function useAnchorPlacemarks(active: boolean, refreshIntervalSeconds = 10
   const { data } = useApiQuery<AnchorPlacemark[]>({
     queryKey: PLACEMARKS_KEY,
     path: '/api/anchor-watch/placemarks',
-    enabled: active,
     refetchInterval: refreshIntervalSeconds * 1000,
     select: (raw: PlacemarksResponse) => (Array.isArray(raw.placemarks) ? raw.placemarks : NO_PINS),
   })

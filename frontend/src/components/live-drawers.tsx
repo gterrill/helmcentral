@@ -132,7 +132,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
   const aisTrails = useAisTrails(TRAIL_POLL_MS)
   const aisAnchorEstimates = useAisAnchorEstimates()
-  const pins = usePins(watch.active)
+  const pins = usePins()
   const hasFix = v.latitude !== null && v.longitude !== null
   const canDrop = hasFix && !v.gnssCriticalAlert
   return (

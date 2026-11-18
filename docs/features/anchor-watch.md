@@ -272,7 +272,7 @@ corrected coordinates. Changing the alarm radius or rode settings doesn't. See
 and move the anchor or change the radius.
 
 **Raise** publishes an explicit "no anchor" state, then removes the local
-watch, trail and session pins. This clears the boat's anchored navigation
+watch, trail and pins. This clears the boat's anchored navigation
 state. So an autopilot, or another instrument that only behaves differently at
 anchor, sees the vessel as under way again. Both operations confirm the change
 before reporting success. They use the saved instrument-network credentials,
@@ -571,8 +571,13 @@ Catenary figure or more.
 Its map takes pins. Click open water to mark a bombie, a mooring block or the
 nearest bit of shoreline, and watch the range close as you swing. Pins are
 shared across every device watching the anchorage, so marking a hazard from the
-bow shows up on the tablet at the helm. They expire with the anchoring, rather
-than accumulating across seasons.
+bow shows up on the tablet at the helm.
+
+You can also drop pins before you anchor. Each pin shows its range and bearing
+from the boat, so you can mark both sides of a channel and judge how wide it is
+before you commit. Pins you drop without a watch carry into the next anchoring,
+and Drop leaves them where they are. They stay until you remove them by hand or
+raise the anchor, so a pin you forget about doesn't expire on its own.
 
 The map keeps the view you panned to for as long as you stay in the anchorage,
 including across updates. When you anchor somewhere else, every device
