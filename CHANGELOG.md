@@ -28,12 +28,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   minutes really does stop the restarts.
 - **On a systemd install, copy over the new `helmcentral.service`.** With login
   set to SignalK, Helmcentral now waits for SignalK after a power cut instead
-  of exiting. It tries again 5 seconds after each failed try and says so in the
-  log, then carries on once SignalK answers. If SignalK answers with its
-  security switched off, or the address in `settings.yaml` can't work, it still
-  refuses to start. What to do: copy the updated `helmcentral.service` over the
-  old one and run `sudo systemctl daemon-reload`. Without it the restart limit
-  never took effect. Docker installs need nothing.
+  of exiting. Whenever SignalK gives no answer at all, it tries again 5 seconds
+  after each failed try. The log shows the real error on the first try and then
+  once a minute, and says when SignalK answers. If SignalK does answer and its
+  security is switched off, it still refuses to start. What to do: copy the
+  updated `helmcentral.service` over the old one and run
+  `sudo systemctl daemon-reload`. Without it the restart limit never took
+  effect. Docker installs need nothing.
 
 ### Changed
 

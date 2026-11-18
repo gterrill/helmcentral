@@ -347,30 +347,32 @@ delegated login needs SignalK to do the authenticating, Helmcentral asks
 SignalK for its security status before it starts up. What happens next
 depends on the answer:
 
-- SignalK can't be reached: Helmcentral waits. It tries again 5 seconds
-  after each failed try and writes a line to the log each time, naming the
-  address and saying that login can't start until SignalK answers. A try can
-  itself take up to 5 seconds to fail, so the lines come a little further
-  apart than that. Helmcentral only waits for faults that can clear by
-  themselves, such as a refused connection, an unreachable network or a
-  timeout. A mistake in the address, such as a bad URL, a certificate error or
-  a host name that doesn't exist, stops it at once with an error naming the
-  address. Helmcentral reads `settings.yaml` again on every try, so a
-  corrected address takes effect without a restart. This is the usual state after a
-  power cut, when SignalK is still starting up. It writes one more line when
-  SignalK does answer. There's no time limit, and Helmcentral doesn't start
-  until SignalK answers, so alarms and anchor watch are also down while it
-  waits. A SignalK that never comes up leaves Helmcentral waiting, so check
-  the address in `settings.yaml` if the log keeps repeating.
+- SignalK gives no answer at all: Helmcentral waits. That covers a refused
+  connection, an unreachable network, a timeout, a host name that doesn't
+  exist, a certificate error and a badly written address. Whatever the cause,
+  it tries again 5 seconds after each failed try. A try can itself take up to
+  5 seconds to fail, so the tries come a little further apart than that. This
+  is the usual state after a power cut, when SignalK is still starting up.
+  Helmcentral reads `settings.yaml` again on every try, so a corrected address
+  takes effect without a restart. There's no time limit, and Helmcentral
+  doesn't start until SignalK answers, so alarms and anchor watch are also
+  down while it waits.
+- What the log shows while it waits: the first failed try gets one line. It
+  has the address, the actual error and a note that login can't start until
+  SignalK answers. After that, one line a minute with the number of tries so
+  far and the latest error. It writes one more line when SignalK does answer.
+  A SignalK that never comes up leaves Helmcentral waiting, so check the
+  address in `settings.yaml` and the error in the log if the lines keep coming.
 - SignalK's security is off: Helmcentral refuses to start straight away.
-  Settings → Security won't save `signalk` unless SignalK's security is on.
-  So either SignalK's security was turned off afterwards, or `settings.yaml`
-  was edited by hand. A wrong SignalK address in `settings.yaml` can look
-  like this too, if something else answers at that address, so check the
-  address before you change SignalK.
-- SignalK answers with anything else that isn't a usable security status:
-  Helmcentral refuses to start straight away, the same as when security is
-  off.
+  SignalK says so by answering that its login address doesn't exist (HTTP
+  404). Settings → Security won't save `signalk` unless SignalK's security is
+  on. So either SignalK's security was turned off afterwards, or
+  `settings.yaml` was edited by hand. A wrong SignalK address in
+  `settings.yaml` can look like this too, if something else answers at that
+  address, so check the address before you change SignalK.
+- SignalK answers with anything else: Helmcentral takes that as security
+  being on and starts. Any answer other than a 404 means the login address
+  exists, even a rejection of the empty login Helmcentral sends to test it.
 
 When Helmcentral refuses to start, whatever started it has to start it
 again. Here's how to get going once SignalK is up and its security is on:

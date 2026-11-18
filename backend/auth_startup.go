@@ -2,18 +2,13 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -45,70 +40,55 @@ func checkAuthModeAtStartup(settingsPath string) (mode string, err error) {
 // SignalK can't be reached. There is no cap: SignalK is a required source.
 const signalKStartupRetryInterval = 5 * time.Second
 
-// signalKUnreachableError marks a transport failure: SignalK could not be
-// reached at all, as opposed to answering with something unusable.
+// signalKUnreachableError marks a request that got no HTTP answer at all, for
+// any reason; its text is the underlying cause.
 type signalKUnreachableError struct{ err error }
 
 func (e *signalKUnreachableError) Error() string { return e.err.Error() }
 func (e *signalKUnreachableError) Unwrap() error { return e.err }
-
-// isRetryableSignalKTransportError reports whether a failed request to SignalK
-// is one that can clear by itself because SignalK, or the network to it, is not
-// up yet: connection refused, host or network unreachable, connection reset,
-// timeouts, and DNS failures that are temporary or timeouts. Everything else
-// is a fault in the configured address (bad URL or scheme, TLS or certificate
-// errors, a host name that does not exist) that waiting will not mend.
-func isRetryableSignalKTransportError(err error) bool {
-	var (
-		certVerify  *tls.CertificateVerificationError
-		unknownAuth x509.UnknownAuthorityError
-		hostname    x509.HostnameError
-		certInvalid x509.CertificateInvalidError
-		recordHdr   tls.RecordHeaderError
-	)
-	if errors.As(err, &certVerify) || errors.As(err, &unknownAuth) || errors.As(err, &hostname) ||
-		errors.As(err, &certInvalid) || errors.As(err, &recordHdr) {
-		return false
-	}
-
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		if dnsErr.IsNotFound {
-			return false
-		}
-		return dnsErr.IsTimeout || dnsErr.IsTemporary
-	}
-
-	for _, errno := range []syscall.Errno{
-		syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH,
-		syscall.ECONNRESET, syscall.ETIMEDOUT,
-	} {
-		if errors.Is(err, errno) {
-			return true
-		}
-	}
-
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
-}
 
 // checkAuthModeAtStartupWith is checkAuthModeAtStartup with the probe and the
 // retry interval injected, so tests need neither a server nor a real wait.
 //
 // settings.yaml is read again on every try, so a corrected SignalK address, or
 // auth.mode changed away from signalk, takes effect while startup waits. A
-// settings file that cannot be read refuses startup; it is never replaced with
-// the default SignalK address. The default applies only when the signalk
-// section is absent from a file that reads fine.
+// file that cannot be read at the first try has no mode to know and counts as
+// mode none, as it always did; a file that becomes unreadable during a
+// signalk-mode wait refuses startup, and is never replaced with the default
+// SignalK address. The default applies only when the signalk section is absent
+// from a file that reads fine.
 func checkAuthModeAtStartupWith(settingsPath string, probe func(signalkURL string) (bool, error), retryInterval time.Duration) (mode string, err error) {
-	waited := false
+	return checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: retryInterval, summary: signalKStartupSummaryInterval, now: time.Now, sleep: time.Sleep,
+	})
+}
+
+// signalKStartupSummaryInterval is how often the wait is logged after the first
+// failed try, so a long wait leaves a handful of lines, not thousands.
+const signalKStartupSummaryInterval = time.Minute
+
+// startupWait is the timing of the wait: the pause between tries, the interval
+// between log summaries, and the clock, injectable so tests need no real time.
+type startupWait struct {
+	retry, summary time.Duration
+	now            func() time.Time
+	sleep          func(time.Duration)
+}
+
+func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL string) (bool, error), w startupWait) (mode string, err error) {
+	tries := 0
+	var lastSummary time.Time
+	sawSignalK := false
 	for {
 		settings, readErr := readSettings(settingsPath)
 		if readErr != nil {
-			return "", fmt.Errorf("could not read %s to check auth.mode: %w", settingsPath, readErr)
+			// With no readable file there is no mode to know, and startup treats
+			// that as none, as it always has. Only a signalk-mode wait that has
+			// lost its file refuses.
+			if !sawSignalK {
+				return authModeNone, nil
+			}
+			return authModeSignalK, fmt.Errorf("could not read %s to check auth.mode: %w", settingsPath, readErr)
 		}
 		mode = authModeFromSettings(settings)
 		if !validAuthModes[mode] {
@@ -121,25 +101,33 @@ func checkAuthModeAtStartupWith(settingsPath string, probe func(signalkURL strin
 			return mode, nil
 		}
 
+		sawSignalK = true
 		address, port := signalKAddressFromSettings(settings)
 		signalkURL := buildSignalKURL(address, port)
 
-		// An unreachable SignalK is waited on, not fatal: after a power cut it
-		// is usually still starting. Nothing proceeds as if login worked;
-		// every other outcome is judged on the first answer.
+		// A SignalK that gives no HTTP answer is waited on, not fatal: after a
+		// power cut it is usually still starting. Nothing proceeds as if login
+		// worked; any HTTP answer is judged at once.
 		enabled, probeErr := probe(signalkURL)
 		if probeErr != nil {
 			var unreachable *signalKUnreachableError
 			if !errors.As(probeErr, &unreachable) {
 				return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
 			}
-			log.Printf("auth: SignalK at %s is not answering (%v); login can't start until it does, trying again %s after each failed try", signalkURL, probeErr, retryInterval)
-			waited = true
-			time.Sleep(retryInterval)
+			tries++
+			now := w.now()
+			if tries == 1 {
+				log.Printf("auth: SignalK at %s is not answering (%v); login can't start until SignalK answers, trying again %s after each failed try", signalkURL, probeErr, w.retry)
+				lastSummary = now
+			} else if now.Sub(lastSummary) >= w.summary {
+				log.Printf("auth: still waiting for SignalK at %s after %d tries; latest error: %v", signalkURL, tries, probeErr)
+				lastSummary = now
+			}
+			w.sleep(w.retry)
 			continue
 		}
-		if waited {
-			log.Printf("auth: SignalK at %s is answering after waiting for it", signalkURL)
+		if tries > 0 {
+			log.Printf("auth: SignalK at %s is answering after %d failed tries", signalkURL, tries)
 		}
 		return mode, securityEnabledError(signalkURL, enabled)
 	}
@@ -182,11 +170,8 @@ func probeSignalKSecurityEnabled(signalkURL string) (bool, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		reachErr := fmt.Errorf("could not reach signalk at %s: %w", signalkURL, err)
-		if isRetryableSignalKTransportError(err) {
-			return false, &signalKUnreachableError{err: reachErr}
-		}
-		return false, reachErr
+		// No HTTP answer, whatever the cause: startup waits on it.
+		return false, &signalKUnreachableError{err: fmt.Errorf("could not reach signalk at %s: %w", signalkURL, err)}
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)

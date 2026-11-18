@@ -1,13 +1,9 @@
 package main
 
 import (
-	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -1203,9 +1198,9 @@ func TestCheckAuthModeAtStartup_NonTransportErrorDoesNotRetry(t *testing.T) {
 	}
 }
 
-// Only a network failure that can clear by itself is waited on. A fault in the
-// configured address never will, so it must refuse at once and name the address.
-func TestProbeSignalKSecurityEnabled_PermanentFaultsAreNotRetryable(t *testing.T) {
+// Any failure where SignalK gives no HTTP answer at all is waited on, whatever
+// the cause, and the underlying error stays in the text for the log.
+func TestProbeSignalKSecurityEnabled_AnyNoAnswerIsUnreachable(t *testing.T) {
 	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer tlsSrv.Close()
 
@@ -1221,45 +1216,11 @@ func TestProbeSignalKSecurityEnabled_PermanentFaultsAreNotRetryable(t *testing.T
 				t.Fatal("expected an error")
 			}
 			var unreachable *signalKUnreachableError
-			if errors.As(err, &unreachable) {
-				t.Fatalf("a permanent fault must not be retried, got: %v", err)
+			if !errors.As(err, &unreachable) {
+				t.Fatalf("a no-answer failure must be waited on, got: %v", err)
 			}
 			if !strings.Contains(err.Error(), address) {
 				t.Fatalf("expected the error to name %q, got: %v", address, err)
-			}
-		})
-	}
-}
-
-func TestIsRetryableSignalKTransportError(t *testing.T) {
-	wrap := func(err error) error {
-		return &url.Error{Op: "Post", URL: "http://signalk.test", Err: &net.OpError{Op: "dial", Err: err}}
-	}
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"connection refused", wrap(os.NewSyscallError("connect", syscall.ECONNREFUSED)), true},
-		{"host unreachable", wrap(os.NewSyscallError("connect", syscall.EHOSTUNREACH)), true},
-		{"network unreachable", wrap(os.NewSyscallError("connect", syscall.ENETUNREACH)), true},
-		{"connection reset", wrap(os.NewSyscallError("read", syscall.ECONNRESET)), true},
-		{"timed out", wrap(os.NewSyscallError("connect", syscall.ETIMEDOUT)), true},
-		{"deadline exceeded", &url.Error{Op: "Post", URL: "http://signalk.test", Err: context.DeadlineExceeded}, true},
-		{"EOF before a response", &url.Error{Op: "Post", URL: "http://signalk.test", Err: io.EOF}, true},
-		{"DNS timeout", wrap(&net.DNSError{Err: "i/o timeout", IsTimeout: true}), true},
-		{"DNS temporary failure", wrap(&net.DNSError{Err: "server misbehaving", IsTemporary: true}), true},
-		{"DNS not found", wrap(&net.DNSError{Err: "no such host", Name: "nowhere.test", IsNotFound: true}), false},
-		{"DNS other", wrap(&net.DNSError{Err: "refused"}), false},
-		{"x509 unknown authority", &url.Error{Op: "Post", URL: "https://signalk.test", Err: x509.UnknownAuthorityError{}}, false},
-		{"TLS record header", &url.Error{Op: "Post", URL: "https://signalk.test", Err: tls.RecordHeaderError{Msg: "bad"}}, false},
-		{"unsupported scheme", &url.Error{Op: "Post", URL: "ftp://signalk.test", Err: errors.New("unsupported protocol scheme \"ftp\"")}, false},
-		{"plain error", errors.New("something else"), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isRetryableSignalKTransportError(tc.err); got != tc.want {
-				t.Fatalf("isRetryableSignalKTransportError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -1315,9 +1276,10 @@ func TestCheckAuthModeAtStartup_StopsWaitingWhenModeChangesAwayFromSignalK(t *te
 	}
 }
 
-// An unreadable settings file must refuse to start, not fall back to the
-// default SignalK address (AGENTS.md Fallback Policy).
-func TestCheckAuthModeAtStartup_SettingsLoadFailureSurfaces(t *testing.T) {
+// A settings file that cannot be read has no auth.mode to know, so startup does
+// what it always did: treat the mode as none and carry on. Only signalk mode
+// has a security check to refuse on.
+func TestCheckAuthModeAtStartup_UnreadableSettingsIsModeNoneAsBefore(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "settings.yaml")
 	if err := os.WriteFile(settingsPath, []byte("auth: [unclosed\n"), 0o644); err != nil {
@@ -1329,12 +1291,92 @@ func TestCheckAuthModeAtStartup_SettingsLoadFailureSurfaces(t *testing.T) {
 		return true, nil
 	}
 
-	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
-	if err == nil {
-		t.Fatal("expected an unreadable settings file to refuse startup")
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected the unreadable file to behave as on main (mode none), got: %v", err)
+	}
+	if mode != authModeNone {
+		t.Fatalf("expected mode %q, got %q", authModeNone, mode)
 	}
 	if calls != 0 {
+		t.Fatalf("expected no probe, got %d", calls)
+	}
+	if got := resolveAuthMode(settingsPath); got != authModeNone {
+		t.Fatalf("resolveAuthMode on an unreadable file = %q, want %q", got, authModeNone)
+	}
+}
+
+// Once startup has seen mode signalk, a settings file that stops being
+// readable while it waits refuses startup; it is never replaced with the
+// default SignalK address (AGENTS.md Fallback Policy).
+func TestCheckAuthModeAtStartup_SettingsBrokenWhileWaitingInSignalKModeRefuses(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if err := os.WriteFile(settingsPath, []byte("auth: [unclosed\n"), 0o644); err != nil {
+			t.Fatalf("rewrite settings: %v", err)
+		}
+		return false, &signalKUnreachableError{err: errors.New("connection refused")}
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a settings file broken during a signalk-mode wait to refuse startup")
+	}
+	if calls != 1 {
 		t.Fatalf("expected no probe against a guessed address, got %d", calls)
+	}
+}
+
+// ── Wait logging ─────────────────────────────────────────────────────────────
+
+// fakeStartupClock lets a test run many "5 s" tries without waiting: sleeping
+// just moves the clock on.
+type fakeStartupClock struct{ t time.Time }
+
+func (c *fakeStartupClock) now() time.Time        { return c.t }
+func (c *fakeStartupClock) sleep(d time.Duration) { c.t = c.t.Add(d) }
+
+// N failed tries log the first one in full, then one summary per interval,
+// then one line when SignalK answers — never one line per try.
+func TestCheckAuthModeAtStartup_WaitLogIsFirstTryThenOneSummaryPerInterval(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	logs := captureLog(t)
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls <= 25 {
+			return false, &signalKUnreachableError{err: fmt.Errorf("refused %d", calls)}
+		}
+		return true, nil
+	}
+
+	_, err := checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, now: clock.now, sleep: clock.sleep,
+	})
+	if err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	// 25 failed tries at 5 s spacing: tries 1..25 at t=0..120 s. First line at
+	// try 1, summaries at t=60 s and t=120 s, then the answered line.
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 log lines (first, 2 summaries, answered), got %d:\n%s", len(lines), logs.String())
+	}
+	if !strings.Contains(lines[0], "http://signalk.test") || !strings.Contains(lines[0], "refused 1") ||
+		!strings.Contains(lines[0], "login can't start until SignalK answers") {
+		t.Fatalf("first line should name the address, the real error and the consequence: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "refused 13") || !strings.Contains(lines[1], "13 tries") {
+		t.Fatalf("summary should carry the try count and latest error: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], "refused 25") || !strings.Contains(lines[2], "25 tries") {
+		t.Fatalf("summary should carry the try count and latest error: %s", lines[2])
+	}
+	if !strings.Contains(lines[3], "answering") {
+		t.Fatalf("expected a final answered line, got: %s", lines[3])
 	}
 }
 
