@@ -318,7 +318,7 @@ func mcpWriteAlarmRules(b *strings.Builder, d assistantToolDeps) {
 		return
 	}
 	var stored []alarmRule
-	if err := store.Read(func(q sqlQueryer) error {
+	if err := store.Read(lockMCPAlarmRules, func(q sqlQueryer) error {
 		var err error
 		stored, err = listAlarmRulesQ(q)
 		return err

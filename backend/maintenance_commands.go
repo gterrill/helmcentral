@@ -275,7 +275,7 @@ func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req mainte
 // transaction, through the record registry instead.
 
 // runCmd runs one command in its own RunTx and returns what it wrote.
-func runCmd[T any](s *documentStore, op string, cmd func(tx *sql.Tx, now time.Time) (T, error)) (T, error) {
+func runCmd[T any](s *documentStore, op *lockOp, cmd func(tx *sql.Tx, now time.Time) (T, error)) (T, error) {
 	var out T
 	err := s.RunTx(op, func(tx *sql.Tx, now time.Time) error {
 		var err error
@@ -290,37 +290,37 @@ func runCmd[T any](s *documentStore, op string, cmd func(tx *sql.Tx, now time.Ti
 }
 
 func (s *documentStore) CreateMaintenanceRuleCmd(req maintenanceRuleRequest) (maintenanceRule, error) {
-	return runCmd(s, "create maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsCreateMaintenanceRule, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdCreateMaintenanceRule(tx, now, req)
 	})
 }
 
 func (s *documentStore) UpdateMaintenanceRuleCmd(id string, req maintenanceRuleRequest) (maintenanceRule, error) {
-	return runCmd(s, "update maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsUpdateMaintenanceRule, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdUpdateMaintenanceRule(tx, now, id, req)
 	})
 }
 
 func (s *documentStore) SetMaintenanceRuleOverridesCmd(id string, in maintenanceOverridesInput) (maintenanceRule, error) {
-	return runCmd(s, "set maintenance rule overrides", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsSetMaintenanceOverrides, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdSetMaintenanceRuleOverrides(tx, now, id, in)
 	})
 }
 
 func (s *documentStore) ResetMaintenanceRuleOverrideCmd(id, field string) (maintenanceRule, error) {
-	return runCmd(s, "reset maintenance rule override", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsResetMaintenanceOverride, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdResetMaintenanceRuleOverride(tx, now, id, field)
 	})
 }
 
 func (s *documentStore) AcknowledgeMaintenanceRuleCmd(id, reason string) (maintenanceRule, error) {
-	return runCmd(s, "acknowledge maintenance rule", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsAcknowledgeMaintenance, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdAcknowledgeMaintenanceRule(tx, now, id, reason)
 	})
 }
 
 func (s *documentStore) SetMaintenanceRuleLastDoneCmd(today time.Time, id string, req maintenanceLastDoneRequest) (maintenanceRule, error) {
-	return runCmd(s, "set maintenance rule last done", func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
+	return runCmd(s, lockDocumentsSetMaintenanceLastDone, func(tx *sql.Tx, now time.Time) (maintenanceRule, error) {
 		return cmdSetMaintenanceRuleLastDone(tx, now, today, id, req)
 	})
 }
@@ -333,7 +333,7 @@ type completedMaintenanceRule struct {
 }
 
 func (s *documentStore) CompleteMaintenanceRuleCmd(id string, req maintenanceLogEntryRequest) (maintenanceRule, maintenanceLogEntry, error) {
-	done, err := runCmd(s, "complete maintenance rule", func(tx *sql.Tx, now time.Time) (completedMaintenanceRule, error) {
+	done, err := runCmd(s, lockDocumentsCompleteMaintenanceRule, func(tx *sql.Tx, now time.Time) (completedMaintenanceRule, error) {
 		rule, entry, err := cmdCompleteMaintenanceRule(tx, now, id, req)
 		return completedMaintenanceRule{rule, entry}, err
 	})

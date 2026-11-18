@@ -76,7 +76,7 @@ func importLegacyAlarmRules(s *documentStore, path string, now time.Time) (int, 
 	}
 
 	origins := inferLegacySeededBy(file.Rules, file.SeededSets)
-	err = s.writeAlarmRules("import alarm rules", func(tx *sql.Tx, _ time.Time) error {
+	err = s.writeAlarmRules(lockAlarmRulesImport, func(tx *sql.Tx, _ time.Time) error {
 		done, err := alarmSeededSetsQ(tx)
 		if err != nil {
 			return err

@@ -75,7 +75,7 @@ func (d assistantToolDeps) executeListAlarmRules(ctx context.Context, _ json.Raw
 		return "", errors.New("list_alarm_rules: the alarm rules are not available")
 	}
 	var stored []alarmRule
-	if err := d.documents().Read(func(q sqlQueryer) error {
+	if err := d.documents().Read(lockMateListAlarmRules, func(q sqlQueryer) error {
 		var err error
 		stored, err = listAlarmRulesQ(q)
 		return err

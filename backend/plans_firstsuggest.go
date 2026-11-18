@@ -28,8 +28,7 @@ func createPlanFirstSuggestionSchema(db *sql.DB) error {
 // KeptSuggestion is the departure kept for a leg on day, in loc, and false when
 // the day has none. It never writes.
 func (s *documentStore) KeptSuggestion(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsKeptSuggestion.held(&s.mu).release()
 	return s.keptSuggestionLocked(s.db, planID, legKey, day, loc)
 }
 
@@ -53,12 +52,12 @@ func (s *documentStore) keptSuggestionLocked(q interface {
 // no row for the day, and then drops the days more than two before this one, at
 // most once for each day it is asked about.
 func (s *documentStore) FirstSuggestion(planID int64, legKey, day string, t time.Time) (time.Time, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsFirstSuggestion.held(&s.mu)
+	defer h.release()
 	if kept, ok, err := s.keptSuggestionLocked(s.db, planID, legKey, day, t.Location()); err != nil || ok {
 		return kept, err
 	}
-	err := s.runTxLocked("save first suggestion", func(tx *sql.Tx, _ time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, _ time.Time) error {
 		if s.firstSuggestionsPrunedOn != day {
 			if _, err := tx.Exec(`DELETE FROM plan_first_suggestions WHERE day < ?`, dayPlus(day, -2)); err != nil {
 				return fmt.Errorf("save first suggestion: %w", err)

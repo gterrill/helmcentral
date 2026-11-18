@@ -129,7 +129,7 @@ func listWatchesHandler(c echo.Context) error {
 	}
 	resp := watchListResponse{Watches: []watchListEntry{}, Max: maxScheduledWatches}
 	now := time.Now()
-	err = docs.Read(func(q sqlQueryer) error {
+	err = docs.Read(lockWatchesListHandler, func(q sqlQueryer) error {
 		list, err := listSavedWatchesQ(q)
 		if err != nil {
 			return err
@@ -185,7 +185,7 @@ func getWatchHandler(c echo.Context) error {
 		// HasOlder says there are runs older than the last one returned.
 		HasOlder bool `json:"has_older"`
 	}
-	err = docs.Read(func(q sqlQueryer) error {
+	err = docs.Read(lockWatchesGetHandler, func(q sqlQueryer) error {
 		w, err := savedWatchByIDQ(q, c.Param("id"))
 		if err != nil {
 			return err
@@ -300,7 +300,7 @@ func createWatchHandler(c echo.Context) error {
 		return watchError(c, err)
 	}
 	var created savedWatch
-	err = docs.RunTx("create watch", func(tx *sql.Tx, now time.Time) error {
+	err = docs.RunTx(lockWatchesCreate, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		created, err = createSavedWatchTx(tx, req.applyTo(newSavedWatchDefaults()), now)
 		return err
@@ -322,7 +322,7 @@ func patchWatchHandler(c echo.Context) error {
 		return watchError(c, err)
 	}
 	var updated savedWatch
-	err = docs.RunTx("change watch", func(tx *sql.Tx, now time.Time) error {
+	err = docs.RunTx(lockWatchesChange, func(tx *sql.Tx, now time.Time) error {
 		before, err := savedWatchByIDQ(tx, c.Param("id"))
 		if err != nil {
 			return err
@@ -348,7 +348,7 @@ func deleteWatchHandler(c echo.Context) error {
 	if err := stopRunningOneOffWatch(docs, c.Param("id")); err != nil {
 		return watchError(c, err)
 	}
-	if err := docs.RunTx("delete watch", func(tx *sql.Tx, _ time.Time) error {
+	if err := docs.RunTx(lockWatchesDelete, func(tx *sql.Tx, _ time.Time) error {
 		return deleteSavedWatchTx(tx, c.Param("id"))
 	}); err != nil {
 		return watchError(c, err)
@@ -361,7 +361,7 @@ func deleteWatchHandler(c echo.Context) error {
 // stopped; its report is on its way and the delete goes ahead.
 func stopRunningOneOffWatch(docs *documentStore, id string) error {
 	var w savedWatch
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(lockWatchesStopOneOff, func(q sqlQueryer) error {
 		var err error
 		w, err = savedWatchByIDQ(q, id)
 		return err
@@ -387,7 +387,7 @@ func deleteWatchRunHandler(c echo.Context) error {
 	if err != nil {
 		return watchError(c, err)
 	}
-	if err := docs.RunTx("delete watch run", func(tx *sql.Tx, _ time.Time) error {
+	if err := docs.RunTx(lockWatchesDeleteRun, func(tx *sql.Tx, _ time.Time) error {
 		return deleteWatchRunTx(tx, c.Param("id"), c.Param("runId"))
 	}); err != nil {
 		return watchError(c, err)
@@ -407,7 +407,7 @@ func runWatchHandler(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "the watch scheduler is not running"})
 	}
 	var w savedWatch
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(lockWatchesRunNow, func(q sqlQueryer) error {
 		var err error
 		w, err = savedWatchByIDQ(q, c.Param("id"))
 		return err
@@ -490,7 +490,7 @@ func getWatchRunHandler(c echo.Context) error {
 		return watchError(c, err)
 	}
 	var run watchRun
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(lockWatchesGetRun, func(q sqlQueryer) error {
 		var err error
 		run, err = watchRunByIDQ(q, c.Param("id"), c.Param("runId"))
 		return err

@@ -179,7 +179,7 @@ func getAlarmRuleRecord(q sqlQueryer, id string) (recordSnapshot, error) {
 
 func listAlarmRuleRecords(s *documentStore, f map[string]string) ([]recordSnapshot, error) {
 	var rules []alarmRule
-	if err := s.Read(func(q sqlQueryer) error {
+	if err := s.Read(lockAlarmRulesListRecords, func(q sqlQueryer) error {
 		var err error
 		rules, err = listAlarmRulesQ(q)
 		return err

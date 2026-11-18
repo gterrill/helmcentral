@@ -102,7 +102,7 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 	var notes []string
 	note := func(format string, args ...any) { notes = append(notes, fmt.Sprintf(format, args...)) }
 
-	err = store.RunTx("convert vessel settings", func(tx *sql.Tx, now time.Time) error {
+	err = store.RunTx(lockVesselConvertSettings, func(tx *sql.Tx, now time.Time) error {
 		items, err := loadConvertItems(tx)
 		if err != nil {
 			return err
@@ -390,7 +390,7 @@ func adoptHouseBankRules(socPath string) error {
 	if !adopts {
 		return nil
 	}
-	return store.writeAlarmRules("adopt house bank alarm rules", func(tx *sql.Tx, now time.Time) error {
+	return store.writeAlarmRules(lockAlarmRulesAdoptHouseBank, func(tx *sql.Tx, now time.Time) error {
 		rules, err := listAlarmRulesQ(tx)
 		if err != nil {
 			return err

@@ -560,10 +560,10 @@ func (s *documentStore) CreatePlan(in plan) (plan, error) {
 	if verr != nil {
 		return plan{}, verr
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsCreatePlan.held(&s.mu)
+	defer h.release()
 	var saved plan
-	err := s.runTxLocked("create plan", func(tx *sql.Tx, now time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		saved, err = createPlanTx(tx, now, in)
 		return err
@@ -594,15 +594,13 @@ func createPlanTx(tx *sql.Tx, now time.Time, in plan) (plan, error) {
 }
 
 func (s *documentStore) GetPlan(id int64) (plan, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsGetPlan.held(&s.mu).release()
 	return loadPlan(s.db, id)
 }
 
 // ListPlans returns every plan, oldest first.
 func (s *documentStore) ListPlans() ([]plan, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsListPlans.held(&s.mu).release()
 	// One query: each plan's stops follow it in position order. A plan with no
 	// stops has one row with a NULL position.
 	rows, err := s.db.Query(`SELECT p.id, p.name, p.created_at, p.updated_at, p.revision, s.position,
@@ -658,11 +656,11 @@ func (s *documentStore) UpdatePlan(id int64, in plan) (plan, bool, error) {
 	if verr != nil {
 		return plan{}, false, verr
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsUpdatePlan.held(&s.mu)
+	defer h.release()
 	var saved plan
 	found := true
-	err := s.runTxLocked("update plan", func(tx *sql.Tx, now time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		saved, found, err = updatePlanTx(tx, now, id, in)
 		return err
@@ -694,11 +692,11 @@ func updatePlanTx(tx *sql.Tx, now time.Time, id int64, in plan) (saved plan, fou
 // PatchPlanStop changes one stop's arrival or nights and shifts every later
 // date. ok is false when there is no such plan.
 func (s *documentStore) PatchPlanStop(id int64, idx int, arrive *string, nights *int) (plan, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsPatchPlanStop.held(&s.mu)
+	defer h.release()
 	var saved plan
 	found := true
-	err := s.runTxLocked("edit plan stop", func(tx *sql.Tx, now time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		cur, ok, err := loadPlan(tx, id)
 		if err != nil {
 			return err
@@ -738,10 +736,10 @@ func (s *documentStore) PatchPlanStop(id int64, idx int, arrive *string, nights 
 
 // DeletePlan removes a plan and its stops; ok is false when it was not there.
 func (s *documentStore) DeletePlan(id int64) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsDeletePlan.held(&s.mu)
+	defer h.release()
 	found := false
-	err := s.runTxLocked("delete plan", func(tx *sql.Tx, _ time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, _ time.Time) error {
 		if _, err := tx.Exec(`DELETE FROM plan_stops WHERE plan_id = ?`, id); err != nil {
 			return fmt.Errorf("delete plan: %w", err)
 		}

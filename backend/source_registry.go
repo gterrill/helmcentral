@@ -125,7 +125,7 @@ func (s *sourceRegistryStore) load(vessel string) ([]seenRow, *registryMeta, boo
 	var rows []seenRow
 	var meta *registryMeta
 	installSeeded := false
-	err := s.ds.Read(func(q sqlQueryer) error {
+	err := s.ds.Read(lockSourceRegistryLoad, func(q sqlQueryer) error {
 		r, err := q.Query(`SELECT path, first_seen, last_seen FROM signalk_source_seen WHERE vessel = ?`, vessel)
 		if err != nil {
 			return err
@@ -175,7 +175,7 @@ func (s *sourceRegistryStore) load(vessel string) ([]seenRow, *registryMeta, boo
 }
 
 func (s *sourceRegistryStore) save(vessel string, rows []seenRow, meta *registryMeta) error {
-	return s.ds.RunTx("remember source sightings", func(tx *sql.Tx, now time.Time) error {
+	return s.ds.RunTx(lockSourceRegistryRemember, func(tx *sql.Tx, now time.Time) error {
 		for _, r := range rows {
 			if _, err := tx.Exec(`INSERT INTO signalk_source_seen (vessel, path, first_seen, last_seen) VALUES (?, ?, ?, ?)
 				ON CONFLICT(vessel, path) DO UPDATE SET

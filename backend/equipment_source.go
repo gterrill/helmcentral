@@ -87,7 +87,7 @@ func isEquipmentSourceTaken(err error) bool {
 // figures. In a swap each item keeps its own figures: they describe the
 // physical item, not the source.
 func (s *documentStore) UpdateEquipmentTakingSource(id string, item equipmentItem, fromID, mode string) (updated equipmentItem, err error) {
-	err = s.RunTx("swap equipment source", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsSwapEquipmentSource, func(tx *sql.Tx, now time.Time) error {
 		updated, err = takeEquipmentSourceTx(tx, now, id, item, fromID, mode)
 		return err
 	})

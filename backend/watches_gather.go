@@ -26,7 +26,7 @@ func gatherWatchReportInput(ctx context.Context, d assistantToolDeps, store *doc
 
 	var prev watchRun
 	var havePrev bool
-	if err := store.Read(func(q sqlQueryer) error {
+	if err := store.Read(lockWatchesGatherInput, func(q sqlQueryer) error {
 		var err error
 		prev, havePrev, err = lastRanRunQ(q, w.ID)
 		return err

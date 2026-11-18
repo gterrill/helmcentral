@@ -583,7 +583,7 @@ func (h *watchHost) afterRun(run watchRun) {
 	}
 	var w savedWatch
 	var prevTold []string
-	if err := h.store().Read(func(q sqlQueryer) error {
+	if err := h.store().Read(lockWatchesAfterRun, func(q sqlQueryer) error {
 		var err error
 		if w, err = savedWatchByIDQ(q, run.WatchID); err != nil {
 			return err
@@ -604,7 +604,7 @@ func (h *watchHost) afterRun(run watchRun) {
 	}
 	keys := watchFindingKeys(run.Findings)
 	inherited := intersectStrings(prevTold, keys)
-	if err := h.store().RunTx("remember told findings", func(tx *sql.Tx, _ time.Time) error {
+	if err := h.store().RunTx(lockWatchesRememberFindings, func(tx *sql.Tx, _ time.Time) error {
 		return setWatchRunToldTx(tx, run.WatchID, run.ID, inherited)
 	}); err != nil {
 		log.Printf("watches: %q: could not remember which findings run %s repeats, so the next run may tell them again: %v", w.Name, run.ID, err)
@@ -642,7 +642,7 @@ func recordWatchDelivery(watchID, runID, channel string) {
 		log.Printf("watches: %s delivered run %s but the record store is not open, so the run will not show it", channel, runID)
 		return
 	}
-	err := store.RunTx("record watch delivery", func(tx *sql.Tx, _ time.Time) error {
+	err := store.RunTx(lockWatchesRecordDelivery, func(tx *sql.Tx, _ time.Time) error {
 		return addWatchRunNotifiedTx(tx, watchID, runID, channel)
 	})
 	if err != nil && !errors.Is(err, errWatchRunNotFound) {
@@ -685,7 +685,7 @@ func recordWatchNotSent(watchID, runID, reason string) {
 		log.Printf("watches: run %s was not sent (%s) but the record store is not open, so the run will not say so", runID, reason)
 		return
 	}
-	err := store.RunTx("record watch not sent", func(tx *sql.Tx, _ time.Time) error {
+	err := store.RunTx(lockWatchesRecordNotSent, func(tx *sql.Tx, _ time.Time) error {
 		return setWatchRunNotSentTx(tx, watchID, runID, reason)
 	})
 	if err != nil && !errors.Is(err, errWatchRunNotFound) {
@@ -740,7 +740,7 @@ func recordWatchNotifyNote(watchID, runID, note string) {
 		log.Printf("watches: run %s: %s, but the record store is not open, so the run will not say so", runID, note)
 		return
 	}
-	err := store.RunTx("record watch delivery note", func(tx *sql.Tx, _ time.Time) error {
+	err := store.RunTx(lockWatchesRecordDeliveryNote, func(tx *sql.Tx, _ time.Time) error {
 		return addWatchRunNotifyNoteTx(tx, watchID, runID, note)
 	})
 	if err != nil && !errors.Is(err, errWatchRunNotFound) {

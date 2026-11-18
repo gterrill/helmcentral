@@ -779,15 +779,13 @@ func cmdDeleteMaintenanceRule(tx *sql.Tx, id string) error {
 
 // MaintenanceSchedule is the schedule for filter against the live profiles.
 func (s *documentStore) MaintenanceSchedule(filter maintenanceRuleFilter) (maintenanceSchedule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsMaintenanceSchedule.held(&s.mu).release()
 	return buildMaintenanceSchedule(s.db, currentMaintenanceProfiles(), filter)
 }
 
 // ResolveMaintenanceRule is one rule's effective form; see effectiveRuleByID.
 func (s *documentStore) ResolveMaintenanceRule(id string) (effectiveMaintenanceRule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsResolveMaintenanceRule.held(&s.mu).release()
 	return effectiveRuleByID(s.db, currentMaintenanceProfiles(), id)
 }
 
@@ -940,15 +938,13 @@ func checkForUnconvertedMaintenanceRules(db *sql.DB) error {
 // MaintenanceRuleHistoryLabel is maintenanceRuleHistoryLabel on the store's
 // connection.
 func (s *documentStore) MaintenanceRuleHistoryLabel(profiles maintenanceProfileSet, ruleID string) (string, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsMaintenanceRuleHistoryLabel.held(&s.mu).release()
 	return maintenanceRuleHistoryLabel(s.db, profiles, ruleID)
 }
 
 // PreviewMaintenanceProfileChange is previewMaintenanceProfileChange on the
 // store's connection, against the live profiles.
 func (s *documentStore) PreviewMaintenanceProfileChange(equipmentID, newProfileID string) (maintenanceProfileChangePreview, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsPreviewMaintenanceProfileChange.held(&s.mu).release()
 	return previewMaintenanceProfileChange(s.db, currentMaintenanceProfiles(), equipmentID, newProfileID)
 }

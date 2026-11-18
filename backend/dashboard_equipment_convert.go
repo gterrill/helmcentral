@@ -81,7 +81,7 @@ func convertDashboardTilesToEquipment() error {
 		if globalProfileStore == nil {
 			return fmt.Errorf("convert dashboard tiles: the profile store is not open")
 		}
-		err := globalProfileStore.inTx(func(tx *sql.Tx) error {
+		err := globalProfileStore.inTx(lockProfilesConvertDashboardTiles, func(tx *sql.Tx) error {
 			for id := range c.edited {
 				if err := updateProfileTx(tx, c.ix.profiles[id]); err != nil {
 					return err

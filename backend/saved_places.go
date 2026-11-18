@@ -205,7 +205,7 @@ func savedPlaceByNameQ(q sqlQueryer, name string) (savedPlace, error) {
 // place has the name.
 func findSavedPlaceByName(store *documentStore, name string) (*savedPlace, error) {
 	var found *savedPlace
-	err := store.Read(func(q sqlQueryer) error {
+	err := store.Read(lockSavedPlacesFindByName, func(q sqlQueryer) error {
 		p, err := savedPlaceByNameQ(q, name)
 		if errors.Is(err, errSavedPlaceNotFound) {
 			return nil
@@ -262,7 +262,7 @@ func listSavedPlacesNearQ(q sqlQueryer, lat, lon, radiusM float64) ([]savedPlace
 // readSavedPlacesNear is listSavedPlacesNearQ in its own read.
 func readSavedPlacesNear(store *documentStore, lat, lon, radiusM float64) ([]savedPlace, error) {
 	var places []savedPlace
-	err := store.Read(func(q sqlQueryer) error {
+	err := store.Read(lockSavedPlacesNear, func(q sqlQueryer) error {
 		var err error
 		places, err = listSavedPlacesNearQ(q, lat, lon, radiusM)
 		return err
@@ -273,7 +273,7 @@ func readSavedPlacesNear(store *documentStore, lat, lon, radiusM float64) ([]sav
 // readSavedPlaces is listSavedPlacesQ in its own read.
 func readSavedPlaces(store *documentStore) ([]savedPlace, error) {
 	var places []savedPlace
-	err := store.Read(func(q sqlQueryer) error {
+	err := store.Read(lockSavedPlacesList, func(q sqlQueryer) error {
 		var err error
 		places, err = listSavedPlacesQ(q)
 		return err
@@ -649,7 +649,7 @@ func createSavedPlaceHandler(c echo.Context) error {
 		return savedPlaceError(c, fieldErr("lon", "is required"))
 	}
 	var created savedPlace
-	err = docs.RunTx("create saved place", func(tx *sql.Tx, now time.Time) error {
+	err = docs.RunTx(lockSavedPlacesCreate, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		created, err = createSavedPlaceTx(tx, savedPlace{
 			Name: req.Name, Lat: *req.Lat, Lon: *req.Lon, Note: req.Note,
@@ -684,7 +684,7 @@ func patchSavedPlaceHandler(c echo.Context) error {
 		}
 	}
 	var updated savedPlace
-	err = docs.RunTx("change saved place", func(tx *sql.Tx, now time.Time) error {
+	err = docs.RunTx(lockSavedPlacesChange, func(tx *sql.Tx, now time.Time) error {
 		p, err := savedPlaceByIDQ(tx, c.Param("id"))
 		if err != nil {
 			return err
@@ -707,7 +707,7 @@ func deleteSavedPlaceHandler(c echo.Context) error {
 	if err != nil {
 		return savedPlaceError(c, err)
 	}
-	if err := docs.RunTx("delete saved place", func(tx *sql.Tx, _ time.Time) error {
+	if err := docs.RunTx(lockSavedPlacesDelete, func(tx *sql.Tx, _ time.Time) error {
 		return deleteSavedPlaceTx(tx, c.Param("id"))
 	}); err != nil {
 		return savedPlaceError(c, err)

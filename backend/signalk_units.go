@@ -92,7 +92,7 @@ func newSignalKUnitStore(ds *documentStore) (*signalKUnitStore, error) {
 
 func (s *signalKUnitStore) load(vessel string) (map[string]string, error) {
 	out := map[string]string{}
-	err := s.ds.Read(func(q sqlQueryer) error {
+	err := s.ds.Read(lockSignalKUnitsLoad, func(q sqlQueryer) error {
 		rows, err := q.Query(`SELECT path, units FROM signalk_path_units WHERE vessel = ?`, vessel)
 		if err != nil {
 			return err
@@ -114,7 +114,7 @@ func (s *signalKUnitStore) load(vessel string) (map[string]string, error) {
 }
 
 func (s *signalKUnitStore) save(changes []rememberedUnit) error {
-	return s.ds.RunTx("remember signalk units", func(tx *sql.Tx, now time.Time) error {
+	return s.ds.RunTx(lockSignalKUnitsRemember, func(tx *sql.Tx, now time.Time) error {
 		for _, c := range changes {
 			if _, err := tx.Exec(`INSERT INTO signalk_path_units (vessel, path, units, declared_at) VALUES (?, ?, ?, ?)
 				ON CONFLICT(vessel, path) DO UPDATE SET units = excluded.units, declared_at = excluded.declared_at`,

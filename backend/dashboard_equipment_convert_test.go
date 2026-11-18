@@ -82,7 +82,7 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 	prevStore := globalProfileStore
 	globalProfileStore = ps
 	t.Cleanup(func() { globalProfileStore = prevStore })
-	if err := ps.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, mustJSONDecodeProfile(t), profileBasedOn{}) }); err != nil {
+	if err := ps.inTx(testTxOp, func(tx *sql.Tx) error { return insertProfileTx(tx, mustJSONDecodeProfile(t), profileBasedOn{}) }); err != nil {
 		t.Fatal(err)
 	}
 	loadEngineProfiles()
@@ -274,7 +274,7 @@ func TestConvertDashboardTilesConvertsUnitsAndDropsFuelBarZones(t *testing.T) {
 	prev := globalProfileStore
 	globalProfileStore = ps
 	t.Cleanup(func() { globalProfileStore = prev })
-	if err := ps.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, barProfileWithoutZones(), profileBasedOn{}) }); err != nil {
+	if err := ps.inTx(testTxOp, func(tx *sql.Tx) error { return insertProfileTx(tx, barProfileWithoutZones(), profileBasedOn{}) }); err != nil {
 		t.Fatal(err)
 	}
 	loadEngineProfiles()

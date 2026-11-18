@@ -190,7 +190,7 @@ func productionNormalAnswerDeps(settingsPath string) normalAnswerDeps {
 				return watchRun{}, err
 			}
 			var run watchRun
-			err = docs.Read(func(q sqlQueryer) error {
+			err = docs.Read(lockWatchesRunForAnswer, func(q sqlQueryer) error {
 				var err error
 				run, err = watchRunByIDQ(q, watchID, runID)
 				return err

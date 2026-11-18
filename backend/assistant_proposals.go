@@ -259,8 +259,7 @@ func assistantProposalByID(q sqlQueryer, id string) (assistantProposal, error) {
 
 // GetProposal reads one proposal with its current status.
 func (s *assistantStore) GetProposal(id string) (assistantProposal, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockAssistantGetProposal.held(&s.mu).release()
 	return assistantProposalByID(s.db, id)
 }
 
@@ -297,7 +296,7 @@ func dismissAssistantProposal(assistant *assistantStore, records *documentStore,
 		return assistantProposal{}, err
 	}
 	var p assistantProposal
-	err := records.RunTx("dismiss proposal", func(tx *sql.Tx, now time.Time) error {
+	err := records.RunTx(lockAssistantDismissProposal, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		p, err = dismissProposalTx(tx, now, id)
 		return err
@@ -339,7 +338,7 @@ func undoAssistantProposal(assistant *assistantStore, records *documentStore, id
 		return assistantProposal{}, err
 	}
 	var p assistantProposal
-	err := records.RunTx("undo proposal", func(tx *sql.Tx, now time.Time) error {
+	err := records.RunTx(lockAssistantUndoProposal, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		p, err = undoProposalTx(tx, id)
 		return err
@@ -437,21 +436,22 @@ func applyAssistantProposal(assistant *assistantStore, records *documentStore, i
 
 // applyAssistantProposalUnderLock holds records.mu across
 // applyAssistantProposalLocked, releasing it by defer so a panic in an
-// operation cannot leave the record store locked.
+// operation cannot leave the record store locked. The apply and the stale
+// marking that can follow it run under one hold, so they record as one op.
 func applyAssistantProposalUnderLock(records *documentStore, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
-	records.lockForTx("apply assistant proposal")
-	defer records.mu.Unlock()
-	return applyAssistantProposalLocked(records, id, today)
+	h := records.holdForTx(lockAssistantApplyProposal)
+	defer h.release()
+	return applyAssistantProposalLocked(records, h, id, today)
 }
 
 // applyAssistantProposalLocked is applyAssistantProposal's body; the caller
-// holds records.mu.
-func applyAssistantProposalLocked(records *documentStore, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
+// holds records.mu through h.
+func applyAssistantProposalLocked(records *documentStore, h *heldLock, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
 	var (
 		p       assistantProposal
 		results []changeOpResult
 	)
-	err := records.runTxLocked("apply proposal", func(tx *sql.Tx, now time.Time) error {
+	err := records.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		p, results, err = applyProposalTx(tx, now, today, id)
 		return err
@@ -462,7 +462,7 @@ func applyAssistantProposalLocked(records *documentStore, id string, today time.
 	if !proposalGoesStale(err) {
 		return assistantProposal{}, nil, err
 	}
-	settled, serr := recordProposalStaleLocked(records, id, err.Error())
+	settled, serr := recordProposalStaleLocked(records, h, id, err.Error())
 	if serr != nil {
 		if errors.Is(serr, errAssistantProposalStale) || errors.Is(serr, errAssistantProposalDismissed) {
 			return assistantProposal{}, nil, serr
@@ -478,12 +478,12 @@ func applyAssistantProposalLocked(records *documentStore, id string, today time.
 // written and it answers with what the proposal actually is: the stored
 // proposal for an applied one, the dismissed or stored-stale refusal
 // otherwise. The caller holds records.mu.
-func recordProposalStaleLocked(records *documentStore, id, reason string) (assistantProposal, error) {
+func recordProposalStaleLocked(records *documentStore, h *heldLock, id, reason string) (assistantProposal, error) {
 	var (
 		marked  bool
 		current assistantProposal
 	)
-	if err := records.runTxLocked("mark proposal stale", func(tx *sql.Tx, now time.Time) error {
+	if err := records.runTxLockedAs(h, "mark proposal stale", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		marked, current, err = markProposalStaleTx(tx, now, id, reason)
 		return err

@@ -202,8 +202,7 @@ func listSourceItems() ([]sourceItem, error) {
 
 // SourceItems reads every item that owns a SignalK source.
 func (s *documentStore) SourceItems() ([]sourceItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsSourceItems.held(&s.mu).release()
 	return sourceItemsQ(s.db)
 }
 

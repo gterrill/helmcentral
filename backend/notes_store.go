@@ -84,8 +84,8 @@ func (s *documentStore) InsertNote(doc document) (document, error) {
 //     be assumed away. This mirrors Insert's own check-before-write
 //     duplicate handling exactly.
 func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsReplaceNoteBody.held(&s.mu)
+	defer h.release()
 
 	var currentSHA, kind string
 	err := s.db.QueryRow(`SELECT sha256, kind FROM documents WHERE id = ?`, id).Scan(&currentSHA, &kind)
@@ -110,7 +110,7 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 		return "", fmt.Errorf("replace note body: check collision: %w", err)
 	}
 
-	err = s.runTxLocked("replace note body", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		res, err := tx.Exec(
 			`UPDATE documents SET sha256 = ?, size_bytes = ?, updated_at = ?, status = 'pending', stage = 'extract', error = '', reindex_seq = reindex_seq + 1 WHERE id = ?`,
 			newSHA, size, now.Unix(), id,
@@ -152,8 +152,7 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 //     (classifyNoteType re-run in notes_handlers.go) can never quietly
 //     undo an explicit override.
 func (s *documentStore) SetNoteTypeIfNotOperator(id, noteType, source string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsSetNoteTypeIfNotOperator.held(&s.mu).release()
 
 	var currentSource, kind string
 	err := s.db.QueryRow(`SELECT note_type_source, kind FROM documents WHERE id = ?`, id).Scan(&currentSource, &kind)
@@ -199,8 +198,7 @@ func (s *documentStore) SetNoteTypeIfNotOperator(id, noteType, source string) er
 // new caller's sake, would cost more than the handful of lines this
 // duplicates.
 func (s *documentStore) ListNotes(unfiledOnly bool, noteType, tag string, limit, offset int) ([]document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsListNotes.held(&s.mu).release()
 
 	query := `SELECT ` + documentColumns + ` FROM documents d WHERE d.kind = 'note'`
 	var args []any
@@ -258,8 +256,7 @@ func (s *documentStore) ListNotes(unfiledOnly bool, noteType, tag string, limit,
 // race to set it out from under the operator's own tap the way an
 // automatic reclassification can race note_type.
 func (s *documentStore) SetNotePinned(id string, pinned bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsSetNotePinned.held(&s.mu).release()
 
 	var kind string
 	err := s.db.QueryRow(`SELECT kind FROM documents WHERE id = ?`, id).Scan(&kind)
@@ -288,8 +285,7 @@ func (s *documentStore) SetNotePinned(id string, pinned bool) error {
 // so a caller that ever wants a different cap (or none at all) doesn't need
 // a second store method.
 func (s *documentStore) PinnedNotes() ([]document, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsPinnedNotes.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT ` + documentColumns + ` FROM documents WHERE kind = 'note' AND pinned = 1 ORDER BY lower(title)`)
 	if err != nil {
@@ -339,8 +335,7 @@ func (s *documentStore) PinnedNotes() ([]document, error) {
 // processes them" - only the caller changed, from an HTTP handler to the
 // automatic sweep.
 func (s *documentStore) EnrichBackfillNotes() (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsEnrichBackfillNotes.held(&s.mu).release()
 
 	res, err := s.db.Exec(
 		`UPDATE documents SET status = 'pending', stage = 'extract', error = '', force_ocr = 1, enrich = 1, reindex_seq = reindex_seq + 1, updated_at = ?

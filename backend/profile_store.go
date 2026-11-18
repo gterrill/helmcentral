@@ -72,8 +72,8 @@ func newProfileStore(ds *documentStore) (*profileStore, error) {
 // inTx runs fn in one document store transaction (RunTx), committing when it
 // returns nil, so fn may read and write maintenance_rules and equipment as
 // well as equipment_profiles.
-func (s *profileStore) inTx(fn func(tx *sql.Tx) error) error {
-	return s.ds.RunTx("profile store", func(tx *sql.Tx, _ time.Time) error { return fn(tx) })
+func (s *profileStore) inTx(op *lockOp, fn func(tx *sql.Tx) error) error {
+	return s.ds.RunTx(op, func(tx *sql.Tx, _ time.Time) error { return fn(tx) })
 }
 
 func profileExistsTx(tx *sql.Tx, id string) (bool, error) {
@@ -180,7 +180,7 @@ type profileRow struct {
 // allRows returns every stored row, oldest id first.
 func (s *profileStore) allRows() ([]profileRow, error) {
 	var out []profileRow
-	err := s.ds.Read(func(q sqlQueryer) error {
+	err := s.ds.Read(lockProfilesAllRows, func(q sqlQueryer) error {
 		rows, err := q.Query(`SELECT id, body FROM equipment_profiles ORDER BY id`)
 		if err != nil {
 			return fmt.Errorf("profile store: list: %w", err)
@@ -203,7 +203,7 @@ func (s *profileStore) allRows() ([]profileRow, error) {
 
 func (s *profileStore) count() (int, error) {
 	var n int
-	err := s.ds.Read(func(q sqlQueryer) error {
+	err := s.ds.Read(lockProfilesCount, func(q sqlQueryer) error {
 		if err := q.QueryRow(`SELECT COUNT(*) FROM equipment_profiles`).Scan(&n); err != nil {
 			return fmt.Errorf("profile store: count: %w", err)
 		}

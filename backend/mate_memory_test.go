@@ -15,7 +15,7 @@ import (
 func addMemory(t *testing.T, env *proposalEnv, text string) mateMemory {
 	t.Helper()
 	var m mateMemory
-	err := env.docs.RunTx("test memory", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		m, err = createMateMemoryTx(tx, text, now)
 		return err
@@ -42,7 +42,7 @@ func TestMateMemory_AddEditDelete(t *testing.T) {
 		t.Fatalf("added %+v", m)
 	}
 	env.advance()
-	err := env.docs.RunTx("edit", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := updateMateMemoryTx(tx, m.ID, "The fuel polisher has a sampling port on its suction side only.", now)
 		return err
 	})
@@ -53,13 +53,13 @@ func TestMateMemory_AddEditDelete(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0].Text, "suction side only") || !got[0].UpdatedAt.After(got[0].CreatedAt) {
 		t.Fatalf("after edit %+v", got)
 	}
-	if err := env.docs.RunTx("delete", func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, m.ID) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, m.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	if got := memoriesOf(t, env); len(got) != 0 {
 		t.Fatalf("after delete %+v", got)
 	}
-	err = env.docs.RunTx("delete again", func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, m.ID) })
+	err = env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, m.ID) })
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("deleting a missing memory: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestMateMemory_TextIsCheckedWithAPlainError(t *testing.T) {
 		"too long":  strings.Repeat("x", maxMateMemoryChars+1),
 		"line feed": "first line\nsecond line",
 	} {
-		err := env.docs.RunTx("add", func(tx *sql.Tx, now time.Time) error {
+		err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 			_, err := createMateMemoryTx(tx, text, now)
 			return err
 		})
@@ -80,7 +80,7 @@ func TestMateMemory_TextIsCheckedWithAPlainError(t *testing.T) {
 			t.Errorf("%s should be refused", name)
 		}
 	}
-	if err := env.docs.RunTx("add", func(tx *sql.Tx, now time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := createMateMemoryTx(tx, strings.Repeat("x", maxMateMemoryChars), now)
 		return err
 	}); err != nil {
@@ -93,7 +93,7 @@ func TestMateMemory_TheListHoldsAtMostFiftyAndNeverDropsOne(t *testing.T) {
 	for i := 0; i < maxMateMemories; i++ {
 		addMemory(t, env, "Fact number "+string(rune('A'+i%26))+strings.Repeat("z", i))
 	}
-	err := env.docs.RunTx("one too many", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := createMateMemoryTx(tx, "One more fact", now)
 		return err
 	})
@@ -525,7 +525,7 @@ func TestReviewsReadMemoriesButCannotSaveThem(t *testing.T) {
 
 func seedFuelPolisherMemory(t *testing.T) {
 	t.Helper()
-	if err := globalDocumentStore.RunTx("seed", func(tx *sql.Tx, now time.Time) error {
+	if err := globalDocumentStore.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := createMateMemoryTx(tx, "The fuel polisher has no sampling port.", now)
 		return err
 	}); err != nil {
@@ -611,7 +611,7 @@ func TestUndoProposal_RefusesAFactChangedSinceItWasKept(t *testing.T) {
 	env := newProposalEnv(t)
 	card, fact := keptFactCard(t, env, "the hatch sticks")
 	env.advance()
-	if err := env.docs.RunTx("rewrite", func(tx *sql.Tx, now time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := updateMateMemoryTx(tx, fact.ID, "The forward hatch sticks when wet.", now)
 		return err
 	}); err != nil {
@@ -632,7 +632,7 @@ func TestUndoProposal_RefusesAFactChangedSinceItWasKept(t *testing.T) {
 func TestUndoProposal_AFactAlreadyRemovedIsUndone(t *testing.T) {
 	env := newProposalEnv(t)
 	card, fact := keptFactCard(t, env, "the hatch sticks")
-	if err := env.docs.RunTx("remove", func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, fact.ID) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return deleteMateMemoryTx(tx, fact.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	got, err := undoAssistantProposal(env.asst, env.docs, card.ID)
@@ -701,7 +701,7 @@ func TestUndoProposalHandler_AnswersTheProposalOrAPlainRefusal(t *testing.T) {
 	card2, fact2 := keptFactCard(t, env, "the bilge pump is on the port side")
 	_ = fact
 	env.advance()
-	_ = env.docs.RunTx("rewrite", func(tx *sql.Tx, now time.Time) error {
+	_ = env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := updateMateMemoryTx(tx, fact2.ID, "The bilge pump is forward.", now)
 		return err
 	})

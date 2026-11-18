@@ -292,16 +292,14 @@ func listOpenJobs(q sqlQueryer, f openJobFilter) ([]openJob, error) {
 }
 
 func (s *documentStore) GetOpenJob(id string) (openJob, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsGetOpenJob.held(&s.mu).release()
 	return openJobByID(s.db, id)
 }
 
 // OpenJobStatus reads only a job's status, for a caller that needs to know
 // whether it is still open and not its photos.
 func (s *documentStore) OpenJobStatus(id string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsOpenJobStatus.held(&s.mu).release()
 	var status string
 	err := s.db.QueryRow(`SELECT status FROM open_jobs WHERE id = ?`, id).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -314,8 +312,7 @@ func (s *documentStore) OpenJobStatus(id string) (string, error) {
 }
 
 func (s *documentStore) ListOpenJobs(f openJobFilter) ([]openJob, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsListOpenJobs.held(&s.mu).release()
 	return listOpenJobs(s.db, f)
 }
 
@@ -483,19 +480,19 @@ func cmdCompleteOpenJob(tx *sql.Tx, now time.Time, id string, req maintenanceLog
 // ── store entry points ──────────────────────────────────────────────────
 
 func (s *documentStore) CreateOpenJobCmd(today time.Time, req openJobRequest) (openJob, error) {
-	return runCmd(s, "create open job", func(tx *sql.Tx, now time.Time) (openJob, error) {
+	return runCmd(s, lockDocumentsCreateOpenJob, func(tx *sql.Tx, now time.Time) (openJob, error) {
 		return cmdCreateOpenJob(tx, now, today, req)
 	})
 }
 
 func (s *documentStore) UpdateOpenJobCmd(id string, req openJobRequest) (openJob, error) {
-	return runCmd(s, "update open job", func(tx *sql.Tx, now time.Time) (openJob, error) {
+	return runCmd(s, lockDocumentsUpdateOpenJob, func(tx *sql.Tx, now time.Time) (openJob, error) {
 		return cmdUpdateOpenJob(tx, now, id, req)
 	})
 }
 
 func (s *documentStore) DropOpenJobCmd(today time.Time, id, reason string) (openJob, error) {
-	return runCmd(s, "drop open job", func(tx *sql.Tx, now time.Time) (openJob, error) {
+	return runCmd(s, lockDocumentsDropOpenJob, func(tx *sql.Tx, now time.Time) (openJob, error) {
 		return cmdDropOpenJob(tx, now, today, id, reason)
 	})
 }
@@ -506,7 +503,7 @@ type completedOpenJob struct {
 }
 
 func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryRequest) (openJob, maintenanceLogEntry, error) {
-	done, err := runCmd(s, "complete open job", func(tx *sql.Tx, now time.Time) (completedOpenJob, error) {
+	done, err := runCmd(s, lockDocumentsCompleteOpenJob, func(tx *sql.Tx, now time.Time) (completedOpenJob, error) {
 		job, entry, err := cmdCompleteOpenJob(tx, now, id, req)
 		return completedOpenJob{job, entry}, err
 	})
@@ -523,8 +520,7 @@ func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryReq
 // OpenJobPhotoIDBySHA returns the id of the job's photo with these bytes, or
 // "" if the job has none. It answers for a closed job too: its photos stay.
 func (s *documentStore) OpenJobPhotoIDBySHA(jobID, sha string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsOpenJobPhotoIDBySHA.held(&s.mu).release()
 	var id string
 	err := s.db.QueryRow(`
 		SELECT d.id FROM open_job_photos ojp
@@ -543,7 +539,7 @@ func (s *documentStore) OpenJobPhotoIDBySHA(jobID, sha string) (string, error) {
 // Only a job that is still open takes photos; once closed, its photos are the
 // ones it was closed with.
 func (s *documentStore) AddOpenJobPhoto(jobID, documentID string) error {
-	return s.RunTx("add open job photo", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsAddOpenJobPhoto, func(tx *sql.Tx, now time.Time) error {
 		if _, err := openJobForClose(tx, jobID); err != nil {
 			return err
 		}
@@ -572,8 +568,7 @@ func (s *documentStore) AddOpenJobPhoto(jobID, documentID string) error {
 
 // RemoveOpenJobPhoto unlinks documentID from the job.
 func (s *documentStore) RemoveOpenJobPhoto(jobID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsRemoveOpenJobPhoto.held(&s.mu).release()
 	res, err := s.db.Exec(`DELETE FROM open_job_photos WHERE job_id = ? AND document_id = ?`, jobID, documentID)
 	if err != nil {
 		return fmt.Errorf("remove open job photo: %w", err)
@@ -584,8 +579,7 @@ func (s *documentStore) RemoveOpenJobPhoto(jobID, documentID string) error {
 // OpenJobPhotoDeletableAsOrphan is true when nothing else (an item's photo
 // strip, a log line, another job) still shows the document.
 func (s *documentStore) OpenJobPhotoDeletableAsOrphan(documentID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsOpenJobPhotoDeletableOrphan.held(&s.mu).release()
 	return rowExists(s.db, `
 		SELECT 1 FROM documents d
 		WHERE d.id = ?

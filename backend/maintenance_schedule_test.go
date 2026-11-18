@@ -45,7 +45,7 @@ func scheduleFixture(t *testing.T) (*documentStore, equipmentItem) {
 
 func runScheduleTx(t *testing.T, store *documentStore, fn func(tx *sql.Tx, now time.Time) error) error {
 	t.Helper()
-	return store.RunTx("test write", fn)
+	return store.RunTx(testTxOp, fn)
 }
 
 func mustScheduleTx(t *testing.T, store *documentStore, fn func(tx *sql.Tx, now time.Time) error) {
@@ -89,7 +89,7 @@ func intp(v int) *int        { return &v }
 func replaceProfile(t *testing.T, store *profileStore, doc string) {
 	t.Helper()
 	p := mustProfile(t, doc)
-	if err := store.inTx(func(tx *sql.Tx) error { return updateProfileTx(tx, p) }); err != nil {
+	if err := store.inTx(testTxOp, func(tx *sql.Tx) error { return updateProfileTx(tx, p) }); err != nil {
 		t.Fatalf("updateProfileTx: %v", err)
 	}
 	loadEngineProfiles()

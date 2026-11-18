@@ -169,15 +169,14 @@ func vesselParticularsFrom(q sqlQueryer) (vesselParticulars, error) {
 // when nothing has been saved yet. Never an error for "not set": a boat that
 // has not filled this in is a normal state.
 func (s *documentStore) GetVesselParticulars() (vesselParticulars, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsGetVesselParticulars.held(&s.mu).release()
 	return vesselParticularsFrom(s.db)
 }
 
 // SetVesselParticulars replaces the whole record.
 func (s *documentStore) SetVesselParticulars(v vesselParticulars) (vesselParticulars, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	h := lockDocumentsSetVesselParticulars.held(&s.mu)
+	defer h.release()
 
 	v = trimParticulars(v)
 	if verr := validateParticulars(v); verr != nil {
@@ -185,7 +184,7 @@ func (s *documentStore) SetVesselParticulars(v vesselParticulars) (vesselParticu
 	}
 
 	var saved vesselParticulars
-	err := s.runTxLocked("set vessel particulars", func(tx *sql.Tx, now time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		if err := upsertVesselParticularsTx(tx, v, now); err != nil {
 			return err
 		}

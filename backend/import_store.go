@@ -311,8 +311,7 @@ func alreadyImportedKeys(st stagedImport, recorded map[string]map[string]importR
 // CreateImportRun stores a new draft. The decisions must already validate
 // against the payload (the defaults always do).
 func (s *documentStore) CreateImportRun(source, label, fileSHA string, staged stagedImport, decisions importDecisions) (importRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsCreateImportRun.held(&s.mu).release()
 
 	decisions = normalizeDecisions(decisions)
 	if err := validateImportDecisions(staged, decisions); err != nil {
@@ -340,8 +339,7 @@ func (s *documentStore) CreateImportRun(source, label, fileSHA string, staged st
 
 // GetImportRun reads one run.
 func (s *documentStore) GetImportRun(id string) (importRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsGetImportRun.held(&s.mu).release()
 	return importRunByID(s.db, id)
 }
 
@@ -353,7 +351,7 @@ func (s *documentStore) GetImportRun(id string) (importRun, error) {
 // not wipe a file the operator already handed over.
 func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (importRun, error) {
 	var out importRun
-	err := s.RunTx("merge import decisions", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsMergeImportDecisions, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err
@@ -405,7 +403,7 @@ func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (
 // for one staged file, and clears its skipped flag.
 func (s *documentStore) SetImportFileDocument(id, fileKey, documentID string) (importRun, error) {
 	var out importRun
-	err := s.RunTx("set import file", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsSetImportFile, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err
@@ -466,7 +464,7 @@ func saveImportDecisionsTx(tx *sql.Tx, id string, d importDecisions, now time.Ti
 // exists. Files already stored for it stay in the document library.
 func (s *documentStore) AbandonImportRun(id string) (importRun, error) {
 	var out importRun
-	err := s.RunTx("abandon import run", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsAbandonImportRun, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err

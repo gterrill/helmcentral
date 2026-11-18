@@ -159,7 +159,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 	now := vesselStatusTestNow
 	w := savedWatch{ID: "w1", Name: "Morning", Kind: watchKindScheduled, Schedule: "0 6 * * *", Sections: allSections(), Thresholds: defaultWatchThresholds(),
 		Enabled: true, CreatedAt: now.Add(-72 * time.Hour), UpdatedAt: now.Add(-72 * time.Hour), ScheduleChangedAt: now.Add(-72 * time.Hour)}
-	if err := env.docs.RunTx("watch", func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, w) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, w) }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,7 +178,7 @@ func TestGatherWatchReportInput_UsesThePreviousRunAndTheStatus(t *testing.T) {
 	prevAt := now.Add(-5 * time.Hour)
 	report, _ := buildWatchReport(w, watchReportInput{Now: prevAt, Loc: time.UTC, Since: prevAt.Add(-time.Hour), Status: calmStatus()})
 	raw, _ := json.Marshal(report)
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{WatchID: "w1", StartedAt: prevAt, FinishedAt: prevAt, Outcome: watchOutcomeRan, Report: raw, CostKnown: true}, true)
 	}); err != nil {
 		t.Fatal(err)

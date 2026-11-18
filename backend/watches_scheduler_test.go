@@ -69,7 +69,7 @@ func (f *watchHostFixture) add(name, schedule string) savedWatch {
 	created := f.clock.Add(-48 * time.Hour)
 	w := savedWatch{ID: "id-" + name, Name: name, Kind: watchKindScheduled, Schedule: schedule, Sections: []string{"power"},
 		Thresholds: defaultWatchThresholds(), Enabled: true, CreatedAt: created, UpdatedAt: created, ScheduleChangedAt: created}
-	if err := f.docs.RunTx("test watch", func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, w) }); err != nil {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, w) }); err != nil {
 		f.t.Fatal(err)
 	}
 	return w
@@ -78,7 +78,7 @@ func (f *watchHostFixture) add(name, schedule string) savedWatch {
 // ran leaves a previous run on the watch.
 func (f *watchHostFixture) ran(id string, at time.Time) {
 	f.t.Helper()
-	err := f.docs.RunTx("seed run", func(tx *sql.Tx, _ time.Time) error {
+	err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{WatchID: id, StartedAt: at, FinishedAt: at, Outcome: watchOutcomeRan, CostKnown: true}, true)
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func (f *watchHostFixture) ran(id string, at time.Time) {
 func (f *watchHostFixture) get(id string) savedWatch {
 	f.t.Helper()
 	var w savedWatch
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		w, err = savedWatchByIDQ(q, id)
 		return err
@@ -102,7 +102,7 @@ func (f *watchHostFixture) get(id string) savedWatch {
 func (f *watchHostFixture) runsOf(id string) []watchRun {
 	f.t.Helper()
 	var runs []watchRun
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		runs, err = watchRunsQ(q, id, 50, nil)
 		return err
@@ -197,7 +197,7 @@ func TestWatchTick_AnUnknownCostIsRecordedAndPausesNothing(t *testing.T) {
 		t.Fatal("the next hour's run happens: nothing is paused for an unknown cost")
 	}
 	var cost watchCost
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		cost, err = watchCostSinceQ(q, f.clock.Add(-24*time.Hour))
 		return err
@@ -266,7 +266,7 @@ func TestWatchTick_ReadsThePositionAndMateOncePerTick(t *testing.T) {
 func TestWatchTick_DisabledAndOneOffWatchesAreLeftAlone(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.add("Off", "0 * * * *")
-	if err := f.docs.RunTx("off", func(tx *sql.Tx, now time.Time) error {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		w, err := savedWatchByIDQ(tx, "id-Off")
 		w.Enabled, w.UpdatedAt = false, now
 		if err != nil {
@@ -278,7 +278,7 @@ func TestWatchTick_DisabledAndOneOffWatchesAreLeftAlone(t *testing.T) {
 	}
 	started, ends := f.clock.Add(-time.Minute), f.clock.Add(5*time.Minute)
 	oneOff := savedWatch{ID: "oo", Name: "Depth", Kind: watchKindOneOff, StartedAt: &started, EndsAt: &ends, Sections: []string{}, Enabled: true, CreatedAt: started, UpdatedAt: started}
-	if err := f.docs.RunTx("one-off", func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, oneOff) }); err != nil {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return insertSavedWatchTx(tx, oneOff) }); err != nil {
 		t.Fatal(err)
 	}
 	f.host.tick(context.Background())
@@ -295,7 +295,7 @@ func TestWatchTick_AWatchSwitchedOffDuringAnEarlierRunIsNotRun(t *testing.T) {
 		if w.Name != "A" {
 			return
 		}
-		_ = f.docs.RunTx("off", func(tx *sql.Tx, now time.Time) error {
+		_ = f.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 			b, _ := savedWatchByIDQ(tx, "id-B")
 			b.Enabled, b.UpdatedAt = false, now
 			return updateSavedWatchTx(tx, b)
@@ -336,7 +336,7 @@ func TestWatchTick_AWatchDeletedMidRunIsNotAFailure(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.add("A", "0 * * * *")
 	f.onReport = func(w savedWatch) {
-		_ = f.docs.RunTx("del", func(tx *sql.Tx, _ time.Time) error { return deleteSavedWatchTx(tx, w.ID) })
+		_ = f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return deleteSavedWatchTx(tx, w.ID) })
 	}
 	f.host.tick(context.Background())
 	if f.host.stopReason() != "" {
@@ -398,7 +398,7 @@ func TestPruneWatchHistory_DropsQuietRunsOverAYearOldAndKeepsFindings(t *testing
 	old := f.clock.Add(-400 * 24 * time.Hour)
 	recent := f.clock.Add(-10 * 24 * time.Hour)
 	seed := func(id string, at time.Time, findings []watchFinding) {
-		if err := f.docs.RunTx("seed", func(tx *sql.Tx, _ time.Time) error {
+		if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 			return insertWatchRunTx(tx, watchRun{ID: id, WatchID: "id-A", StartedAt: at, FinishedAt: at, Outcome: watchOutcomeRan, Findings: findings, CostKnown: true}, true)
 		}); err != nil {
 			t.Fatal(err)
@@ -409,13 +409,13 @@ func TestPruneWatchHistory_DropsQuietRunsOverAYearOldAndKeepsFindings(t *testing
 	seed("recent-quiet", recent, nil)
 	// A one-off watch left with no runs goes with them.
 	started := old
-	if err := f.docs.RunTx("one-off", func(tx *sql.Tx, _ time.Time) error {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertSavedWatchTx(tx, savedWatch{ID: "oo", Name: "Depth", Kind: watchKindOneOff, StartedAt: &started, Sections: []string{}, CreatedAt: old, UpdatedAt: old})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var n int64
-	if err := f.docs.RunTx("prune", func(tx *sql.Tx, _ time.Time) error {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		var err error
 		n, err = pruneWatchRunsTx(tx, f.clock.Add(-watchRunRetention))
 		return err
@@ -434,7 +434,7 @@ func TestPruneWatchHistory_DropsQuietRunsOverAYearOldAndKeepsFindings(t *testing
 	}
 	for _, w := range func() []savedWatch {
 		var l []savedWatch
-		_ = f.docs.Read(func(q sqlQueryer) error { l, _ = listSavedWatchesQ(q); return nil })
+		_ = f.docs.Read(testReadOp, func(q sqlQueryer) error { l, _ = listSavedWatchesQ(q); return nil })
 		return l
 	}() {
 		if w.ID == "oo" {

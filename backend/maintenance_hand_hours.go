@@ -119,8 +119,7 @@ func insertHandHourReadingTx(tx *sql.Tx, now time.Time, equipmentID, readOn stri
 
 // ListHandHourReadings returns equipmentID's kept readings, latest date first.
 func (s *documentStore) ListHandHourReadings(equipmentID string) ([]handHourReading, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsListHandHourReadings.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT `+handHourReadingColumns+` FROM hand_hour_readings WHERE equipment_id = ? ORDER BY read_on DESC, created_at DESC, id DESC`, equipmentID)
 	if err != nil {
 		return nil, fmt.Errorf("list hand hour readings"+": %w", err)
@@ -144,8 +143,7 @@ func (s *documentStore) ListHandHourReadings(equipmentID string) ([]handHourRead
 // with its meter-reset history, under one lock: the kept readings plus the
 // hours on the item's service log entries (a Complete form writes one).
 func (s *documentStore) HandHourSamples(equipmentID string) ([]handHourSample, []hourMeterReset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockDocumentsHandHourSamples.held(&s.mu).release()
 	rows, err := s.db.Query(`
 		SELECT read_on, hours FROM hand_hour_readings WHERE equipment_id = ?
 		UNION ALL
@@ -178,7 +176,7 @@ func (s *documentStore) HandHourSamples(equipmentID string) ([]handHourSample, [
 
 // DeleteHandHourReading removes one kept reading of equipmentID.
 func (s *documentStore) DeleteHandHourReading(equipmentID, readingID string) error {
-	return s.RunTx("delete hand hour reading", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsDeleteHandHourReading, func(tx *sql.Tx, now time.Time) error {
 		res, err := tx.Exec(`DELETE FROM hand_hour_readings WHERE id = ? AND equipment_id = ?`, readingID, equipmentID)
 		if err != nil {
 			return fmt.Errorf("delete hand hour reading"+": %w", err)
@@ -246,7 +244,7 @@ func cmdRecordHandHourReading(tx *sql.Tx, now, today time.Time, equipmentID stri
 }
 
 func (s *documentStore) RecordHandHourReadingCmd(today time.Time, equipmentID string, req handHourReadingRequest) (handHourReading, error) {
-	return runCmd(s, "record hand hour reading", func(tx *sql.Tx, now time.Time) (handHourReading, error) {
+	return runCmd(s, lockDocumentsRecordHandHourReading, func(tx *sql.Tx, now time.Time) (handHourReading, error) {
 		return cmdRecordHandHourReading(tx, now, today, equipmentID, req)
 	})
 }

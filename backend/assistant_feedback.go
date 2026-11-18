@@ -169,18 +169,22 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 		return assistantFeedback{}, fmt.Errorf("%w: the note is longer than %d characters", errAssistantFeedbackInvalid, assistantFeedbackNoteMax)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
+	var fb assistantFeedback
+	err := runTxUnderLock(lockAssistantSetMessageFeedback, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
+		var err error
+		fb, err = setMessageFeedbackTx(tx, messageID, verdict, note, s.now())
+		return err
+	})
 	if err != nil {
-		return assistantFeedback{}, fmt.Errorf("begin set feedback: %w", err)
+		return assistantFeedback{}, err
 	}
-	defer tx.Rollback()
+	return fb, nil
+}
+
+func setMessageFeedbackTx(tx *sql.Tx, messageID, verdict, note string, now time.Time) (assistantFeedback, error) {
 	if err := answerRoleTx(tx, messageID); err != nil {
 		return assistantFeedback{}, err
 	}
-	now := s.now()
 	// A new rating on an answer whose lookups the retention rule has already
 	// cleared would list as an answer that used no tools. What matters is
 	// whether the lookups this rating needs are gone, not how old the answer
@@ -210,9 +214,6 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 		Scan(&fb.MessageID, &fb.Verdict, &fb.Note, &created, &updated); err != nil {
 		return assistantFeedback{}, fmt.Errorf("read feedback: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return assistantFeedback{}, fmt.Errorf("commit set feedback: %w", err)
-	}
 	fb.CreatedAt = time.Unix(created, 0).UTC()
 	fb.UpdatedAt = time.Unix(updated, 0).UTC()
 	return fb, nil
@@ -221,24 +222,15 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 // ClearMessageFeedback removes the verdict on an assistant message. Clearing
 // an answer that has none is not an error; an unknown id is.
 func (s *assistantStore) ClearMessageFeedback(messageID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin clear feedback: %w", err)
-	}
-	defer tx.Rollback()
-	if err := answerRoleTx(tx, messageID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM message_feedback WHERE message_id = ?`, messageID); err != nil {
-		return fmt.Errorf("clear feedback: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit clear feedback: %w", err)
-	}
-	return nil
+	return runTxUnderLock(lockAssistantClearMessageFeedback, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
+		if err := answerRoleTx(tx, messageID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM message_feedback WHERE message_id = ?`, messageID); err != nil {
+			return fmt.Errorf("clear feedback: %w", err)
+		}
+		return nil
+	})
 }
 
 const (
@@ -284,8 +276,7 @@ func (s *assistantStore) ListFeedback(limit int, before string) ([]assistantFeed
 // readFeedbackPage does the reads, under the lock: the rated answers, then
 // every one's tool calls in a single query.
 func (s *assistantStore) readFeedbackPage(n int, curUpdated int64, curID string) ([]assistantFeedbackEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockAssistantReadFeedbackPage.held(&s.mu).release()
 
 	rows, err := s.db.Query(`
 		SELECT f.message_id, f.verdict, f.note, f.created_at, f.updated_at,

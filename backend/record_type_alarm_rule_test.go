@@ -41,7 +41,7 @@ func seedBuiltInRule(t *testing.T, r alarmRule) alarmRule {
 		t.Fatal(err)
 	}
 	r.ID, r.SeededBy = "built-in-"+r.Label, "test-set"
-	err := globalDocumentStore.writeAlarmRules("seed", func(tx *sql.Tx, now time.Time) error {
+	err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		r.CreatedAt, r.UpdatedAt = now, now
 		return insertAlarmRuleTx(tx, r)
 	})
@@ -260,7 +260,7 @@ func TestAlarmRule_UpdatingARoleBoundRuleDoesNotReenterTheStoreLock(t *testing.T
 	env := alarmProposalEnv(t)
 	t.Setenv("SETTINGS_FILE", t.TempDir()+"/none.yaml")
 	r := alarmRule{ID: "role-rule", Enabled: true, Path: "", PathRole: alarmPathRoleHouseBankSoC, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, DwellSeconds: 30, State: alarmStateWarn, Methods: []string{"visual"}}
-	err := globalDocumentStore.writeAlarmRules("seed", func(tx *sql.Tx, now time.Time) error {
+	err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		r.CreatedAt, r.UpdatedAt = now, now
 		return insertAlarmRuleTx(tx, r)
 	})
@@ -313,7 +313,7 @@ func TestAlarmRule_UnknownUnitRefusesNumbersAndNamesThePath(t *testing.T) {
 func TestAlarmRule_HouseBankRoleIsARatio(t *testing.T) {
 	env := alarmProposalEnv(t)
 	r := alarmRule{ID: "role-rule", Enabled: true, Path: "", PathRole: alarmPathRoleHouseBankSoC, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, Hysteresis: 0.05, DwellSeconds: 30, State: alarmStateWarn, Methods: []string{"visual"}}
-	if err := globalDocumentStore.writeAlarmRules("seed", func(tx *sql.Tx, now time.Time) error {
+	if err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		r.CreatedAt, r.UpdatedAt = now, now
 		return insertAlarmRuleTx(tx, r)
 	}); err != nil {

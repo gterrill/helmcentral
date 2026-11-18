@@ -18,7 +18,7 @@ import (
 func createTestSavedPlace(t *testing.T, env *proposalEnv, name string, lat, lon float64) savedPlace {
 	t.Helper()
 	var p savedPlace
-	err := env.docs.RunTx("test create", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		p, err = createSavedPlaceTx(tx, savedPlace{Name: name, Lat: lat, Lon: lon}, now)
 		return err
@@ -48,7 +48,7 @@ func TestSavedPlaces_StoreCreateListUpdateDelete(t *testing.T) {
 	createTestSavedPlace(t, env, "Brampton Island - West Bay", -20.8163, 149.2615)
 
 	var list []savedPlace
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		list, err = listSavedPlacesQ(q)
 		return err
@@ -57,7 +57,7 @@ func TestSavedPlaces_StoreCreateListUpdateDelete(t *testing.T) {
 	}
 
 	env.advance()
-	err := env.docs.RunTx("test update", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		p.Name, p.Lat = "Thomas Is South", -20.55
 		_, err := updateSavedPlaceTx(tx, p, now)
 		return err
@@ -70,7 +70,7 @@ func TestSavedPlaces_StoreCreateListUpdateDelete(t *testing.T) {
 		t.Fatalf("update not stored: %+v", got)
 	}
 
-	if err := env.docs.RunTx("test delete", func(tx *sql.Tx, _ time.Time) error { return deleteSavedPlaceTx(tx, p.ID) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return deleteSavedPlaceTx(tx, p.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := savedPlaceByIDQ(env.docs.db, p.ID); err != errSavedPlaceNotFound {
@@ -81,7 +81,7 @@ func TestSavedPlaces_StoreCreateListUpdateDelete(t *testing.T) {
 func TestSavedPlaces_NamesAreUniqueIgnoringCase(t *testing.T) {
 	env := newProposalEnv(t)
 	createTestSavedPlace(t, env, "Thomas Island South", -20.5, 149.1)
-	err := env.docs.RunTx("dup", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := createSavedPlaceTx(tx, savedPlace{Name: "thomas island south", Lat: -20, Lon: 149}, now)
 		return err
 	})
@@ -331,7 +331,7 @@ func TestMCPFindPlaces_ReturnsASavedPlace(t *testing.T) {
 		return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil
 	}
 	deps.placeNames = func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
-	if err := globalDocumentStore.RunTx("seed", func(tx *sql.Tx, now time.Time) error {
+	if err := globalDocumentStore.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		_, err := createSavedPlaceTx(tx, savedPlace{Name: "Thomas Island South", Lat: -20.5446, Lon: 149.1189}, now)
 		return err
 	}); err != nil {

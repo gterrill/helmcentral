@@ -104,7 +104,7 @@ func TestWatchREST_RunsCarryTheSplitReviewAndNewBoatTime(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
 
 	review := "Quiet night. Bank fell 4%.\n\n- one"
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "r1", WatchID: created.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan,
 			Report: json.RawMessage(`{"kind":"sections"}`), Review: &review, BoatTime: "Tue 3 Nov 14:30 AEST"}, true)
 	}); err != nil {
@@ -147,7 +147,7 @@ func TestWatchREST_RunsCarryTheSplitReviewAndNewBoatTime(t *testing.T) {
 
 	// Mate's tools read no split, but every reader gets the one time label. A run
 	// with no review carries neither field.
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		stored, err := watchRunByIDQ(q, created.ID, "r1")
 		if err != nil {
 			return err

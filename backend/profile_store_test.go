@@ -28,7 +28,7 @@ func TestProfileStoreTxFunctions(t *testing.T) {
 	store := newTestProfileStore(t)
 	p := mustProfile(t, goodProfile)
 
-	err := store.inTx(func(tx *sql.Tx) error {
+	err := store.inTx(testTxOp, func(tx *sql.Tx) error {
 		if err := insertProfileTx(tx, p, profileBasedOn{Source: "helmcentral", ID: "x", SHA256: "abc"}); err != nil {
 			return err
 		}
@@ -58,7 +58,7 @@ func TestProfileStoreTxFunctions(t *testing.T) {
 
 	// A rolled-back transaction leaves nothing behind.
 	rollback := errors.New("stop")
-	err = store.inTx(func(tx *sql.Tx) error {
+	err = store.inTx(testTxOp, func(tx *sql.Tx) error {
 		if err := deleteProfileTx(tx, p.ID); err != nil {
 			return err
 		}
@@ -70,7 +70,7 @@ func TestProfileStoreTxFunctions(t *testing.T) {
 	if n, _ := store.count(); n != 1 {
 		t.Fatalf("expected the delete to roll back, count %d", n)
 	}
-	if err := store.inTx(func(tx *sql.Tx) error { return deleteProfileTx(tx, "nope") }); !errors.Is(err, errProfileNotFound) {
+	if err := store.inTx(testTxOp, func(tx *sql.Tx) error { return deleteProfileTx(tx, "nope") }); !errors.Is(err, errProfileNotFound) {
 		t.Fatalf("expected errProfileNotFound, got %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestCatalogueListAndCopy(t *testing.T) {
 		t.Fatalf("missing entry: %d", rec.Code)
 	}
 
-	err := globalProfileStore.inTx(func(tx *sql.Tx) error {
+	err := globalProfileStore.inTx(testTxOp, func(tx *sql.Tx) error {
 		_, basedOn, err := getProfileTx(tx, "my-copy")
 		if basedOn.Source != "helmcentral" || basedOn.ID != first.ID || basedOn.SHA256 != first.SHA256 {
 			t.Fatalf("based_on not recorded: %+v", basedOn)

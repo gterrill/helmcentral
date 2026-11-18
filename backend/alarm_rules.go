@@ -191,7 +191,7 @@ func createAlarmRule(rule alarmRule) (alarmRule, error) {
 	if err != nil {
 		return alarmRule{}, err
 	}
-	err = store.writeAlarmRules("create alarm rule", func(tx *sql.Tx, now time.Time) error {
+	err = store.writeAlarmRules(lockAlarmRulesCreate, func(tx *sql.Tx, now time.Time) error {
 		rule.ID = uuid.NewString()
 		rule.CreatedAt = now
 		rule.UpdatedAt = now
@@ -212,7 +212,7 @@ func updateAlarmRule(id string, next alarmRule) (alarmRule, error) {
 	if err != nil {
 		return alarmRule{}, err
 	}
-	err = store.writeAlarmRules("update alarm rule", func(tx *sql.Tx, now time.Time) error {
+	err = store.writeAlarmRules(lockAlarmRulesUpdate, func(tx *sql.Tx, now time.Time) error {
 		existing, err := alarmRuleByIDQ(tx, id)
 		if errors.Is(err, errAlarmRuleNotFound) {
 			return fmt.Errorf("no alarm rule with id %q", id)
@@ -238,7 +238,7 @@ func deleteAlarmRule(id string) error {
 	if err != nil {
 		return err
 	}
-	return store.writeAlarmRules("delete alarm rule", func(tx *sql.Tx, _ time.Time) error {
+	return store.writeAlarmRules(lockAlarmRulesDelete, func(tx *sql.Tx, _ time.Time) error {
 		if err := deleteAlarmRuleTx(tx, id); errors.Is(err, errAlarmRuleNotFound) {
 			return fmt.Errorf("no alarm rule with id %q", id)
 		} else {
@@ -394,7 +394,7 @@ func syncRoleBoundRules(vessel vesselView) error {
 	if !moves {
 		return nil
 	}
-	return store.writeAlarmRules("move role-bound alarm rules", func(tx *sql.Tx, now time.Time) error {
+	return store.writeAlarmRules(lockAlarmRulesMoveRoleBound, func(tx *sql.Tx, now time.Time) error {
 		rules, err := listAlarmRulesQ(tx)
 		if err != nil {
 			return err

@@ -177,7 +177,7 @@ func copyCatalogueProfileHandler(c echo.Context) error {
 	}
 
 	basedOn := profileBasedOn{Source: entry.Source, ID: entry.Profile.ID, SHA256: entry.SHA256}
-	err = globalProfileStore.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, profile, basedOn) })
+	err = globalProfileStore.inTx(lockProfilesCopyFromCatalogue, func(tx *sql.Tx) error { return insertProfileTx(tx, profile, basedOn) })
 	if err != nil {
 		if errors.Is(err, errProfileExists) {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "profile id already exists"})
