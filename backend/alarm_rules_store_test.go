@@ -18,7 +18,7 @@ func insertFixedIDAlarmRuleForTest(t *testing.T, rule alarmRule) (alarmRule, err
 	if err := validateAlarmRule(&rule); err != nil {
 		return alarmRule{}, err
 	}
-	err := globalDocumentStore.writeAlarmRules("test insert", func(tx *sql.Tx, now time.Time) error {
+	err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		rule.CreatedAt, rule.UpdatedAt = now, now
 		return insertAlarmRuleTx(tx, rule)
 	})
@@ -45,7 +45,7 @@ func TestAlarmRulesSurviveReopeningTheStore(t *testing.T) {
 	}
 	defer reopened.Close()
 	var got alarmRule
-	if err := reopened.Read(func(q sqlQueryer) error {
+	if err := reopened.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		got, err = alarmRuleByIDQ(q, created.ID)
 		return err
@@ -67,7 +67,7 @@ func TestAlarmRuleTxVariantsRollBackAndRefreshAfterCommit(t *testing.T) {
 	rule.ID, rule.CreatedAt, rule.UpdatedAt = "tx-rule", now, now
 
 	boom := errors.New("boom")
-	err := store.RunTx("test", func(tx *sql.Tx, _ time.Time) error {
+	err := store.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		if err := insertAlarmRuleTx(tx, rule); err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ func TestAlarmRuleTxVariantsRollBackAndRefreshAfterCommit(t *testing.T) {
 		t.Fatal("a rolled back insert must leave no rule")
 	}
 
-	if err := store.RunTx("test", func(tx *sql.Tx, _ time.Time) error { return insertAlarmRuleTx(tx, rule) }); err != nil {
+	if err := store.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return insertAlarmRuleTx(tx, rule) }); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := getAlarmRule("tx-rule"); ok {
@@ -465,7 +465,7 @@ func TestImportIgnoresABlankIgnoredSensorList(t *testing.T) {
 
 func TestACommittedWriteWhoseReloadFailsSaysItWasSaved(t *testing.T) {
 	withTempAlarmRules(t)
-	err := globalDocumentStore.writeAlarmRules("break", func(tx *sql.Tx, _ time.Time) error {
+	err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`DROP TABLE alarm_rule_seeded_sets`)
 		return err
 	})
@@ -487,7 +487,7 @@ func TestAnEmptyNotifyListRoundTripsAsItWas(t *testing.T) {
 	for id, notify := range map[string][]string{"nil": nil, "empty": {}, "some": {"ntfy"}} {
 		r := validRule()
 		r.ID, r.Notify, r.CreatedAt, r.UpdatedAt = id, notify, now, now
-		if err := globalDocumentStore.writeAlarmRules("t", func(tx *sql.Tx, _ time.Time) error { return insertAlarmRuleTx(tx, r) }); err != nil {
+		if err := globalDocumentStore.writeAlarmRules(testTxOp, func(tx *sql.Tx, _ time.Time) error { return insertAlarmRuleTx(tx, r) }); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := getAlarmRule(id)

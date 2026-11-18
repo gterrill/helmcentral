@@ -112,7 +112,7 @@ func getWatchRecord(q sqlQueryer, id string) (recordSnapshot, error) {
 
 func listWatchRecords(s *documentStore, f map[string]string) ([]recordSnapshot, error) {
 	var watches []savedWatch
-	if err := s.Read(func(q sqlQueryer) error {
+	if err := s.Read(lockWatchesListRecords, func(q sqlQueryer) error {
 		var err error
 		watches, err = listSavedWatchesQ(q)
 		return err

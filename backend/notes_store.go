@@ -84,7 +84,8 @@ func (s *documentStore) InsertNote(doc document) (document, error) {
 //     be assumed away. This mirrors Insert's own check-before-write
 //     duplicate handling exactly.
 func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, error) {
-	defer lockDocumentsReplaceNoteBody.held(&s.mu).release()
+	h := lockDocumentsReplaceNoteBody.held(&s.mu)
+	defer h.release()
 
 	var currentSHA, kind string
 	err := s.db.QueryRow(`SELECT sha256, kind FROM documents WHERE id = ?`, id).Scan(&currentSHA, &kind)
@@ -109,7 +110,7 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 		return "", fmt.Errorf("replace note body: check collision: %w", err)
 	}
 
-	err = s.runTxLocked("replace note body", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		res, err := tx.Exec(
 			`UPDATE documents SET sha256 = ?, size_bytes = ?, updated_at = ?, status = 'pending', stage = 'extract', error = '', reindex_seq = reindex_seq + 1 WHERE id = ?`,
 			newSHA, size, now.Unix(), id,

@@ -209,8 +209,8 @@ func (s *outsideAssistantStore) Close() error {
 
 // RunTx runs fn in one transaction, holding the store mutex for its life
 // (ADR 0184). fn gets the store's clock reading for the transaction.
-func (s *outsideAssistantStore) RunTx(op string, fn func(tx *sql.Tx, now time.Time) error) error {
-	return runTxUnderLock(&s.mu, s.db, op, time.Now, serverVitals, func(tx *sql.Tx) error {
+func (s *outsideAssistantStore) RunTx(op *lockOp, fn func(tx *sql.Tx, now time.Time) error) error {
+	return runTxUnderLock(op, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		return fn(tx, s.now())
 	})
 }
@@ -236,7 +236,7 @@ func (s *outsideAssistantStore) CreateToken(name string, tools []string) (mcpTok
 	}
 	secret := mcpTokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	rec := mcpTokenRecord{ID: uuid.NewString(), Name: name}
-	err := s.RunTx("create outside assistant token", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockMCPCreateToken, func(tx *sql.Tx, now time.Time) error {
 		rec.CreatedAt = now.UTC().Truncate(time.Second)
 		if _, err := tx.Exec(`INSERT INTO mcp_tokens (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)`,
 			rec.ID, rec.Name, hashMCPToken(secret), rec.CreatedAt.Unix()); err != nil {
@@ -278,7 +278,7 @@ func (s *outsideAssistantStore) Authenticate(secret string) (mcpTokenRecord, boo
 	hash := hashMCPToken(secret)
 	var rec mcpTokenRecord
 	found := false
-	err := s.RunTx("authenticate outside assistant", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockMCPAuthenticate, func(tx *sql.Tx, now time.Time) error {
 		var stored string
 		var created int64
 		var used sql.NullInt64
@@ -371,7 +371,7 @@ func (s *outsideAssistantStore) ListTokens() ([]mcpTokenRecord, error) {
 // RevokeToken deletes one token and its tool list. The token stops working at
 // once. Activity it left behind keeps the client name it was logged under.
 func (s *outsideAssistantStore) RevokeToken(id string) error {
-	return s.RunTx("revoke outside assistant token", func(tx *sql.Tx, _ time.Time) error {
+	return s.RunTx(lockMCPRevokeToken, func(tx *sql.Tx, _ time.Time) error {
 		res, err := tx.Exec(`DELETE FROM mcp_tokens WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("revoke outside assistant token: %w", err)
@@ -416,7 +416,7 @@ func (s *outsideAssistantStore) ToolsFor(id string) ([]string, error) {
 // caller (mcp_routes.go) rejects names that cannot be offered, and the server
 // ignores any that slip through (mcp_tools.go).
 func (s *outsideAssistantStore) SetTools(id string, tools []string) error {
-	return s.RunTx("set outside assistant tools", func(tx *sql.Tx, _ time.Time) error {
+	return s.RunTx(lockMCPSetTools, func(tx *sql.Tx, _ time.Time) error {
 		var n int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM mcp_tokens WHERE id = ?`, id).Scan(&n); err != nil {
 			return fmt.Errorf("set outside assistant tools: %w", err)
@@ -429,7 +429,7 @@ func (s *outsideAssistantStore) SetTools(id string, tools []string) error {
 }
 
 func (s *outsideAssistantStore) RecordActivity(e mcpActivity) error {
-	return s.RunTx("record outside assistant activity", func(tx *sql.Tx, _ time.Time) error {
+	return s.RunTx(lockMCPRecordActivity, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`INSERT INTO mcp_activity (at, client, kind, name, outcome, duration_ms) VALUES (?, ?, ?, ?, ?, ?)`,
 			e.At.UTC().Unix(), e.Client, e.Kind, e.Name, e.Outcome, e.DurationMS)
 		if err != nil {
@@ -443,7 +443,7 @@ func (s *outsideAssistantStore) RecordActivity(e mcpActivity) error {
 // how many rows went.
 func (s *outsideAssistantStore) PruneActivity() (int64, error) {
 	var n int64
-	err := s.RunTx("prune outside assistant activity", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockMCPPruneActivity, func(tx *sql.Tx, now time.Time) error {
 		res, err := tx.Exec(`DELETE FROM mcp_activity WHERE at < ?`, now.Add(-mcpActivityRetention).Unix())
 		if err != nil {
 			return fmt.Errorf("prune outside assistant activity: %w", err)

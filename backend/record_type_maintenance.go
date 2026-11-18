@@ -199,7 +199,7 @@ func listMaintenanceRules(s *documentStore, filter map[string]string) ([]recordS
 		return nil, err
 	}
 	var out []recordSnapshot
-	err = s.Read(func(q sqlQueryer) error {
+	err = s.Read(lockMaintenanceListRules, func(q sqlQueryer) error {
 		for _, eff := range sched.Rules {
 			snap, err := ruleSnapshot(q, eff)
 			if err != nil {
@@ -644,7 +644,7 @@ func listMaintenanceLogEntries(s *documentStore, filter map[string]string) ([]re
 		return nil, err
 	}
 	var out []recordSnapshot
-	err = s.Read(func(q sqlQueryer) error {
+	err = s.Read(lockMaintenanceListLogEntries, func(q sqlQueryer) error {
 		for _, e := range entries {
 			snap, err := logSnapshot(q, e)
 			if err != nil {

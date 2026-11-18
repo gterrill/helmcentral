@@ -317,14 +317,14 @@ func reloadAlarmRulesCache(q sqlQueryer) error {
 // writeAlarmRules runs fn in one transaction and, once it has committed,
 // reloads the in-memory copy before the store lock is released, so two
 // writers cannot leave the copy older than the database.
-func (s *documentStore) writeAlarmRules(op string, fn func(tx *sql.Tx, now time.Time) error) error {
-	s.lockForTx(op)
-	defer s.mu.Unlock()
-	if err := s.runTxLocked(op, fn); err != nil {
+func (s *documentStore) writeAlarmRules(op *lockOp, fn func(tx *sql.Tx, now time.Time) error) error {
+	h := s.holdForTx(op)
+	defer h.release()
+	if err := s.runTxLocked(h, fn); err != nil {
 		return err
 	}
 	if err := reloadAlarmRulesCache(s.db); err != nil {
-		return fmt.Errorf("%s: %w (%v)", op, errAlarmRulesNotReloaded, err)
+		return fmt.Errorf("%s: %w (%v)", op.name, errAlarmRulesNotReloaded, err)
 	}
 	return nil
 }
@@ -332,7 +332,7 @@ func (s *documentStore) writeAlarmRules(op string, fn func(tx *sql.Tx, now time.
 // refreshAlarmRules reloads the in-memory copy. A changeset that wrote rules
 // through RunTx calls it after the commit.
 func refreshAlarmRules(s *documentStore) error {
-	return s.Read(func(q sqlQueryer) error { return reloadAlarmRulesCache(q) })
+	return s.Read(lockAlarmRulesRefresh, func(q sqlQueryer) error { return reloadAlarmRulesCache(q) })
 }
 
 // alarmRuleStore is the store the rules live in. A missing store is a boot
@@ -375,7 +375,7 @@ func seedAlarmRuleSet(marker string, rules []alarmRule, fixedIDs bool) error {
 		rule.SeededBy = marker
 		prepared[i] = rule
 	}
-	return store.writeAlarmRules("seed alarm rules "+marker, func(tx *sql.Tx, now time.Time) error {
+	return store.writeAlarmRules(lockAlarmRulesSeed, func(tx *sql.Tx, now time.Time) error {
 		sets, err := alarmSeededSetsQ(tx)
 		if err != nil {
 			return err

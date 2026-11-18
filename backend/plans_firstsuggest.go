@@ -52,11 +52,12 @@ func (s *documentStore) keptSuggestionLocked(q interface {
 // no row for the day, and then drops the days more than two before this one, at
 // most once for each day it is asked about.
 func (s *documentStore) FirstSuggestion(planID int64, legKey, day string, t time.Time) (time.Time, error) {
-	defer lockDocumentsFirstSuggestion.held(&s.mu).release()
+	h := lockDocumentsFirstSuggestion.held(&s.mu)
+	defer h.release()
 	if kept, ok, err := s.keptSuggestionLocked(s.db, planID, legKey, day, t.Location()); err != nil || ok {
 		return kept, err
 	}
-	err := s.runTxLocked("save first suggestion", func(tx *sql.Tx, _ time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, _ time.Time) error {
 		if s.firstSuggestionsPrunedOn != day {
 			if _, err := tx.Exec(`DELETE FROM plan_first_suggestions WHERE day < ?`, dayPlus(day, -2)); err != nil {
 				return fmt.Errorf("save first suggestion: %w", err)

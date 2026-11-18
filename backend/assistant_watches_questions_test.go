@@ -17,7 +17,7 @@ func TestGetWatchRunsGivesMateTheRunsQuestions(t *testing.T) {
 	env.applyOK(t, watchCreateArgs)
 	w := firstWatch(t, env.docs)
 	review := "Fridge draw is up."
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "run-q", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan,
 			Report: json.RawMessage(`{"kind":"sections","sections":[]}`), Review: &review, CostKnown: true,
 			Questions: []string{"Did you run the watermaker?"}}, true)
@@ -68,7 +68,7 @@ func TestGetWatchRunsLeavesOutTheRowsAndSummaryButKeepsQuestionsAndLines(t *test
 	env.applyOK(t, watchCreateArgs)
 	w := firstWatch(t, env.docs)
 	review := "Fridge draw is up."
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "run-r", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan,
 			Report: json.RawMessage(storedReportWithRows), Review: &review, CostKnown: true,
 			Questions: []string{"Did you run the watermaker?"}}, true)
@@ -89,7 +89,7 @@ func TestGetWatchRunsLeavesOutTheRowsAndSummaryButKeepsQuestionsAndLines(t *test
 	}
 	// Reading it for Mate does not change what is stored.
 	var stored watchRun
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		stored, err = watchRunAnyByIDQ(q, "run-r")
 		return err

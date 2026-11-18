@@ -348,7 +348,7 @@ var (
 // the same sort_index and ListZones' own ORDER BY falls back to
 // lower(name).
 func (s *documentStore) CreateZone(name string) (zone inventoryZone, err error) {
-	err = s.RunTx("create zone", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsCreateZone, func(tx *sql.Tx, now time.Time) error {
 		zone, err = createZoneTx(tx, now, name)
 		return err
 	})
@@ -384,7 +384,7 @@ func createZoneTx(tx *sql.Tx, now time.Time, name string) (inventoryZone, error)
 // CRUD ever changes on a zone (sort_index has no editor this cycle; see
 // CreateZone's own comment).
 func (s *documentStore) UpdateZone(id, name string) (zone inventoryZone, err error) {
-	err = s.RunTx("update zone", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsUpdateZone, func(tx *sql.Tx, now time.Time) error {
 		zone, err = updateZoneTx(tx, now, id, name)
 		return err
 	})
@@ -427,7 +427,7 @@ func updateZoneTx(tx *sql.Tx, now time.Time, id, name string) (inventoryZone, er
 // comment for why this pre-checks with COUNT(*) rather than attempting the
 // DELETE and inspecting what SQLite's RESTRICT violation says.
 func (s *documentStore) DeleteZone(id string) error {
-	return s.RunTx("delete zone", func(tx *sql.Tx, now time.Time) error { return deleteZoneTx(tx, id) })
+	return s.RunTx(lockDocumentsDeleteZone, func(tx *sql.Tx, now time.Time) error { return deleteZoneTx(tx, id) })
 }
 
 func deleteZoneTx(tx *sql.Tx, id string) error {
@@ -590,7 +590,7 @@ func binsForZone(q sqlQueryer, zoneID string) ([]inventoryBin, error) {
 // (case-insensitively, boat-wide - inventory_bins_code's own schema
 // comment), then inserts.
 func (s *documentStore) CreateBin(zoneID, code, name string) (bin inventoryBin, err error) {
-	err = s.RunTx("create bin", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsCreateBin, func(tx *sql.Tx, now time.Time) error {
 		bin, err = createBinTx(tx, now, zoneID, code, name)
 		return err
 	})
@@ -635,7 +635,7 @@ func createBinTx(tx *sql.Tx, now time.Time, zoneID, code, name string) (inventor
 // cycle, so zone_id is fixed at creation and every equipment record already
 // pointing at this bin keeps a location that still makes sense.
 func (s *documentStore) UpdateBin(id, code, name string) (bin inventoryBin, err error) {
-	err = s.RunTx("update bin", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsUpdateBin, func(tx *sql.Tx, now time.Time) error {
 		bin, err = updateBinTx(tx, now, id, code, name)
 		return err
 	})
@@ -675,7 +675,7 @@ func updateBinTx(tx *sql.Tx, now time.Time, id, code, name string) (inventoryBin
 // pointing at it - see inventoryInUseError's own doc comment for why this
 // pre-checks with COUNT(*) rather than attempting the DELETE.
 func (s *documentStore) DeleteBin(id string) error {
-	return s.RunTx("delete bin", func(tx *sql.Tx, now time.Time) error { return deleteBinTx(tx, id) })
+	return s.RunTx(lockDocumentsDeleteBin, func(tx *sql.Tx, now time.Time) error { return deleteBinTx(tx, id) })
 }
 
 func deleteBinTx(tx *sql.Tx, id string) error {
@@ -1082,7 +1082,7 @@ func validateEquipmentQuantities(item equipmentItem) (quantity int, required any
 // bin_id go through validateEquipmentLocation before anything is written,
 // so a bad or contradictory location never reaches the INSERT at all.
 func (s *documentStore) CreateEquipment(item equipmentItem) (created equipmentItem, err error) {
-	err = s.RunTx("create equipment", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsCreateEquipment, func(tx *sql.Tx, now time.Time) error {
 		created, err = createEquipmentTx(tx, now, item)
 		return err
 	})
@@ -1160,7 +1160,7 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 // identical to CreateEquipment's rather than a second, subtly different
 // copy of it.
 func (s *documentStore) UpdateEquipment(id string, item equipmentItem) (updated equipmentItem, err error) {
-	err = s.RunTx("update equipment", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsUpdateEquipment, func(tx *sql.Tx, now time.Time) error {
 		updated, err = updateEquipmentTx(tx, now, id, item)
 		return err
 	})
@@ -1264,7 +1264,7 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 // this item, then delete its now-orphaned photos" atomic is to run both
 // steps' SQL inside the one transaction this method already holds.
 func (s *documentStore) DeleteEquipment(id string, deletePhotos bool) (deletedPhotoSHAs []string, err error) {
-	err = s.RunTx("delete equipment", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockDocumentsDeleteEquipment, func(tx *sql.Tx, now time.Time) error {
 		deletedPhotoSHAs, err = deleteEquipmentTx(tx, id, deletePhotos)
 		return err
 	})
@@ -1591,7 +1591,7 @@ func (s *documentStore) EquipmentLinkedToDocument(docID string) (map[string]bool
 // id in both lists; this is a documented tie-break for a case the spec
 // leaves open, not a behaviour anything currently exercises.
 func (s *documentStore) PatchEquipmentDocuments(id string, add, remove []string) error {
-	return s.RunTx("patch equipment documents", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsPatchEquipmentDocuments, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("patch equipment documents: check equipment: %w", err)
@@ -1766,7 +1766,7 @@ func (s *documentStore) EquipmentPhotoIDBySHA(equipmentID, sha string) (string, 
 // document the operator filed for some other reason; it is simply linked,
 // the same as any other existing document would be.
 func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error {
-	return s.RunTx("add equipment photo", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsAddEquipmentPhoto, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 		if err != nil {
 			return fmt.Errorf("add equipment photo: check equipment: %w", err)
@@ -1813,7 +1813,7 @@ func (s *documentStore) AddEquipmentPhoto(equipmentID, documentID string) error 
 // its own doc comment for why a partial reorder isn't accepted the way
 // PatchEquipmentDocuments' add/remove diff is for ordinary links).
 func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []string) error {
-	return s.RunTx("set equipment photo order", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsSetEquipmentPhotoOrder, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 		if err != nil {
 			return fmt.Errorf("set equipment photo order: check equipment: %w", err)
@@ -1854,7 +1854,7 @@ func (s *documentStore) SetEquipmentPhotoOrder(equipmentID string, order []strin
 // more). errEquipmentPhotoNotFound if documentID isn't currently one of
 // equipmentID's own photos (linked AND image/jpeg or image/png).
 func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) error {
-	return s.RunTx("remove equipment photo", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsRemoveEquipmentPhoto, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 		if err != nil {
 			return fmt.Errorf("remove equipment photo: check equipment: %w", err)

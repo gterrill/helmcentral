@@ -512,7 +512,7 @@ func (s *assistantStore) SetTitle(id, title string) error {
 // behind. A missing id reports errAssistantConversationNotFound (checked
 // with errors.Is).
 func (s *assistantStore) DeleteConversation(id string) error {
-	return runTxUnderLock(&s.mu, s.db, "assistant.DeleteConversation", time.Now, serverVitals, func(tx *sql.Tx) error {
+	return runTxUnderLock(lockAssistantDeleteConversation, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		return deleteConversationTx(tx, id)
 	})
 }
@@ -558,7 +558,7 @@ func deleteConversationTx(tx *sql.Tx, id string) error {
 // row that would never appear in any ListMessages call.
 func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, error) {
 	var out assistantMessage
-	err := runTxUnderLock(&s.mu, s.db, "assistant.AppendMessage", time.Now, serverVitals, func(tx *sql.Tx) error {
+	err := runTxUnderLock(lockAssistantAppendMessage, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		var err error
 		out, err = appendMessageTx(tx, m, s.now())
 		return err

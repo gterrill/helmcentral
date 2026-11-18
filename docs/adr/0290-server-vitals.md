@@ -68,14 +68,12 @@ has no fallback path that would leave statements untimed.
   `rows.Close()`, so the time a caller spends reading rows counts. Rows read
   are counted beside it.
 - **Cap**: 2,000 distinct keys across the whole process, held by the
-  recorder. SQL statement shapes and the `tx.time.<op>` and
-  `tx.lock_wait.<op>` keys of `RunTx` draw on this budget. The production code
+  recorder. Only SQL statement shapes draw on this budget. The production code
   holds about 470 distinct literal statement shapes, so the cap leaves room
   for SQL built at run time without letting it grow without bound. Past that, one warning
-  goes to the log and further statements record under `<store>:<overflow>`
-  (a transaction op under `tx.time.<overflow>` or `tx.lock_wait.<overflow>`).
+  goes to the log and further statements record under `<store>:<overflow>`.
   The overflow key is visible in the output; nothing is dropped quietly.
-  The lock keys of reads and single statements (below) sit outside this
+  The lock and transaction keys of the store ops (below) sit outside this
   budget and have a cap of their own.
 - **Slow statements**: any statement over 250 ms writes one log line naming
   the store, the shape and the duration.
@@ -84,40 +82,42 @@ has no fallback path that would leave statements untimed.
 
 ### More database figures
 
-`RunTx` records two numbers per op name: `tx.lock_wait.<op>` (queued on the
-store mutex behind other writers) and `tx.time.<op>` (begin to commit). One
-helper does the locking and timing, and the record store, the coastline store
-and the MCP store all call it (`runTxUnderLock`, or `lockTimed` plus
-`runTxTimed` where the record store keeps its test seam on the lock). A slow
-write that shows a long wait was waiting on another write.
-
-A call that is a read or a single statement, not a transaction, names itself
-once as a `lockOp` (`var lockDocumentsGet = newLockOp("documents.Get")`, all
-in `store_lock_ops.go`) and locks with
-`defer lockDocumentsGet.held(&s.mu).release()`. That records
-`tx.lock_wait.<op>`, the time spent getting the lock, and
-`tx.lock_hold.<op>`, the time the lock was held. The wait includes time queued
+Every store call that takes a store mutex names itself once as a `lockOp`
+(`var lockDocumentsGet = newLockOp("documents.Get")`, all in
+`store_lock_ops.go`) and records three numbers under that one name:
+`tx.lock_wait.<op>` (the time spent getting the lock), `tx.lock_hold.<op>`
+(the time the lock was held) and, for a call that runs a transaction,
+`tx.time.<op>` (begin to commit or rollback). The wait includes time queued
 behind readers as well as writers, because every call on a store shares one
-mutex. A write that is a multi-statement transaction goes through
-`runTxUnderLock` instead, so it also records `tx.time.<op>`: the assistant
-store's message, run, feedback and passage-decision writes do.
+mutex. A slow write that shows a long wait was waiting on another call.
 
-Each public method has its own op. A helper that several methods share, such
-as the alarm log's `one` and `stampOpen`, takes the caller's op as an argument,
-so `Get` and `LatestForRule`, or `MarkAcknowledged` and `MarkCleared`, are not
-merged into one key. An op is a store name and a method name written in the
-code, never an id or a value from a request. `newLockOp` builds both key
-strings once at start-up, so a call allocates nothing for its keys.
+A read or a single statement locks with
+`defer lockDocumentsGet.held(&s.mu).release()`. A write goes through
+`RunTx(op, fn)`, or, when it reads before it decides to write, takes the lock
+as `h := op.held(&s.mu)` and runs `s.runTxLocked(h, fn)`. The coastline, MCP
+and assistant stores run theirs through `runTxUnderLock(op, ...)`. In every
+case the lock and the transaction of one write carry the same op, so a
+transaction never appears under free text apart from its lock.
 
-The lock keys have a budget of their own. The 163 ops make 326 keys, fixed
-when the program starts, and they are recorded directly, not through the
-2,000-key budget above, so they cannot crowd out SQL shapes. `lockOpLimit`
-(512) caps the ops: `newLockOp` panics past it, or on a repeated name, so a
-runaway set stops the process at start-up instead of growing quietly. A test
-declares every op against a fresh registry and checks that a full 2,000 SQL
-shapes are still admitted. The record store, the assistant store, the alarm
-log, the MCP and web push stores, and the coastline store lock this way for
-their reads and single statements.
+One name per op. Each caller has its own op, and a helper that several
+callers share (`documentStore.Read`, `RunTx`, the profile store's `inTx`, the
+alarm log's `one` and `stampOpen`) takes the caller's op as an argument, so
+the alarm review's read and the Mate's watch tools' read are not merged into
+one key. An op is a store name and a method name written in the code, never an
+id or a value from a request. `newLockOp` builds the three key strings once at
+start-up and panics on a repeated name, so no two ops share a key and a call
+allocates nothing for its keys. No `RunTx` caller passes a name built at run
+time.
+
+All three numbers are recorded after the mutex is released, from what the
+call measured while it held it, so a slow recorder cannot stall a store.
+
+The keys have a budget of their own. They are fixed when the program starts
+and recorded directly, not through the 2,000-key budget above, so they cannot
+crowd out SQL shapes. `lockOpLimit` (400) caps the ops: `newLockOp` panics past
+it, or on a repeated name, so a runaway set stops the process at start-up
+instead of growing quietly. A test declares every op against a fresh registry
+and checks that a full 2,000 SQL shapes are still admitted.
 
 Each pool's `sql.DBStats` `WaitCount` and `WaitDuration` are
 sampled once a minute, as `db.pool_wait_count.<store>` and
@@ -202,11 +202,6 @@ problem.
   them would cost more than it shows. Two SQLite-backed locks are left out:
   `alarmIgnoreStore` uses a `sync.RWMutex`, which a `lockOp` does not take, and
   `nearbyContactStore` releases its lock by hand in the middle of a method.
-- Two tests fail under `go test -race` and also fail on the commit this work
-  branched from, so this change did not cause them:
-  `TestDocumentIndexer_RunProcessesPendingDocumentsBeforeEmbedding` and
-  `TestGetActiveRouteHandler_RouteWithNextPointAlsoCarriesDestination`. They
-  are known and left for a separate fix.
 - The last partial minute before a stop is not written. The server has no
   graceful shutdown to hook into, so vitals start with `context.Background()`
   and nothing ever ends them.

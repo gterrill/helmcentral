@@ -142,7 +142,8 @@ func manualSubtreeDocumentCount(q sqlQueryer, folderID string) (int, error) {
 // itself runs; see this file's own top comment on why no SEPARATE
 // manuals-only uniqueness check is needed.
 func (s *documentStore) CreateManual(name string) (manualSummary, error) {
-	defer lockDocumentsCreateManual.held(&s.mu).release()
+	h := lockDocumentsCreateManual.held(&s.mu)
+	defer h.release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
@@ -150,7 +151,7 @@ func (s *documentStore) CreateManual(name string) (manualSummary, error) {
 	}
 
 	var summary manualSummary
-	err = s.runTxLocked("create manual", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		taken, err := folderNameTaken(tx, nil, trimmed, "")
 		if err != nil {
 			return fmt.Errorf("create manual: check name: %w", err)
@@ -183,7 +184,7 @@ func (s *documentStore) CreateManual(name string) (manualSummary, error) {
 // manual" action twice is not a mistake worth surfacing.
 func (s *documentStore) FlagManual(folderID string) (manualSummary, error) {
 	var summary manualSummary
-	err := s.RunTx("flag manual", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsFlagManual, func(tx *sql.Tx, now time.Time) error {
 		var name string
 		var parentID sql.NullString
 		err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, folderID).Scan(&name, &parentID)
@@ -468,7 +469,7 @@ func (s *documentStore) ManualSectionNames(manualID string) ([]string, error) {
 // collection just because the caller supplied the "wrong" parent_id
 // alongside a manual's own :id.
 func (s *documentStore) ReorderManualChildren(manualID, parentID string, items []manualReorderItem) error {
-	return s.RunTx("reorder manual children", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsReorderManualChildren, func(tx *sql.Tx, now time.Time) error {
 		var role string
 		err := tx.QueryRow(`SELECT role FROM document_folders WHERE id = ?`, manualID).Scan(&role)
 		if errors.Is(err, sql.ErrNoRows) {

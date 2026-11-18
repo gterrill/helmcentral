@@ -1421,7 +1421,8 @@ func (s *documentStore) rebuildMetaChunksUnderFolderTx(tx *sql.Tx, folderID stri
 // uuid", and doc.CreatedAt.IsZero() still means "stamp it now", exactly as
 // before.
 func (s *documentStore) Insert(doc document) (document, error) {
-	defer lockDocumentsInsert.held(&s.mu).release()
+	h := lockDocumentsInsert.held(&s.mu)
+	defer h.release()
 
 	existing, err := scanDocument(s.db.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE sha256 = ?`, doc.SHA256))
 	if err == nil {
@@ -1462,7 +1463,7 @@ func (s *documentStore) Insert(doc document) (document, error) {
 	doc.IndexedAt = nil
 	initialTags := doc.OperatorTags
 
-	err = s.runTxLocked("insert document", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		if doc.CreatedAt.IsZero() {
 			doc.CreatedAt = now
 		}
@@ -1911,7 +1912,7 @@ func updateMetaTx(tx *sql.Tx, now time.Time, id string, title, notes *string, ta
 // operator source rather than duplicated. The meta chunk is rebuilt
 // afterward so search reflects the edit immediately.
 func (s *documentStore) UpdateMeta(id string, title, notes *string, tags []string) error {
-	return s.RunTx("update meta", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsUpdateMeta, func(tx *sql.Tx, now time.Time) error {
 		if err := updateMetaTx(tx, now, id, title, notes, tags); err != nil {
 			return err
 		}
@@ -1926,7 +1927,7 @@ func (s *documentStore) UpdateMeta(id string, title, notes *string, tags []strin
 // source rather than being duplicated or downgraded. The meta chunk is
 // rebuilt afterward.
 func (s *documentStore) SetSuggested(id, title, summary string, tags []string) error {
-	return s.RunTx("set suggested", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsSetSuggested, func(tx *sql.Tx, now time.Time) error {
 		var currentTitle string
 		if err := tx.QueryRow(`SELECT title FROM documents WHERE id = ?`, id).Scan(&currentTitle); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -1967,7 +1968,7 @@ func (s *documentStore) SetSuggested(id, title, summary string, tags []string) e
 // sources - callers replacing extracted or OCR'd body text pass
 // []string{"local"} or []string{"local","ocr"}, never "meta".
 func (s *documentStore) ReplaceChunks(id string, sources []string, chunks []documentChunk) error {
-	return s.RunTx("replace chunks", func(tx *sql.Tx, _ time.Time) error {
+	return s.RunTx(lockDocumentsReplaceChunks, func(tx *sql.Tx, _ time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("replace chunks: check document: %w", err)
@@ -2250,7 +2251,7 @@ func (s *documentStore) NextPending() (document, bool, error) {
 // able to leave a half-deleted database row behind.
 func (s *documentStore) Delete(id string) (string, error) {
 	var sha string
-	err := s.RunTx("delete document", func(tx *sql.Tx, _ time.Time) error {
+	err := s.RunTx(lockDocumentsDelete, func(tx *sql.Tx, _ time.Time) error {
 		if err := tx.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, id).Scan(&sha); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errDocumentNotFound
@@ -2304,7 +2305,7 @@ func (s *documentStore) moveDocumentsTx(tx *sql.Tx, now time.Time, ids []string,
 // the whole call with errDocumentNotFound - a partial bulk move that
 // silently skips ids it doesn't recognize would hide a caller's bug.
 func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
-	return s.RunTx("move documents", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsMove, func(tx *sql.Tx, now time.Time) error {
 		return s.moveDocumentsTx(tx, now, ids, folderID)
 	})
 }
@@ -2325,7 +2326,7 @@ func (s *documentStore) MoveDocuments(ids []string, folderID *string) error {
 // sort_index-only patch needs no rebuild of its own.
 func (s *documentStore) PatchDocument(id string, title, notes *string, tags []string, folderID *string, moveFolder bool, sortIndex *int) (document, error) {
 	var doc document
-	err := s.RunTx("patch document", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsPatch, func(tx *sql.Tx, now time.Time) error {
 		metaChanged := title != nil || notes != nil || tags != nil
 
 		if metaChanged {
@@ -2507,7 +2508,8 @@ var chunkEmbeddingsBatchSize = 200
 // the id rather than surfacing modernc/sqlite's bare "FOREIGN KEY
 // constraint failed".
 func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[int64][]float32) error {
-	defer lockDocumentsSetChunkEmbeddings.held(&s.mu).release()
+	h := lockDocumentsSetChunkEmbeddings.held(&s.mu)
+	defer h.release()
 
 	ids := make([]int64, 0, len(vectors))
 	for id := range vectors {
@@ -2533,7 +2535,7 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 		if end > len(ids) {
 			end = len(ids)
 		}
-		if err := s.setChunkEmbeddingsBatchTx(model, dims, units, ids[start:end]); err != nil {
+		if err := s.setChunkEmbeddingsBatchTx(h, model, dims, units, ids[start:end]); err != nil {
 			return err
 		}
 	}
@@ -2544,8 +2546,8 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 // already-validated, normalised vectors in its own transaction. Callers
 // already hold s.mu, hence runTxLocked; each batch is stamped with its own
 // transaction's now.
-func (s *documentStore) setChunkEmbeddingsBatchTx(model string, dims int, units map[int64][]float32, ids []int64) error {
-	return s.runTxLocked("set chunk embeddings", func(tx *sql.Tx, now time.Time) error {
+func (s *documentStore) setChunkEmbeddingsBatchTx(h *heldLock, model string, dims int, units map[int64][]float32, ids []int64) error {
+	return s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		for _, chunkID := range ids {
 			if _, err := tx.Exec(
 				`INSERT INTO document_chunk_embeddings (chunk_id, model, dims, vector, created_at) VALUES (?, ?, ?, ?, ?)
@@ -2819,7 +2821,8 @@ func (s *documentStore) SearchVector(queryVec []float32, model string, folderID 
 // no sibling already has the same name case-insensitively, then inserts the
 // new folder.
 func (s *documentStore) CreateFolder(name string, parentID *string) (documentFolder, error) {
-	defer lockDocumentsCreateFolder.held(&s.mu).release()
+	h := lockDocumentsCreateFolder.held(&s.mu)
+	defer h.release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
@@ -2827,7 +2830,7 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 	}
 
 	var folder documentFolder
-	err = s.runTxLocked("create folder", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		if parentID != nil {
 			ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *parentID)
 			if err != nil {
@@ -2866,14 +2869,15 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 // CreateFolder matches siblings (case-insensitively), or makes it. The find and
 // the insert share one lock and transaction, so two callers cannot both make it.
 func (s *documentStore) FindOrCreateRootFolder(name string) (documentFolder, error) {
-	defer lockDocumentsFindOrCreateRootFolder.held(&s.mu).release()
+	h := lockDocumentsFindOrCreateRootFolder.held(&s.mu)
+	defer h.release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
 		return documentFolder{}, err
 	}
 	var folder documentFolder
-	err = s.runTxLocked("find or create root folder", func(tx *sql.Tx, now time.Time) error {
+	err = s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		var created, updated int64
 		row := tx.QueryRow(
 			`SELECT id, name, created_at, updated_at FROM document_folders WHERE `+folderSiblingMatch+` LIMIT 1`,
@@ -2915,7 +2919,8 @@ func (s *documentStore) FindOrCreateRootFolder(name string) (documentFolder, err
 // is rebuilt exactly once, since either a new name or a new parent changes
 // the folder-path text they all carry.
 func (s *documentStore) PatchFolder(id string, name *string, parentID *string, moveParent bool) error {
-	defer lockDocumentsPatchFolder.held(&s.mu).release()
+	h := lockDocumentsPatchFolder.held(&s.mu)
+	defer h.release()
 
 	var trimmedName string
 	if name != nil {
@@ -2930,7 +2935,7 @@ func (s *documentStore) PatchFolder(id string, name *string, parentID *string, m
 		return errFolderCycle
 	}
 
-	return s.runTxLocked("patch folder", func(tx *sql.Tx, now time.Time) error {
+	return s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		var currentName string
 		var currentParent sql.NullString
 		if err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, id).Scan(&currentName, &currentParent); err != nil {
@@ -3020,7 +3025,7 @@ func (s *documentStore) MoveFolder(id string, parentID *string) error {
 // 0106): an operator emptying a folder is a deliberate, visible act, not a
 // side effect of deleting its parent.
 func (s *documentStore) DeleteFolder(id string) error {
-	return s.RunTx("delete folder", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsDeleteFolder, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("delete folder: check exists: %w", err)

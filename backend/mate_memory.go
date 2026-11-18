@@ -153,7 +153,7 @@ func listMateMemoriesQ(q sqlQueryer) ([]mateMemory, error) {
 
 func readMateMemories(store *documentStore) ([]mateMemory, error) {
 	var out []mateMemory
-	err := store.Read(func(q sqlQueryer) error {
+	err := store.Read(lockMateReadMemories, func(q sqlQueryer) error {
 		var err error
 		out, err = listMateMemoriesQ(q)
 		return err
@@ -358,7 +358,7 @@ func listMateMemoriesHandler(c echo.Context) error {
 // POST /api/assistant/memories adds a fact by hand.
 func createMateMemoryHandler(c echo.Context) error {
 	var created mateMemory
-	if ok, err := writeMateMemory(c, "add kept fact", true, func(tx *sql.Tx, now time.Time, body mateMemoryBody) error {
+	if ok, err := writeMateMemory(c, lockMateMemoryAdd, true, func(tx *sql.Tx, now time.Time, body mateMemoryBody) error {
 		var err error
 		created, err = createMateMemoryTx(tx, body.Text, now)
 		return err
@@ -371,7 +371,7 @@ func createMateMemoryHandler(c echo.Context) error {
 // PATCH /api/assistant/memories/:id rewrites a fact.
 func patchMateMemoryHandler(c echo.Context) error {
 	var updated mateMemory
-	if ok, err := writeMateMemory(c, "change kept fact", true, func(tx *sql.Tx, now time.Time, body mateMemoryBody) error {
+	if ok, err := writeMateMemory(c, lockMateMemoryChange, true, func(tx *sql.Tx, now time.Time, body mateMemoryBody) error {
 		var err error
 		updated, err = updateMateMemoryTx(tx, c.Param("id"), body.Text, now)
 		return err
@@ -384,7 +384,7 @@ func patchMateMemoryHandler(c echo.Context) error {
 // DELETE /api/assistant/memories/:id removes a fact. The undo on a card under
 // Mate's reply calls it too.
 func deleteMateMemoryHandler(c echo.Context) error {
-	if ok, err := writeMateMemory(c, "delete kept fact", false, func(tx *sql.Tx, _ time.Time, _ mateMemoryBody) error {
+	if ok, err := writeMateMemory(c, lockMateMemoryDelete, false, func(tx *sql.Tx, _ time.Time, _ mateMemoryBody) error {
 		return deleteMateMemoryTx(tx, c.Param("id"))
 	}); !ok {
 		return err
@@ -396,7 +396,7 @@ func deleteMateMemoryHandler(c echo.Context) error {
 // the store, reads the body when the write has one, and runs fn in a
 // transaction. When a step fails the error reply is already sent: ok is false
 // and the handler returns err as it is. When ok is true the caller replies.
-func writeMateMemory(c echo.Context, label string, hasBody bool, fn func(tx *sql.Tx, now time.Time, body mateMemoryBody) error) (ok bool, err error) {
+func writeMateMemory(c echo.Context, op *lockOp, hasBody bool, fn func(tx *sql.Tx, now time.Time, body mateMemoryBody) error) (ok bool, err error) {
 	store, err := requireDocumentStore("Mate's memory")
 	if err != nil {
 		return false, mateMemoryError(c, err)
@@ -407,7 +407,7 @@ func writeMateMemory(c echo.Context, label string, hasBody bool, fn func(tx *sql
 			return false, mateMemoryError(c, err)
 		}
 	}
-	if err := store.RunTx(label, func(tx *sql.Tx, now time.Time) error { return fn(tx, now, body) }); err != nil {
+	if err := store.RunTx(op, func(tx *sql.Tx, now time.Time) error { return fn(tx, now, body) }); err != nil {
 		return false, mateMemoryError(c, err)
 	}
 	return true, nil
@@ -670,7 +670,7 @@ func (d assistantToolDeps) executeRememberFact(ctx context.Context, raw json.Raw
 	// they already have, even straight after "remember that".
 	if id := strings.TrimSpace(args.Replaces); id != "" {
 		var current mateMemory
-		if err := store.Read(func(q sqlQueryer) error {
+		if err := store.Read(lockMateMemoryCheck, func(q sqlQueryer) error {
 			var err error
 			current, err = mateMemoryByIDQ(q, id)
 			return err

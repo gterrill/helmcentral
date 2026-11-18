@@ -238,7 +238,7 @@ func maintenanceRuleByID(q sqlQueryer, id string) (maintenanceRule, error) {
 // writing.
 func (s *documentStore) CreateMaintenanceRule(in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx("create maintenance rule", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsCreateMaintenanceRule, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = createMaintenanceRuleTx(tx, now, in)
 		return err
@@ -291,7 +291,7 @@ func createMaintenanceRuleTx(tx *sql.Tx, now time.Time, in maintenanceRuleInput)
 // created_at.
 func (s *documentStore) UpdateMaintenanceRule(id string, in maintenanceRuleInput) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx("update maintenance rule", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsUpdateMaintenanceRule, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = updateMaintenanceRuleTx(tx, now, id, in)
 		return err
@@ -355,7 +355,7 @@ func updateMaintenanceRuleTx(tx *sql.Tx, now time.Time, id string, in maintenanc
 // own doc comment) - history is never erased by deleting the rule that
 // generated it.
 func (s *documentStore) DeleteMaintenanceRule(id string) error {
-	return s.RunTx("delete maintenance rule", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsDeleteMaintenanceRule, func(tx *sql.Tx, now time.Time) error {
 		return cmdDeleteMaintenanceRule(tx, id)
 	})
 }
@@ -383,7 +383,7 @@ func (s *documentStore) ListMaintenanceRuleRows(filter maintenanceRuleFilter) ([
 // clears it, independently of this method.
 func (s *documentStore) AcknowledgeMaintenanceRule(id, reason string) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx("acknowledge maintenance rule", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsAcknowledgeMaintenance, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = acknowledgeMaintenanceRuleTx(tx, now, id, reason)
 		return err
@@ -429,7 +429,7 @@ func acknowledgeMaintenanceRuleTx(tx *sql.Tx, now time.Time, id, reason string) 
 // "date and/or hours" (spec's own wording).
 func (s *documentStore) SetMaintenanceRuleLastDone(id string, at *string, hours *float64) (maintenanceRule, error) {
 	var out0 maintenanceRule
-	err := s.RunTx("set maintenance rule last done", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsSetMaintenanceLastDone, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, err = setMaintenanceRuleLastDoneTx(tx, now, id, at, hours)
 		return err
@@ -479,7 +479,7 @@ func setMaintenanceRuleLastDoneTx(tx *sql.Tx, now time.Time, id string, at *stri
 // note - spec §8.
 func (s *documentStore) SetMaintenanceRuleProcedureNote(id, noteID string) (maintenanceRule, error) {
 	var out maintenanceRule
-	err := s.RunTx("set maintenance rule procedure note", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsSetMaintenanceNote, func(tx *sql.Tx, now time.Time) error {
 		if _, err := prepareMaintenanceRuleWriteTx(tx, now, id); err != nil {
 			return err
 		}
@@ -675,7 +675,7 @@ func insertMaintenanceLogPartsTx(tx *sql.Tx, logEntryID string, parts []maintena
 // the only path that ever sets rule_id) means.
 func (s *documentStore) CreateMaintenanceLogEntry(in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
 	var created maintenanceLogEntry
-	err := s.RunTx("create log entry", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsCreateLogEntry, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		created, err = insertMaintenanceLogEntryTx(tx, now, in)
 		return err
@@ -752,7 +752,7 @@ func insertMaintenanceLogEntryTx(tx *sql.Tx, now time.Time, in maintenanceLogEnt
 func (s *documentStore) UpdateMaintenanceLogEntry(id string, in maintenanceLogEntryInput) (maintenanceLogEntry, error) {
 	var updated maintenanceLogEntry
 	var before sql.NullString
-	err := s.RunTx("update log entry", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsUpdateLogEntry, func(tx *sql.Tx, now time.Time) error {
 		// The existence check also reads the start date the entry had.
 		err := tx.QueryRow(`SELECT started_at FROM maintenance_log_entries WHERE id = ?`, id).Scan(&before)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -942,7 +942,7 @@ func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) (
 func (s *documentStore) CompleteMaintenanceRule(ruleID string, in maintenanceLogEntryInput, newFixedDueDate string) (maintenanceRule, maintenanceLogEntry, error) {
 	var out0 maintenanceRule
 	var out1 maintenanceLogEntry
-	err := s.RunTx("complete maintenance rule", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsCompleteMaintenanceRule, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		out0, out1, err = completeMaintenanceRuleTx(tx, now, ruleID, in, newFixedDueDate)
 		return err
@@ -1038,7 +1038,7 @@ var errMaintenanceLogPhotoNotFound = errors.New("photo not found on this log ent
 // AddMaintenanceLogPhoto links documentID to logEntryID, at the end of the
 // entry's current photo order.
 func (s *documentStore) AddMaintenanceLogPhoto(logEntryID, documentID string) error {
-	return s.RunTx("add log photo", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsAddLogPhoto, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM maintenance_log_entries WHERE id = ?`, logEntryID)
 		if err != nil {
 			return fmt.Errorf("add log photo: check log entry: %w", err)
@@ -1110,7 +1110,7 @@ func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) 
 // actually converted with.
 func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, newReading float64, changedAt string) (hourMeterReset, error) {
 	var reset hourMeterReset
-	err := s.RunTx("record meter reset", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsRecordMeterReset, func(tx *sql.Tx, now time.Time) error {
 		ok, err := rowExists(tx, `SELECT 1 FROM equipment WHERE id = ?`, equipmentID)
 		if err != nil {
 			return fmt.Errorf("record meter reset: check equipment: %w", err)
@@ -1187,8 +1187,9 @@ func nilIfEmpty(s string) *string {
 // Read runs fn with a read-only view of the database, holding the store mutex
 // for its duration. It is for code that reads through the transaction-taking
 // helpers (a registered record type's Get) outside any write. fn must not
-// call another documentStore method.
-func (s *documentStore) Read(fn func(q sqlQueryer) error) error {
-	defer lockDocumentsRead.held(&s.mu).release()
+// call another documentStore method. op is the caller's own lockOp: Read has
+// a dozen unrelated callers, and each records under its own name.
+func (s *documentStore) Read(op *lockOp, fn func(q sqlQueryer) error) error {
+	defer op.held(&s.mu).release()
 	return fn(s.db)
 }

@@ -144,7 +144,7 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 	}
 
 	var view passageDecisionView
-	err := runTxUnderLock(&s.mu, s.db, "assistant.SetOperatorPassageDecision", time.Now, serverVitals, func(tx *sql.Tx) error {
+	err := runTxUnderLock(lockAssistantSetOperatorPassageDecision, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		var err error
 		view, err = setOperatorPassageDecisionTx(tx, id, state, rowDate, s.now(), invalid)
 		return err
@@ -296,7 +296,7 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 		return 0, nil
 	}
 	changed := 0
-	err := runTxUnderLock(&s.mu, s.db, "assistant.ApplyPassageDecisionUpdates", time.Now, serverVitals, func(tx *sql.Tx) error {
+	err := runTxUnderLock(lockAssistantApplyPassageDecisionUpdates, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		var err error
 		changed, err = applyPassageDecisionUpdatesTx(tx, ups, s.now().UnixMilli())
 		return err

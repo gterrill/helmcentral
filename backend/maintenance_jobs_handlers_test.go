@@ -542,7 +542,7 @@ func TestProfileGuardAndMaintenanceWriteShareOneTransaction(t *testing.T) {
 		t.Fatal("the profile store must run on the document store")
 	}
 	id := maintenanceJobID(item.ID, "impeller")
-	err := globalProfileStore.inTx(func(tx *sql.Tx) error {
+	err := globalProfileStore.inTx(testTxOp, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO maintenance_rules (id, equipment_id, description, profile_service_id, created_at, updated_at) VALUES (?, ?, 'x', 'impeller', 0, 0)`, id, item.ID); err != nil {
 			return err
 		}

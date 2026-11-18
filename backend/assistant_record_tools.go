@@ -134,7 +134,7 @@ func (d assistantToolDeps) executeGetRecord(ctx context.Context, raw json.RawMes
 		return "", err
 	}
 	var snap recordSnapshot
-	err = store.Read(func(q sqlQueryer) error {
+	err = store.Read(lockMateGetRecord, func(q sqlQueryer) error {
 		var gerr error
 		snap, gerr = t.Get(q, strings.TrimSpace(args.ID))
 		return gerr

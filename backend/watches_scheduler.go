@@ -93,7 +93,7 @@ func (h *watchHost) stopReason() string {
 
 // save records a run and halts the scheduler when it cannot be recorded.
 func (h *watchHost) save(run watchRun, countsAsRun bool) bool {
-	err := h.store().RunTx("record watch run", func(tx *sql.Tx, _ time.Time) error {
+	err := h.store().RunTx(lockWatchesRecordRun, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, run, countsAsRun)
 	})
 	if errors.Is(err, errWatchNotFound) {
@@ -126,7 +126,7 @@ func (h *watchHost) tick(ctx context.Context) {
 		return
 	}
 	var listed []savedWatch
-	if err := store.Read(func(q sqlQueryer) error {
+	if err := store.Read(lockWatchesListForTick, func(q sqlQueryer) error {
 		var err error
 		listed, err = listSavedWatchesQ(q)
 		return err
@@ -168,7 +168,7 @@ func (h *watchHost) tick(ctx context.Context) {
 		// An earlier run in this tick can take minutes, and the operator may
 		// have switched this watch off or deleted it meanwhile.
 		var w savedWatch
-		if err := store.Read(func(q sqlQueryer) error {
+		if err := store.Read(lockWatchesWatchForTick, func(q sqlQueryer) error {
 			var err error
 			w, err = savedWatchByIDQ(q, l.ID)
 			return err
@@ -242,7 +242,7 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 	reviewCtx := ctx
 	var previous watchRun
 	var hadPrevious bool
-	if err := h.store().Read(func(q sqlQueryer) error {
+	if err := h.store().Read(lockWatchesLastRanRun, func(q sqlQueryer) error {
 		var err error
 		previous, hadPrevious, err = lastRanRunQ(q, w.ID)
 		return err
@@ -310,7 +310,7 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 // deleted, switched off or already run since it was queued is not.
 func (h *watchHost) stillOwed(w savedWatch, now time.Time, loc *time.Location) (savedWatch, bool, error) {
 	var cur savedWatch
-	if err := h.store().Read(func(q sqlQueryer) error {
+	if err := h.store().Read(lockWatchesStillOwed, func(q sqlQueryer) error {
 		var err error
 		cur, err = savedWatchByIDQ(q, w.ID)
 		return err
@@ -481,7 +481,7 @@ func pruneWatchHistory(h *watchHost) {
 		return
 	}
 	var n int64
-	err := store.RunTx("prune watch history", func(tx *sql.Tx, now time.Time) error {
+	err := store.RunTx(lockWatchesPruneHistory, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		n, err = pruneWatchRunsTx(tx, now.Add(-watchRunRetention))
 		return err

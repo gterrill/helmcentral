@@ -55,7 +55,7 @@ func (s *outsideAssistantStore) RegisterOAuthClient(name string, redirectURIs []
 		return mcpOAuthClient{}, fmt.Errorf("register oauth client: %w", err)
 	}
 	c := mcpOAuthClient{ID: mcpOAuthClientPrefix + base64.RawURLEncoding.EncodeToString(raw), Name: name, RedirectURIs: redirectURIs}
-	err = s.RunTx("register oauth client", func(tx *sql.Tx, now time.Time) error {
+	err = s.RunTx(lockMCPRegisterOAuthClient, func(tx *sql.Tx, now time.Time) error {
 		var n int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM mcp_oauth_clients`).Scan(&n); err != nil {
 			return fmt.Errorf("register oauth client: %w", err)
@@ -118,7 +118,7 @@ func (s *outsideAssistantStore) GetOAuthClient(id string) (mcpOAuthClient, bool,
 // with tokenID, which protects it from eviction at the cap while that token
 // lives.
 func (s *outsideAssistantStore) MarkOAuthClientAuthorized(id, tokenID string) error {
-	return s.RunTx("mark oauth client authorized", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockMCPMarkOAuthAuthorized, func(tx *sql.Tx, now time.Time) error {
 		if _, err := tx.Exec(`UPDATE mcp_oauth_clients SET authorized_at = ?, token_id = ? WHERE client_id = ?`, now.UTC().Unix(), tokenID, id); err != nil {
 			return fmt.Errorf("mark oauth client authorized: %w", err)
 		}

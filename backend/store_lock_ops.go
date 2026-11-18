@@ -1,14 +1,18 @@
 package main
 
-// Every store call that takes a store mutex for a read or a single statement
-// names itself here, once, as a lockOp (ADR 0290). A method writes
+// Every store call that takes a store mutex, for a read, a single statement or
+// a transaction, names itself here, once, as a lockOp (ADR 0290). A method
+// writes
 //
 //	defer lockDocumentsGet.held(&s.mu).release()
 //
 // and its wait and hold times land under "tx.lock_wait.documents.Get" and
-// "tx.lock_hold.documents.Get". One var per public method, so two methods that
-// share a helper still record under their own names; a helper takes the
-// caller's lockOp as an argument.
+// "tx.lock_hold.documents.Get"; a write that runs a transaction under the same
+// op adds "tx.time.documents.<Name>". One var per caller, so two callers that
+// share a helper (documentStore.Read, RunTx, profileStore.inTx, runCmd,
+// writeAlarmRules) still record under their own names: the helper takes the
+// caller's lockOp as an argument. The lock and the transaction of one write
+// share one op, and newLockOp refuses a name declared twice.
 
 // Coastline store.
 var (
@@ -202,9 +206,198 @@ var (
 	lockDocumentsRemoveMaintenanceLogPhoto       = newLockOp("documents.RemoveMaintenanceLogPhoto")
 	lockDocumentsMaintenanceLogPhotoDeletable    = newLockOp("documents.MaintenanceLogPhotoDeletableAsOrphan")
 	lockDocumentsListHourMeterResets             = newLockOp("documents.ListHourMeterResets")
-	lockDocumentsRead                            = newLockOp("documents.Read")
 	lockDocumentsMaintenanceSchedule             = newLockOp("documents.MaintenanceSchedule")
 	lockDocumentsResolveMaintenanceRule          = newLockOp("documents.ResolveMaintenanceRule")
 	lockDocumentsMaintenanceRuleHistoryLabel     = newLockOp("documents.MaintenanceRuleHistoryLabel")
 	lockDocumentsPreviewMaintenanceProfileChange = newLockOp("documents.PreviewMaintenanceProfileChange")
+)
+
+// Document store writes that run a transaction through RunTx.
+var (
+	lockDocumentsUpdateMeta           = newLockOp("documents.UpdateMeta")
+	lockDocumentsSetSuggested         = newLockOp("documents.SetSuggested")
+	lockDocumentsReplaceChunks        = newLockOp("documents.ReplaceChunks")
+	lockDocumentsDelete               = newLockOp("documents.Delete")
+	lockDocumentsMove                 = newLockOp("documents.Move")
+	lockDocumentsPatch                = newLockOp("documents.Patch")
+	lockDocumentsDeleteFolder         = newLockOp("documents.DeleteFolder")
+	lockDocumentsCommitImport         = newLockOp("documents.CommitImport")
+	lockDocumentsMergeImportDecisions = newLockOp("documents.MergeImportDecisions")
+	lockDocumentsSetImportFile        = newLockOp("documents.SetImportFile")
+	lockDocumentsAbandonImportRun     = newLockOp("documents.AbandonImportRun")
+
+	lockDocumentsCreateZone               = newLockOp("documents.CreateZone")
+	lockDocumentsUpdateZone               = newLockOp("documents.UpdateZone")
+	lockDocumentsDeleteZone               = newLockOp("documents.DeleteZone")
+	lockDocumentsCreateBin                = newLockOp("documents.CreateBin")
+	lockDocumentsUpdateBin                = newLockOp("documents.UpdateBin")
+	lockDocumentsDeleteBin                = newLockOp("documents.DeleteBin")
+	lockDocumentsCreateEquipment          = newLockOp("documents.CreateEquipment")
+	lockDocumentsUpdateEquipment          = newLockOp("documents.UpdateEquipment")
+	lockDocumentsDeleteEquipment          = newLockOp("documents.DeleteEquipment")
+	lockDocumentsPatchEquipmentDocuments  = newLockOp("documents.PatchEquipmentDocuments")
+	lockDocumentsAddEquipmentPhoto        = newLockOp("documents.AddEquipmentPhoto")
+	lockDocumentsSetEquipmentPhotoOrder   = newLockOp("documents.SetEquipmentPhotoOrder")
+	lockDocumentsRemoveEquipmentPhoto     = newLockOp("documents.RemoveEquipmentPhoto")
+	lockDocumentsSwapEquipmentSource      = newLockOp("documents.SwapEquipmentSource")
+	lockDocumentsCreateDeck               = newLockOp("documents.CreateDeck")
+	lockDocumentsUpdateDeck               = newLockOp("documents.UpdateDeck")
+	lockDocumentsSetDeckPlan              = newLockOp("documents.SetDeckPlan")
+	lockDocumentsDeleteDeck               = newLockOp("documents.DeleteDeck")
+	lockDocumentsSaveDeckLayout           = newLockOp("documents.SaveDeckLayout")
+	lockDocumentsFlagManual               = newLockOp("documents.FlagManual")
+	lockDocumentsReorderManualChildren    = newLockOp("documents.ReorderManualChildren")
+	lockDocumentsAddOpenJobPhoto          = newLockOp("documents.AddOpenJobPhoto")
+	lockDocumentsCreateOpenJob            = newLockOp("documents.CreateOpenJob")
+	lockDocumentsUpdateOpenJob            = newLockOp("documents.UpdateOpenJob")
+	lockDocumentsDropOpenJob              = newLockOp("documents.DropOpenJob")
+	lockDocumentsCompleteOpenJob          = newLockOp("documents.CompleteOpenJob")
+	lockDocumentsDeleteHandHourReading    = newLockOp("documents.DeleteHandHourReading")
+	lockDocumentsRecordHandHourReading    = newLockOp("documents.RecordHandHourReading")
+	lockDocumentsCreateMaintenanceRule    = newLockOp("documents.CreateMaintenanceRule")
+	lockDocumentsUpdateMaintenanceRule    = newLockOp("documents.UpdateMaintenanceRule")
+	lockDocumentsDeleteMaintenanceRule    = newLockOp("documents.DeleteMaintenanceRule")
+	lockDocumentsAcknowledgeMaintenance   = newLockOp("documents.AcknowledgeMaintenanceRule")
+	lockDocumentsSetMaintenanceLastDone   = newLockOp("documents.SetMaintenanceRuleLastDone")
+	lockDocumentsSetMaintenanceNote       = newLockOp("documents.SetMaintenanceRuleProcedureNote")
+	lockDocumentsSetMaintenanceOverrides  = newLockOp("documents.SetMaintenanceRuleOverrides")
+	lockDocumentsResetMaintenanceOverride = newLockOp("documents.ResetMaintenanceRuleOverride")
+	lockDocumentsCompleteMaintenanceRule  = newLockOp("documents.CompleteMaintenanceRule")
+	lockDocumentsCreateLogEntry           = newLockOp("documents.CreateMaintenanceLogEntry")
+	lockDocumentsUpdateLogEntry           = newLockOp("documents.UpdateMaintenanceLogEntry")
+	lockDocumentsAddLogPhoto              = newLockOp("documents.AddMaintenanceLogPhoto")
+	lockDocumentsRecordMeterReset         = newLockOp("documents.RecordHourMeterReset")
+)
+
+// Watches, saved places, alarm rules and reviews, Mate memory, vessel and
+// other record writes through the document store.
+var (
+	lockWatchesCreate             = newLockOp("watches.Create")
+	lockWatchesChange             = newLockOp("watches.Change")
+	lockWatchesDelete             = newLockOp("watches.Delete")
+	lockWatchesDeleteRun          = newLockOp("watches.DeleteRun")
+	lockWatchesRememberFindings   = newLockOp("watches.RememberToldFindings")
+	lockWatchesRecordDelivery     = newLockOp("watches.RecordDelivery")
+	lockWatchesRecordNotSent      = newLockOp("watches.RecordNotSent")
+	lockWatchesRecordDeliveryNote = newLockOp("watches.RecordDeliveryNote")
+	lockWatchesRecordRun          = newLockOp("watches.RecordRun")
+	lockWatchesPruneHistory       = newLockOp("watches.PruneHistory")
+	lockWatchesStartOneOff        = newLockOp("watches.StartOneOff")
+	lockWatchesCheckpointOneOff   = newLockOp("watches.CheckpointOneOff")
+	lockWatchesFinishOneOff       = newLockOp("watches.FinishOneOff")
+	lockWatchesMarkOneOffEnded    = newLockOp("watches.MarkOneOffEnded")
+	lockWatchesSaveOneOffDowntime = newLockOp("watches.SaveOneOffDowntime")
+
+	lockSavedPlacesCreate = newLockOp("saved_places.Create")
+	lockSavedPlacesChange = newLockOp("saved_places.Change")
+	lockSavedPlacesDelete = newLockOp("saved_places.Delete")
+
+	lockAlarmRulesSeed           = newLockOp("alarm_rules.Seed")
+	lockAlarmRulesCreate         = newLockOp("alarm_rules.Create")
+	lockAlarmRulesUpdate         = newLockOp("alarm_rules.Update")
+	lockAlarmRulesDelete         = newLockOp("alarm_rules.Delete")
+	lockAlarmRulesMoveRoleBound  = newLockOp("alarm_rules.MoveRoleBound")
+	lockAlarmRulesImport         = newLockOp("alarm_rules.Import")
+	lockAlarmRulesAdoptHouseBank = newLockOp("alarm_rules.AdoptHouseBank")
+
+	lockAlarmReviewFailInterrupted = newLockOp("alarm_review.FailInterrupted")
+	lockAlarmReviewInsert          = newLockOp("alarm_review.Insert")
+	lockAlarmReviewUpdate          = newLockOp("alarm_review.Update")
+
+	lockMateMemoryAdd    = newLockOp("mate_memory.Add")
+	lockMateMemoryChange = newLockOp("mate_memory.Change")
+	lockMateMemoryDelete = newLockOp("mate_memory.Delete")
+
+	lockVesselConvertSettings    = newLockOp("vessel.ConvertSettings")
+	lockSignalKUnitsRemember     = newLockOp("signalk_units.Remember")
+	lockSourceRegistryRemember   = newLockOp("source_registry.RememberSightings")
+	lockChangesetDryRun          = newLockOp("changeset.DryRun")
+	lockAssistantApplyProposal   = newLockOp("assistant.ApplyProposal")
+	lockAssistantDismissProposal = newLockOp("assistant.DismissProposal")
+	lockAssistantUndoProposal    = newLockOp("assistant.UndoProposal")
+)
+
+// Profile store transactions and the engine profile handlers that run them.
+var (
+	lockProfilesAllRows               = newLockOp("profiles.AllRows")
+	lockProfilesCount                 = newLockOp("profiles.Count")
+	lockProfilesReadByID              = newLockOp("profiles.ReadByID")
+	lockProfilesUpdate                = newLockOp("profiles.Update")
+	lockProfilesCreate                = newLockOp("profiles.Create")
+	lockProfilesDelete                = newLockOp("profiles.Delete")
+	lockProfilesCopyFromCatalogue     = newLockOp("profiles.CopyFromCatalogue")
+	lockProfilesConvertDashboardTiles = newLockOp("profiles.ConvertDashboardTiles")
+)
+
+// documentStore.Read callers: one op each, so a read in the alarm review and a
+// read in the Mate's watch tools do not share a key.
+var (
+	lockSavedPlacesFindByName = newLockOp("saved_places.FindByName")
+	lockSavedPlacesNear       = newLockOp("saved_places.Near")
+	lockSavedPlacesList       = newLockOp("saved_places.List")
+
+	lockWatchesListRecords   = newLockOp("watches.ListRecords")
+	lockWatchesListHandler   = newLockOp("watches.List")
+	lockWatchesGetHandler    = newLockOp("watches.Get")
+	lockWatchesStopOneOff    = newLockOp("watches.StopOneOff")
+	lockWatchesRunNow        = newLockOp("watches.RunNow")
+	lockWatchesGetRun        = newLockOp("watches.GetRun")
+	lockWatchesAfterRun      = newLockOp("watches.AfterRun")
+	lockWatchesGatherInput   = newLockOp("watches.GatherReportInput")
+	lockWatchesListForTick   = newLockOp("watches.ListForTick")
+	lockWatchesWatchForTick  = newLockOp("watches.WatchForTick")
+	lockWatchesLastRanRun    = newLockOp("watches.LastRanRun")
+	lockWatchesStillOwed     = newLockOp("watches.StillOwed")
+	lockWatchesListForResume = newLockOp("watches.ListForResume")
+	lockWatchesRunForResume  = newLockOp("watches.RunForResume")
+	lockWatchesRunForAnswer  = newLockOp("anomaly.WatchRunForAnswer")
+
+	lockMateListWatches    = newLockOp("mate.ListWatches")
+	lockMateGetWatchRuns   = newLockOp("mate.GetWatchRuns")
+	lockMateRunWatchNow    = newLockOp("mate.RunWatchNow")
+	lockMateGetRecord      = newLockOp("mate.GetRecord")
+	lockMateListAlarmRules = newLockOp("mate.ListAlarmRules")
+	lockMateReadMemories   = newLockOp("mate_memory.Read")
+	lockMateMemoryCheck    = newLockOp("mate_memory.RememberFactCheck")
+	lockMCPAlarmRules      = newLockOp("mcp.WriteAlarmRules")
+
+	lockAlarmRulesListRecords = newLockOp("alarm_rules.ListRecords")
+	lockAlarmRulesRefresh     = newLockOp("alarm_rules.Refresh")
+	lockAlarmReviewRead       = newLockOp("alarm_review.ReadReviews")
+
+	lockMaintenanceListRules      = newLockOp("maintenance.ListRules")
+	lockMaintenanceListLogEntries = newLockOp("maintenance.ListLogEntries")
+
+	lockSignalKUnitsLoad   = newLockOp("signalk_units.Load")
+	lockSourceRegistryLoad = newLockOp("source_registry.Load")
+)
+
+// Transactions on the other stores.
+var (
+	lockCoastlineRequestSquares     = newLockOp("coastline.RequestSquares")
+	lockCoastlineRemoveSquares      = newLockOp("coastline.RemoveSquares")
+	lockCoastlineSaveSquare         = newLockOp("coastline.SaveSquare")
+	lockCoastlineRecordFailure      = newLockOp("coastline.RecordFailure")
+	lockCoastlineDeleteFailedSquare = newLockOp("coastline.DeleteFailedSquare")
+	lockCoastlineDeferCheck         = newLockOp("coastline.DeferCheck")
+	lockCoastlineRecordEdits        = newLockOp("coastline.RecordEdits")
+	lockCoastlineClearCoverage      = newLockOp("coastline.ClearCoverage")
+
+	lockAssistantSetMessageFeedback          = newLockOp("assistant.SetMessageFeedback")
+	lockAssistantClearMessageFeedback        = newLockOp("assistant.ClearMessageFeedback")
+	lockAssistantSetOperatorPassageDecision  = newLockOp("assistant.SetOperatorPassageDecision")
+	lockAssistantApplyPassageDecisionUpdates = newLockOp("assistant.ApplyPassageDecisionUpdates")
+	lockAssistantSaveRun                     = newLockOp("assistant.SaveRun")
+	lockAssistantPruneRuns                   = newLockOp("assistant.PruneRuns")
+	lockAssistantDeleteConversation          = newLockOp("assistant.DeleteConversation")
+	lockAssistantAppendMessage               = newLockOp("assistant.AppendMessage")
+
+	lockMCPCreateToken         = newLockOp("mcp.CreateToken")
+	lockMCPAuthenticate        = newLockOp("mcp.Authenticate")
+	lockMCPRevokeToken         = newLockOp("mcp.RevokeToken")
+	lockMCPSetTools            = newLockOp("mcp.SetTools")
+	lockMCPRecordActivity      = newLockOp("mcp.RecordActivity")
+	lockMCPPruneActivity       = newLockOp("mcp.PruneActivity")
+	lockMCPRegisterOAuthClient = newLockOp("mcp.RegisterOAuthClient")
+	lockMCPMarkOAuthAuthorized = newLockOp("mcp.MarkOAuthClientAuthorized")
 )

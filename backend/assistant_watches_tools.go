@@ -46,7 +46,7 @@ func (d assistantToolDeps) executeListWatches(ctx context.Context, _ json.RawMes
 	}
 	result := assistantListWatchesResult{Watches: []assistantWatchEntry{}, Limit: maxScheduledWatches,
 		Note: "These are the scheduled watches. Findings and Mate's reviews are on the Watches page."}
-	err := d.documents().Read(func(q sqlQueryer) error {
+	err := d.documents().Read(lockMateListWatches, func(q sqlQueryer) error {
 		list, err := listSavedWatchesQ(q)
 		if err != nil {
 			return err
@@ -138,7 +138,7 @@ func (d assistantToolDeps) executeGetWatchRuns(ctx context.Context, raw json.Raw
 		limit = assistantWatchRunsMax
 	}
 	var result assistantWatchRunsResult
-	err := d.documents().Read(func(q sqlQueryer) error {
+	err := d.documents().Read(lockMateGetWatchRuns, func(q sqlQueryer) error {
 		if args.RunID != "" {
 			run, err := watchRunAnyByIDQ(q, args.RunID)
 			if err != nil {
@@ -228,7 +228,7 @@ func (d assistantToolDeps) executeRunWatchNow(ctx context.Context, raw json.RawM
 		return "", errors.New("run_watch_now: give the watch_id from list_watches")
 	}
 	var w savedWatch
-	if err := d.documents().Read(func(q sqlQueryer) error {
+	if err := d.documents().Read(lockMateRunWatchNow, func(q sqlQueryer) error {
 		var err error
 		w, err = savedWatchByIDQ(q, args.WatchID)
 		return err

@@ -314,7 +314,7 @@ func TestDismissProposal_WaitsForAnApplyHoldingTheRecordStoreLock(t *testing.T) 
 
 	// The apply, run under the lock the test holds, as applyAssistantProposal
 	// runs it under the lock it takes.
-	applied, _, err := applyAssistantProposalLocked(env.docs, p.ID, env.deps.today)
+	applied, _, err := applyAssistantProposalLocked(env.docs, lockedForTest(&env.docs.mu), p.ID, env.deps.today)
 	if err != nil || applied.Status != assistantProposalApplied {
 		t.Fatalf("apply under the lock: %q, %v", applied.Status, err)
 	}
@@ -344,8 +344,9 @@ func TestRecordProposalStale_StatusChangedMeanwhileReturnsTheRealStatus(t *testi
 	}
 
 	env.docs.mu.Lock()
-	_, dErr := recordProposalStaleLocked(env.docs, dismissed.ID, "a record changed")
-	got, aErr := recordProposalStaleLocked(env.docs, applied.ID, "a record changed")
+	h := lockedForTest(&env.docs.mu)
+	_, dErr := recordProposalStaleLocked(env.docs, h, dismissed.ID, "a record changed")
+	got, aErr := recordProposalStaleLocked(env.docs, h, applied.ID, "a record changed")
 	env.docs.mu.Unlock()
 
 	if !errors.Is(dErr, errAssistantProposalDismissed) {
@@ -1081,7 +1082,7 @@ func TestApplyProposal_PanicReleasesTheRecordStoreLock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- env.docs.RunTx("after panic", func(tx *sql.Tx, now time.Time) error { return nil })
+		done <- env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error { return nil })
 	}()
 	select {
 	case err := <-done:

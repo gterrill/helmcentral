@@ -157,7 +157,7 @@ func (f *watchHostFixture) notifyOn(id string, channels []string, send string) *
 	f.t.Helper()
 	w := f.get(id)
 	w.Notify, w.Send = channels, send
-	if err := f.docs.RunTx("set notify", func(tx *sql.Tx, _ time.Time) error { return updateSavedWatchTx(tx, w) }); err != nil {
+	if err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return updateSavedWatchTx(tx, w) }); err != nil {
 		f.t.Fatal(err)
 	}
 	prev := globalDocumentStore
@@ -466,13 +466,13 @@ func TestWatchREST_RunsShowWhoWasToldAndWhatIsStillBeingRetried(t *testing.T) {
 	env.applyOK(t, watchCreateArgs)
 	w := firstWatch(t, env.docs)
 	for _, id := range []string{"r1", "r2"} {
-		if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+		if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 			return insertWatchRunTx(tx, watchRun{ID: id, WatchID: w.ID, StartedAt: env.clock.Add(map[string]time.Duration{"r1": time.Hour, "r2": 2 * time.Hour}[id]), FinishedAt: env.clock, Outcome: watchOutcomeRan, CostKnown: true}, true)
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := env.docs.RunTx("notified", func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "r1", transportNtfy) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "r1", transportNtfy) }); err != nil {
 		t.Fatal(err)
 	}
 	m := testWatchMessage(t)
@@ -512,12 +512,12 @@ func TestMateWatchTools_ShowNotifySendAndWhetherTheRunWasNotified(t *testing.T) 
 	env := newProposalEnv(t)
 	env.applyOK(t, `{"operations":[{"type":"watch","action":"create","fields":{"name":"Morning report","schedule":"0 6 * * *","sections":["power"],"notify":["ntfy"],"send":"every"}}]}`)
 	w := firstWatch(t, env.docs)
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "r1", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan, CostKnown: true}, true)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.docs.RunTx("notified", func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "r1", transportNtfy) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "r1", transportNtfy) }); err != nil {
 		t.Fatal(err)
 	}
 	list, err := env.deps.executeListWatches(context.Background(), nil)
@@ -601,12 +601,12 @@ func TestWatchREST_GetOneRunWithItsDeliveryState(t *testing.T) {
 	t.Cleanup(func() { globalAlarmLogStore = prev })
 	env.applyOK(t, watchCreateArgs)
 	w := firstWatch(t, env.docs)
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "old", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan, CostKnown: true}, true)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.docs.RunTx("notified", func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "old", transportNtfy) }); err != nil {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error { return addWatchRunNotifiedTx(tx, w.ID, "old", transportNtfy) }); err != nil {
 		t.Fatal(err)
 	}
 	c, rec := watchRequestTo(http.MethodGet, "/api/watches/"+w.ID+"/runs/old", "", "id", w.ID, "runId", "old")

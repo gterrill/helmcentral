@@ -108,9 +108,8 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 	if err != nil {
 		return assistantRunTrace{}, fmt.Errorf("encode run budget: %w", err)
 	}
-	err = runTxUnderLock(&s.mu, s.db, "assistant.SaveRun", time.Now, serverVitals, func(tx *sql.Tx) error {
-		_, err := saveRunTx(tx, run, string(budget))
-		return err
+	err = runTxUnderLock(lockAssistantSaveRun, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
+		return saveRunTx(tx, run, string(budget))
 	})
 	if err != nil {
 		return assistantRunTrace{}, err
@@ -118,7 +117,7 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 	return run, nil
 }
 
-func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) (assistantRunTrace, error) {
+func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 	var answer sql.NullString
 	if run.AnswerMessageID != nil {
 		answer = sql.NullString{String: *run.AnswerMessageID, Valid: true}
@@ -127,25 +126,25 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) (assistantRunTr
 		(id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.ConversationID, run.AfterSeq, answer, run.Model, run.StartedAt.UnixMilli(), run.DurationMs, run.StopReason, run.Error, budget); err != nil {
-		return assistantRunTrace{}, fmt.Errorf("insert run: %w", err)
+		return fmt.Errorf("insert run: %w", err)
 	}
 	roundStmt, err := tx.Prepare(`INSERT INTO assistant_run_rounds
 		(run_id, idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return assistantRunTrace{}, fmt.Errorf("prepare insert run round: %w", err)
+		return fmt.Errorf("prepare insert run round: %w", err)
 	}
 	defer roundStmt.Close()
 	callStmt, err := tx.Prepare(`INSERT INTO assistant_run_calls
 		(run_id, round, seq, name, args, result, elapsed_ms, result_bytes, error, truncated, original_bytes, cache)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return assistantRunTrace{}, fmt.Errorf("prepare insert run call: %w", err)
+		return fmt.Errorf("prepare insert run call: %w", err)
 	}
 	defer callStmt.Close()
 	for _, r := range run.Rounds {
 		if _, err := roundStmt.Exec(run.ID, r.Index, r.Kind, r.StartOffsetMs, r.LatencyMs, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, boolToInt(r.ForcedFinal), boolToInt(r.Progress), r.Error, r.CheckTrigger, cutUTF8(r.CheckDraft, assistantToolCallMaxBytes)); err != nil {
-			return assistantRunTrace{}, fmt.Errorf("insert run round %d: %w", r.Index, err)
+			return fmt.Errorf("insert run round %d: %w", r.Index, err)
 		}
 		for _, c := range r.Calls {
 			args, result := cutUTF8(c.Args, assistantToolCallMaxBytes), cutUTF8(c.Result, assistantToolCallMaxBytes)
@@ -155,11 +154,11 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) (assistantRunTr
 				original = sql.NullInt64{Int64: int64(len(c.Args) + len(c.Result)), Valid: true}
 			}
 			if _, err := callStmt.Exec(run.ID, r.Index, c.Seq, c.Name, args, result, c.ElapsedMs, len(c.Result), c.Error, boolToInt(truncated), original, c.Cache); err != nil {
-				return assistantRunTrace{}, fmt.Errorf("insert run call %s: %w", c.Name, err)
+				return fmt.Errorf("insert run call %s: %w", c.Name, err)
 			}
 		}
 	}
-	return run, nil
+	return nil
 }
 
 const assistantRunColumns = `id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget,
@@ -288,7 +287,7 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 // while the rating stands; clearing the rating puts it back under the rule.
 func (s *assistantStore) PruneRuns() (int64, error) {
 	var removed int64
-	err := runTxUnderLock(&s.mu, s.db, "assistant.PruneRuns", time.Now, serverVitals, func(tx *sql.Tx) error {
+	err := runTxUnderLock(lockAssistantPruneRuns, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		var err error
 		removed, err = pruneRunsTx(tx, s.now())
 		return err

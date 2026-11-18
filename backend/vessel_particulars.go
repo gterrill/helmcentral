@@ -175,7 +175,8 @@ func (s *documentStore) GetVesselParticulars() (vesselParticulars, error) {
 
 // SetVesselParticulars replaces the whole record.
 func (s *documentStore) SetVesselParticulars(v vesselParticulars) (vesselParticulars, error) {
-	defer lockDocumentsSetVesselParticulars.held(&s.mu).release()
+	h := lockDocumentsSetVesselParticulars.held(&s.mu)
+	defer h.release()
 
 	v = trimParticulars(v)
 	if verr := validateParticulars(v); verr != nil {
@@ -183,7 +184,7 @@ func (s *documentStore) SetVesselParticulars(v vesselParticulars) (vesselParticu
 	}
 
 	var saved vesselParticulars
-	err := s.runTxLocked("set vessel particulars", func(tx *sql.Tx, now time.Time) error {
+	err := s.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
 		if err := upsertVesselParticularsTx(tx, v, now); err != nil {
 			return err
 		}

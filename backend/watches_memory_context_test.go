@@ -73,7 +73,7 @@ func TestWatchReview_ARunWithNoMemoriesOrRepliesStillCarriesTheReview(t *testing
 	f := newWatchHostFixture(t)
 	f.add("Morning", "0 6 * * *")
 	text := "Draw is 9 A. Is the freezer on?"
-	err := f.docs.RunTx("seed", func(tx *sql.Tx, _ time.Time) error {
+	err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "prev", WatchID: "id-Morning", StartedAt: f.clock.Add(-24 * time.Hour), FinishedAt: f.clock.Add(-24 * time.Hour),
 			Outcome: watchOutcomeRan, Review: &text, CostKnown: true}, true)
 	})
@@ -99,7 +99,7 @@ func TestWatchRun_RepliesFromChatsOnThePreviousRunGoToTheNextReview(t *testing.T
 	f := newWatchHostFixture(t)
 	f.add("Morning", "0 6 * * *")
 	text := "Draw is 9 A. Is the freezer on?"
-	err := f.docs.RunTx("seed", func(tx *sql.Tx, _ time.Time) error {
+	err := f.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "prev", WatchID: "id-Morning", StartedAt: f.clock.Add(-24 * time.Hour), FinishedAt: f.clock.Add(-24 * time.Hour),
 			Outcome: watchOutcomeRan, Review: &text, CostKnown: true}, true)
 	})

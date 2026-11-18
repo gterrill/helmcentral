@@ -10,6 +10,18 @@ import (
 	"time"
 )
 
+// Scratch ops for tests that call RunTx, Read and inTx directly.
+var (
+	testTxOp   = newLockOp("test.Tx")
+	testReadOp = newLockOp("test.Read")
+)
+
+// lockedForTest describes a mutex the test has locked by hand, for the helpers
+// that take the hold their caller keeps. The test unlocks it itself.
+func lockedForTest(mu *sync.Mutex) *heldLock {
+	return &heldLock{op: testTxOp, mu: mu, clock: time.Now, reg: lockRecorder(), since: time.Now()}
+}
+
 // handoffClock is a clock the test moves by hand. Its first two reads (the
 // start of the wait and the moment the lock is won) signal on first and
 // second, so the test knows where the goroutine under test has got to without
@@ -116,12 +128,60 @@ func TestLockOpHeldTimed_UnlocksWhenTheCallerPanics(t *testing.T) {
 	}
 }
 
+// unlockProbe is a recorder that checks, on every record, that the store mutex
+// is free: a registry whose record blocks must not be able to stall the store.
+type unlockProbe struct {
+	mu   *sync.Mutex
+	held []string
+	seen []string
+}
+
+func (p *unlockProbe) record(name string, _ time.Duration) {
+	p.seen = append(p.seen, name)
+	if !p.mu.TryLock() {
+		p.held = append(p.held, name)
+		return
+	}
+	p.mu.Unlock()
+}
+func (p *unlockProbe) count(string, int64)                     {}
+func (p *unlockProbe) recordRows(string, time.Duration, int64) {}
+
+func TestLockOpHeld_RecordsOnlyAfterTheMutexIsFree(t *testing.T) {
+	var mu sync.Mutex
+	probe := &unlockProbe{mu: &mu}
+	op := makeLockOp("t.after")
+	h := op.heldTimed(&mu, time.Now, probe)
+	if len(probe.seen) != 0 {
+		t.Fatalf("recorded %v while the lock was held", probe.seen)
+	}
+	h.release()
+	if len(probe.held) != 0 {
+		t.Errorf("recorded %v while the store mutex was held", probe.held)
+	}
+	if len(probe.seen) != 2 {
+		t.Errorf("recorded %v, want the wait and the hold", probe.seen)
+	}
+}
+
+func TestNewLockOp_PanicsOnARepeatedName(t *testing.T) {
+	name := "t.repeated.once"
+	newLockOp(name)
+	defer func() {
+		if recover() == nil {
+			t.Error("a second op with the same name did not panic")
+		}
+	}()
+	newLockOp(name)
+}
+
 func TestRunTxUnderLock_ReturnsTheInnerErrorUnlocksAndRecords(t *testing.T) {
 	v := newVitalsRegistry(time.Now)
 	db := openOneConnPool(t)
 	var mu sync.Mutex
 	want := errors.New("inner failure")
-	err := runTxUnderLock(&mu, db, "t.tx", time.Now, v, func(tx *sql.Tx) error { return want })
+	op := makeLockOp("t.tx")
+	err := runTxUnderLock(op, &mu, db, time.Now, v, func(tx *sql.Tx) error { return want })
 	if err != want {
 		t.Errorf("err = %v, want the inner error as it is", err)
 	}
@@ -129,13 +189,29 @@ func TestRunTxUnderLock_ReturnsTheInnerErrorUnlocksAndRecords(t *testing.T) {
 		t.Fatal("mutex still held after an error")
 	}
 	mu.Unlock()
-	for _, k := range []string{"tx.lock_wait.t.tx", "tx.time.t.tx"} {
+	for _, k := range []string{"tx.lock_wait.t.tx", "tx.time.t.tx", "tx.lock_hold.t.tx"} {
 		if _, ok := v.timing(k); !ok {
 			t.Errorf("%s not recorded", k)
 		}
 	}
-	if err := runTxUnderLock(&mu, db, "t.tx", time.Now, v, func(tx *sql.Tx) error { return nil }); err != nil {
+	if err := runTxUnderLock(op, &mu, db, time.Now, v, func(tx *sql.Tx) error { return nil }); err != nil {
 		t.Errorf("clean run: %v", err)
+	}
+}
+
+func TestRunTxUnderLock_RecordsOnlyAfterTheMutexIsFree(t *testing.T) {
+	var mu sync.Mutex
+	probe := &unlockProbe{mu: &mu}
+	db := openOneConnPool(t)
+	op := makeLockOp("t.txafter")
+	if err := runTxUnderLock(op, &mu, db, time.Now, probe, func(tx *sql.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(probe.held) != 0 {
+		t.Errorf("recorded %v while the store mutex was held", probe.held)
+	}
+	if len(probe.seen) != 3 {
+		t.Errorf("recorded %v, want wait, transaction and hold", probe.seen)
 	}
 }
 
@@ -145,7 +221,7 @@ func TestRunTxUnderLock_UnlocksWhenFnPanics(t *testing.T) {
 	var mu sync.Mutex
 	func() {
 		defer func() { _ = recover() }()
-		_ = runTxUnderLock(&mu, db, "t.panic", time.Now, v, func(tx *sql.Tx) error { panic("boom") })
+		_ = runTxUnderLock(makeLockOp("t.panic"), &mu, db, time.Now, v, func(tx *sql.Tx) error { panic("boom") })
 	}()
 	if !mu.TryLock() {
 		t.Fatal("mutex still held after a panic")

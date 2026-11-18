@@ -30,7 +30,7 @@ func newOneOffFixture(t *testing.T) *oneOffFixture {
 func (f *oneOffFixture) watches(t *testing.T) []savedWatch {
 	t.Helper()
 	var list []savedWatch
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		list, err = listSavedWatchesQ(q)
 		return err
@@ -43,7 +43,7 @@ func (f *oneOffFixture) watches(t *testing.T) []savedWatch {
 func (f *oneOffFixture) runs(t *testing.T, id string) []watchRun {
 	t.Helper()
 	var runs []watchRun
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		runs, err = watchRunsQ(q, id, 10, nil)
 		return err
@@ -220,7 +220,7 @@ func waitUntil(t *testing.T, what string, ok func() bool) {
 func (f *oneOffFixture) samples(t *testing.T, id string, paths int) [][]assistantWatchSample {
 	t.Helper()
 	var series [][]assistantWatchSample
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		series, err = loadWatchSamplesQ(q, id, paths)
 		return err
@@ -406,7 +406,7 @@ func TestOneOffWatch_ACheckpointAddsOnlyTheNewSamples(t *testing.T) {
 	f.h.tickThrough(f.h.ticker(0), 2*assistantWatchCheckpointEvery+1)
 	waitUntil(t, "two saves", func() bool { return f.sampleCount(t, info.ID) == 2*assistantWatchCheckpointEvery })
 	var chunks, bytes int
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		return q.QueryRow(`SELECT COUNT(*), COALESCE(SUM(length(samples)), 0) FROM watch_samples WHERE watch_id = ?`, info.ID).Scan(&chunks, &bytes)
 	}); err != nil {
 		t.Fatal(err)

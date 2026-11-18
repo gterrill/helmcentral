@@ -176,7 +176,7 @@ func (s *documentStore) HandHourSamples(equipmentID string) ([]handHourSample, [
 
 // DeleteHandHourReading removes one kept reading of equipmentID.
 func (s *documentStore) DeleteHandHourReading(equipmentID, readingID string) error {
-	return s.RunTx("delete hand hour reading", func(tx *sql.Tx, now time.Time) error {
+	return s.RunTx(lockDocumentsDeleteHandHourReading, func(tx *sql.Tx, now time.Time) error {
 		res, err := tx.Exec(`DELETE FROM hand_hour_readings WHERE id = ? AND equipment_id = ?`, readingID, equipmentID)
 		if err != nil {
 			return fmt.Errorf("delete hand hour reading"+": %w", err)
@@ -244,7 +244,7 @@ func cmdRecordHandHourReading(tx *sql.Tx, now, today time.Time, equipmentID stri
 }
 
 func (s *documentStore) RecordHandHourReadingCmd(today time.Time, equipmentID string, req handHourReadingRequest) (handHourReading, error) {
-	return runCmd(s, "record hand hour reading", func(tx *sql.Tx, now time.Time) (handHourReading, error) {
+	return runCmd(s, lockDocumentsRecordHandHourReading, func(tx *sql.Tx, now time.Time) (handHourReading, error) {
 		return cmdRecordHandHourReading(tx, now, today, equipmentID, req)
 	})
 }

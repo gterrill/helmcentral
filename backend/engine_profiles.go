@@ -513,7 +513,7 @@ func readProfileByID(id string) (engineProfile, error) {
 		return engineProfile{}, errors.New("profile store is not open")
 	}
 	var profile engineProfile
-	err := globalProfileStore.inTx(func(tx *sql.Tx) error {
+	err := globalProfileStore.inTx(lockProfilesReadByID, func(tx *sql.Tx) error {
 		var err error
 		profile, _, err = getProfileTx(tx, id)
 		return err
@@ -575,7 +575,7 @@ func updateProfileHandler(c echo.Context, requiredKind string) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
 	}
 	confirmRemoved := c.QueryParam("confirm_removed") == "1"
-	err = globalProfileStore.inTx(func(tx *sql.Tx) error {
+	err = globalProfileStore.inTx(lockProfilesUpdate, func(tx *sql.Tx) error {
 		if _, _, err := getProfileTx(tx, id); errors.Is(err, errProfileNotFound) {
 			return err
 		}
@@ -643,7 +643,7 @@ func createEquipmentProfileHandler(c echo.Context) error {
 	if globalProfileStore == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
 	}
-	err = globalProfileStore.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, profile, profileBasedOn{}) })
+	err = globalProfileStore.inTx(lockProfilesCreate, func(tx *sql.Tx) error { return insertProfileTx(tx, profile, profileBasedOn{}) })
 	if err != nil {
 		if errors.Is(err, errProfileExists) {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "profile id already exists"})
@@ -711,7 +711,7 @@ func deleteEquipmentProfileHandler(c echo.Context) error {
 	if globalProfileStore == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "profile store is not open"})
 	}
-	err = globalProfileStore.inTx(func(tx *sql.Tx) error {
+	err = globalProfileStore.inTx(lockProfilesDelete, func(tx *sql.Tx) error {
 		if err := guardProfileDeleteTx(tx, id); err != nil {
 			return err
 		}

@@ -288,7 +288,7 @@ func (w *importWriter) record(kind, key, targetID, label, action string) error {
 // commitImportRunTx writes everything in one transaction.
 func (s *documentStore) commitImportRunTx(run importRun, noteDocs map[string]string) (importCommitResult, error) {
 	var result importCommitResult
-	err := s.RunTx("commit import", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsCommitImport, func(tx *sql.Tx, now time.Time) error {
 		// Re-read inside the transaction: the decisions that were checked a
 		// moment ago are the ones that get written, and nothing else can change
 		// them now.

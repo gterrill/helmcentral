@@ -92,7 +92,7 @@ func (s *watchOneOffStore) Start(info assistantWatchInfo) error {
 		Sections: []string{}, Thresholds: defaultWatchThresholds(), LookOutFor: truncateRunes(info.Reason, maxWatchLookOutForChars),
 		Enabled: true, CreatedAt: info.StartedAt, UpdatedAt: info.StartedAt, ScheduleChangedAt: info.StartedAt, Config: config,
 	}
-	return docs.RunTx("start one-off watch", func(tx *sql.Tx, _ time.Time) error {
+	return docs.RunTx(lockWatchesStartOneOff, func(tx *sql.Tx, _ time.Time) error {
 		return insertSavedWatchTx(tx, w)
 	})
 }
@@ -105,7 +105,7 @@ func (s *watchOneOffStore) Checkpoint(info assistantWatchInfo, batch [][]assista
 	if docs == nil {
 		return
 	}
-	if err := docs.RunTx("checkpoint one-off watch", func(tx *sql.Tx, _ time.Time) error {
+	if err := docs.RunTx(lockWatchesCheckpointOneOff, func(tx *sql.Tx, _ time.Time) error {
 		return appendWatchSamplesTx(tx, info.ID, batch)
 	}); err != nil {
 		log.Printf("watches: could not save the samples of watch %s, so a restart would lose them: %v", info.ID, err)
@@ -181,7 +181,7 @@ func (s *watchOneOffStore) finish(info assistantWatchInfo, run watchRun, countsA
 		_, err := tx.Exec(`UPDATE watches SET enabled = 0, reported_at = ? WHERE id = ?`, nullableReported(now, reported), info.ID)
 		return err
 	}
-	err := docs.RunTx("finish one-off watch", func(tx *sql.Tx, now time.Time) error {
+	err := docs.RunTx(lockWatchesFinishOneOff, func(tx *sql.Tx, now time.Time) error {
 		if err := insertWatchRunTx(tx, run, countsAsRun); err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func (s *watchOneOffStore) finish(info assistantWatchInfo, run watchRun, countsA
 		return
 	}
 	log.Printf("watches: could not save the end of watch %s: %v", info.ID, err)
-	if err := docs.RunTx("mark one-off watch ended", mark); err != nil {
+	if err := docs.RunTx(lockWatchesMarkOneOffEnded, mark); err != nil {
 		log.Printf("watches: ALERT: watch %s ended but neither its report nor its end could be saved (%v); this process will not report it again, but a restart might", info.ID, err)
 		s.remember(info.ID, reported)
 	}
@@ -323,7 +323,7 @@ func oneOffInfo(w savedWatch, cfg watchOneOffConfig) (assistantWatchInfo, error)
 // naming it, and the others are still picked up.
 func resumeOneOffWatches(reg *assistantWatchRegistry, docs *documentStore, now time.Time) (resumed, ended int, err error) {
 	var list []savedWatch
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(lockWatchesListForResume, func(q sqlQueryer) error {
 		var err error
 		list, err = listSavedWatchesQ(q)
 		return err
@@ -362,7 +362,7 @@ func resumeOneOffWatch(reg *assistantWatchRegistry, docs *documentStore, w saved
 		return err
 	}
 	var series [][]assistantWatchSample
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(lockWatchesRunForResume, func(q sqlQueryer) error {
 		var err error
 		series, err = loadWatchSamplesQ(q, w.ID, len(cfg.Paths))
 		return err
@@ -380,7 +380,7 @@ func resumeOneOffWatch(reg *assistantWatchRegistry, docs *documentStore, w saved
 		for i := range series {
 			gap[i] = series[i][saved[i]:]
 		}
-		if err := docs.RunTx("save the downtime of a one-off watch", func(tx *sql.Tx, _ time.Time) error {
+		if err := docs.RunTx(lockWatchesSaveOneOffDowntime, func(tx *sql.Tx, _ time.Time) error {
 			return appendWatchSamplesTx(tx, w.ID, gap)
 		}); err != nil {
 			return fmt.Errorf("save the time Helmcentral was down: %w", err)

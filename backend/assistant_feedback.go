@@ -170,7 +170,7 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 	}
 
 	var fb assistantFeedback
-	err := runTxUnderLock(&s.mu, s.db, "assistant.SetMessageFeedback", time.Now, serverVitals, func(tx *sql.Tx) error {
+	err := runTxUnderLock(lockAssistantSetMessageFeedback, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		var err error
 		fb, err = setMessageFeedbackTx(tx, messageID, verdict, note, s.now())
 		return err
@@ -222,7 +222,7 @@ func setMessageFeedbackTx(tx *sql.Tx, messageID, verdict, note string, now time.
 // ClearMessageFeedback removes the verdict on an assistant message. Clearing
 // an answer that has none is not an error; an unknown id is.
 func (s *assistantStore) ClearMessageFeedback(messageID string) error {
-	return runTxUnderLock(&s.mu, s.db, "assistant.ClearMessageFeedback", time.Now, serverVitals, func(tx *sql.Tx) error {
+	return runTxUnderLock(lockAssistantClearMessageFeedback, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		if err := answerRoleTx(tx, messageID); err != nil {
 			return err
 		}

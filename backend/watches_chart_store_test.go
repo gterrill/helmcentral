@@ -18,7 +18,7 @@ func chartRunEnv(t *testing.T) (*proposalEnv, savedWatch) {
 	var w savedWatch
 	_ = json.Unmarshal(rec.Body.Bytes(), &w)
 	chart := testWatchChart()
-	err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "r1", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan, CostKnown: true,
 			Findings: []watchFinding{{Section: "weather", Rule: "pressure_fall", Text: "t", By: watchByRules}, {Section: "tanks", Rule: "tank_change", Text: "u", By: watchByRules, ChartProblem: "No history to chart: nothing was recorded"}},
 			Charts:   []watchChart{chart}}, true)
@@ -32,7 +32,7 @@ func chartRunEnv(t *testing.T) (*proposalEnv, savedWatch) {
 func TestWatchRun_ChartsAndProblemsAreStoredWithTheRun(t *testing.T) {
 	env, w := chartRunEnv(t)
 	var run watchRun
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		run, err = watchRunByIDQ(q, w.ID, "r1")
 		return err
@@ -55,13 +55,13 @@ func TestWatchRun_ChartsAndProblemsAreStoredWithTheRun(t *testing.T) {
 
 func TestWatchRun_DeliveryNotesAreStoredWithTheRun(t *testing.T) {
 	env, w := chartRunEnv(t)
-	if err := env.docs.RunTx("note", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return addWatchRunNotifyNoteTx(tx, w.ID, "r1", "ntfy: sent without the chart (the server refused attachments)")
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var run watchRun
-	_ = env.docs.Read(func(q sqlQueryer) error {
+	_ = env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		run, err = watchRunByIDQ(q, w.ID, "r1")
 		return err

@@ -351,7 +351,7 @@ func (s *documentStore) GetImportRun(id string) (importRun, error) {
 // not wipe a file the operator already handed over.
 func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (importRun, error) {
 	var out importRun
-	err := s.RunTx("merge import decisions", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsMergeImportDecisions, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err
@@ -403,7 +403,7 @@ func (s *documentStore) MergeImportDecisions(id string, patch importDecisions) (
 // for one staged file, and clears its skipped flag.
 func (s *documentStore) SetImportFileDocument(id, fileKey, documentID string) (importRun, error) {
 	var out importRun
-	err := s.RunTx("set import file", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsSetImportFile, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err
@@ -464,7 +464,7 @@ func saveImportDecisionsTx(tx *sql.Tx, id string, d importDecisions, now time.Ti
 // exists. Files already stored for it stay in the document library.
 func (s *documentStore) AbandonImportRun(id string) (importRun, error) {
 	var out importRun
-	err := s.RunTx("abandon import run", func(tx *sql.Tx, now time.Time) error {
+	err := s.RunTx(lockDocumentsAbandonImportRun, func(tx *sql.Tx, now time.Time) error {
 		run, err := importRunByID(tx, id)
 		if err != nil {
 			return err

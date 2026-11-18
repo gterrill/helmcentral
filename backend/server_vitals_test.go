@@ -305,22 +305,29 @@ func TestVitals_FileLinesCarryBucketsNotPercentiles(t *testing.T) {
 	}
 }
 
-func TestLockForTx_RecordsTheWaitForEveryCaller(t *testing.T) {
+var (
+	vitalsTestLockForTx = newLockOp("vitals-test-lockfortx")
+	vitalsTestOp        = newLockOp("vitals-test-op")
+	vitalsTestCoastOp   = newLockOp("vitals-coast-op")
+	vitalsTestMCPOp     = newLockOp("vitals-mcp-op")
+)
+
+func TestHoldForTx_RecordsTheWaitForEveryCaller(t *testing.T) {
+	reg := recordLocksInto(t)
 	s := newTestDocumentStore(t)
 	reached := make(chan struct{}, 1)
 	s.lockWaitHook = func() { reached <- struct{}{} }
 	s.mu.Lock()
 	done := make(chan struct{})
 	go func() {
-		s.lockForTx("vitals-test-lockfortx")
-		s.mu.Unlock()
+		s.holdForTx(vitalsTestLockForTx).release()
 		close(done)
 	}()
 	<-reached
 	time.Sleep(40 * time.Millisecond)
 	s.mu.Unlock()
 	<-done
-	if w, ok := serverVitals.timing("tx.lock_wait.vitals-test-lockfortx"); !ok || w.MaxMs < 30 {
+	if w, ok := reg.timing("tx.lock_wait.vitals-test-lockfortx"); !ok || w.MaxMs < 30 {
 		t.Errorf("lock wait = %+v (found %v), want at least 30ms", w, ok)
 	}
 }
@@ -555,6 +562,7 @@ func TestVitalsRoute_SitsOnTheLogsTier(t *testing.T) {
 }
 
 func TestRunTx_RecordsLockWaitAndTransactionTimeSeparately(t *testing.T) {
+	reg := recordLocksInto(t)
 	s := newTestDocumentStore(t)
 	reached := make(chan struct{}, 1)
 	s.lockWaitHook = func() { reached <- struct{}{} }
@@ -562,7 +570,7 @@ func TestRunTx_RecordsLockWaitAndTransactionTimeSeparately(t *testing.T) {
 	s.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
-		done <- s.RunTx("vitals-test-op", func(tx *sql.Tx, now time.Time) error {
+		done <- s.RunTx(vitalsTestOp, func(tx *sql.Tx, now time.Time) error {
 			time.Sleep(20 * time.Millisecond)
 			return nil
 		})
@@ -574,11 +582,11 @@ func TestRunTx_RecordsLockWaitAndTransactionTimeSeparately(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wait, ok := serverVitals.timing("tx.lock_wait.vitals-test-op")
+	wait, ok := reg.timing("tx.lock_wait.vitals-test-op")
 	if !ok || wait.MaxMs < 50 {
 		t.Errorf("lock wait = %+v (found %v), want at least 50ms", wait, ok)
 	}
-	run, ok := serverVitals.timing("tx.time.vitals-test-op")
+	run, ok := reg.timing("tx.time.vitals-test-op")
 	if !ok || run.MaxMs < 20 || run.MaxMs >= 50 {
 		t.Errorf("transaction time = %+v (found %v), want about 20ms and not the wait", run, ok)
 	}
@@ -641,17 +649,18 @@ func TestVitalsSummary_NoLinesIsAnErrorNamingTheFiles(t *testing.T) {
 }
 
 func TestCoastlineAndMCPRunTx_RecordLockWaitAndTime(t *testing.T) {
+	reg := recordLocksInto(t)
 	coast := newTestCoastlineStore(t)
-	if err := coast.RunTx("vitals-coast-op", func(tx *sql.Tx) error { return nil }); err != nil {
+	if err := coast.RunTx(vitalsTestCoastOp, func(tx *sql.Tx) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	mcp := newTestMCPStore(t)
-	if err := mcp.RunTx("vitals-mcp-op", func(tx *sql.Tx, now time.Time) error { return nil }); err != nil {
+	if err := mcp.RunTx(vitalsTestMCPOp, func(tx *sql.Tx, now time.Time) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range []string{"vitals-coast-op", "vitals-mcp-op"} {
 		for _, prefix := range []string{"tx.lock_wait.", "tx.time."} {
-			if _, ok := serverVitals.timing(prefix + op); !ok {
+			if _, ok := reg.timing(prefix + op); !ok {
 				t.Errorf("%s%s not recorded", prefix, op)
 			}
 		}
@@ -746,7 +755,7 @@ func TestVitals_SinceStartHasNoGauges(t *testing.T) {
 	}
 }
 
-func TestRunTxTimed_PanicNamesTheOpWithoutTheMutex(t *testing.T) {
+func TestRunTx_PanicNamesTheOpWithoutTheMutex(t *testing.T) {
 	defer func() {
 		r := recover()
 		msg, _ := r.(string)
@@ -755,7 +764,8 @@ func TestRunTxTimed_PanicNamesTheOpWithoutTheMutex(t *testing.T) {
 		}
 	}()
 	var mu sync.Mutex
-	_ = runTxTimed(&mu, nil, "my-op", time.Now, serverVitals, func(tx *sql.Tx) error { return nil })
+	h := &heldLock{op: makeLockOp("my-op"), mu: &mu, clock: time.Now, reg: serverVitals}
+	_ = h.runTx(nil, func(tx *sql.Tx) error { return nil })
 }
 
 func TestVitalsSummary_RejectsABadLineWithItsPosition(t *testing.T) {

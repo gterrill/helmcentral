@@ -19,7 +19,7 @@ func depthOf(v float64) *float64 { return &v }
 func createDepthPlace(t *testing.T, env *proposalEnv, name string, lat, lon float64, depth *float64, source, date string) savedPlace {
 	t.Helper()
 	var p savedPlace
-	err := env.docs.RunTx("test create", func(tx *sql.Tx, now time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		var err error
 		p, err = createSavedPlaceTx(tx, savedPlace{Name: name, Lat: lat, Lon: lon, DepthM: depth, DepthSource: source, DepthDate: date}, now)
 		return err
@@ -39,7 +39,7 @@ func TestSavedPlaceDepth_StoredReplacedAndCleared(t *testing.T) {
 	}
 
 	// A new depth replaces the old with its own source and date.
-	err = env.docs.RunTx("replace", func(tx *sql.Tx, now time.Time) error {
+	err = env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		got.DepthM, got.DepthSource, got.DepthDate = depthOf(5.5), "sounded", "2026-11-09"
 		_, err := updateSavedPlaceTx(tx, got, now)
 		return err
@@ -52,7 +52,7 @@ func TestSavedPlaceDepth_StoredReplacedAndCleared(t *testing.T) {
 		t.Fatalf("replaced: %+v", got)
 	}
 
-	err = env.docs.RunTx("clear", func(tx *sql.Tx, now time.Time) error {
+	err = env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 		got.DepthM, got.DepthSource, got.DepthDate = nil, "", ""
 		_, err := updateSavedPlaceTx(tx, got, now)
 		return err
@@ -80,7 +80,7 @@ func TestSavedPlaceDepth_ValidationIsAGroup(t *testing.T) {
 	}
 	for name, p := range cases {
 		p.Name, p.Lat, p.Lon = "Spot "+name, -20, 149
-		err := env.docs.RunTx("create", func(tx *sql.Tx, now time.Time) error {
+		err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, now time.Time) error {
 			_, err := createSavedPlaceTx(tx, p, now)
 			return err
 		})

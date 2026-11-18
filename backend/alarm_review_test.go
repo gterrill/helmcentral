@@ -112,7 +112,7 @@ func TestAlarmRule_MateReviewsSwitchPersistsAndIsOffByDefault(t *testing.T) {
 	}
 	defer reopened.Close()
 	var got alarmRule
-	if err := reopened.Read(func(q sqlQueryer) error {
+	if err := reopened.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		got, err = alarmRuleByIDQ(q, created.ID)
 		return err
@@ -669,7 +669,7 @@ func TestAlarmReview_WithMateOffNothingStartsAndNothingIsWritten(t *testing.T) {
 		t.Fatalf("Mate off: row %v built %v", ok, built)
 	}
 	var n int
-	if err := globalDocumentStore.Read(func(q sqlQueryer) error {
+	if err := globalDocumentStore.Read(testReadOp, func(q sqlQueryer) error {
 		return q.QueryRow(`SELECT COUNT(*) FROM alarm_reviews`).Scan(&n)
 	}); err != nil || n != 0 {
 		t.Fatalf("rows %d err %v", n, err)

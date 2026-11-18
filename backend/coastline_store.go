@@ -106,7 +106,7 @@ type coastlineRequest struct {
 // how many were newly stored.
 func (s *coastlineStore) AddRequests(squares []coverageSquare) (int, error) {
 	added := 0
-	err := s.RunTx("request coastline squares", func(tx *sql.Tx) error {
+	err := s.RunTx(lockCoastlineRequestSquares, func(tx *sql.Tx) error {
 		var batch int
 		if err := tx.QueryRow(`SELECT COALESCE(MAX(batch), 0) + 1 FROM coastline_requests`).Scan(&batch); err != nil {
 			return err
@@ -150,7 +150,7 @@ func (s *coastlineStore) Requests() ([]coastlineRequest, error) {
 // ring's top-up and was never requested is not touched.
 func (s *coastlineStore) RemoveSquares(squares []coverageSquare) ([]coverageSquare, error) {
 	var changed []coverageSquare
-	err := s.RunTx("remove coastline squares", func(tx *sql.Tx) error {
+	err := s.RunTx(lockCoastlineRemoveSquares, func(tx *sql.Tx) error {
 		for _, sq := range squares {
 			held, err := tx.Exec(`DELETE FROM coastline_squares WHERE lat = ? AND lon = ? AND status = ?`, sq.Lat, sq.Lon, coastlineStatusReady)
 			if err != nil {
@@ -200,8 +200,8 @@ func (s *coastlineStore) Close() error {
 
 // RunTx runs fn in one transaction on the store's connection and commits
 // only when fn returns nil. See store_tx.go for the convention.
-func (s *coastlineStore) RunTx(op string, fn func(tx *sql.Tx) error) error {
-	return runTxUnderLock(&s.mu, s.db, op, time.Now, serverVitals, fn)
+func (s *coastlineStore) RunTx(op *lockOp, fn func(tx *sql.Tx) error) error {
+	return runTxUnderLock(op, &s.mu, s.db, time.Now, lockRecorder(), fn)
 }
 
 type storedShorelineLine struct {
@@ -285,7 +285,7 @@ func (s *coastlineStore) SaveSquareAsOf(sq coverageSquare, lines []shorelineLine
 	if err != nil {
 		return fmt.Errorf("encode square %s: %w", sq.Label(), err)
 	}
-	return s.RunTx("save coastline square", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineSaveSquare, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
 			INSERT INTO coastline_squares (lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at, geometry, data_as_of)
 			VALUES (?, ?, ?, ?, 0, ?, '', 0, 0, ?, ?)
@@ -307,7 +307,7 @@ func (s *coastlineStore) SaveSquareAsOf(sq coverageSquare, lines []shorelineLine
 // keeps its geometry and stays ready; a square never downloaded is stored as
 // failed so the page can show it.
 func (s *coastlineStore) RecordFailure(sq coverageSquare, message string, at, nextAttempt time.Time) error {
-	return s.RunTx("record coastline failure", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineRecordFailure, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
 			INSERT INTO coastline_squares (lat, lon, status, last_error, attempts, next_attempt_at)
 			VALUES (?, ?, ?, ?, 1, ?)
@@ -321,7 +321,7 @@ func (s *coastlineStore) RecordFailure(sq coverageSquare, message string, at, ne
 // DeleteFailed removes a square's row only if it failed and holds no
 // geometry; a held square is never touched.
 func (s *coastlineStore) DeleteFailed(sq coverageSquare) error {
-	return s.RunTx("delete failed coastline square", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineDeleteFailedSquare, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`DELETE FROM coastline_squares WHERE lat = ? AND lon = ? AND status = ?`, sq.Lat, sq.Lon, coastlineStatusFailed)
 		return err
 	})
@@ -331,7 +331,7 @@ func (s *coastlineStore) DeleteFailed(sq coverageSquare) error {
 // counting it as checked. The check reached a working server, so an earlier
 // failure no longer stands.
 func (s *coastlineStore) DeferCheck(sq coverageSquare, until time.Time) error {
-	return s.RunTx("defer coastline check", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineDeferCheck, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE coastline_squares SET next_attempt_at = ?, last_error = '', attempts = 0 WHERE lat = ? AND lon = ? AND status = ?`,
 			unixOrZero(until), sq.Lat, sq.Lon, coastlineStatusReady)
 		return err
@@ -340,7 +340,7 @@ func (s *coastlineStore) DeferCheck(sq coverageSquare, until time.Time) error {
 
 // RecordEdits stores the result of a weekly check on a held square.
 func (s *coastlineStore) RecordEdits(sq coverageSquare, edits int, checkedAt time.Time) error {
-	return s.RunTx("record coastline edits", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineRecordEdits, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`
 			UPDATE coastline_squares SET edits_since = ?, checked_at = ?, last_error = '', attempts = 0, next_attempt_at = 0
 			WHERE lat = ? AND lon = ? AND status = ?`,
@@ -429,7 +429,7 @@ func (s *coastlineStore) Lines(squares []coverageSquare) ([]shorelineLine, error
 
 // Clear deletes every square and every waiting request.
 func (s *coastlineStore) Clear() error {
-	return s.RunTx("clear coastline coverage", func(tx *sql.Tx) error {
+	return s.RunTx(lockCoastlineClearCoverage, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`DELETE FROM coastline_requests`); err != nil {
 			return err
 		}

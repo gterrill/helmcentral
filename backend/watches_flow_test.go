@@ -20,7 +20,7 @@ const watchCreateArgs = `{"operations":[{"type":"watch","action":"create","field
 func firstWatch(t *testing.T, docs *documentStore) savedWatch {
 	t.Helper()
 	var list []savedWatch
-	if err := docs.Read(func(q sqlQueryer) error {
+	if err := docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		list, err = listSavedWatchesQ(q)
 		return err
@@ -115,7 +115,7 @@ func TestWatchRecord_DeleteTakesItsRuns(t *testing.T) {
 	env := newProposalEnv(t)
 	env.applyOK(t, watchCreateArgs)
 	w := firstWatch(t, env.docs)
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan, CostKnown: true}, true)
 	}); err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestWatchRecord_DeleteTakesItsRuns(t *testing.T) {
 	env.advance()
 	env.applyOK(t, `{"operations":[{"type":"watch","action":"delete","id":"`+w.ID+`"}]}`)
 	var runs int
-	_ = env.docs.Read(func(q sqlQueryer) error {
+	_ = env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		return q.QueryRow(`SELECT COUNT(*) FROM watch_runs`).Scan(&runs)
 	})
 	if runs != 0 {
@@ -134,7 +134,7 @@ func TestWatchRecord_DeleteTakesItsRuns(t *testing.T) {
 func TestWatchRecord_OneOffWatchesAreNotMatesToEdit(t *testing.T) {
 	env := newProposalEnv(t)
 	started, ends := env.clock, env.clock.Add(5*time.Minute)
-	if err := env.docs.RunTx("one-off", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertSavedWatchTx(tx, savedWatch{ID: "oo", Name: "Depth", Kind: watchKindOneOff, StartedAt: &started, EndsAt: &ends,
 			Sections: []string{}, Enabled: true, CreatedAt: started, UpdatedAt: started})
 	}); err != nil {
@@ -197,7 +197,7 @@ func TestWatchREST_CreateListGetPatchDelete(t *testing.T) {
 
 	// A run to show in the list and the detail.
 	started := env.clock
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		cost := 0.05
 		review := "Quiet."
 		return insertWatchRunTx(tx, watchRun{ID: "r1", WatchID: created.ID, StartedAt: started, FinishedAt: started, Outcome: watchOutcomeRan,
@@ -416,7 +416,7 @@ func TestMateWatchTools_ListReadAndRun(t *testing.T) {
 
 	// A run to read.
 	review := "All quiet."
-	if err := env.docs.RunTx("run", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "run-1", WatchID: w.ID, StartedAt: env.clock, FinishedAt: env.clock, Outcome: watchOutcomeRan,
 			Report: json.RawMessage(`{"kind":"sections","sections":[]}`), Review: &review, CostKnown: true}, true)
 	}); err != nil {

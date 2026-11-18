@@ -34,7 +34,7 @@ func legacyFixture(t *testing.T) *legacyFixtureEnv {
 	}
 	for _, doc := range []string{scheduleProfileA, scheduleProfileB} {
 		p := mustProfile(t, doc)
-		if err := ps.inTx(func(tx *sql.Tx) error { return insertProfileTx(tx, p, profileBasedOn{}) }); err != nil {
+		if err := ps.inTx(testTxOp, func(tx *sql.Tx) error { return insertProfileTx(tx, p, profileBasedOn{}) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -181,7 +181,7 @@ func TestConvertMaintenance_ApplyRekeysKeepsOnlyDifferencesAndMovesHistory(t *te
 func currentProfileSetOf(t *testing.T, e *legacyFixtureEnv) maintenanceProfileSet {
 	t.Helper()
 	var set maintenanceProfileSet
-	err := e.ps.inTx(func(tx *sql.Tx) error {
+	err := e.ps.inTx(testTxOp, func(tx *sql.Tx) error {
 		var err error
 		set, err = loadMaintenanceProfileSetTx(tx)
 		return err

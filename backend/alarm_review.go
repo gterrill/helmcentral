@@ -207,7 +207,7 @@ func (r *alarmReviewer) start() error {
 	if err != nil {
 		return err
 	}
-	if err := store.RunTx("fail interrupted alarm reviews", func(tx *sql.Tx, _ time.Time) error {
+	if err := store.RunTx(lockAlarmReviewFailInterrupted, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`UPDATE alarm_reviews SET state = ?, problem = ?, finished_at = ? WHERE state = ?`,
 			alarmReviewFailed, alarmReviewRestarted, alarmRuleStoreTime(r.now()), alarmReviewActive)
 		return err
@@ -291,7 +291,7 @@ func (r *alarmReviewer) readReviews() (map[string]alarmReview, error) {
 		return nil, err
 	}
 	latest := map[string]alarmReview{}
-	if err := store.Read(func(q sqlQueryer) error {
+	if err := store.Read(lockAlarmReviewRead, func(q sqlQueryer) error {
 		rows, err := q.Query(`SELECT ` + alarmReviewColumns + ` FROM alarm_reviews a
 			WHERE started_at = (SELECT MAX(started_at) FROM alarm_reviews WHERE rule_id = a.rule_id)`)
 		if err != nil {
@@ -433,7 +433,7 @@ func (r *alarmReviewer) insertReview(rev alarmReview) error {
 	if !rev.FinishedAt.IsZero() {
 		finished = alarmRuleStoreTime(rev.FinishedAt)
 	}
-	return store.RunTx("insert alarm review", func(tx *sql.Tx, _ time.Time) error {
+	return store.RunTx(lockAlarmReviewInsert, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`INSERT INTO alarm_reviews (`+alarmReviewColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			rev.ID, rev.RuleID, rev.Title, alarmRuleStoreTime(rev.RaisedAt), alarmRuleStoreTime(rev.StartedAt), finished, rev.State,
 			rev.ConversationID, rev.Summary, rev.Problem, rev.CostUSD, boolToInt(rev.CostKnown), rev.Model, rev.Followup)
@@ -446,7 +446,7 @@ func (r *alarmReviewer) updateReview(rev alarmReview) error {
 	if err != nil {
 		return err
 	}
-	return store.RunTx("update alarm review", func(tx *sql.Tx, _ time.Time) error {
+	return store.RunTx(lockAlarmReviewUpdate, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`UPDATE alarm_reviews SET finished_at = ?, state = ?, conversation_id = ?, summary = ?, problem = ?,
 			cost_usd = ?, cost_known = ?, model = ?, followup = ? WHERE id = ?`,
 			alarmRuleStoreTime(rev.FinishedAt), rev.State, rev.ConversationID, rev.Summary, rev.Problem, rev.CostUSD, boolToInt(rev.CostKnown), rev.Model, rev.Followup, rev.ID)

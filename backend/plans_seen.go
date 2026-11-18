@@ -66,7 +66,8 @@ func (s *documentStore) planSeenLocked(planID int64) (map[string]string, error) 
 // key that is no longer a leg is dropped. A snapshot that is the one already
 // saved writes nothing.
 func (s *documentStore) SavePlanSeen(planID int64, currentKeys []string, seen []planSeenVerdict) error {
-	defer lockDocumentsSavePlanSeen.held(&s.mu).release()
+	h := lockDocumentsSavePlanSeen.held(&s.mu)
+	defer h.release()
 	have, err := s.planSeenLocked(planID)
 	if err != nil {
 		return err
@@ -85,7 +86,7 @@ func (s *documentStore) SavePlanSeen(planID int64, currentKeys []string, seen []
 	if maps.Equal(have, want) {
 		return nil
 	}
-	return s.runTxLocked("save plan verdicts seen", func(tx *sql.Tx, _ time.Time) error {
+	return s.runTxLocked(h, func(tx *sql.Tx, _ time.Time) error {
 		if _, err := tx.Exec(`DELETE FROM plan_verdicts_seen WHERE plan_id = ?`, planID); err != nil {
 			return fmt.Errorf("save plan verdicts seen: %w", err)
 		}

@@ -64,7 +64,7 @@ func TestOneOffWatch_ListEntryGivesStartAndEndOnTheBoatClock(t *testing.T) {
 	}
 	w := f.watches(t)[0]
 	var e watchListEntry
-	if err := f.docs.Read(func(q sqlQueryer) error {
+	if err := f.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		e, err = watchEntryFor(q, w, time.Now())
 		return err
@@ -91,7 +91,7 @@ func TestWatchRuns_PageByCursorNotOffset(t *testing.T) {
 	base := watchTestTime(29, 0, 0)
 	seed := func(i int) {
 		at := base.Add(time.Duration(i) * time.Hour)
-		if err := env.docs.RunTx("seed", func(tx *sql.Tx, _ time.Time) error {
+		if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 			return insertWatchRunTx(tx, watchRun{WatchID: w.ID, StartedAt: at, FinishedAt: at, Outcome: watchOutcomeRan, CostKnown: true}, true)
 		}); err != nil {
 			t.Fatal(err)

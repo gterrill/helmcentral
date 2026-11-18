@@ -14,7 +14,7 @@ func TestWatchRun_QuestionsAndExtendsAreStoredAndReadBackEverywhere(t *testing.T
 	env, w := chartRunEnv(t)
 	zero := 0
 	later := env.clock.Add(time.Hour)
-	err := env.docs.RunTx("run 2", func(tx *sql.Tx, _ time.Time) error {
+	err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		return insertWatchRunTx(tx, watchRun{ID: "r2", WatchID: w.ID, StartedAt: later, FinishedAt: later, Outcome: watchOutcomeRan, CostKnown: true,
 			Findings:  []watchFinding{{Section: "tanks", Rule: "tank_change", Text: "t", By: watchByRules}, {Section: "tanks", Rule: "mate_review", Text: "u", By: watchByMate, Key: "k", Extends: &zero}},
 			Questions: []string{"Were the heaters on?", "Is the fridge new?"}}, true)
@@ -31,7 +31,7 @@ func TestWatchRun_QuestionsAndExtendsAreStoredAndReadBackEverywhere(t *testing.T
 			t.Errorf("%s: findings %+v", where, r.Findings)
 		}
 	}
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		byID, err := watchRunByIDQ(q, w.ID, "r2")
 		if err != nil {
 			return err
@@ -79,14 +79,14 @@ func TestWatchRun_QuestionsAndExtendsAreStoredAndReadBackEverywhere(t *testing.T
 func TestWatchRun_ARunSavedBeforeQuestionsStillLoads(t *testing.T) {
 	env, w := chartRunEnv(t)
 	// r1 was saved with no questions: the column is NULL, as on an old database.
-	if err := env.docs.RunTx("null", func(tx *sql.Tx, _ time.Time) error {
+	if err := env.docs.RunTx(testTxOp, func(tx *sql.Tx, _ time.Time) error {
 		_, err := tx.Exec(`UPDATE watch_runs SET questions = NULL`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var run watchRun
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		var err error
 		run, err = watchRunByIDQ(q, w.ID, "r1")
 		return err
@@ -112,7 +112,7 @@ func TestWatchRun_TheQuestionsColumnIsAddedToAnOlderDatabase(t *testing.T) {
 	if err := createWatchesSchema(env.docs.db); err != nil {
 		t.Fatalf("the schema is brought up to date: %v", err)
 	}
-	if err := env.docs.Read(func(q sqlQueryer) error {
+	if err := env.docs.Read(testReadOp, func(q sqlQueryer) error {
 		r, err := watchRunByIDQ(q, w.ID, "r1")
 		if err == nil && len(r.Questions) != 0 {
 			t.Errorf("questions %q", r.Questions)
