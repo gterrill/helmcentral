@@ -198,6 +198,30 @@ func TestMCPRoundTrip_InitializeListCallAndReadResource(t *testing.T) {
 	}
 }
 
+// The facts Mate keeps never reach an outside assistant, by the tool or by the
+// resource.
+func TestMCPRoundTrip_KeptFactsAreNotExposed(t *testing.T) {
+	env := newMCPTestEnv(t)
+	seedFuelPolisherMemory(t)
+	_, secret, _ := env.store.CreateToken("Claude Code", mcpDefaultTools())
+	cs := env.connect(t, secret)
+
+	ctxRes, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_boat_context", Arguments: map[string]any{}})
+	if err != nil || ctxRes.IsError {
+		t.Fatalf("get_boat_context: %v %+v", err, ctxRes)
+	}
+	if text := ctxRes.Content[0].(*mcp.TextContent).Text; strings.Contains(text, "sampling port") || strings.Contains(text, "Mate to keep") {
+		t.Errorf("the tool exposed the kept facts:\n%s", text)
+	}
+	rr, err := cs.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: mcpContextResourceURI})
+	if err != nil || len(rr.Contents) != 1 {
+		t.Fatalf("resource: %v %+v", err, rr)
+	}
+	if text := rr.Contents[0].Text; strings.Contains(text, "sampling port") || strings.Contains(text, "Mate to keep") {
+		t.Errorf("the resource exposed the kept facts:\n%s", text)
+	}
+}
+
 func sortedCopy(in []string) []string {
 	out := append([]string(nil), in...)
 	for i := 1; i < len(out); i++ {

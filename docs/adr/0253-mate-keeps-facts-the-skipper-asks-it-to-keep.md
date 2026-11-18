@@ -86,15 +86,17 @@ one the operator has already asked for in words.
   which `replaces` needs.
 - **A list that can't be read is said.** The prompt tells Mate the facts could not be read, in a chat and in
   both kinds of review, rather than reading as an empty list. The failure is also logged.
-- **Days are in the boat's time.** The prompt, the outside assistants' context and the record's `kept_on` use
+- **Days are in the boat's time.** The prompt and the record's `kept_on` use
   one helper. The record also carries `kept_at_iso`, the instant in UTC.
 
 ### Managing and outside assistants
 
 - Settings → Mate lists the facts under the standing notes, with **Edit**, **Remove** and **Add fact**, on
   routes at read tier for the list and write tier for changes.
-- The boat context for outside assistants lists the facts as a read-only section. The section is drawn from no
-  switchable tool, so no token gate hides it, and no outside tool changes a fact.
+- The facts never reach outside assistants. The boat context, as the resource and as `get_boat_context`, has no
+  section for them, and no other outside tool reads or changes a fact. This replaces the first design, which
+  listed the facts in the boat context as a read-only section. The skipper told Mate these facts, not every
+  service that can read the boat, so the list stays with Mate. No token setting brings it back.
 
 ## Consequences
 
