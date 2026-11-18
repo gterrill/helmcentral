@@ -1108,6 +1108,15 @@ var planAssessDepsFor = func(d assistantToolDeps) planAssessDeps {
 	return planAssessDepsFromTool(d, planSettingsPath())
 }
 
+// readOnlyAssessDeps is planAssessDepsFor for a caller that must not write: a
+// read tool, an outside assistant or a replay. The deps are pinned to the tool
+// deps' clock and keep no first suggestions, so no such caller can forget to.
+func readOnlyAssessDeps(d assistantToolDeps) planAssessDeps {
+	deps := planAssessDepsFor(d).pinned()
+	deps.suggested = readOnlySuggested(deps)
+	return deps
+}
+
 // pageAssessDeps are the readers the Forecast page's endpoints run on: the
 // production tool deps, on the wall clock.
 func pageAssessDeps() planAssessDeps {

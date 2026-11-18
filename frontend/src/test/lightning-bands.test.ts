@@ -211,9 +211,9 @@ describe('lightningStatus', () => {
     expect(lightningStatus(feed({ provider: null, windows: [], error: 'down' }), true, 'UTC')).toEqual({ kind: 'none' })
   })
 
-  it('reports a stay once a provider is known, and nothing before', () => {
-    expect(lightningStatus(feed(), true, undefined)).toEqual({ kind: 'stay' })
-    expect(lightningStatus(feed({ windows: [] }), true, 'Australia/Brisbane')).toEqual({ kind: 'stay' })
+  it('reports a place once a provider is known, and nothing before', () => {
+    expect(lightningStatus(feed(), true, undefined)).toEqual({ kind: 'place' })
+    expect(lightningStatus(feed({ windows: [] }), true, 'Australia/Brisbane')).toEqual({ kind: 'place' })
   })
 })
 

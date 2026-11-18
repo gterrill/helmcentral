@@ -152,7 +152,7 @@ export function LightningKey({ testId, status, provider, held, staleBadge }: Lig
   if (status.kind === 'none') return null
 
   let body: ReactNode
-  if (status.kind === 'stay') {
+  if (status.kind === 'place') {
     body = <p>Lightning is for the boat's position, not this place.</p>
   } else if (status.kind === 'error') {
     body = <p>Lightning unavailable: {status.message}</p>
