@@ -1377,9 +1377,11 @@ export function ForecastDrawer({
   const precipTooltipEntry = cloudTooltip.activeIndex === null ? null : precipHourly[cloudTooltip.activeIndex] ?? null
   const uvTooltipEntry = cloudTooltip.activeIndex === null ? null : uvHourly[cloudTooltip.activeIndex] ?? null
 
-  // Lightning is the boat's own feed, so a stay never draws it. The key says
-  // why instead, but only on a boat that has lightning to say it about.
-  const lightningState = lightningStatus(lightning, Boolean(stay), forecastZone)
+  // Lightning is the boat's own feed, so a plan row's place never draws it
+  // (`stay` is set for every plan row). The key says why instead, but only on
+  // a boat that has lightning to say it about.
+  const showingPlace = Boolean(stay)
+  const lightningState = lightningStatus(lightning, showingPlace, forecastZone)
   const lightningWindows = lightningState.kind === 'ready' && lightning ? lightning.windows : NO_LIGHTNING_WINDOWS
   const lightningAgeSeconds = ageSecondsFromUpdatedAt(lightning?.updatedAt ?? null, Date.now())
   const lightningStale = lightningState.kind === 'ready' && isForecastStale(lightningAgeSeconds, lightning?.ttlSeconds)

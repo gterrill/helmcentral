@@ -39,6 +39,8 @@ export interface LightningFeed {
 
 /**
  * What a chart's lightning key has to say. `none` says nothing at all.
+ * `place` is a plan row's forecast: the boat's lightning isn't drawn there, and
+ * the key says so. `error` is a feed with no windows to draw, and its message.
  * `ready` draws the band, with the feed's error as a line under it when it has
  * one: windows held across a failed refresh still draw.
  */

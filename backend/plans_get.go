@@ -435,8 +435,6 @@ func (d assistantToolDeps) executeGetPlans(ctx context.Context, raw json.RawMess
 	if err != nil {
 		return "", fmt.Errorf("get_plans: %w", err)
 	}
-	// The clock and the providers are the tool deps' own, so a pinned or replayed
-	// run reads the plans as it did then.
 	deps := readOnlyAssessDeps(d)
 	plans := make([]plan, 0, len(stored))
 	res := getPlansResult{Plans: []planBrief{}}
