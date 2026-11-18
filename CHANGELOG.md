@@ -18,6 +18,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and any other connected assistant used to read it in the boat context, and
   they no longer do. Mate's own chats and reviews use it as before. Nothing
   to do on upgrade.
+- **After a power cut, Helmcentral now waits for SignalK instead of exiting.**
+  With login set to SignalK, Helmcentral used to stop if SignalK wasn't
+  answering yet when it started. It now tries again every 5 seconds and says
+  so in the log, then carries on once SignalK answers. If SignalK answers with
+  its security switched off, Helmcentral still refuses to start. On a
+  systemd install, copy the updated `helmcentral.service` over the old one and
+  run `sudo systemctl daemon-reload`, so that five failed starts in two
+  minutes really does stop the restarts.
 
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1109,5 +1110,98 @@ func TestProbeSignalKSecurityEnabled_UnreachableSurfacesErrorNotSwallowed(t *tes
 	_, err := probeSignalKSecurityEnabled(url)
 	if err == nil {
 		t.Fatal("expected an unreachable SignalK to surface an explicit error rather than a guessed answer")
+	}
+}
+
+// ── SignalK startup wait ─────────────────────────────────────────────────────
+//
+// After a power cut SignalK is often still starting when Helmcentral comes up.
+// An unreachable SignalK is waited on; any answer is judged at once.
+
+func TestCheckAuthModeAtStartup_WaitsForUnreachableSignalKThenSucceeds(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls < 3 {
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return true, nil
+	}
+
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected startup to succeed once SignalK answered, got: %v", err)
+	}
+	if mode != authModeSignalK {
+		t.Fatalf("expected mode %q, got %q", authModeSignalK, mode)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 probes (2 unreachable, 1 answer), got %d", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_SecurityOffAfterWaitingStillFailsFast(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls == 1 {
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return false, nil
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "security is disabled") {
+		t.Fatalf("expected a security-disabled error, got: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected no retry after SignalK answered, got %d probes", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_SecurityOffFirstProbeDoesNotRetry(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return false, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err == nil {
+		t.Fatal("expected security off to refuse to start")
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 probe, got %d", calls)
+	}
+}
+
+func TestCheckAuthModeAtStartup_NonTransportErrorDoesNotRetry(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return false, errors.New("unusable answer")
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "unusable answer") {
+		t.Fatalf("expected the probe error to surface, got: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 probe, got %d", calls)
+	}
+}
+
+func TestProbeSignalKSecurityEnabled_UnreachableIsATransportError(t *testing.T) {
+	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := unreachable.URL
+	unreachable.Close()
+
+	_, err := probeSignalKSecurityEnabled(url)
+	var unreachableErr *signalKUnreachableError
+	if !errors.As(err, &unreachableErr) {
+		t.Fatalf("expected a signalKUnreachableError, got: %v", err)
 	}
 }

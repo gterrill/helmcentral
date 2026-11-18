@@ -7,6 +7,20 @@ Documentation=https://github.com/gterrill/helmcentral
 Wants=network-online.target
 After=network-online.target signalk.service
 
+# Startup is deliberately fail-fast: an unreadable secrets store, plugin
+# override store, tile cache or helmcentral.sqlite (documents, Mate's
+# conversations, the AIS sighting log) calls log.Fatalf rather than
+# degrading - as does finding a pre-upgrade documents.sqlite/
+# assistant.sqlite/nearby-contacts.sqlite/alarm-log.sqlite/
+# webpush-subscriptions.sqlite/plugin_overrides.sqlite still sitting in the
+# data directory, which needs the one-time `helmcentral migrate-db` command
+# run first. Cap restarts so a genuinely broken state dir surfaces as a
+# failed unit instead of an endless loop. systemd reads these two settings
+# only in [Unit]; in [Service] they are ignored. A SignalK that is slow to
+# start does not use up the cap: Helmcentral waits for it inside one start.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=helmcentral
@@ -29,18 +43,6 @@ ExecStart=/usr/local/bin/helmcentral
 
 Restart=on-failure
 RestartSec=5s
-
-# Startup is deliberately fail-fast: an unreadable secrets store, plugin
-# override store, tile cache or helmcentral.sqlite (documents, Mate's
-# conversations, the AIS sighting log) calls log.Fatalf rather than
-# degrading - as does finding a pre-upgrade documents.sqlite/
-# assistant.sqlite/nearby-contacts.sqlite/alarm-log.sqlite/
-# webpush-subscriptions.sqlite/plugin_overrides.sqlite still sitting in the
-# data directory, which needs the one-time `helmcentral migrate-db` command
-# run first. Cap restarts so a genuinely broken state dir surfaces as a
-# failed unit instead of an endless loop.
-StartLimitIntervalSec=120
-StartLimitBurst=5
 
 NoNewPrivileges=yes
 PrivateTmp=yes
