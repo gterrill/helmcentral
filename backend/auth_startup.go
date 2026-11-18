@@ -53,10 +53,12 @@ func (e *signalKUnreachableError) Unwrap() error { return e.err }
 // settings.yaml is read again on every try, so a corrected SignalK address, or
 // auth.mode changed away from signalk, takes effect while startup waits. A
 // file that cannot be read at the first try has no mode to know and counts as
-// mode none, as it always did; a file that becomes unreadable during a
-// signalk-mode wait refuses startup, and is never replaced with the default
-// SignalK address. The default applies only when the signalk section is absent
-// from a file that reads fine.
+// mode none, as it always did. Once the wait has started in signalk mode, a
+// file that is unreadable, empty or missing is one more failed try: the wait
+// goes on, logs the settings problem, probes no address for that try, and never
+// guesses the default address. Only a file that reads fine and has content ends
+// the wait in another mode. The default address applies only when the signalk
+// section is absent from such a file.
 func checkAuthModeAtStartupWith(settingsPath string, probe func(signalkURL string) (bool, error), retryInterval time.Duration) (mode string, err error) {
 	return checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
 		retry: retryInterval, summary: signalKStartupSummaryInterval, now: time.Now, sleep: time.Sleep,
@@ -79,16 +81,37 @@ func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL st
 	tries := 0
 	var lastSummary time.Time
 	sawSignalK := false
+	// failedTry counts one more failed try and logs it: in full the first time,
+	// then once per summary interval. what names the thing that failed.
+	failedTry := func(first, still string, cause error) {
+		tries++
+		now := w.now()
+		if tries == 1 {
+			log.Printf("%s (%v); login can't start until SignalK answers, trying again %s after each failed try", first, cause, w.retry)
+			lastSummary = now
+		} else if now.Sub(lastSummary) >= w.summary {
+			log.Printf("%s after %d tries; latest error: %v", still, tries, cause)
+			lastSummary = now
+		}
+		w.sleep(w.retry)
+	}
 	for {
 		settings, readErr := readSettings(settingsPath)
+		if readErr == nil && len(settings) == 0 {
+			readErr = fmt.Errorf("%s is empty or missing", settingsPath)
+		}
 		if readErr != nil {
-			// With no readable file there is no mode to know, and startup treats
-			// that as none, as it always has. Only a signalk-mode wait that has
-			// lost its file refuses.
+			// With no usable file at the first try there is no mode to know, and
+			// startup treats that as none, as it always has. Once the wait has
+			// started in signalk mode, a bad read is one more failed try: never a
+			// refusal (a restart would read it as mode none and skip the check),
+			// never mode none, and no address is probed for it.
 			if !sawSignalK {
 				return authModeNone, nil
 			}
-			return authModeSignalK, fmt.Errorf("could not read %s to check auth.mode: %w", settingsPath, readErr)
+			failedTry("auth: settings.yaml can't be used while waiting for SignalK",
+				"auth: still waiting; settings.yaml still can't be used", readErr)
+			continue
 		}
 		mode = authModeFromSettings(settings)
 		if !validAuthModes[mode] {
@@ -114,16 +137,8 @@ func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL st
 			if !errors.As(probeErr, &unreachable) {
 				return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
 			}
-			tries++
-			now := w.now()
-			if tries == 1 {
-				log.Printf("auth: SignalK at %s is not answering (%v); login can't start until SignalK answers, trying again %s after each failed try", signalkURL, probeErr, w.retry)
-				lastSummary = now
-			} else if now.Sub(lastSummary) >= w.summary {
-				log.Printf("auth: still waiting for SignalK at %s after %d tries; latest error: %v", signalkURL, tries, probeErr)
-				lastSummary = now
-			}
-			w.sleep(w.retry)
+			failedTry(fmt.Sprintf("auth: SignalK at %s is not answering", signalkURL),
+				fmt.Sprintf("auth: still waiting for SignalK at %s", signalkURL), probeErr)
 			continue
 		}
 		if tries > 0 {

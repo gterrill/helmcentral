@@ -1306,26 +1306,114 @@ func TestCheckAuthModeAtStartup_UnreadableSettingsIsModeNoneAsBefore(t *testing.
 	}
 }
 
-// Once startup has seen mode signalk, a settings file that stops being
-// readable while it waits refuses startup; it is never replaced with the
-// default SignalK address (AGENTS.md Fallback Policy).
-func TestCheckAuthModeAtStartup_SettingsBrokenWhileWaitingInSignalKModeRefuses(t *testing.T) {
+// Once startup has seen mode signalk, a settings file that stops being usable
+// while it waits (unreadable, empty or missing) is one more failed try: startup
+// keeps waiting, probes no guessed address, logs the settings problem, and
+// carries on in signalk mode once the file is good again. It neither refuses
+// nor falls back to mode none.
+func TestCheckAuthModeAtStartup_SettingsUnusableWhileWaitingKeepsWaiting(t *testing.T) {
+	cases := []struct {
+		name    string
+		damage  func(t *testing.T, path string)
+		logWord string
+	}{
+		{"unreadable", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("auth: [unclosed\n"), 0o644); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+		{"empty", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+		{"missing", func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatalf("damage settings: %v", err)
+			}
+		}, "settings.yaml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+			good, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			logs := captureLog(t)
+			probes := 0
+			var seen []string
+			probe := func(u string) (bool, error) {
+				probes++
+				seen = append(seen, u)
+				if probes == 1 {
+					tc.damage(t, settingsPath)
+					return false, &signalKUnreachableError{err: errors.New("connection refused")}
+				}
+				return true, nil
+			}
+			sleeps := 0
+			clock := &fakeStartupClock{t: time.Unix(0, 0)}
+			w := startupWait{
+				// Each sleep moves the fake clock a full summary interval, so
+				// every failed try writes a log line.
+				retry: time.Second, summary: time.Minute, now: clock.now,
+				sleep: func(time.Duration) {
+					clock.sleep(time.Minute)
+					sleeps++
+					if sleeps == 3 { // two tries read the damaged file, then it is restored
+						if err := os.WriteFile(settingsPath, good, 0o644); err != nil {
+							t.Fatalf("restore settings: %v", err)
+						}
+					}
+				},
+			}
+
+			mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, w)
+			if err != nil {
+				t.Fatalf("expected the wait to survive a damaged settings file, got: %v", err)
+			}
+			if mode != authModeSignalK {
+				t.Fatalf("expected mode %q, got %q", authModeSignalK, mode)
+			}
+			if probes != 2 {
+				t.Fatalf("expected no probe while the file was unusable, got %d probes: %v", probes, seen)
+			}
+			if sleeps < 3 {
+				t.Fatalf("expected the wait to sleep through the damaged reads, got %d sleeps", sleeps)
+			}
+			if !strings.Contains(logs.String(), tc.logWord) || !strings.Contains(logs.String(), "settings") {
+				t.Fatalf("expected the log to name the settings problem, got:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// A file that reads fine, has content and names another mode still ends the
+// wait in that mode.
+func TestCheckAuthModeAtStartup_ContentfulOtherModeEndsWaitAfterSettingsProblem(t *testing.T) {
 	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
-	calls := 0
 	probe := func(string) (bool, error) {
-		calls++
-		if err := os.WriteFile(settingsPath, []byte("auth: [unclosed\n"), 0o644); err != nil {
-			t.Fatalf("rewrite settings: %v", err)
+		if err := os.WriteFile(settingsPath, nil, 0o644); err != nil {
+			t.Fatalf("empty settings: %v", err)
 		}
 		return false, &signalKUnreachableError{err: errors.New("connection refused")}
 	}
-
-	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
-	if err == nil {
-		t.Fatal("expected a settings file broken during a signalk-mode wait to refuse startup")
+	sleeps := 0
+	w := startupWait{
+		retry: time.Second, summary: time.Minute, now: time.Now,
+		sleep: func(time.Duration) {
+			sleeps++
+			if sleeps == 2 {
+				if err := os.WriteFile(settingsPath, []byte("auth:\n  mode: none\n"), 0o644); err != nil {
+					t.Fatalf("write settings: %v", err)
+				}
+			}
+		},
 	}
-	if calls != 1 {
-		t.Fatalf("expected no probe against a guessed address, got %d", calls)
+	mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, w)
+	if err != nil || mode != authModeNone {
+		t.Fatalf("expected mode none, no error; got %q, %v", mode, err)
 	}
 }
 
