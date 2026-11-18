@@ -315,6 +315,18 @@ describe("ForecastPage", () => {
       expect(screen.getAllByRole("complementary", { name: "Plans" })).toHaveLength(1);
     });
 
+    it("keeps its 24rem wrapper open and a stretching rail strip when hidden", () => {
+      plansState([PLAN], 1, LEGS);
+      render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+      const wrapper = screen.getByRole("complementary", { name: "Plans" }).parentElement!;
+      expect(wrapper).toHaveClass("w-full", "min-w-0", "shrink-0", "xl:order-2", "xl:w-(--sidebar-width)");
+      expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("24rem");
+      expect(screen.getByRole("button", { name: "Hide plans" })).toHaveAttribute("aria-controls");
+      fireEvent.click(screen.getByRole("button", { name: "Hide plans" }));
+      const strip = screen.getByRole("button", { name: "Show plans" }).parentElement!.parentElement!;
+      expect(strip).toHaveClass("flex", "xl:order-2", "xl:self-stretch");
+    });
+
     it("is a labelled landmark", () => {
       plansState([PLAN], 1, LEGS);
       render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);

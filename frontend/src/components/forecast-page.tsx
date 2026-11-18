@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Pencil, Plus, Route, Trash2 } from "lucide-react";
 
@@ -7,13 +7,11 @@ import {
   type ForecastDrawerProps,
 } from "@/components/forecast-drawer";
 import { ConfirmDelete } from "@/components/patterns";
-import { SidebarPaneHeader, SidebarPaneRail } from "@/components/patterns/sidebar-pane";
+import { SidebarPane } from "@/components/patterns/sidebar-pane";
 import { PlanEditor } from "@/components/plan-editor";
 import { PlanTable, type PlanPlaceSelection } from "@/components/plan-table";
 import { Button } from "@/components/ui/button";
 import {
-  Sidebar,
-  SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
 } from "@/components/ui/sidebar";
@@ -299,143 +297,128 @@ export function ForecastPage({
 
       {/* Stretches to the forecast's height from xl up, so the rail reads as
           a strip down the page, as the Rode Planner's does. */}
-      {hasPlans && !plansOpen && (
-        <div className="flex xl:order-2 xl:self-stretch">
-          <SidebarPaneRail
-            side="right"
-            icon={Route}
-            label="Show plans"
-            onShow={() => setPlansOpen(true)}
-          />
-        </div>
-      )}
-      {hasPlans && plansOpen && (
-        <div
-          className="w-full min-w-0 shrink-0 xl:order-2 xl:w-(--sidebar-width)"
-          style={{ "--sidebar-width": "24rem" } as CSSProperties}
+      {hasPlans && (
+        <SidebarPane
+          side="right"
+          icon={Route}
+          label="Plans"
+          open={plansOpen}
+          onOpenChange={setPlansOpen}
+          hideLabel="Hide plans"
+          showLabel="Show plans"
+          contentId={PLANS_CONTENT_ID}
+          landmarkLabel="Plans"
+          width={{ size: '24rem', from: 'xl' }}
+          paneClassName="w-full min-w-0 shrink-0 xl:order-2"
+          railWrapperClassName="flex xl:order-2 xl:self-stretch"
         >
-          <Sidebar
-            side="right"
-            collapsible="none"
-            role="complementary"
-            aria-label="Plans"
-            className="h-full w-full rounded-xl border"
-          >
-            <SidebarPaneHeader
-              side="right"
-              icon={Route}
-              label="Plans"
-              hideLabel="Hide plans"
-              controlsId={PLANS_CONTENT_ID}
-              onHide={() => setPlansOpen(false)}
-            />
-
-            <SidebarContent id={PLANS_CONTENT_ID}>
-              <SidebarGroup>
-                <SidebarGroupContent className="space-y-3">
-                  {newPlanButton && <div>{newPlanButton}</div>}
-                  {errorLine}
-                  <section aria-label="Passage plans" className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div
-                        className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
-                        role="group"
-                        aria-label="Choose a plan"
+          {() => (
+          <>
+          <SidebarGroup>
+            <SidebarGroupContent className="space-y-3">
+              {newPlanButton && <div>{newPlanButton}</div>}
+              {errorLine}
+              <section aria-label="Passage plans" className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    className="flex min-w-0 flex-wrap gap-1 rounded-md border border-border bg-card p-0.5"
+                    role="group"
+                    aria-label="Choose a plan"
+                  >
+                    {open.map((p) => (
+                      <Button
+                        key={p.id}
+                        type="button"
+                        size="sm"
+                        variant={plan?.id === p.id ? "secondary" : "ghost"}
+                        className="h-8 min-w-0 max-w-64 text-xs"
+                        aria-pressed={plan?.id === p.id}
+                        onClick={() => pick(p.id)}
                       >
-                        {open.map((p) => (
-                          <Button
-                            key={p.id}
-                            type="button"
-                            size="sm"
-                            variant={plan?.id === p.id ? "secondary" : "ghost"}
-                            className="h-8 min-w-0 max-w-64 text-xs"
-                            aria-pressed={plan?.id === p.id}
-                            onClick={() => pick(p.id)}
-                          >
-                            <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
-                          </Button>
-                        ))}
-                      </div>
-                      {canWrite && plan && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-xs"
-                            onClick={() => setEditing("change")}
-                          >
-                            <Pencil size={13} aria-hidden className="mr-1" />
-                            Change plan
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-xs"
-                            onClick={() => setConfirmDelete(true)}
-                          >
-                            <Trash2 size={13} aria-hidden className="mr-1" />
-                            Delete plan
-                          </Button>
-                        </div>
-                      )}
+                        <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                      </Button>
+                    ))}
+                  </div>
+                  {canWrite && plan && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs"
+                        onClick={() => setEditing("change")}
+                      >
+                        <Pencil size={13} aria-hidden className="mr-1" />
+                        Change plan
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs"
+                        onClick={() => setConfirmDelete(true)}
+                      >
+                        <Trash2 size={13} aria-hidden className="mr-1" />
+                        Delete plan
+                      </Button>
                     </div>
+                  )}
+                </div>
 
-                    {past.length > 0 && (
-                      <details className="text-sm">
-                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                          Past ({past.length})
-                        </summary>
-                        <div className="mt-1.5 flex flex-wrap gap-1.5">
-                          {past.map((p) => (
-                            <Button
-                              key={p.id}
-                              type="button"
-                              size="sm"
-                              variant={plan?.id === p.id ? "secondary" : "outline"}
-                              className="h-8 min-w-0 max-w-64 text-xs"
-                              aria-pressed={plan?.id === p.id}
-                              onClick={() => pick(p.id)}
-                            >
-                              <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
-                            </Button>
-                          ))}
-                        </div>
-                      </details>
-                    )}
+                {past.length > 0 && (
+                  <details className="text-sm">
+                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                      Past ({past.length})
+                    </summary>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {past.map((p) => (
+                        <Button
+                          key={p.id}
+                          type="button"
+                          size="sm"
+                          variant={plan?.id === p.id ? "secondary" : "outline"}
+                          className="h-8 min-w-0 max-w-64 text-xs"
+                          aria-pressed={plan?.id === p.id}
+                          onClick={() => pick(p.id)}
+                        >
+                          <span className="truncate">{`${p.name} · ${planRange(p)}`}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </details>
+                )}
 
-                    {actionError && (
-                      <p role="alert" className="text-xs text-destructive">
-                        {actionError}
-                      </p>
-                    )}
-                  </section>
-                </SidebarGroupContent>
-              </SidebarGroup>
+                {actionError && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {actionError}
+                  </p>
+                )}
+              </section>
+            </SidebarGroupContent>
+          </SidebarGroup>
 
-              {plan && (
-                <SidebarGroup>
-                  {/* The table sizes itself to its pane; if a row is still too
-                      wide it scrolls here rather than widening the sidebar. */}
-                  <SidebarGroupContent className="min-w-0 overflow-x-auto">
-                    <PlanTable
-                      plan={plan}
-                      legs={legs}
-                      legsLoading={legsLoading}
-                      legsError={legsError}
-                      canWrite={canWrite}
-                      selectedRowKey={selectedRowKey}
-                      addingNight={addingNight}
-                      onSelect={selectRow}
-                      onAddNight={addNight}
-                    />
-                  </SidebarGroupContent>
-                </SidebarGroup>
-              )}
-            </SidebarContent>
-          </Sidebar>
-        </div>
+          {plan && (
+            <SidebarGroup>
+              {/* The table sizes itself to its pane; if a row is still too
+                  wide it scrolls here rather than widening the sidebar. */}
+              <SidebarGroupContent className="min-w-0 overflow-x-auto">
+                <PlanTable
+                  plan={plan}
+                  legs={legs}
+                  legsLoading={legsLoading}
+                  legsError={legsError}
+                  canWrite={canWrite}
+                  selectedRowKey={selectedRowKey}
+                  addingNight={addingNight}
+                  onSelect={selectRow}
+                  onAddNight={addNight}
+                />
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
+          </>
+          )}
+        </SidebarPane>
       )}
 
       <div className="min-w-0 space-y-3 xl:order-1 xl:flex-1">
