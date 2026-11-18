@@ -84,6 +84,7 @@ grep -q '^ran$' "$work/a.out" && bad "second caller ran while the first held the
 kill "$holder"
 poll "grep -q '^ran\$' '$work/a.out'" || bad "second caller did not run after the first released"
 [ "$(grep -c waiting "$work/a.out")" -eq 1 ] || bad "waiting line not printed exactly once"
+grep -q 'already locked' "$work/a.out" && bad "lockf's own busy message leaked into the output"
 reap "$waiter_pid"
 reap "$hpid"
 forget "$holder"
