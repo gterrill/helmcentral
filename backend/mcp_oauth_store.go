@@ -90,7 +90,7 @@ func (s *outsideAssistantStore) RegisterOAuthClient(name string, redirectURIs []
 
 // GetOAuthClient reads one client; found is false for an unknown id.
 func (s *outsideAssistantStore) GetOAuthClient(id string) (mcpOAuthClient, bool, error) {
-	defer lockHeld(&s.mu, "mcp.GetOAuthClient")()
+	defer lockMCPGetOAuthClient.held(&s.mu).release()
 	var c mcpOAuthClient
 	var uris string
 	var created int64

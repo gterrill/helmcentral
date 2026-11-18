@@ -68,12 +68,15 @@ has no fallback path that would leave statements untimed.
   `rows.Close()`, so the time a caller spends reading rows counts. Rows read
   are counted beside it.
 - **Cap**: 2,000 distinct keys across the whole process, held by the
-  recorder, so the `tx.*` keys below draw on the same budget. The production code
+  recorder. SQL statement shapes and the `tx.time.<op>` and
+  `tx.lock_wait.<op>` keys of `RunTx` draw on this budget. The production code
   holds about 470 distinct literal statement shapes, so the cap leaves room
   for SQL built at run time without letting it grow without bound. Past that, one warning
   goes to the log and further statements record under `<store>:<overflow>`
   (a transaction op under `tx.time.<overflow>` or `tx.lock_wait.<overflow>`).
   The overflow key is visible in the output; nothing is dropped quietly.
+  The lock keys of reads and single statements (below) sit outside this
+  budget and have a cap of their own.
 - **Slow statements**: any statement over 250 ms writes one log line naming
   the store, the shape and the duration.
 - **Cost**: about 0.4 µs a statement on an M1 (`BenchmarkSQLExec`), against
@@ -88,14 +91,35 @@ and the MCP store all call it (`runTxUnderLock`, or `lockTimed` plus
 `runTxTimed` where the record store keeps its test seam on the lock). A slow
 write that shows a long wait was waiting on another write.
 
-A call that is a read or a single statement, not a transaction, locks with
-`defer lockHeld(&s.mu, "documents.Get")()`. That records the same
-`tx.lock_wait.<op>` and adds `tx.lock_hold.<op>`, the time the lock was held.
-The op is a store name and a method name written in the code, never an id or a
-value from a request, so the keys stay bounded; the 171 such ops add about 340
-keys to the 2,000 budget. The record store, the assistant store, the alarm log,
-the MCP and web push stores, and the coastline store lock this way for their
-reads and single statements. Each pool's `sql.DBStats` `WaitCount` and `WaitDuration` are
+A call that is a read or a single statement, not a transaction, names itself
+once as a `lockOp` (`var lockDocumentsGet = newLockOp("documents.Get")`, all
+in `store_lock_ops.go`) and locks with
+`defer lockDocumentsGet.held(&s.mu).release()`. That records
+`tx.lock_wait.<op>`, the time spent getting the lock, and
+`tx.lock_hold.<op>`, the time the lock was held. The wait includes time queued
+behind readers as well as writers, because every call on a store shares one
+mutex. A write that is a multi-statement transaction goes through
+`runTxUnderLock` instead, so it also records `tx.time.<op>`: the assistant
+store's message, run, feedback and passage-decision writes do.
+
+Each public method has its own op. A helper that several methods share, such
+as the alarm log's `one` and `stampOpen`, takes the caller's op as an argument,
+so `Get` and `LatestForRule`, or `MarkAcknowledged` and `MarkCleared`, are not
+merged into one key. An op is a store name and a method name written in the
+code, never an id or a value from a request. `newLockOp` builds both key
+strings once at start-up, so a call allocates nothing for its keys.
+
+The lock keys have a budget of their own. The 163 ops make 326 keys, fixed
+when the program starts, and they are recorded directly, not through the
+2,000-key budget above, so they cannot crowd out SQL shapes. `lockOpLimit`
+(512) caps the ops: `newLockOp` panics past it, or on a repeated name, so a
+runaway set stops the process at start-up instead of growing quietly. A test
+declares every op against a fresh registry and checks that a full 2,000 SQL
+shapes are still admitted. The record store, the assistant store, the alarm
+log, the MCP and web push stores, and the coastline store lock this way for
+their reads and single statements.
+
+Each pool's `sql.DBStats` `WaitCount` and `WaitDuration` are
 sampled once a minute, as `db.pool_wait_count.<store>` and
 `db.pool_wait_us.<store>`. The registry holds each pool through a weak
 pointer, so watching never keeps a pool alive: a collected pool drops out at
@@ -176,8 +200,13 @@ problem.
   helpers. Mutexes that guard memory only (caches, registries, the telemetry
   buffers) are not timed: some are taken once per SignalK delta, and timing
   them would cost more than it shows. Two SQLite-backed locks are left out:
-  `alarmIgnoreStore` uses a `sync.RWMutex`, which `lockHeld` does not take, and
+  `alarmIgnoreStore` uses a `sync.RWMutex`, which a `lockOp` does not take, and
   `nearbyContactStore` releases its lock by hand in the middle of a method.
+- Two tests fail under `go test -race` and also fail on the commit this work
+  branched from, so this change did not cause them:
+  `TestDocumentIndexer_RunProcessesPendingDocumentsBeforeEmbedding` and
+  `TestGetActiveRouteHandler_RouteWithNextPointAlsoCarriesDestination`. They
+  are known and left for a separate fix.
 - The last partial minute before a stop is not written. The server has no
   graceful shutdown to hook into, so vitals start with `context.Background()`
   and nothing ever ends them.

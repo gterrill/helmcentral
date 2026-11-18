@@ -311,7 +311,7 @@ func alreadyImportedKeys(st stagedImport, recorded map[string]map[string]importR
 // CreateImportRun stores a new draft. The decisions must already validate
 // against the payload (the defaults always do).
 func (s *documentStore) CreateImportRun(source, label, fileSHA string, staged stagedImport, decisions importDecisions) (importRun, error) {
-	defer lockHeld(&s.mu, "documents.CreateImportRun")()
+	defer lockDocumentsCreateImportRun.held(&s.mu).release()
 
 	decisions = normalizeDecisions(decisions)
 	if err := validateImportDecisions(staged, decisions); err != nil {
@@ -339,7 +339,7 @@ func (s *documentStore) CreateImportRun(source, label, fileSHA string, staged st
 
 // GetImportRun reads one run.
 func (s *documentStore) GetImportRun(id string) (importRun, error) {
-	defer lockHeld(&s.mu, "documents.GetImportRun")()
+	defer lockDocumentsGetImportRun.held(&s.mu).release()
 	return importRunByID(s.db, id)
 }
 

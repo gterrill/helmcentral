@@ -246,13 +246,13 @@ func deckPlanRefusal(mimeType string) string {
 
 // GetDeck returns one deck.
 func (s *documentStore) GetDeck(id string) (inventoryDeck, error) {
-	defer lockHeld(&s.mu, "documents.GetDeck")()
+	defer lockDocumentsGetDeck.held(&s.mu).release()
 	return deckByID(s.db, id)
 }
 
 // ListDecks returns every deck by sort_index then name.
 func (s *documentStore) ListDecks() ([]inventoryDeck, error) {
-	defer lockHeld(&s.mu, "documents.ListDecks")()
+	defer lockDocumentsListDecks.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT ` + deckColumns + ` FROM inventory_decks ORDER BY sort_index, lower(name)`)
 	if err != nil {

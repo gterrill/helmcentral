@@ -277,7 +277,7 @@ func checklistTickMapKey(itemKey string, occurrence int) string {
 // read here at all (plan §3: "the note is the template; the run is the
 // state").
 func (s *documentStore) StartOrResumeChecklistRun(documentID string) (checklistRunView, bool, error) {
-	defer lockHeld(&s.mu, "documents.StartOrResumeChecklistRun")()
+	defer lockDocumentsStartOrResumeChecklistRun.held(&s.mu).release()
 
 	doc, body, err := s.noteAndBody(documentID)
 	if err != nil {
@@ -342,7 +342,7 @@ func (s *documentStore) activeChecklistRunRowLocked(documentID string) (checklis
 // active run right now - "you have not started one" is a normal state, not
 // a 404.
 func (s *documentStore) ActiveChecklistRun(documentID string) (checklistRunView, bool, error) {
-	defer lockHeld(&s.mu, "documents.ActiveChecklistRun")()
+	defer lockDocumentsActiveChecklistRun.held(&s.mu).release()
 
 	_, body, err := s.noteAndBody(documentID)
 	if err != nil {
@@ -365,7 +365,7 @@ func (s *documentStore) ActiveChecklistRun(documentID string) (checklistRunView,
 // (plan §3: "it may be the last thing that happens before the operator
 // walks away from the screen").
 func (s *documentStore) TickChecklistItem(runID, itemKey string, occurrence int, checked bool) (checklistRunView, error) {
-	defer lockHeld(&s.mu, "documents.TickChecklistItem")()
+	defer lockDocumentsTickChecklistItem.held(&s.mu).release()
 
 	run, err := readChecklistRunRow(s.db, runID)
 	if err != nil {
@@ -420,7 +420,7 @@ func (s *documentStore) TickChecklistItem(runID, itemKey string, occurrence int,
 // a real error, not an idempotent no-op, the same reasoning
 // TickChecklistItem's own closed check gives.
 func (s *documentStore) CompleteChecklistRun(runID string) (checklistRunView, error) {
-	defer lockHeld(&s.mu, "documents.CompleteChecklistRun")()
+	defer lockDocumentsCompleteChecklistRun.held(&s.mu).release()
 
 	run, err := readChecklistRunRow(s.db, runID)
 	if err != nil {
@@ -449,7 +449,7 @@ func (s *documentStore) CompleteChecklistRun(runID string) (checklistRunView, er
 // keeps a stopped run's own tick history intact rather than orphaning it.
 // errChecklistRunClosed if the run is already completed or abandoned.
 func (s *documentStore) AbandonChecklistRun(runID string) error {
-	defer lockHeld(&s.mu, "documents.AbandonChecklistRun")()
+	defer lockDocumentsAbandonChecklistRun.held(&s.mu).release()
 
 	run, err := readChecklistRunRow(s.db, runID)
 	if err != nil {

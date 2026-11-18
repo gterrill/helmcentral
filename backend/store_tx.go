@@ -76,25 +76,73 @@ func lockTimed(mu *sync.Mutex, op string, clock func() time.Time, reg *vitalsReg
 	reg.record(reg.keys.admit("tx.lock_wait."+op, "tx.lock_wait.<overflow>"), clock().Sub(waitStart))
 }
 
-// lockHeld takes mu for a store call that is not a transaction (a read, or a
-// single statement) and returns the function that releases it, so a method
-// writes `defer lockHeld(&s.mu, "documents.Get")()`. The wait is recorded as
-// tx.lock_wait.<op> and the time the lock was held as tx.lock_hold.<op>. op
-// names the store and the method as a literal in the code, never an id or any
-// value from a request, so the keys stay bounded.
-func lockHeld(mu *sync.Mutex, op string) func() {
-	return lockHeldTimed(mu, op, time.Now, serverVitals)
+// lockOpLimit caps how many lockOps the code may declare. Lock keys are
+// fixed when the program starts, one wait key and one hold key per op, so they
+// do not draw on the registry's key budget (sqlKeyLimit) and cannot crowd SQL
+// statement shapes out of it. newLockOp panics past the cap, so a runaway set
+// stops the process at start-up rather than growing silently.
+const lockOpLimit = 512
+
+// lockOp names one store method that takes a store mutex for a read or a
+// single statement, with its two vitals keys built once. Declare each as a
+// package-level var in store_lock_ops.go; the name is a literal like
+// "documents.Get", never an id or any value from a request.
+type lockOp struct {
+	name, waitKey, holdKey string
 }
 
-// lockHeldTimed is lockHeld with its clock and registry passed in.
-func lockHeldTimed(mu *sync.Mutex, op string, clock func() time.Time, reg *vitalsRegistry) func() {
-	lockTimed(mu, op, clock, reg)
-	held := clock()
-	return func() {
-		d := clock().Sub(held)
-		mu.Unlock()
-		reg.record(reg.keys.admit("tx.lock_hold."+op, "tx.lock_hold.<overflow>"), d)
+var lockOpRegistry struct {
+	mu  sync.Mutex
+	ops []*lockOp
+}
+
+// newLockOp declares an op. It panics on a repeated name or past lockOpLimit.
+func newLockOp(name string) *lockOp {
+	lockOpRegistry.mu.Lock()
+	defer lockOpRegistry.mu.Unlock()
+	if len(lockOpRegistry.ops) >= lockOpLimit {
+		panic(fmt.Sprintf("more than %d lock ops; raise lockOpLimit on purpose (%s)", lockOpLimit, name))
 	}
+	for _, o := range lockOpRegistry.ops {
+		if o.name == name {
+			panic("lock op declared twice: " + name)
+		}
+	}
+	o := &lockOp{name: name, waitKey: "tx.lock_wait." + name, holdKey: "tx.lock_hold." + name}
+	lockOpRegistry.ops = append(lockOpRegistry.ops, o)
+	return o
+}
+
+// heldLock is a store mutex taken through a lockOp, until release.
+type heldLock struct {
+	op    *lockOp
+	mu    *sync.Mutex
+	clock func() time.Time
+	reg   *vitalsRegistry
+	since time.Time
+}
+
+// held takes mu and records the time spent waiting for it, which includes
+// time queued behind readers as well as writers. A method writes
+// `defer lockDocumentsGet.held(&s.mu).release()`.
+func (o *lockOp) held(mu *sync.Mutex) heldLock {
+	return o.heldTimed(mu, time.Now, serverVitals)
+}
+
+// heldTimed is held with its clock and registry passed in.
+func (o *lockOp) heldTimed(mu *sync.Mutex, clock func() time.Time, reg *vitalsRegistry) heldLock {
+	waitStart := clock()
+	mu.Lock()
+	since := clock()
+	reg.record(o.waitKey, since.Sub(waitStart))
+	return heldLock{op: o, mu: mu, clock: clock, reg: reg, since: since}
+}
+
+// release unlocks the mutex and records how long it was held.
+func (h heldLock) release() {
+	d := h.clock().Sub(h.since)
+	h.mu.Unlock()
+	h.reg.record(h.op.holdKey, d)
 }
 
 // runTxUnderLock takes mu, runs fn in one transaction on db and releases mu,

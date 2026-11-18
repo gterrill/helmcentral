@@ -1244,7 +1244,7 @@ func documentTagsOf(q sqlQueryer, docID string) (operator, suggested []string, e
 // stays on its document, stays searchable, and stays filterable by ?tag=
 // (List/Search's own document_tags queries, not this one).
 func (s *documentStore) TagCounts() ([]documentTagCount, error) {
-	defer lockHeld(&s.mu, "documents.TagCounts")()
+	defer lockDocumentsTagCounts.held(&s.mu).release()
 
 	rows, err := s.db.Query(`
 		SELECT tag, COUNT(DISTINCT document_id) FROM document_tags
@@ -1421,7 +1421,7 @@ func (s *documentStore) rebuildMetaChunksUnderFolderTx(tx *sql.Tx, folderID stri
 // uuid", and doc.CreatedAt.IsZero() still means "stamp it now", exactly as
 // before.
 func (s *documentStore) Insert(doc document) (document, error) {
-	defer lockHeld(&s.mu, "documents.Insert")()
+	defer lockDocumentsInsert.held(&s.mu).release()
 
 	existing, err := scanDocument(s.db.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE sha256 = ?`, doc.SHA256))
 	if err == nil {
@@ -1501,7 +1501,7 @@ func (s *documentStore) Insert(doc document) (document, error) {
 // Get looks up a single document by id, tags included.
 // errDocumentNotFound if id does not exist.
 func (s *documentStore) Get(id string) (document, error) {
-	defer lockHeld(&s.mu, "documents.Get")()
+	defer lockDocumentsGet.held(&s.mu).release()
 
 	doc, err := scanDocument(s.db.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1518,7 +1518,7 @@ func (s *documentStore) Get(id string) (document, error) {
 
 // HasSHA says whether a document with this content hash exists.
 func (s *documentStore) HasSHA(sha256 string) (bool, error) {
-	defer lockHeld(&s.mu, "documents.HasSHA")()
+	defer lockDocumentsHasSHA.held(&s.mu).release()
 	ok, err := rowExists(s.db, `SELECT 1 FROM documents WHERE sha256 = ? LIMIT 1`, sha256)
 	if err != nil {
 		return false, fmt.Errorf("check document by sha256: %w", err)
@@ -1531,7 +1531,7 @@ func (s *documentStore) HasSHA(sha256 string) (bool, error) {
 // yet" case a duplicate check makes on every upload, not a database
 // failure.
 func (s *documentStore) GetBySHA(sha256 string) (document, bool, error) {
-	defer lockHeld(&s.mu, "documents.GetBySHA")()
+	defer lockDocumentsGetBySHA.held(&s.mu).release()
 
 	doc, err := scanDocument(s.db.QueryRow(`SELECT `+documentColumns+` FROM documents WHERE sha256 = ?`, sha256))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1637,7 +1637,7 @@ func queryDocuments(q sqlQueryer, folderID *string, recursive bool, tag string, 
 // means no LIMIT/OFFSET at all (every matching row). See queryDocuments for
 // the folderID/recursive contract.
 func (s *documentStore) List(folderID *string, recursive bool, tag string, limit, offset int) ([]document, error) {
-	defer lockHeld(&s.mu, "documents.List")()
+	defer lockDocumentsList.held(&s.mu).release()
 
 	docs, err := queryDocuments(s.db, folderID, recursive, tag, limit, offset)
 	if err != nil {
@@ -1657,7 +1657,7 @@ func (s *documentStore) List(folderID *string, recursive bool, tag string, limit
 // full rows (every column including markdown, plus one tag query per row)
 // just to take len() of the result.
 func (s *documentStore) Count() (int, error) {
-	defer lockHeld(&s.mu, "documents.Count")()
+	defer lockDocumentsCount.held(&s.mu).release()
 
 	var n int
 	if err := s.db.QueryRow(`SELECT count(*) FROM documents`).Scan(&n); err != nil {
@@ -1681,7 +1681,7 @@ func (s *documentStore) Count() (int, error) {
 // error - FTS5 rejects an empty MATCH string outright, so this is checked
 // before ever reaching SQL.
 func (s *documentStore) Search(query string, folderID *string, recursive bool, tag string, limit, offset int) ([]documentSearchResult, error) {
-	defer lockHeld(&s.mu, "documents.Search")()
+	defer lockDocumentsSearch.held(&s.mu).release()
 
 	if strings.TrimSpace(query) == "" || limit <= 0 {
 		return nil, nil
@@ -1788,16 +1788,17 @@ func (s *documentStore) DocumentsTaggedWith(name string, limit int) ([]taggedDoc
 	if limit <= 0 {
 		return nil, nil
 	}
-	return s.taggedDocuments(name, limit)
+	return s.taggedDocuments(lockDocumentsDocumentsTaggedWith, name, limit)
 }
 
-// taggedDocuments is DocumentsTaggedWith with limit <= 0 meaning no limit.
-func (s *documentStore) taggedDocuments(name string, limit int) ([]taggedDocument, error) {
+// taggedDocuments is DocumentsTaggedWith with limit <= 0 meaning no limit. op
+// is the caller's, so each caller records under its own name.
+func (s *documentStore) taggedDocuments(op *lockOp, name string, limit int) ([]taggedDocument, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "documents.taggedDocuments")()
+	defer op.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT id, title, filename, tag FROM documents
 		JOIN document_tags ON document_id = id
@@ -1830,7 +1831,7 @@ func (s *documentStore) taggedDocuments(name string, limit int) ([]taggedDocumen
 // documentsWithOperatorTag returns every document the marina link would find
 // for tag, in full, for the record listing.
 func (s *documentStore) documentsWithOperatorTag(tag string) ([]document, error) {
-	found, err := s.taggedDocuments(tag, 0)
+	found, err := s.taggedDocuments(lockDocumentsDocumentsWithOperatorTag, tag, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -2001,7 +2002,7 @@ func (s *documentStore) ReplaceChunks(id string, sources []string, chunks []docu
 // can't distinguish "no chunks yet" (a pending document) from "no such
 // document" the way this codebase's fail-fast policy requires.
 func (s *documentStore) ChunksFrom(id string, fromSeq int) ([]documentChunk, error) {
-	defer lockHeld(&s.mu, "documents.ChunksFrom")()
+	defer lockDocumentsChunksFrom.held(&s.mu).release()
 
 	ok, err := rowExists(s.db, `SELECT 1 FROM documents WHERE id = ?`, id)
 	if err != nil {
@@ -2041,7 +2042,7 @@ func (s *documentStore) ChunksFrom(id string, fromSeq int) ([]documentChunk, err
 // the OCR heuristic from markdown/page_count after a restart rather than
 // needing its own persisted column.
 func (s *documentStore) SetExtracted(id, markdown string, pageCount int) error {
-	defer lockHeld(&s.mu, "documents.SetExtracted")()
+	defer lockDocumentsSetExtracted.held(&s.mu).release()
 
 	res, err := s.db.Exec(`UPDATE documents SET markdown = ?, page_count = ?, updated_at = ? WHERE id = ?`, markdown, pageCount, s.now().Unix(), id)
 	if err != nil {
@@ -2059,7 +2060,7 @@ func (s *documentStore) SetExtracted(id, markdown string, pageCount int) error {
 // SetIndexed first, then SetWarning, whenever there is one to carry
 // forward.
 func (s *documentStore) SetWarning(id, msg string) error {
-	defer lockHeld(&s.mu, "documents.SetWarning")()
+	defer lockDocumentsSetWarning.held(&s.mu).release()
 
 	res, err := s.db.Exec(`UPDATE documents SET error = ?, updated_at = ? WHERE id = ?`, msg, s.now().Unix(), id)
 	if err != nil {
@@ -2074,7 +2075,7 @@ func (s *documentStore) SetWarning(id, msg string) error {
 // since a document reindexed more than once should show everything spent
 // on it, not just the most recent pass.
 func (s *documentStore) AddIndexCost(id, model string, cost float64) error {
-	defer lockHeld(&s.mu, "documents.AddIndexCost")()
+	defer lockDocumentsAddIndexCost.held(&s.mu).release()
 
 	res, err := s.db.Exec(
 		`UPDATE documents SET index_model = ?, index_cost_usd = index_cost_usd + ?, updated_at = ? WHERE id = ?`,
@@ -2100,7 +2101,7 @@ func (s *documentStore) AddIndexCost(id, model string, cost float64) error {
 // both jobs, so it accumulates here exactly the way AddIndexCost's own
 // does.
 func (s *documentStore) AddEmbedCost(id string, cost float64) error {
-	defer lockHeld(&s.mu, "documents.AddEmbedCost")()
+	defer lockDocumentsAddEmbedCost.held(&s.mu).release()
 
 	res, err := s.db.Exec(
 		`UPDATE documents SET index_cost_usd = index_cost_usd + ?, updated_at = ? WHERE id = ?`,
@@ -2113,7 +2114,7 @@ func (s *documentStore) AddEmbedCost(id string, cost float64) error {
 }
 
 func (s *documentStore) SetStage(id, stage string) error {
-	defer lockHeld(&s.mu, "documents.SetStage")()
+	defer lockDocumentsSetStage.held(&s.mu).release()
 
 	res, err := s.db.Exec(`UPDATE documents SET stage = ?, updated_at = ? WHERE id = ?`, stage, s.now().Unix(), id)
 	if err != nil {
@@ -2129,7 +2130,7 @@ func (s *documentStore) SetStage(id, stage string) error {
 // while it was being worked on (the indexer's own finishIndexed) want
 // SetIndexedIfCurrent instead.
 func (s *documentStore) SetIndexed(id, indexedWith string) error {
-	defer lockHeld(&s.mu, "documents.SetIndexed")()
+	defer lockDocumentsSetIndexed.held(&s.mu).release()
 
 	now := s.now()
 	res, err := s.db.Exec(
@@ -2156,7 +2157,7 @@ func (s *documentStore) SetIndexed(id, indexedWith string) error {
 // finishIndexed's own doc comment covers what the caller does with that.
 // ok=false with errDocumentNotFound means id itself no longer exists.
 func (s *documentStore) SetIndexedIfCurrent(id string, expectedSeq int, indexedWith string) (bool, error) {
-	defer lockHeld(&s.mu, "documents.SetIndexedIfCurrent")()
+	defer lockDocumentsSetIndexedIfCurrent.held(&s.mu).release()
 
 	now := s.now()
 	res, err := s.db.Exec(
@@ -2187,7 +2188,7 @@ func (s *documentStore) SetIndexedIfCurrent(id string, expectedSeq int, indexedW
 // the stage it failed at, e.g. "enrich", stays visible) and indexed_at
 // untouched (a document that never finished indexing has no indexed_at).
 func (s *documentStore) SetFailed(id, errMsg string) error {
-	defer lockHeld(&s.mu, "documents.SetFailed")()
+	defer lockDocumentsSetFailed.held(&s.mu).release()
 
 	res, err := s.db.Exec(`UPDATE documents SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`, errMsg, s.now().Unix(), id)
 	if err != nil {
@@ -2210,7 +2211,7 @@ func (s *documentStore) SetFailed(id, errMsg string) error {
 // the indexer is already mid-pass on id (review finding, same function's
 // doc comment).
 func (s *documentStore) MarkReindex(id string, enrich bool) error {
-	defer lockHeld(&s.mu, "documents.MarkReindex")()
+	defer lockDocumentsMarkReindex.held(&s.mu).release()
 
 	res, err := s.db.Exec(
 		`UPDATE documents SET status = 'pending', stage = 'extract', error = '', force_ocr = 1, enrich = ?, reindex_seq = reindex_seq + 1, updated_at = ? WHERE id = ?`,
@@ -2226,7 +2227,7 @@ func (s *documentStore) MarkReindex(id string, enrich bool) error {
 // there is none - the indexer's queue-pop, and how pending rows resume
 // after a restart (B4).
 func (s *documentStore) NextPending() (document, bool, error) {
-	defer lockHeld(&s.mu, "documents.NextPending")()
+	defer lockDocumentsNextPending.held(&s.mu).release()
 
 	doc, err := scanDocument(s.db.QueryRow(`SELECT ` + documentColumns + ` FROM documents WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 1`))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2421,7 +2422,7 @@ const chunksMissingEmbeddingWhere = `NOT EXISTS (
 // outright - there is nothing to embed, and paying OpenRouter for a blank
 // string is waste. limit<=0 returns no rows.
 func (s *documentStore) PendingEmbedChunks(model string, dims, limit int, enrichedOnly bool) ([]documentChunk, error) {
-	defer lockHeld(&s.mu, "documents.PendingEmbedChunks")()
+	defer lockDocumentsPendingEmbedChunks.held(&s.mu).release()
 
 	if limit <= 0 {
 		return nil, nil
@@ -2506,7 +2507,7 @@ var chunkEmbeddingsBatchSize = 200
 // the id rather than surfacing modernc/sqlite's bare "FOREIGN KEY
 // constraint failed".
 func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[int64][]float32) error {
-	defer lockHeld(&s.mu, "documents.SetChunkEmbeddings")()
+	defer lockDocumentsSetChunkEmbeddings.held(&s.mu).release()
 
 	ids := make([]int64, 0, len(vectors))
 	for id := range vectors {
@@ -2570,7 +2571,7 @@ func (s *documentStore) setChunkEmbeddingsBatchTx(model string, dims int, units 
 // there is no enrichedOnly split here: this is a whole-library summary, not
 // the automatic pass's own narrower queue.
 func (s *documentStore) EmbeddingCounts(model string, dims int) (documentEmbeddingCounts, error) {
-	defer lockHeld(&s.mu, "documents.EmbeddingCounts")()
+	defer lockDocumentsEmbeddingCounts.held(&s.mu).release()
 
 	var counts documentEmbeddingCounts
 	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunks`).Scan(&counts.ChunksTotal); err != nil {
@@ -2659,7 +2660,7 @@ func truncateSnippet(text string, n int) string {
 // decode is a different matter entirely, corruption rather than a stale
 // setting, and is returned as an error rather than skipped.
 func (s *documentStore) SearchVector(queryVec []float32, model string, folderID *string, recursive bool, tag string, limit int) ([]documentSearchResult, error) {
-	defer lockHeld(&s.mu, "documents.SearchVector")()
+	defer lockDocumentsSearchVector.held(&s.mu).release()
 
 	if limit <= 0 {
 		return nil, nil
@@ -2818,7 +2819,7 @@ func (s *documentStore) SearchVector(queryVec []float32, model string, folderID 
 // no sibling already has the same name case-insensitively, then inserts the
 // new folder.
 func (s *documentStore) CreateFolder(name string, parentID *string) (documentFolder, error) {
-	defer lockHeld(&s.mu, "documents.CreateFolder")()
+	defer lockDocumentsCreateFolder.held(&s.mu).release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
@@ -2865,7 +2866,7 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 // CreateFolder matches siblings (case-insensitively), or makes it. The find and
 // the insert share one lock and transaction, so two callers cannot both make it.
 func (s *documentStore) FindOrCreateRootFolder(name string) (documentFolder, error) {
-	defer lockHeld(&s.mu, "documents.FindOrCreateRootFolder")()
+	defer lockDocumentsFindOrCreateRootFolder.held(&s.mu).release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
@@ -2914,7 +2915,7 @@ func (s *documentStore) FindOrCreateRootFolder(name string) (documentFolder, err
 // is rebuilt exactly once, since either a new name or a new parent changes
 // the folder-path text they all carry.
 func (s *documentStore) PatchFolder(id string, name *string, parentID *string, moveParent bool) error {
-	defer lockHeld(&s.mu, "documents.PatchFolder")()
+	defer lockDocumentsPatchFolder.held(&s.mu).release()
 
 	var trimmedName string
 	if name != nil {
@@ -3054,7 +3055,7 @@ func (s *documentStore) DeleteFolder(id string) error {
 // all"; see queryDocuments' doc comment for why these differ.
 // errFolderNotFound if parentID is non-nil and does not exist.
 func (s *documentStore) ListFolder(parentID *string) ([]documentFolder, []document, error) {
-	defer lockHeld(&s.mu, "documents.ListFolder")()
+	defer lockDocumentsListFolder.held(&s.mu).release()
 
 	var parentKey string
 	if parentID != nil {
@@ -3154,7 +3155,7 @@ type documentFolderTreeNode struct {
 // FolderTree returns every folder, flat, in sibling order (sort_index then
 // name), with the number of documents filed directly in each.
 func (s *documentStore) FolderTree() ([]documentFolderTreeNode, error) {
-	defer lockHeld(&s.mu, "documents.FolderTree")()
+	defer lockDocumentsFolderTree.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT f.id, f.parent_id, f.name, f.role = 'manual',
 		(SELECT COUNT(*) FROM documents d WHERE d.folder_id = f.id)
@@ -3200,7 +3201,7 @@ func (s *documentStore) FolderTree() ([]documentFolderTreeNode, error) {
 // FolderPath returns id's ancestor chain root-first, id last.
 // errFolderNotFound if id does not exist.
 func (s *documentStore) FolderPath(id string) ([]documentFolder, error) {
-	defer lockHeld(&s.mu, "documents.FolderPath")()
+	defer lockDocumentsFolderPath.held(&s.mu).release()
 	return folderPath(s.db, id)
 }
 
@@ -3215,7 +3216,7 @@ func (s *documentStore) FolderPath(id string) ([]documentFolder, error) {
 // segment along the way does not exist, or if path resolves to no segments
 // at all (empty, or all-blank).
 func (s *documentStore) ResolveFolderPath(path string) (string, error) {
-	defer lockHeld(&s.mu, "documents.ResolveFolderPath")()
+	defer lockDocumentsResolveFolderPath.held(&s.mu).release()
 
 	var parentKey string
 	id := ""
@@ -3255,7 +3256,7 @@ func (s *documentStore) ResolveFolderPath(path string) (string, error) {
 // Count() above was added to avoid. A single query over document_folders,
 // scoped the same way ListFolder's own subfolder query is, replaces it.
 func (s *documentStore) TopLevelFolderNames() ([]string, error) {
-	defer lockHeld(&s.mu, "documents.TopLevelFolderNames")()
+	defer lockDocumentsTopLevelFolderNames.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT name FROM document_folders WHERE COALESCE(parent_id,'') = '' ORDER BY lower(name)`)
 	if err != nil {
@@ -3282,7 +3283,7 @@ func (s *documentStore) TopLevelFolderNames() ([]string, error) {
 // allSHAs returns every document's sha256, for sweepDocumentsDir to compare
 // against what's actually on disk.
 func (s *documentStore) allSHAs() (map[string]bool, error) {
-	defer lockHeld(&s.mu, "documents.allSHAs")()
+	defer lockDocumentsAllSHAs.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT sha256 FROM documents`)
 	if err != nil {

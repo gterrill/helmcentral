@@ -476,7 +476,7 @@ func zoneUseCounts(q sqlQueryer, id string) (bins, equipment int, err error) {
 // are still open would block forever on a pool that is exactly one
 // connection wide.
 func (s *documentStore) ListZones() ([]inventoryZone, error) {
-	defer lockHeld(&s.mu, "documents.ListZones")()
+	defer lockDocumentsListZones.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT id, name, sort_index, created_at, updated_at, deck_id, polygon FROM inventory_zones ORDER BY sort_index, lower(name)`)
 	if err != nil {
@@ -1317,14 +1317,14 @@ func deleteEquipmentTx(tx *sql.Tx, id string, deletePhotos bool) (deletedPhotoSH
 // the HTTP handler for GET /api/inventory/equipment/:id
 // (inventory_handlers.go) calls both and composes {item, documents} itself.
 func (s *documentStore) GetEquipment(id string) (equipmentItem, error) {
-	defer lockHeld(&s.mu, "documents.GetEquipment")()
+	defer lockDocumentsGetEquipment.held(&s.mu).release()
 	return equipmentByID(s.db, id)
 }
 
 // EquipmentExists says whether an equipment item with this id is there, without
 // reading the item.
 func (s *documentStore) EquipmentExists(id string) (bool, error) {
-	defer lockHeld(&s.mu, "documents.EquipmentExists")()
+	defer lockDocumentsEquipmentExists.held(&s.mu).release()
 	return rowExists(s.db, `SELECT 1 FROM equipment WHERE id = ?`, id)
 }
 
@@ -1379,7 +1379,7 @@ func equipmentMatchesQuery(it equipmentItem, q string) bool {
 // passes the structural filters and running equipmentMatchesQuery in Go
 // over all of them costs nothing worth optimising away.
 func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, error) {
-	defer lockHeld(&s.mu, "documents.ListEquipment")()
+	defer lockDocumentsListEquipment.held(&s.mu).release()
 
 	query := `SELECT ` + equipmentColumns + ` FROM ` + equipmentFromClause + ` WHERE 1=1`
 	var args []any
@@ -1481,7 +1481,7 @@ func (s *documentStore) ListEquipment(filter equipmentFilter) ([]equipmentItem, 
 // tolerance; every row this query returns has a real document behind it by
 // construction.
 func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, error) {
-	defer lockHeld(&s.mu, "documents.EquipmentDocuments")()
+	defer lockDocumentsEquipmentDocuments.held(&s.mu).release()
 
 	ok, err := rowExists(s.db, `SELECT 1 FROM equipment WHERE id = ?`, id)
 	if err != nil {
@@ -1521,7 +1521,7 @@ func (s *documentStore) EquipmentDocuments(id string) ([]equipmentDocument, erro
 // EquipmentLinkedToDocument is the set of equipment ids a document is linked
 // to, so an update can show which suggested links already exist.
 func (s *documentStore) EquipmentLinkedToDocument(docID string) (map[string]bool, error) {
-	defer lockHeld(&s.mu, "documents.EquipmentLinkedToDocument")()
+	defer lockDocumentsEquipmentLinkedToDocument.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT equipment_id FROM equipment_documents WHERE document_id = ?`, docID)
 	if err != nil {
 		return nil, fmt.Errorf("list equipment links: %w", err)
@@ -1737,7 +1737,7 @@ func sameIDSet(a, b []string) bool {
 // EquipmentPhotoIDBySHA returns the id of the document with these bytes if it
 // is linked to equipmentID, or "" if the item has no such document.
 func (s *documentStore) EquipmentPhotoIDBySHA(equipmentID, sha string) (string, error) {
-	defer lockHeld(&s.mu, "documents.EquipmentPhotoIDBySHA")()
+	defer lockDocumentsEquipmentPhotoIDBySHA.held(&s.mu).release()
 	var id string
 	err := s.db.QueryRow(`
 		SELECT d.id FROM equipment_documents ed
@@ -1902,7 +1902,7 @@ func (s *documentStore) RemoveEquipmentPhoto(equipmentID, documentID string) err
 // a log entry still shows. MaintenanceLogPhotoDeletableAsOrphan
 // (maintenance_store.go) is this same check from the log-entry side.
 func (s *documentStore) DocumentDeletableAsOrphanPhoto(documentID string) (bool, error) {
-	defer lockHeld(&s.mu, "documents.DocumentDeletableAsOrphanPhoto")()
+	defer lockDocumentsDocumentDeletableAsOrphan.held(&s.mu).release()
 	return rowExists(s.db, `
 		SELECT 1 FROM documents d
 		WHERE d.id = ?

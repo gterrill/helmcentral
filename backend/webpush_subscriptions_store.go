@@ -99,7 +99,7 @@ func (s *webPushSubscriptionStore) Upsert(sub webPushSubscription) (webPushSubsc
 	if s == nil {
 		return sub, nil
 	}
-	defer lockHeld(&s.mu, "webpush.Upsert")()
+	defer lockWebpushUpsert.held(&s.mu).release()
 
 	if sub.ID == "" {
 		sub.ID = uuid.NewString()
@@ -173,7 +173,7 @@ func (s *webPushSubscriptionStore) All() ([]webPushSubscription, error) {
 	if s == nil {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "webpush.All")()
+	defer lockWebpushAll.held(&s.mu).release()
 
 	rows, err := s.db.Query(`
 		SELECT id, endpoint, p256dh, auth, label, user_agent, vapid_public_key,
@@ -201,7 +201,7 @@ func (s *webPushSubscriptionStore) DeleteByEndpoint(endpoint string) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "webpush.DeleteByEndpoint")()
+	defer lockWebpushDeleteByEndpoint.held(&s.mu).release()
 
 	if _, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE endpoint = ?`, endpoint); err != nil {
 		return fmt.Errorf("delete push subscription: %w", err)
@@ -213,7 +213,7 @@ func (s *webPushSubscriptionStore) DeleteByID(id string) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "webpush.DeleteByID")()
+	defer lockWebpushDeleteByID.held(&s.mu).release()
 
 	if _, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete push subscription: %w", err)
@@ -225,7 +225,7 @@ func (s *webPushSubscriptionStore) MarkSuccess(id string, at time.Time) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "webpush.MarkSuccess")()
+	defer lockWebpushMarkSuccess.held(&s.mu).release()
 
 	if _, err := s.db.Exec(
 		`UPDATE push_subscriptions SET last_success_at = ?, last_error = '' WHERE id = ?`,
@@ -239,7 +239,7 @@ func (s *webPushSubscriptionStore) MarkError(id string, message string) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "webpush.MarkError")()
+	defer lockWebpushMarkError.held(&s.mu).release()
 
 	if _, err := s.db.Exec(
 		`UPDATE push_subscriptions SET last_error = ? WHERE id = ?`, message, id); err != nil {
@@ -259,7 +259,7 @@ func (s *webPushSubscriptionStore) DeleteWhereKeyNot(publicKey string) (int64, e
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "webpush.DeleteWhereKeyNot")()
+	defer lockWebpushDeleteWhereKey.held(&s.mu).release()
 
 	result, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE vapid_public_key != ?`, publicKey)
 	if err != nil {
@@ -272,7 +272,7 @@ func (s *webPushSubscriptionStore) Count() (int, error) {
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "webpush.Count")()
+	defer lockWebpushCount.held(&s.mu).release()
 
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM push_subscriptions`).Scan(&count); err != nil {

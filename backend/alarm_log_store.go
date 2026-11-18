@@ -124,7 +124,7 @@ func (s *alarmLogStore) LoadCollisionProfileRefusedOn() (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("alarm log is not available")
 	}
-	defer lockHeld(&s.mu, "alarm_log.LoadCollisionProfileRefusedOn")()
+	defer lockAlarmLogLoadCollisionProfileRefusedOn.held(&s.mu).release()
 	var profile string
 	err := s.db.QueryRow(`SELECT refused_on FROM collision_profile_state WHERE id = 1`).Scan(&profile)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -142,7 +142,7 @@ func (s *alarmLogStore) SaveCollisionProfileRefusedOn(profile string) error {
 	if s == nil {
 		return fmt.Errorf("alarm log is not available")
 	}
-	defer lockHeld(&s.mu, "alarm_log.SaveCollisionProfileRefusedOn")()
+	defer lockAlarmLogSaveCollisionProfileRefusedOn.held(&s.mu).release()
 	if _, err := s.db.Exec(
 		`INSERT INTO collision_profile_state (id, state, refused_on) VALUES (1, '', ?)
 		 ON CONFLICT(id) DO UPDATE SET refused_on = excluded.refused_on`, profile); err != nil {
@@ -157,7 +157,7 @@ func (s *alarmLogStore) LoadCollisionProfileState() (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("alarm log is not available")
 	}
-	defer lockHeld(&s.mu, "alarm_log.LoadCollisionProfileState")()
+	defer lockAlarmLogLoadCollisionProfileState.held(&s.mu).release()
 	var state string
 	err := s.db.QueryRow(`SELECT state FROM collision_profile_state WHERE id = 1`).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -173,7 +173,7 @@ func (s *alarmLogStore) SaveCollisionProfileState(state string) error {
 	if s == nil {
 		return fmt.Errorf("alarm log is not available")
 	}
-	defer lockHeld(&s.mu, "alarm_log.SaveCollisionProfileState")()
+	defer lockAlarmLogSaveCollisionProfileState.held(&s.mu).release()
 	if _, err := s.db.Exec(
 		`INSERT INTO collision_profile_state (id, state) VALUES (1, ?)
 		 ON CONFLICT(id) DO UPDATE SET state = excluded.state`, state); err != nil {
@@ -210,7 +210,7 @@ func (s *alarmLogStore) RecordRaised(entry alarmLogEntry) (string, error) {
 	if s == nil {
 		return "", nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.RecordRaised")()
+	defer lockAlarmLogRecordRaised.held(&s.mu).release()
 
 	if entry.ID == "" {
 		entry.ID = uuid.NewString()
@@ -238,7 +238,7 @@ func (s *alarmLogStore) RecordStateChange(ruleID, state, message string, escalat
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.RecordStateChange")()
+	defer lockAlarmLogRecordStateChange.held(&s.mu).release()
 
 	ackedSQL := "acked_at"
 	if escalated {
@@ -259,19 +259,21 @@ func (s *alarmLogStore) RecordStateChange(ruleID, state, message string, escalat
 
 // MarkAcknowledged stamps the still-open occurrence for a rule.
 func (s *alarmLogStore) MarkAcknowledged(ruleID string, at time.Time) error {
-	return s.stampOpen(ruleID, "acked_at", at)
+	return s.stampOpen(lockAlarmLogMarkAcknowledged, ruleID, "acked_at", at)
 }
 
 // MarkCleared closes the open occurrence for a rule.
 func (s *alarmLogStore) MarkCleared(ruleID string, at time.Time) error {
-	return s.stampOpen(ruleID, "cleared_at", at)
+	return s.stampOpen(lockAlarmLogMarkCleared, ruleID, "cleared_at", at)
 }
 
-func (s *alarmLogStore) stampOpen(ruleID string, column string, at time.Time) error {
+// stampOpen is MarkAcknowledged and MarkCleared; op is the caller's, so each
+// records under its own name.
+func (s *alarmLogStore) stampOpen(op *lockOp, ruleID string, column string, at time.Time) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.stampOpen")()
+	defer op.held(&s.mu).release()
 
 	// Only the newest open occurrence: an alarm that has already been closed
 	// must not be re-stamped by a later transition of the same rule.
@@ -299,7 +301,7 @@ func (s *alarmLogStore) OpenOccurrence(ruleID string) (alarmLogEntry, bool, erro
 	if s == nil {
 		return alarmLogEntry{}, false, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.OpenOccurrence")()
+	defer lockAlarmLogOpenOccurrence.held(&s.mu).release()
 
 	row := s.db.QueryRow(
 		`SELECT id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at
@@ -334,7 +336,7 @@ func (s *alarmLogStore) Recent(limit int) ([]alarmLogEntry, error) {
 		limit = 100
 	}
 
-	defer lockHeld(&s.mu, "alarm_log.Recent")()
+	defer lockAlarmLogRecent.held(&s.mu).release()
 
 	rows, err := s.db.Query(
 		`SELECT id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at, cleared_at
@@ -397,19 +399,21 @@ func scanAlarmLogRow(r logRowScanner) (alarmLogEntry, error) {
 
 // Get returns one occurrence by its log id (Ask Mate about a cleared alarm).
 func (s *alarmLogStore) Get(id string) (alarmLogEntry, bool, error) {
-	return s.one(`SELECT `+alarmLogColumns+` FROM alarm_log WHERE id = ?`, id)
+	return s.one(lockAlarmLogGet, `SELECT `+alarmLogColumns+` FROM alarm_log WHERE id = ?`, id)
 }
 
 // LatestForRule returns the newest occurrence of a rule, open or cleared.
 func (s *alarmLogStore) LatestForRule(ruleID string) (alarmLogEntry, bool, error) {
-	return s.one(`SELECT `+alarmLogColumns+` FROM alarm_log WHERE rule_id = ? ORDER BY raised_at DESC, id DESC LIMIT 1`, ruleID)
+	return s.one(lockAlarmLogLatestForRule, `SELECT `+alarmLogColumns+` FROM alarm_log WHERE rule_id = ? ORDER BY raised_at DESC, id DESC LIMIT 1`, ruleID)
 }
 
-func (s *alarmLogStore) one(query string, args ...any) (alarmLogEntry, bool, error) {
+// one is Get and LatestForRule; op is the caller's, so each records under its
+// own name.
+func (s *alarmLogStore) one(op *lockOp, query string, args ...any) (alarmLogEntry, bool, error) {
 	if s == nil {
 		return alarmLogEntry{}, false, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.one")()
+	defer op.held(&s.mu).release()
 	entry, err := scanAlarmLogRow(s.db.QueryRow(query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return alarmLogEntry{}, false, nil
@@ -425,7 +429,7 @@ func (s *alarmLogStore) RaisedCount(ruleID string, since time.Time) (int, error)
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.RaisedCount")()
+	defer lockAlarmLogRaisedCount.held(&s.mu).release()
 	var n int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM alarm_log WHERE rule_id = ? AND raised_at >= ?`, ruleID, since.UTC().Unix()).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count alarm raises: %w", err)
@@ -438,7 +442,7 @@ func (s *alarmLogStore) EarliestRaised(ruleID string, since time.Time) (time.Tim
 	if s == nil {
 		return time.Time{}, false, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.EarliestRaised")()
+	defer lockAlarmLogEarliestRaised.held(&s.mu).release()
 	var raised sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MIN(raised_at) FROM alarm_log WHERE rule_id = ? AND raised_at >= ?`,
 		ruleID, since.UTC().Unix()).Scan(&raised); err != nil {
@@ -458,7 +462,7 @@ func (s *alarmLogStore) ChangedBetween(from, to time.Time, exceptRuleID string) 
 	if s == nil {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.ChangedBetween")()
+	defer lockAlarmLogChangedBetween.held(&s.mu).release()
 	f, t := from.UTC().Unix(), to.UTC().Unix()
 	rows, err := s.db.Query(`SELECT * FROM (
 			SELECT `+alarmLogColumns+` FROM alarm_log WHERE raised_at BETWEEN ? AND ? AND rule_id <> ?
@@ -490,7 +494,7 @@ func (s *alarmLogStore) OverlappingBetween(from, to time.Time) ([]alarmLogEntry,
 	if s == nil {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.OverlappingBetween")()
+	defer lockAlarmLogOverlappingBetween.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT `+alarmLogColumns+` FROM alarm_log
 		WHERE raised_at <= ? AND (cleared_at IS NULL OR cleared_at >= ?)
 		ORDER BY raised_at ASC, id ASC`, to.UTC().Unix(), from.UTC().Unix())
@@ -542,7 +546,7 @@ func (s *alarmLogStore) RaisedSummary(from, to time.Time) ([]alarmRaisedGroup, e
 	if s == nil {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.RaisedSummary")()
+	defer lockAlarmLogRaisedSummary.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT label, COUNT(*), MIN(raised_at), MAX(raised_at) FROM alarm_log
 		WHERE raised_at BETWEEN ? AND ? GROUP BY label
 		ORDER BY COUNT(*) DESC, MAX(raised_at) DESC, label ASC`, from.UTC().Unix(), to.UTC().Unix())
@@ -677,7 +681,7 @@ func (s *alarmLogStore) DropLogOlderThan(cutoff time.Time) (int64, error) {
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.DropLogOlderThan")()
+	defer lockAlarmLogDropLogOlderThan.held(&s.mu).release()
 
 	result, err := s.db.Exec(`DELETE FROM alarm_log WHERE raised_at < ?`, cutoff.UTC().Unix())
 	if err != nil {
@@ -703,7 +707,7 @@ func (s *alarmLogStore) Enqueue(transport, ruleID string, payload []byte, dueAt 
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.Enqueue")()
+	defer lockAlarmLogEnqueue.held(&s.mu).release()
 
 	_, err := s.db.Exec(
 		`INSERT INTO notification_queue (id, transport, rule_id, payload, attempts, next_attempt_at, created_at)
@@ -727,7 +731,7 @@ func (s *alarmLogStore) DropQueuedForRule(transport, ruleID string) (int64, erro
 	if s == nil || ruleID == "" {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.DropQueuedForRule")()
+	defer lockAlarmLogDropQueuedForRule.held(&s.mu).release()
 
 	result, err := s.db.Exec(
 		`DELETE FROM notification_queue WHERE transport = ? AND rule_id = ?`, transport, ruleID)
@@ -746,7 +750,7 @@ func (s *alarmLogStore) DueNotifications(now time.Time, limit int) ([]queuedNoti
 		limit = 20
 	}
 
-	defer lockHeld(&s.mu, "alarm_log.DueNotifications")()
+	defer lockAlarmLogDueNotifications.held(&s.mu).release()
 
 	rows, err := s.db.Query(
 		`SELECT id, transport, payload, attempts, last_error FROM notification_queue
@@ -772,7 +776,7 @@ func (s *alarmLogStore) DeleteQueued(id string) error {
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.DeleteQueued")()
+	defer lockAlarmLogDeleteQueued.held(&s.mu).release()
 
 	if _, err := s.db.Exec(`DELETE FROM notification_queue WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete queued notification: %w", err)
@@ -785,7 +789,7 @@ func (s *alarmLogStore) RescheduleQueued(id string, attempts int, nextAttempt ti
 	if s == nil {
 		return nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.RescheduleQueued")()
+	defer lockAlarmLogRescheduleQueued.held(&s.mu).release()
 
 	_, err := s.db.Exec(
 		`UPDATE notification_queue SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?`,
@@ -803,7 +807,7 @@ func (s *alarmLogStore) DropQueuedOlderThan(cutoff time.Time) (int64, error) {
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.DropQueuedOlderThan")()
+	defer lockAlarmLogDropQueuedOlderThan.held(&s.mu).release()
 
 	result, err := s.db.Exec(`DELETE FROM notification_queue WHERE created_at < ?`, cutoff.UTC().Unix())
 	if err != nil {
@@ -816,7 +820,7 @@ func (s *alarmLogStore) QueueDepth() (int, error) {
 	if s == nil {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.QueueDepth")()
+	defer lockAlarmLogQueueDepth.held(&s.mu).release()
 
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM notification_queue`).Scan(&count); err != nil {
@@ -830,7 +834,7 @@ func (s *alarmLogStore) QueuedForKey(key string) ([]queuedNotification, error) {
 	if s == nil {
 		return nil, nil
 	}
-	defer lockHeld(&s.mu, "alarm_log.QueuedForKey")()
+	defer lockAlarmLogQueuedForKey.held(&s.mu).release()
 
 	rows, err := s.db.Query(
 		`SELECT id, transport, payload, attempts, last_error FROM notification_queue WHERE rule_id = ? ORDER BY created_at ASC`, key)

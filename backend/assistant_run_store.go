@@ -103,19 +103,22 @@ func createAssistantRunsSchema(db *sql.DB) error {
 // with its assigned id. A call's args and result are kept up to
 // assistantToolCallMaxBytes each; Truncated and OriginalBytes then say so.
 func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, error) {
-	defer lockHeld(&s.mu, "assistant.SaveRun")()
-
 	run.ID = uuid.NewString()
 	budget, err := json.Marshal(run.Budget)
 	if err != nil {
 		return assistantRunTrace{}, fmt.Errorf("encode run budget: %w", err)
 	}
-	tx, err := s.db.Begin()
+	err = runTxUnderLock(&s.mu, s.db, "assistant.SaveRun", time.Now, serverVitals, func(tx *sql.Tx) error {
+		_, err := saveRunTx(tx, run, string(budget))
+		return err
+	})
 	if err != nil {
-		return assistantRunTrace{}, fmt.Errorf("begin save run: %w", err)
+		return assistantRunTrace{}, err
 	}
-	defer tx.Rollback()
+	return run, nil
+}
 
+func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) (assistantRunTrace, error) {
 	var answer sql.NullString
 	if run.AnswerMessageID != nil {
 		answer = sql.NullString{String: *run.AnswerMessageID, Valid: true}
@@ -123,7 +126,7 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 	if _, err := tx.Exec(`INSERT INTO assistant_runs
 		(id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.ConversationID, run.AfterSeq, answer, run.Model, run.StartedAt.UnixMilli(), run.DurationMs, run.StopReason, run.Error, string(budget)); err != nil {
+		run.ID, run.ConversationID, run.AfterSeq, answer, run.Model, run.StartedAt.UnixMilli(), run.DurationMs, run.StopReason, run.Error, budget); err != nil {
 		return assistantRunTrace{}, fmt.Errorf("insert run: %w", err)
 	}
 	roundStmt, err := tx.Prepare(`INSERT INTO assistant_run_rounds
@@ -156,9 +159,6 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 			}
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return assistantRunTrace{}, fmt.Errorf("commit save run: %w", err)
-	}
 	return run, nil
 }
 
@@ -190,7 +190,7 @@ func scanAssistantRun(row assistantRunScanner) (assistantRunTrace, error) {
 // ListRuns returns a conversation's runs in the order they started, as
 // summaries: everything but the rounds, with RoundCount set.
 func (s *assistantStore) ListRuns(conversationID string) ([]assistantRunTrace, error) {
-	defer lockHeld(&s.mu, "assistant.ListRuns")()
+	defer lockAssistantListRuns.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT `+assistantRunColumns+` FROM assistant_runs WHERE conversation_id = ? ORDER BY started_at, rowid`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -227,7 +227,7 @@ func scanAssistantCall(row assistantRunScanner, extra ...any) (assistantToolCall
 // it: a call's arguments are cut short and its result left out, with the
 // result's size in ResultBytes. ok is false when there is no such run.
 func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
-	defer lockHeld(&s.mu, "assistant.GetRun")()
+	defer lockAssistantGetRun.held(&s.mu).release()
 	run, err := scanAssistantRun(s.db.QueryRow(`SELECT `+assistantRunColumns+` FROM assistant_runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantRunTrace{}, false, nil
@@ -287,8 +287,19 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 // answer after assistantFailedRunRetention. A run behind a rated answer is kept
 // while the rating stands; clearing the rating puts it back under the rule.
 func (s *assistantStore) PruneRuns() (int64, error) {
-	defer lockHeld(&s.mu, "assistant.PruneRuns")()
-	now := s.now()
+	var removed int64
+	err := runTxUnderLock(&s.mu, s.db, "assistant.PruneRuns", time.Now, serverVitals, func(tx *sql.Tx) error {
+		var err error
+		removed, err = pruneRunsTx(tx, s.now())
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+func pruneRunsTx(tx *sql.Tx, now time.Time) (int64, error) {
 	// An answered run is as old as its answer, the same age the rating rule
 	// uses; the run's own start stands in when the answer is gone.
 	const expired = `(answer_message_id IS NULL AND started_at < ?)
@@ -296,11 +307,6 @@ func (s *assistantStore) PruneRuns() (int64, error) {
 		    AND COALESCE((SELECT created_at * 1000 FROM messages WHERE id = answer_message_id), started_at) < ?
 		    AND answer_message_id NOT IN (SELECT message_id FROM message_feedback))`
 	failedCutoff, answeredCutoff := now.Add(-assistantFailedRunRetention).UnixMilli(), now.Add(-assistantRunRetention).UnixMilli()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, fmt.Errorf("begin prune runs: %w", err)
-	}
-	defer tx.Rollback()
 	// Mark the answers whose run goes, so a rating knows the lookups are gone.
 	if _, err := tx.Exec(`UPDATE messages SET lookups_pruned = 1 WHERE id IN (SELECT answer_message_id FROM assistant_runs WHERE `+expired+`)`, failedCutoff, answeredCutoff); err != nil {
 		return 0, fmt.Errorf("mark pruned answers: %w", err)
@@ -308,9 +314,6 @@ func (s *assistantStore) PruneRuns() (int64, error) {
 	res, err := tx.Exec(`DELETE FROM assistant_runs WHERE `+expired, failedCutoff, answeredCutoff)
 	if err != nil {
 		return 0, fmt.Errorf("prune runs: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit prune runs: %w", err)
 	}
 	return res.RowsAffected()
 }

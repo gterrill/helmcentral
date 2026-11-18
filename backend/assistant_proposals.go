@@ -259,7 +259,7 @@ func assistantProposalByID(q sqlQueryer, id string) (assistantProposal, error) {
 
 // GetProposal reads one proposal with its current status.
 func (s *assistantStore) GetProposal(id string) (assistantProposal, error) {
-	defer lockHeld(&s.mu, "assistant.GetProposal")()
+	defer lockAssistantGetProposal.held(&s.mu).release()
 	return assistantProposalByID(s.db, id)
 }
 

@@ -143,16 +143,21 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 		return passageDecisionView{}, invalid("unknown state %q", state)
 	}
 
-	defer lockHeld(&s.mu, "assistant.SetOperatorPassageDecision")()
-
-	tx, err := s.db.Begin()
+	var view passageDecisionView
+	err := runTxUnderLock(&s.mu, s.db, "assistant.SetOperatorPassageDecision", time.Now, serverVitals, func(tx *sql.Tx) error {
+		var err error
+		view, err = setOperatorPassageDecisionTx(tx, id, state, rowDate, s.now(), invalid)
+		return err
+	})
 	if err != nil {
-		return passageDecisionView{}, fmt.Errorf("begin passage decision update: %w", err)
+		return passageDecisionView{}, err
 	}
-	defer tx.Rollback()
+	return view, nil
+}
 
+func setOperatorPassageDecisionTx(tx *sql.Tx, id int64, state string, rowDate *string, now time.Time, invalid func(format string, v ...any) error) (passageDecisionView, error) {
 	var payloadJSON string
-	err = tx.QueryRow(`SELECT payload_json FROM passage_decisions WHERE id = ?`, id).Scan(&payloadJSON)
+	err := tx.QueryRow(`SELECT payload_json FROM passage_decisions WHERE id = ?`, id).Scan(&payloadJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return passageDecisionView{}, errPassageDecisionNotFound
 	}
@@ -181,7 +186,7 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 	}
 	res, err := tx.Exec(
 		`UPDATE passage_decisions SET state = ?, row_date = ?, source = 'operator', passage_id = NULL, updated_ms = ? WHERE id = ?`,
-		state, rd, s.now().UnixMilli(), id)
+		state, rd, now.UnixMilli(), id)
 	if err != nil {
 		return passageDecisionView{}, fmt.Errorf("update passage decision: %w", err)
 	}
@@ -189,9 +194,6 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 		return passageDecisionView{}, fmt.Errorf("update passage decision: %w", err)
 	} else if n != 1 {
 		return passageDecisionView{}, errPassageDecisionNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return passageDecisionView{}, fmt.Errorf("commit passage decision update: %w", err)
 	}
 	return passageDecisionView{ID: id, State: state, RowDate: rowDate}, nil
 }
@@ -219,7 +221,7 @@ func scanPassageDecisionRow(sc interface{ Scan(...any) error }) (passageDecision
 
 // PassageDecisionRow returns one decision, or errPassageDecisionNotFound.
 func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error) {
-	defer lockHeld(&s.mu, "assistant.PassageDecisionRow")()
+	defer lockAssistantPassageDecisionRow.held(&s.mu).release()
 	r, err := scanPassageDecisionRow(s.db.QueryRow(`SELECT `+passageDecisionRowColumns+` FROM passage_decisions WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, errPassageDecisionNotFound
@@ -232,7 +234,7 @@ func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error
 
 // LinkedPassageIDs returns each passage id a decision is linked to, once.
 func (s *assistantStore) LinkedPassageIDs() ([]string, error) {
-	defer lockHeld(&s.mu, "assistant.LinkedPassageIDs")()
+	defer lockAssistantLinkedPassageIDs.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT DISTINCT passage_id FROM passage_decisions WHERE passage_id IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("list linked passages: %w", err)
@@ -254,7 +256,7 @@ func (s *assistantStore) LinkedPassageIDs() ([]string, error) {
 // and any older one linked to a passage in passageIDs (the passages the caller
 // woke, or whose passage is gone). The caller narrows these by row date.
 func (s *assistantStore) PassageDecisionsForInference(since time.Time, include []int64, passageIDs []string) ([]passageDecisionRow, error) {
-	defer lockHeld(&s.mu, "assistant.PassageDecisionsForInference")()
+	defer lockAssistantPassageDecisionsForInference.held(&s.mu).release()
 	where, args := `card_created_ms >= ?`, []any{since.UnixMilli()}
 	if len(include) > 0 {
 		marks := strings.TrimSuffix(strings.Repeat("?,", len(include)), ",")
@@ -293,13 +295,20 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 	if len(ups) == 0 {
 		return 0, nil
 	}
-	defer lockHeld(&s.mu, "assistant.ApplyPassageDecisionUpdates")()
-	tx, err := s.db.Begin()
+	changed := 0
+	err := runTxUnderLock(&s.mu, s.db, "assistant.ApplyPassageDecisionUpdates", time.Now, serverVitals, func(tx *sql.Tx) error {
+		var err error
+		changed, err = applyPassageDecisionUpdatesTx(tx, ups, s.now().UnixMilli())
+		return err
+	})
 	if err != nil {
-		return 0, fmt.Errorf("begin passage decision updates: %w", err)
+		return 0, err
 	}
-	defer tx.Rollback()
-	now := s.now().UnixMilli()
+	return changed, nil
+}
+
+func applyPassageDecisionUpdatesTx(tx *sql.Tx, ups []decisionUpdate, now int64) (int, error) {
+	var err error
 	changed := 0
 	for _, u := range ups {
 		var res sql.Result
@@ -332,9 +341,6 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 		}
 		changed += int(n)
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit passage decision updates: %w", err)
-	}
 	return changed, nil
 }
 
@@ -356,7 +362,7 @@ type passagePlan struct {
 // PassagePlans returns the decisions linked to a passage, oldest card first.
 // A stored payload that cannot be read is an error, never a skipped entry.
 func (s *assistantStore) PassagePlans(passageID string) ([]passagePlan, error) {
-	defer lockHeld(&s.mu, "assistant.PassagePlans")()
+	defer lockAssistantPassagePlans.held(&s.mu).release()
 	rows, err := s.db.Query(`SELECT d.id, d.card_created_ms, d.payload_json, d.state, COALESCE(d.row_date, ''), d.source, COALESCE(d.passage_id, ''), d.conversation_id, c.id IS NOT NULL
 		FROM passage_decisions d LEFT JOIN conversations c ON c.id = d.conversation_id
 		WHERE d.passage_id = ? ORDER BY d.card_created_ms, d.id`, passageID)

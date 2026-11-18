@@ -95,7 +95,7 @@ func scanFormDraft(row rowScanner) (assistantFormDraft, error) {
 // CreateFormDraft stores a filled-in form. It belongs to no message yet: the
 // run attaches it when it saves the reply that carries it.
 func (s *assistantStore) CreateFormDraft(d assistantFormDraft, content []byte) (assistantFormDraft, error) {
-	defer lockHeld(&s.mu, "assistant.CreateFormDraft")()
+	defer lockAssistantCreateFormDraft.held(&s.mu).release()
 	if strings.TrimSpace(d.ID) == "" || strings.TrimSpace(d.Title) == "" || len(content) == 0 {
 		return assistantFormDraft{}, errors.New("create form draft: id, title and content are required")
 	}
@@ -154,7 +154,7 @@ func formDraftsForMessages(q sqlQueryer, messageIDs []string) (map[string][]assi
 }
 
 func (s *assistantStore) GetFormDraft(id string) (assistantFormDraft, error) {
-	defer lockHeld(&s.mu, "assistant.GetFormDraft")()
+	defer lockAssistantGetFormDraft.held(&s.mu).release()
 	d, err := scanFormDraft(s.db.QueryRow(`SELECT `+formDraftColumns+` FROM assistant_form_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantFormDraft{}, errFormDraftNotFound
@@ -175,7 +175,7 @@ func (s *assistantStore) FormDraftContent(id string) (assistantFormDraft, []byte
 	if d.Status == formDraftDismissed {
 		return d, nil, errFormDraftDismissed
 	}
-	defer lockHeld(&s.mu, "assistant.FormDraftContent")()
+	defer lockAssistantFormDraftContent.held(&s.mu).release()
 	var content []byte
 	if err := s.db.QueryRow(`SELECT content FROM assistant_form_drafts WHERE id = ?`, id).Scan(&content); err != nil {
 		return assistantFormDraft{}, nil, fmt.Errorf("read form draft content: %w", err)
@@ -187,7 +187,7 @@ func (s *assistantStore) FormDraftContent(id string) (assistantFormDraft, []byte
 // dismissed one does nothing; a saved one is a document now and cannot be
 // dismissed from here.
 func (s *assistantStore) DismissFormDraft(id string) (assistantFormDraft, error) {
-	defer lockHeld(&s.mu, "assistant.DismissFormDraft")()
+	defer lockAssistantDismissFormDraft.held(&s.mu).release()
 	d, err := scanFormDraft(s.db.QueryRow(`SELECT `+formDraftColumns+` FROM assistant_form_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantFormDraft{}, errFormDraftNotFound
@@ -216,7 +216,7 @@ func (s *assistantStore) DismissFormDraft(id string) (assistantFormDraft, error)
 // markFormDraftSaved records the document, and the title and folder the
 // operator saved it under, so a reloaded card says what was kept.
 func (s *assistantStore) markFormDraftSaved(id, documentID, title, folder string) error {
-	defer lockHeld(&s.mu, "assistant.markFormDraftSaved")()
+	defer lockAssistantMarkFormDraftSaved.held(&s.mu).release()
 	res, err := s.db.Exec(`UPDATE assistant_form_drafts SET status = 'saved', document_id = ?, title = ?, folder = ? WHERE id = ? AND status IN ('draft', 'saved')`, documentID, title, folder, id)
 	if err != nil {
 		return err

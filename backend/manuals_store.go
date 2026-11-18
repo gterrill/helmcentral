@@ -142,7 +142,7 @@ func manualSubtreeDocumentCount(q sqlQueryer, folderID string) (int, error) {
 // itself runs; see this file's own top comment on why no SEPARATE
 // manuals-only uniqueness check is needed.
 func (s *documentStore) CreateManual(name string) (manualSummary, error) {
-	defer lockHeld(&s.mu, "documents.CreateManual")()
+	defer lockDocumentsCreateManual.held(&s.mu).release()
 
 	trimmed, err := validateFolderName(name)
 	if err != nil {
@@ -225,7 +225,7 @@ func (s *documentStore) FlagManual(folderID string) (manualSummary, error) {
 // - a demote on a folder the operator doesn't think of as a manual is a
 // real error, not a silent no-op.
 func (s *documentStore) ClearManual(id string) error {
-	defer lockHeld(&s.mu, "documents.ClearManual")()
+	defer lockDocumentsClearManual.held(&s.mu).release()
 
 	var role string
 	err := s.db.QueryRow(`SELECT role FROM document_folders WHERE id = ?`, id).Scan(&role)
@@ -256,7 +256,7 @@ func (s *documentStore) ClearManual(id string) error {
 // second query issued while the first's rows are still open would block
 // forever waiting for a connection that will never free up.
 func (s *documentStore) ListManuals() ([]manualSummary, error) {
-	defer lockHeld(&s.mu, "documents.ListManuals")()
+	defer lockDocumentsListManuals.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT id, name, updated_at FROM document_folders WHERE role = 'manual' ORDER BY lower(name)`)
 	if err != nil {
@@ -298,7 +298,7 @@ func (s *documentStore) ListManuals() ([]manualSummary, error) {
 // root node first. errFolderNotFound if manualID doesn't exist,
 // errNotAManual if it exists but isn't currently role='manual'.
 func (s *documentStore) ManualTree(manualID string) (manualTreeNode, error) {
-	defer lockHeld(&s.mu, "documents.ManualTree")()
+	defer lockDocumentsManualTree.held(&s.mu).release()
 
 	var name, role string
 	var sortIndex int
@@ -430,7 +430,7 @@ func (s *documentStore) manualTreeChildren(q sqlQueryer, parentID string) ([]man
 // manualTreeChildren (which interleaves folders and documents, and
 // recurses): this needs exactly one level, folders only.
 func (s *documentStore) ManualSectionNames(manualID string) ([]string, error) {
-	defer lockHeld(&s.mu, "documents.ManualSectionNames")()
+	defer lockDocumentsManualSectionNames.held(&s.mu).release()
 
 	rows, err := s.db.Query(`SELECT name FROM document_folders WHERE parent_id = ? ORDER BY sort_index, lower(name)`, manualID)
 	if err != nil {
