@@ -1459,8 +1459,8 @@ Settings → Mate shows the list under the standing notes, with the day each fac
 was kept, in the boat's time. Use **Edit** and **Remove** on a fact, or **Add
 fact** to write one yourself. A read-only session can't open Settings, so it
 can't see or change the list there, though Mate still reads the whole list in
-every conversation. Outside assistants that you've connected can read the list
-as part of the boat's context, but they can't change it.
+every conversation. The list stays with Mate. Outside assistants that you've
+connected never see it.
 
 If Mate can't read the list, it says so in that conversation or review instead
 of carrying on as though no facts were kept.

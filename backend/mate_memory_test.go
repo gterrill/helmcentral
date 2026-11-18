@@ -523,20 +523,25 @@ func TestReviewsReadMemoriesButCannotSaveThem(t *testing.T) {
 
 // The outside assistants' context.
 
-func TestBoatContextListsTheMemoriesReadOnly(t *testing.T) {
-	d := contextTestDeps(t)
+func seedFuelPolisherMemory(t *testing.T) {
+	t.Helper()
 	if err := globalDocumentStore.RunTx("seed", func(tx *sql.Tx, now time.Time) error {
 		_, err := createMateMemoryTx(tx, "The fuel polisher has no sampling port.", now)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestBoatContextCarriesNoMemories(t *testing.T) {
+	d := contextTestDeps(t)
+	seedFuelPolisherMemory(t)
 	md, err := buildBoatContext(d, mcpAllOn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(md, "## Facts the skipper asked Mate to keep") || !strings.Contains(md, "The fuel polisher has no sampling port.") {
-		t.Errorf("the context lacks the memories:\n%s", md)
+	if strings.Contains(md, "Facts the skipper asked Mate to keep") || strings.Contains(md, "sampling port") {
+		t.Errorf("the context carries the kept facts:\n%s", md)
 	}
 	if e, ok := mcpPolicyFor("remember_fact"); !ok || e.Status != mcpNever {
 		t.Errorf("no outside tool may change a memory: %+v %v", e, ok)
