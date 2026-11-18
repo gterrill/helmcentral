@@ -35,7 +35,9 @@ machine_lock_reexec() {
 	fi
 	# `|| _code=$?` keeps a caller running under `set -e` alive on the busy exit.
 	_code=0
-	lockf -k -t 0 "$_lockfile" "$@" || _code=$?
+	# -s drops lockf's own "already locked" line so the output reads as ours
+	# alone; open and usage failures still print.
+	lockf -s -k -t 0 "$_lockfile" "$@" || _code=$?
 	[ "$_code" -eq 75 ] || exit "$_code"
 	echo "$_label: waiting on another $_what"
 	exec lockf -k "$_lockfile" "$@"
