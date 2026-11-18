@@ -2,13 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,9 +26,10 @@ var validAuthModes = map[string]bool{
 
 // checkAuthModeAtStartup resolves and validates auth.mode, and for
 // mode:signalk probes SignalK's security status — waiting while SignalK can't
-// be reached, and failing fast if it answers that security is off, since "Helmcentral requires login" against a
-// server that has no login to require is an unsatisfiable combination that
-// must not boot into a half-state (docs/adr/0040).
+// be reached, and failing fast if it answers that security is off, since
+// "Helmcentral requires login" against a server that has no login to require
+// is an unsatisfiable combination that must not boot into a half-state
+// (docs/adr/0040).
 //
 // This function never exits the process itself — main() is the only caller
 // that turns a non-nil error into log.Fatalf, exactly the pattern every
@@ -46,60 +52,111 @@ type signalKUnreachableError struct{ err error }
 func (e *signalKUnreachableError) Error() string { return e.err.Error() }
 func (e *signalKUnreachableError) Unwrap() error { return e.err }
 
+// isRetryableSignalKTransportError reports whether a failed request to SignalK
+// is one that can clear by itself because SignalK, or the network to it, is not
+// up yet: connection refused, host or network unreachable, connection reset,
+// timeouts, and DNS failures that are temporary or timeouts. Everything else
+// is a fault in the configured address (bad URL or scheme, TLS or certificate
+// errors, a host name that does not exist) that waiting will not mend.
+func isRetryableSignalKTransportError(err error) bool {
+	var (
+		certVerify  *tls.CertificateVerificationError
+		unknownAuth x509.UnknownAuthorityError
+		hostname    x509.HostnameError
+		certInvalid x509.CertificateInvalidError
+		recordHdr   tls.RecordHeaderError
+	)
+	if errors.As(err, &certVerify) || errors.As(err, &unknownAuth) || errors.As(err, &hostname) ||
+		errors.As(err, &certInvalid) || errors.As(err, &recordHdr) {
+		return false
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		if dnsErr.IsNotFound {
+			return false
+		}
+		return dnsErr.IsTimeout || dnsErr.IsTemporary
+	}
+
+	for _, errno := range []syscall.Errno{
+		syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH,
+		syscall.ECONNRESET, syscall.ETIMEDOUT,
+	} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
 // checkAuthModeAtStartupWith is checkAuthModeAtStartup with the probe and the
 // retry interval injected, so tests need neither a server nor a real wait.
+//
+// settings.yaml is read again on every try, so a corrected SignalK address, or
+// auth.mode changed away from signalk, takes effect while startup waits. A
+// settings file that cannot be read refuses startup; it is never replaced with
+// the default SignalK address. The default applies only when the signalk
+// section is absent from a file that reads fine.
 func checkAuthModeAtStartupWith(settingsPath string, probe func(signalkURL string) (bool, error), retryInterval time.Duration) (mode string, err error) {
-	mode = resolveAuthMode(settingsPath)
-	if !validAuthModes[mode] {
-		return mode, fmt.Errorf(
-			"invalid auth.mode %q in settings.yaml — must be %q or %q (see docs/adr/0040-signalk-delegated-authentication.md)",
-			mode, authModeSignalK, authModeNone,
-		)
-	}
-
-	if mode != authModeSignalK {
-		return mode, nil
-	}
-
-	address, port, loadErr := loadSignalKSettings(settingsPath)
-	if loadErr != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-
-	// An unreachable SignalK is waited on, not fatal: after a power cut it is
-	// usually still starting. Nothing proceeds as if login worked; every
-	// other outcome is judged on the first answer.
 	waited := false
-	var enabled bool
 	for {
-		var probeErr error
-		enabled, probeErr = probe(signalkURL)
-		if probeErr == nil {
-			break
+		settings, readErr := readSettings(settingsPath)
+		if readErr != nil {
+			return "", fmt.Errorf("could not read %s to check auth.mode: %w", settingsPath, readErr)
 		}
-		var unreachable *signalKUnreachableError
-		if !errors.As(probeErr, &unreachable) {
-			return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
+		mode = authModeFromSettings(settings)
+		if !validAuthModes[mode] {
+			return mode, fmt.Errorf(
+				"invalid auth.mode %q in settings.yaml — must be %q or %q (see docs/adr/0040-signalk-delegated-authentication.md)",
+				mode, authModeSignalK, authModeNone,
+			)
 		}
-		log.Printf("auth: SignalK at %s is not answering (%v); login can't start until it does, retrying in %s", signalkURL, probeErr, retryInterval)
-		waited = true
-		time.Sleep(retryInterval)
+		if mode != authModeSignalK {
+			return mode, nil
+		}
+
+		address, port := signalKAddressFromSettings(settings)
+		signalkURL := buildSignalKURL(address, port)
+
+		// An unreachable SignalK is waited on, not fatal: after a power cut it
+		// is usually still starting. Nothing proceeds as if login worked;
+		// every other outcome is judged on the first answer.
+		enabled, probeErr := probe(signalkURL)
+		if probeErr != nil {
+			var unreachable *signalKUnreachableError
+			if !errors.As(probeErr, &unreachable) {
+				return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
+			}
+			log.Printf("auth: SignalK at %s is not answering (%v); login can't start until it does, trying again %s after each failed try", signalkURL, probeErr, retryInterval)
+			waited = true
+			time.Sleep(retryInterval)
+			continue
+		}
+		if waited {
+			log.Printf("auth: SignalK at %s is answering after waiting for it", signalkURL)
+		}
+		return mode, securityEnabledError(signalkURL, enabled)
 	}
-	if waited {
-		log.Printf("auth: SignalK at %s is answering after waiting for it", signalkURL)
-	}
+}
+
+// securityEnabledError is nil when SignalK reports security on, and the
+// refusal to start when it reports security off.
+func securityEnabledError(signalkURL string, enabled bool) error {
 	if !enabled {
-		return mode, fmt.Errorf(
+		return fmt.Errorf(
 			"auth.mode is %q but SignalK at %s reports security is disabled — this combination is unsatisfiable. "+
 				"Enable security on the SignalK server (Server -> Security), or set auth.mode: none in settings.yaml "+
 				"to run Helmcentral without authentication",
 			authModeSignalK, signalkURL,
 		)
 	}
-
-	return mode, nil
+	return nil
 }
 
 // probeSignalKSecurityEnabled reports whether SignalK's security subsystem
@@ -125,7 +182,11 @@ func probeSignalKSecurityEnabled(signalkURL string) (bool, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return false, &signalKUnreachableError{err: fmt.Errorf("could not reach signalk at %s: %w", signalkURL, err)}
+		reachErr := fmt.Errorf("could not reach signalk at %s: %w", signalkURL, err)
+		if isRetryableSignalKTransportError(err) {
+			return false, &signalKUnreachableError{err: reachErr}
+		}
+		return false, reachErr
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)

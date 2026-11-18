@@ -11,7 +11,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
 - **Outside assistants no longer see the facts Mate keeps.** The list under
   the standing notes in Settings → Mate now stays with Mate. Claude, ChatGPT
@@ -26,6 +26,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   systemd install, copy the updated `helmcentral.service` over the old one and
   run `sudo systemctl daemon-reload`, so that five failed starts in two
   minutes really does stop the restarts.
+- **On a systemd install, copy over the new `helmcentral.service`.** With login
+  set to SignalK, Helmcentral now waits for SignalK after a power cut instead
+  of exiting. It tries again 5 seconds after each failed try and says so in the
+  log, then carries on once SignalK answers. If SignalK answers with its
+  security switched off, or the address in `settings.yaml` can't work, it still
+  refuses to start. What to do: copy the updated `helmcentral.service` over the
+  old one and run `sudo systemctl daemon-reload`. Without it the restart limit
+  never took effect. Docker installs need nothing.
+
+### Changed
 
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.

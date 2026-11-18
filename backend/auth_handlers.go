@@ -48,6 +48,17 @@ func resolveAuthMode(settingsPath string) string {
 	return mode
 }
 
+// authModeFromSettings is resolveAuthMode for settings already read, so the
+// startup check can tell a read failure from an absent auth.mode.
+func authModeFromSettings(settings map[string]any) string {
+	authMap, _ := settings["auth"].(map[string]any)
+	mode := strings.TrimSpace(coerceString(authMap["mode"]))
+	if mode == "" {
+		return authModeNone
+	}
+	return mode
+}
+
 func authModeHandler(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	return c.JSON(http.StatusOK, map[string]string{"mode": resolveAuthMode(settingsPath)})

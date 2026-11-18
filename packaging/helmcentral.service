@@ -15,9 +15,12 @@ After=network-online.target signalk.service
 # webpush-subscriptions.sqlite/plugin_overrides.sqlite still sitting in the
 # data directory, which needs the one-time `helmcentral migrate-db` command
 # run first. Cap restarts so a genuinely broken state dir surfaces as a
-# failed unit instead of an endless loop. systemd reads these two settings
-# only in [Unit]; in [Service] they are ignored. A SignalK that is slow to
-# start does not use up the cap: Helmcentral waits for it inside one start.
+# failed unit instead of an endless loop. StartLimitIntervalSec= is read only
+# in [Unit]; in [Service] systemd ignores it. StartLimitBurst= (and the legacy
+# StartLimitInterval=) still work in [Service] for compatibility, so the old
+# unit ran with a burst of 5 over the default 10 s interval, which restarts
+# 5 s apart never reached. A SignalK that is slow to start does not use up the
+# cap: Helmcentral waits for it inside one start.
 StartLimitIntervalSec=120
 StartLimitBurst=5
 

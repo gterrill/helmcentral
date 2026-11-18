@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1111,6 +1116,10 @@ func TestProbeSignalKSecurityEnabled_UnreachableSurfacesErrorNotSwallowed(t *tes
 	if err == nil {
 		t.Fatal("expected an unreachable SignalK to surface an explicit error rather than a guessed answer")
 	}
+	var unreachableErr *signalKUnreachableError
+	if !errors.As(err, &unreachableErr) {
+		t.Fatalf("expected a closed port to be a retryable signalKUnreachableError, got: %v", err)
+	}
 }
 
 // ── SignalK startup wait ─────────────────────────────────────────────────────
@@ -1194,14 +1203,159 @@ func TestCheckAuthModeAtStartup_NonTransportErrorDoesNotRetry(t *testing.T) {
 	}
 }
 
-func TestProbeSignalKSecurityEnabled_UnreachableIsATransportError(t *testing.T) {
-	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	url := unreachable.URL
-	unreachable.Close()
+// Only a network failure that can clear by itself is waited on. A fault in the
+// configured address never will, so it must refuse at once and name the address.
+func TestProbeSignalKSecurityEnabled_PermanentFaultsAreNotRetryable(t *testing.T) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer tlsSrv.Close()
 
-	_, err := probeSignalKSecurityEnabled(url)
-	var unreachableErr *signalKUnreachableError
-	if !errors.As(err, &unreachableErr) {
-		t.Fatalf("expected a signalKUnreachableError, got: %v", err)
+	cases := map[string]string{
+		"unsupported scheme": "ftp://127.0.0.1:1",
+		"unparseable URL":    "http://127.0.0.1:bad",
+		"untrusted TLS cert": tlsSrv.URL,
+	}
+	for name, address := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := probeSignalKSecurityEnabled(address)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			var unreachable *signalKUnreachableError
+			if errors.As(err, &unreachable) {
+				t.Fatalf("a permanent fault must not be retried, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), address) {
+				t.Fatalf("expected the error to name %q, got: %v", address, err)
+			}
+		})
+	}
+}
+
+func TestIsRetryableSignalKTransportError(t *testing.T) {
+	wrap := func(err error) error {
+		return &url.Error{Op: "Post", URL: "http://signalk.test", Err: &net.OpError{Op: "dial", Err: err}}
+	}
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"connection refused", wrap(os.NewSyscallError("connect", syscall.ECONNREFUSED)), true},
+		{"host unreachable", wrap(os.NewSyscallError("connect", syscall.EHOSTUNREACH)), true},
+		{"network unreachable", wrap(os.NewSyscallError("connect", syscall.ENETUNREACH)), true},
+		{"connection reset", wrap(os.NewSyscallError("read", syscall.ECONNRESET)), true},
+		{"timed out", wrap(os.NewSyscallError("connect", syscall.ETIMEDOUT)), true},
+		{"deadline exceeded", &url.Error{Op: "Post", URL: "http://signalk.test", Err: context.DeadlineExceeded}, true},
+		{"EOF before a response", &url.Error{Op: "Post", URL: "http://signalk.test", Err: io.EOF}, true},
+		{"DNS timeout", wrap(&net.DNSError{Err: "i/o timeout", IsTimeout: true}), true},
+		{"DNS temporary failure", wrap(&net.DNSError{Err: "server misbehaving", IsTemporary: true}), true},
+		{"DNS not found", wrap(&net.DNSError{Err: "no such host", Name: "nowhere.test", IsNotFound: true}), false},
+		{"DNS other", wrap(&net.DNSError{Err: "refused"}), false},
+		{"x509 unknown authority", &url.Error{Op: "Post", URL: "https://signalk.test", Err: x509.UnknownAuthorityError{}}, false},
+		{"TLS record header", &url.Error{Op: "Post", URL: "https://signalk.test", Err: tls.RecordHeaderError{Msg: "bad"}}, false},
+		{"unsupported scheme", &url.Error{Op: "Post", URL: "ftp://signalk.test", Err: errors.New("unsupported protocol scheme \"ftp\"")}, false},
+		{"plain error", errors.New("something else"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRetryableSignalKTransportError(tc.err); got != tc.want {
+				t.Fatalf("isRetryableSignalKTransportError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// The settings are read again on every try, so a fix made while Helmcentral
+// waits takes effect without a restart.
+func TestCheckAuthModeAtStartup_RereadsSignalKAddressWhileWaiting(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://wrong.test", "signalk")
+	var seen []string
+	probe := func(u string) (bool, error) {
+		seen = append(seen, u)
+		if len(seen) == 1 {
+			content := "signalk:\n  address: http://corrected.example.test\n  port: 3000\nauth:\n  mode: signalk\n"
+			if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
+				t.Fatalf("rewrite settings: %v", err)
+			}
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		}
+		return true, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	want := []string{"http://wrong.test", "http://corrected.example.test"}
+	if len(seen) != 2 || seen[0] != want[0] || seen[1] != want[1] {
+		t.Fatalf("expected probes at %v, got %v", want, seen)
+	}
+}
+
+func TestCheckAuthModeAtStartup_StopsWaitingWhenModeChangesAwayFromSignalK(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		content := "signalk:\n  address: http://signalk.test\n  port: 3000\nauth:\n  mode: none\n"
+		if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("rewrite settings: %v", err)
+		}
+		return false, &signalKUnreachableError{err: errors.New("connection refused")}
+	}
+
+	mode, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected startup to carry on in mode none, got: %v", err)
+	}
+	if mode != authModeNone {
+		t.Fatalf("expected mode %q, got %q", authModeNone, mode)
+	}
+	if calls != 1 {
+		t.Fatalf("expected no probe after the mode changed, got %d", calls)
+	}
+}
+
+// An unreadable settings file must refuse to start, not fall back to the
+// default SignalK address (AGENTS.md Fallback Policy).
+func TestCheckAuthModeAtStartup_SettingsLoadFailureSurfaces(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte("auth: [unclosed\n"), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	_, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an unreadable settings file to refuse startup")
+	}
+	if calls != 0 {
+		t.Fatalf("expected no probe against a guessed address, got %d", calls)
+	}
+}
+
+// An absent signalk section is not a read failure: the documented default
+// address applies.
+func TestCheckAuthModeAtStartup_AbsentSignalKSettingUsesDocumentedDefault(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte("auth:\n  mode: signalk\n"), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	var seen string
+	probe := func(u string) (bool, error) {
+		seen = u
+		return true, nil
+	}
+
+	if _, err := checkAuthModeAtStartupWith(settingsPath, probe, time.Millisecond); err != nil {
+		t.Fatalf("expected startup to succeed, got: %v", err)
+	}
+	if want := buildSignalKURL(defaultSignalKAddress, defaultSignalKPort); seen != want {
+		t.Fatalf("expected the default address %q, got %q", want, seen)
 	}
 }
