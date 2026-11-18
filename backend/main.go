@@ -147,7 +147,8 @@ func main() {
 
 	// auth.mode validation. mode:none (this release's default) only logs a
 	// warning naming the risk; mode:signalk additionally probes SignalK's
-	// security status once and fails fast if it's off, since "Helmcentral
+	// security status. It waits while SignalK can't be reached, and refuses
+	// to start if SignalK answers that security is off, since "Helmcentral
 	// requires login" against a server with no login to require is an
 	// unsatisfiable combination that must not boot into a half-state.
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")

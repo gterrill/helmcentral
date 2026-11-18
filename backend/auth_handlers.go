@@ -41,7 +41,19 @@ const (
 // Read per request rather than cached, so a change takes effect without a
 // restart. Only the startup security probe is one-shot.
 func resolveAuthMode(settingsPath string) string {
-	mode := loadSettingString(settingsPath, []string{"auth", "mode"})
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return authModeNone
+	}
+	return authModeFromSettings(settings)
+}
+
+// authModeFromSettings is the mode rule for settings already read: an absent
+// or blank auth.mode is none. The startup check uses it directly so it can
+// tell a read failure from an absent auth.mode.
+func authModeFromSettings(settings map[string]any) string {
+	authMap, _ := settings["auth"].(map[string]any)
+	mode := strings.TrimSpace(coerceString(authMap["mode"]))
 	if mode == "" {
 		return authModeNone
 	}
