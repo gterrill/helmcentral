@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-11-03). Extends [ADR 0146](0146-mate-proposes-the-operator-applies.md) (Mate proposes and the
+Accepted (2026-11-03). Amended 2026-11-18: the kept facts no longer reach
+outside assistants (see "Managing and outside assistants"). Extends [ADR 0146](0146-mate-proposes-the-operator-applies.md) (Mate proposes and the
 operator applies) and [ADR 0158](0158-mate-changes-records-through-changesets.md) (the changeset that carries
 every proposal). Builds on [ADR 0161](0161-mate-recalls-earlier-conversations.md) (recall by search) and
 [ADR 0227](0227-watches.md) (the review of a watch report).

@@ -203,6 +203,11 @@ func TestMCPRoundTrip_InitializeListCallAndReadResource(t *testing.T) {
 func TestMCPRoundTrip_KeptFactsAreNotExposed(t *testing.T) {
 	env := newMCPTestEnv(t)
 	seedFuelPolisherMemory(t)
+	// The fact is in the store the server reads, so its absence below means
+	// the context leaves it out, not that the server never saw it.
+	if kept, err := readMateMemories(globalDocumentStore); err != nil || len(kept) != 1 {
+		t.Fatalf("seeded facts = %v, %v; want 1", kept, err)
+	}
 	_, secret, _ := env.store.CreateToken("Claude Code", mcpDefaultTools())
 	cs := env.connect(t, secret)
 

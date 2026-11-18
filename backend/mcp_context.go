@@ -133,9 +133,6 @@ func buildBoatContext(d assistantToolDeps, on func(string) bool) (string, error)
 		b.WriteString("## Alarm rules\n\n")
 		mcpWriteAlarmRules(&b, d)
 	}
-	// The facts Mate keeps are for Mate alone: they never go out to an outside
-	// assistant, whatever its token allows.
-
 	return b.String(), nil
 }
 

@@ -228,7 +228,7 @@ func mateMemorySnapshot(m mateMemory, loc *time.Location) recordSnapshot {
 }
 
 // mateMemoryKeptDay is the day a fact was kept in the boat's zone, the same
-// words in the prompt, the outside assistants' context and the record.
+// words in the prompt and the record.
 func mateMemoryKeptDay(m mateMemory, loc *time.Location) string {
 	return m.CreatedAt.In(locOrUTC(loc)).Format("2 Jan 2006")
 }
@@ -822,4 +822,3 @@ func mateMemoriesPromptSection(memories []mateMemory, loc *time.Location, withID
 	}
 	return b.String()
 }
-
