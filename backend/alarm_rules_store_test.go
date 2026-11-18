@@ -481,6 +481,32 @@ func TestACommittedWriteWhoseReloadFailsSaysItWasSaved(t *testing.T) {
 	}
 }
 
+// The operator reads these in the alarm rule form, so they keep the plain
+// words of the write, never the op's vitals name.
+func TestAlarmRuleWriteErrorsReadInPlainWords(t *testing.T) {
+	store := newTestDocumentStore(t)
+	err := store.writeAlarmRules(lockAlarmRulesCreate, func(tx *sql.Tx, _ time.Time) error {
+		_, err := tx.Exec(`DROP TABLE alarm_rule_seeded_sets`)
+		return err
+	})
+	if !errors.Is(err, errAlarmRulesNotReloaded) || !strings.HasPrefix(err.Error(), "create alarm rule: ") {
+		t.Errorf("reload failure = %v, want it to start \"create alarm rule: \"", err)
+	}
+
+	old := globalDocumentStore
+	globalDocumentStore = store
+	t.Cleanup(func() { globalDocumentStore = old })
+	closed := newTestDocumentStore(t)
+	if err := closed.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	globalDocumentStore = closed
+	err = seedAlarmRuleSet("plain-words-marker", nil, false)
+	if err == nil || !strings.HasPrefix(err.Error(), "seed alarm rules plain-words-marker: begin: ") {
+		t.Errorf("seed failure = %v, want the rule-set marker and \"begin\"", err)
+	}
+}
+
 func TestAnEmptyNotifyListRoundTripsAsItWas(t *testing.T) {
 	withTempAlarmRules(t)
 	now := time.Now().UTC()

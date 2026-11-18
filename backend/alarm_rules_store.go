@@ -318,13 +318,19 @@ func reloadAlarmRulesCache(q sqlQueryer) error {
 // reloads the in-memory copy before the store lock is released, so two
 // writers cannot leave the copy older than the database.
 func (s *documentStore) writeAlarmRules(op *lockOp, fn func(tx *sql.Tx, now time.Time) error) error {
+	return s.writeAlarmRulesAs(op, op.label, fn)
+}
+
+// writeAlarmRulesAs is writeAlarmRules with the words an error reads with
+// passed in: the seed names its rule set there.
+func (s *documentStore) writeAlarmRulesAs(op *lockOp, label string, fn func(tx *sql.Tx, now time.Time) error) error {
 	h := s.holdForTx(op)
 	defer h.release()
-	if err := s.runTxLocked(h, fn); err != nil {
+	if err := s.runTxLockedAs(h, label, fn); err != nil {
 		return err
 	}
 	if err := reloadAlarmRulesCache(s.db); err != nil {
-		return fmt.Errorf("%s: %w (%v)", op.name, errAlarmRulesNotReloaded, err)
+		return fmt.Errorf("%s: %w (%v)", label, errAlarmRulesNotReloaded, err)
 	}
 	return nil
 }
@@ -375,7 +381,7 @@ func seedAlarmRuleSet(marker string, rules []alarmRule, fixedIDs bool) error {
 		rule.SeededBy = marker
 		prepared[i] = rule
 	}
-	return store.writeAlarmRules(lockAlarmRulesSeed, func(tx *sql.Tx, now time.Time) error {
+	return store.writeAlarmRulesAs(lockAlarmRulesSeed, "seed alarm rules "+marker, func(tx *sql.Tx, now time.Time) error {
 		sets, err := alarmSeededSetsQ(tx)
 		if err != nil {
 			return err

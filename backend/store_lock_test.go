@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -164,15 +165,75 @@ func TestLockOpHeld_RecordsOnlyAfterTheMutexIsFree(t *testing.T) {
 	}
 }
 
+// It declares into a registry of its own, so the process-wide one is not left
+// holding the name and the test can run again under -count.
 func TestNewLockOp_PanicsOnARepeatedName(t *testing.T) {
+	var reg lockOpSet
 	name := "t.repeated.once"
-	newLockOp(name)
+	reg.declare(name)
 	defer func() {
 		if recover() == nil {
 			t.Error("a second op with the same name did not panic")
 		}
 	}()
-	newLockOp(name)
+	reg.declare(name)
+}
+
+func TestRunTxLocked_PanicsWhenTheHoldIsOnAnotherMutex(t *testing.T) {
+	store := newTestDocumentStore(t)
+	var other sync.Mutex
+	other.Lock()
+	defer other.Unlock()
+	h := lockedForTest(&other)
+	defer func() {
+		if recover() == nil {
+			t.Error("runTxLocked ran under a hold on another store's mutex")
+		}
+	}()
+	_ = store.runTxLocked(h, func(tx *sql.Tx, _ time.Time) error { return nil })
+}
+
+func TestHeldLock_RunTxAfterReleasePanics(t *testing.T) {
+	db := openOneConnPool(t)
+	var mu sync.Mutex
+	h := makeLockOp("t.released").heldTimed(&mu, time.Now, newVitalsRegistry(time.Now))
+	h.release()
+	mu.Lock() // someone else holds the mutex now, so the hold itself is what is stale
+	defer mu.Unlock()
+	defer func() {
+		if recover() == nil {
+			t.Error("a released hold ran a transaction")
+		}
+	}()
+	_ = h.runTx(db, func(tx *sql.Tx) error { return nil })
+}
+
+// A failure the operator can read keeps its plain wording; the op's name is for
+// vitals keys only.
+func TestRunTx_BeginFailureReadsInPlainWords(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := store.RunTx(lockDocumentsCreateZone, func(tx *sql.Tx, _ time.Time) error { return nil })
+	if err == nil || !strings.HasPrefix(err.Error(), "create zone: begin: ") {
+		t.Errorf("err = %v, want it to start \"create zone: begin: \"", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "documents.") {
+		t.Errorf("err = %v names the op", err)
+	}
+}
+
+func TestAssistantTx_BeginFailureKeepsItsOwnWording(t *testing.T) {
+	db := openOneConnPool(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	err := runTxUnderLock(lockAssistantSetMessageFeedback, &mu, db, time.Now, newVitalsRegistry(time.Now), func(tx *sql.Tx) error { return nil })
+	if err == nil || !strings.HasPrefix(err.Error(), "begin set feedback: ") {
+		t.Errorf("err = %v, want it to start \"begin set feedback: \"", err)
+	}
 }
 
 func TestRunTxUnderLock_ReturnsTheInnerErrorUnlocksAndRecords(t *testing.T) {

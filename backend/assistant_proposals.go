@@ -483,7 +483,7 @@ func recordProposalStaleLocked(records *documentStore, h *heldLock, id, reason s
 		marked  bool
 		current assistantProposal
 	)
-	if err := records.runTxLocked(h, func(tx *sql.Tx, now time.Time) error {
+	if err := records.runTxLockedAs(h, "mark proposal stale", func(tx *sql.Tx, now time.Time) error {
 		var err error
 		marked, current, err = markProposalStaleTx(tx, now, id, reason)
 		return err

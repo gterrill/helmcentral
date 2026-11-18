@@ -36,9 +36,9 @@ import (
 // RunTx runs fn in one transaction on this store's connection, holding the
 // store mutex for its duration, and commits only when fn returns nil. now is
 // the store's own clock, read once per transaction; fn uses it rather than
-// calling s.now() again. op names the write for server vitals and in a begin
-// or commit failure ("documents.Insert: begin: ..."); errors fn returns pass
-// through as they are. fn must not call another documentStore method: they
+// calling s.now() again. op names the write for server vitals only; a begin or
+// commit failure reads in the op's plain words ("create zone: begin: ..."),
+// and errors fn returns pass through as they are. fn must not call another documentStore method: they
 // take the same mutex. A method that already holds s.mu (because it reads
 // something before deciding to write) takes it through the same op and calls
 // runTxLocked instead.
@@ -60,10 +60,19 @@ func (s *documentStore) holdForTx(op *lockOp) *heldLock {
 
 // runTxLocked is RunTx for a caller that already holds s.mu through h, the
 // lock it took with the same op. It never takes the mutex itself, and panics
-// when the mutex is free: calling it without s.mu held is a bug that would let
-// two writers share the connection.
+// unless h is a live hold on s.mu: a hold on another store's mutex, or one
+// already released, would let two writers share the connection.
 func (s *documentStore) runTxLocked(h *heldLock, fn func(tx *sql.Tx, now time.Time) error) error {
-	return h.runTx(s.db, func(tx *sql.Tx) error {
+	return s.runTxLockedAs(h, "", fn)
+}
+
+// runTxLockedAs is runTxLocked with label, when not empty, as the plain words
+// of a begin or commit failure in place of the op's own.
+func (s *documentStore) runTxLockedAs(h *heldLock, label string, fn func(tx *sql.Tx, now time.Time) error) error {
+	if h.mu != &s.mu {
+		panic("store transaction run under a hold on another mutex (" + h.op.name + ")")
+	}
+	return h.runTxAs(s.db, label, func(tx *sql.Tx) error {
 		return fn(tx, s.now())
 	})
 }
@@ -83,27 +92,55 @@ const lockOpLimit = 400
 // one, and newLockOp refuses a name declared twice.
 type lockOp struct {
 	name, waitKey, holdKey, txKey string
+
+	// Plain words for the operator-visible errors of a write that runs a
+	// transaction. The name above is for vitals keys only and never appears in
+	// error text. label prefixes a begin or commit failure as "<label>: begin";
+	// begin and commit, when set, replace that wording whole.
+	label, begin, commit string
 }
 
-var lockOpRegistry struct {
+// said sets the plain words a begin or commit failure of this op reads with,
+// and returns the op so a declaration can chain it.
+func (o *lockOp) said(label string) *lockOp {
+	o.label = label
+	return o
+}
+
+// saidAs is said for the writes whose begin and commit errors never read
+// "<label>: begin": it sets both texts whole.
+func (o *lockOp) saidAs(begin, commit string) *lockOp {
+	o.begin, o.commit = begin, commit
+	return o
+}
+
+// lockOpSet is a set of declared ops. The program has one, lockOpRegistry; a
+// test that checks the refusal of a repeated name uses its own.
+type lockOpSet struct {
 	mu  sync.Mutex
 	ops []*lockOp
 }
 
+var lockOpRegistry lockOpSet
+
 // newLockOp declares an op. It panics on a repeated name or past lockOpLimit.
 func newLockOp(name string) *lockOp {
-	lockOpRegistry.mu.Lock()
-	defer lockOpRegistry.mu.Unlock()
-	if len(lockOpRegistry.ops) >= lockOpLimit {
+	return lockOpRegistry.declare(name)
+}
+
+func (r *lockOpSet) declare(name string) *lockOp {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.ops) >= lockOpLimit {
 		panic(fmt.Sprintf("more than %d lock ops; raise lockOpLimit on purpose (%s)", lockOpLimit, name))
 	}
-	for _, o := range lockOpRegistry.ops {
+	for _, o := range r.ops {
 		if o.name == name {
 			panic("lock op declared twice: " + name)
 		}
 	}
 	o := makeLockOp(name)
-	lockOpRegistry.ops = append(lockOpRegistry.ops, o)
+	r.ops = append(r.ops, o)
 	return o
 }
 
@@ -128,6 +165,10 @@ type heldLock struct {
 	// there was one.
 	txTime time.Duration
 	txRan  bool
+
+	// released is set by release: a hold that has let go of its mutex must not
+	// run a transaction, even if another writer has since taken the mutex.
+	released bool
 }
 
 // lockRecorderOverride, nil outside tests, replaces serverVitals as the place
@@ -162,6 +203,7 @@ func (o *lockOp) heldTimed(mu *sync.Mutex, clock func() time.Time, reg vitalsRec
 // when a transaction ran under it, the transaction's time.
 func (h *heldLock) release() {
 	d := h.clock().Sub(h.since)
+	h.released = true
 	h.mu.Unlock()
 	h.reg.record(h.op.waitKey, h.wait)
 	if h.txRan {
@@ -173,10 +215,20 @@ func (h *heldLock) release() {
 // runTx runs fn in one transaction on db, under the mutex h holds. It times
 // begin to commit or rollback into h, to be recorded as tx.time.<op> when h is
 // released; commits only when fn returns nil; and wraps a begin or commit
-// failure with the op's name, while fn's own error passes through as it is. It
-// panics when the mutex is free: running without it would let two writers
-// share the connection.
+// failure in the op's plain words (never its name), while fn's own error
+// passes through as it is. It panics when h has been released or the mutex is
+// free: running without it would let two writers share the connection.
 func (h *heldLock) runTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
+	return h.runTxAs(db, "", fn)
+}
+
+// runTxAs is runTx with label, when not empty, in place of the op's own words
+// for a begin or commit failure: a hold that runs two kinds of write says which
+// one failed.
+func (h *heldLock) runTxAs(db *sql.DB, label string, fn func(tx *sql.Tx) error) error {
+	if h.released {
+		panic("store transaction run after its lock was released (" + h.op.name + ")")
+	}
 	if h.mu.TryLock() {
 		h.mu.Unlock()
 		panic("store transaction run without the store mutex held (" + h.op.name + ")")
@@ -188,7 +240,7 @@ func (h *heldLock) runTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
 	}()
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("%s: begin: %w", h.op.name, err)
+		return h.txFailure("begin", label, err)
 	}
 	defer tx.Rollback()
 
@@ -196,9 +248,27 @@ func (h *heldLock) runTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", h.op.name, err)
+		return h.txFailure("commit", label, err)
 	}
 	return nil
+}
+
+// txFailure words a begin or commit failure as origin/main did: "<label>:
+// begin: ...", or the op's own whole text.
+func (h *heldLock) txFailure(stage, label string, err error) error {
+	whole := h.op.begin
+	if stage == "commit" {
+		whole = h.op.commit
+	}
+	switch {
+	case label != "":
+		return fmt.Errorf("%s: %s: %w", label, stage, err)
+	case whole != "":
+		return fmt.Errorf("%s: %w", whole, err)
+	case h.op.label != "":
+		return fmt.Errorf("%s: %s: %w", h.op.label, stage, err)
+	}
+	return fmt.Errorf("%s: %w", stage, err)
 }
 
 // runTxUnderLock takes mu, runs fn in one transaction on db and releases mu,
