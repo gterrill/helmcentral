@@ -48,6 +48,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A new help page shows how to choose which GPS SignalK uses.** On a boat
+  with several receivers, SignalK can hop between them, so the position jumps
+  while the boat sits still. That can make the boat look like it's under way
+  at the dock and reset your collision profile. The page walks through ranking
+  the receivers in SignalK's Source Priorities. See
+  [Choose which GPS SignalK uses when you have several](docs/how-to/choose-a-gps-when-you-have-several.md).
 - **Drop pins on the Anchor Watch map before you anchor.** Tap or click open
   water and choose **Pin** while no watch is set. Each pin shows its range and
   bearing from the boat, so you can mark both sides of a channel and see how
