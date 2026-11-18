@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Outside assistants no longer see the facts Mate keeps.** The list under
+  the standing notes in Settings → Mate now stays with Mate. Claude, ChatGPT
+  and any other connected assistant used to read it in the boat context, and
+  they no longer do. Mate's own chats and reviews use it as before. Nothing
+  to do on upgrade.
+
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.
   The Anchor Watch page still shows it.
