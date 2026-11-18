@@ -113,6 +113,8 @@ Step-by-step instructions for specific jobs.
   full readings for 90 days, and one-minute averages for two years.
 - [Manage the places you've given Mate](how-to/manage-saved-places.md): saving,
   moving, renaming and deleting a named position.
+- [Choose which GPS SignalK uses when you have several](how-to/choose-a-gps-when-you-have-several.md):
+  ranking the receivers so the position doesn't hop between them.
 - [Set up your vessel](how-to/set-up-your-vessel.md): choose which engines and
   house bank anomaly detection watches, and enter owner and insurance details.
 - [Show equipment on a tile](how-to/show-equipment-on-a-tile.md)

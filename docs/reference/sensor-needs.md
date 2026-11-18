@@ -69,6 +69,10 @@ every feature needs to know where the boat is:
   places around you. They need an Overpass server, either the public one or
   your own. See [Place names](../features/place-names.md).
 
+If the boat has more than one GPS, tell SignalK which one to use. Otherwise
+the position can hop between them while the boat sits still. See
+[Choose which GPS SignalK uses when you have several](../how-to/choose-a-gps-when-you-have-several.md).
+
 ### The autostate plugin
 
 Helmcentral doesn't work out for itself whether the boat is anchored, moored,
