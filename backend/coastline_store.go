@@ -202,9 +202,7 @@ func (s *coastlineStore) Close() error {
 // RunTx runs fn in one transaction on the store's connection and commits
 // only when fn returns nil. See store_tx.go for the convention.
 func (s *coastlineStore) RunTx(op string, fn func(tx *sql.Tx) error) error {
-	lockTimed(&s.mu, op, time.Now, serverVitals)
-	defer s.mu.Unlock()
-	return runTxTimed(&s.mu, s.db, op, time.Now, serverVitals, fn)
+	return runTxUnderLock(&s.mu, s.db, op, time.Now, serverVitals, fn)
 }
 
 type storedShorelineLine struct {

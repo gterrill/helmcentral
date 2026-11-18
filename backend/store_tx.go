@@ -76,6 +76,37 @@ func lockTimed(mu *sync.Mutex, op string, clock func() time.Time, reg *vitalsReg
 	reg.record(reg.keys.admit("tx.lock_wait."+op, "tx.lock_wait.<overflow>"), clock().Sub(waitStart))
 }
 
+// lockHeld takes mu for a store call that is not a transaction (a read, or a
+// single statement) and returns the function that releases it, so a method
+// writes `defer lockHeld(&s.mu, "documents.Get")()`. The wait is recorded as
+// tx.lock_wait.<op> and the time the lock was held as tx.lock_hold.<op>. op
+// names the store and the method as a literal in the code, never an id or any
+// value from a request, so the keys stay bounded.
+func lockHeld(mu *sync.Mutex, op string) func() {
+	return lockHeldTimed(mu, op, time.Now, serverVitals)
+}
+
+// lockHeldTimed is lockHeld with its clock and registry passed in.
+func lockHeldTimed(mu *sync.Mutex, op string, clock func() time.Time, reg *vitalsRegistry) func() {
+	lockTimed(mu, op, clock, reg)
+	held := clock()
+	return func() {
+		d := clock().Sub(held)
+		mu.Unlock()
+		reg.record(reg.keys.admit("tx.lock_hold."+op, "tx.lock_hold.<overflow>"), d)
+	}
+}
+
+// runTxUnderLock takes mu, runs fn in one transaction on db and releases mu,
+// recording tx.lock_wait.<op> and tx.time.<op>. It is the whole of RunTx for a
+// store with no test seam on its lock; fn's error and begin or commit failures
+// are returned as runTxTimed returns them.
+func runTxUnderLock(mu *sync.Mutex, db *sql.DB, op string, clock func() time.Time, reg *vitalsRegistry, fn func(tx *sql.Tx) error) error {
+	lockTimed(mu, op, clock, reg)
+	defer mu.Unlock()
+	return runTxTimed(mu, db, op, clock, reg, fn)
+}
+
 // runTxTimed runs fn in one transaction on db, for a caller that holds mu. It
 // records begin to commit or rollback as tx.time.<op>, commits only when fn
 // returns nil, and wraps a begin or commit failure with op; fn's own error

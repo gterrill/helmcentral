@@ -210,9 +210,7 @@ func (s *outsideAssistantStore) Close() error {
 // RunTx runs fn in one transaction, holding the store mutex for its life
 // (ADR 0184). fn gets the store's clock reading for the transaction.
 func (s *outsideAssistantStore) RunTx(op string, fn func(tx *sql.Tx, now time.Time) error) error {
-	lockTimed(&s.mu, op, time.Now, serverVitals)
-	defer s.mu.Unlock()
-	return runTxTimed(&s.mu, s.db, op, time.Now, serverVitals, func(tx *sql.Tx) error {
+	return runTxUnderLock(&s.mu, s.db, op, time.Now, serverVitals, func(tx *sql.Tx) error {
 		return fn(tx, s.now())
 	})
 }
