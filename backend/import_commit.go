@@ -116,8 +116,7 @@ func commitImportRun(runID string) (importCommitResult, error) {
 // preflightImportCommit runs the checks that need no write, so a commit that
 // is going to be refused is refused before any note exists.
 func (s *documentStore) preflightImportCommit(run importRun) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.preflightImportCommit")()
 	return checkImportReady(s.db, run)
 }
 

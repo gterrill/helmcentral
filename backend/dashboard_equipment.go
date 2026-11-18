@@ -61,8 +61,7 @@ func newEquipmentIndex(refs []equipmentRef, profiles []engineProfile) equipmentI
 
 // EquipmentRefs reads every item's id, name, source and profile.
 func (s *documentStore) EquipmentRefs() ([]equipmentRef, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.EquipmentRefs")()
 	rows, err := s.db.Query(`SELECT id, name, signalk_source, profile_id FROM equipment`)
 	if err != nil {
 		return nil, fmt.Errorf("list equipment refs: %w", err)

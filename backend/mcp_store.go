@@ -324,8 +324,7 @@ func (s *outsideAssistantStore) Authenticate(secret string) (mcpTokenRecord, boo
 
 // GetToken reads one token.
 func (s *outsideAssistantStore) GetToken(id string) (mcpTokenRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "mcp.GetToken")()
 	var rec mcpTokenRecord
 	var created int64
 	var used sql.NullInt64
@@ -345,8 +344,7 @@ func (s *outsideAssistantStore) GetToken(id string) (mcpTokenRecord, error) {
 }
 
 func (s *outsideAssistantStore) ListTokens() ([]mcpTokenRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "mcp.ListTokens")()
 	rows, err := s.db.Query(`SELECT id, name, created_at, last_used_at FROM mcp_tokens ORDER BY created_at, name`)
 	if err != nil {
 		return nil, fmt.Errorf("list outside assistant tokens: %w", err)
@@ -396,8 +394,7 @@ var (
 )
 
 func (s *outsideAssistantStore) ToolsFor(id string) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "mcp.ToolsFor")()
 	rows, err := s.db.Query(`SELECT tool FROM mcp_token_tools WHERE token_id = ?`, id)
 	if err != nil {
 		return nil, fmt.Errorf("read token tools: %w", err)
@@ -462,8 +459,7 @@ func (s *outsideAssistantStore) ListActivity(limit int) ([]mcpActivity, error) {
 		limit = 50
 	}
 	s.waitForQueued() // what is queued is written first
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "mcp.ListActivity")()
 	rows, err := s.db.Query(`SELECT at, client, kind, name, outcome, duration_ms FROM mcp_activity ORDER BY at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list outside assistant activity: %w", err)

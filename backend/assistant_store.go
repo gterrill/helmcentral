@@ -336,8 +336,7 @@ func (s *assistantStore) CreateConversation(title string) (assistantConversation
 // to it so the next review can read what the skipper says here. An empty run id
 // makes an ordinary thread.
 func (s *assistantStore) CreateConversationForWatchRun(title, watchRunID string) (assistantConversation, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.CreateConversationForWatchRun")()
 
 	now := s.now()
 	conv := assistantConversation{
@@ -368,8 +367,7 @@ func (s *assistantStore) CreateConversationForWatchRun(title, watchRunID string)
 // something they wrote, so it is left out. A chat that has been deleted has no
 // rows, so it gives nothing.
 func (s *assistantStore) SkipperRepliesForWatchRun(runID string, maxChars int) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SkipperRepliesForWatchRun")()
 
 	rows, err := s.db.Query(`
 		SELECT m.content FROM messages m
@@ -420,8 +418,7 @@ func (s *assistantStore) SkipperRepliesForWatchRun(runID string, maxChars int) (
 // unset: whether a summary note still exists is checked when one
 // conversation is opened (GetConversation).
 func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.ListConversations")()
 
 	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
@@ -447,8 +444,7 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 // error, when the id simply does not exist - the normal "not found" case a
 // 404 handler checks for, not a database failure.
 func (s *assistantStore) GetConversation(id string) (assistantConversation, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.GetConversation")()
 
 	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id, watch_run_id FROM conversations WHERE id = ?`, id)
 
@@ -478,8 +474,7 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 // updated_at: saving a note is not conversation activity. A missing
 // conversation is errAssistantConversationNotFound.
 func (s *assistantStore) SetSummaryNote(id, noteID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SetSummaryNote")()
 
 	var value any
 	if noteID != "" {
@@ -504,8 +499,7 @@ func (s *assistantStore) SetSummaryNote(id, noteID string) error {
 // renaming is not conversation activity, and bumping it would reorder the
 // list panel out from under an operator who just typed a message.
 func (s *assistantStore) SetTitle(id, title string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SetTitle")()
 
 	if _, err := s.db.Exec(`UPDATE conversations SET title = ? WHERE id = ?`, title, id); err != nil {
 		return fmt.Errorf("set conversation title: %w", err)
@@ -518,8 +512,7 @@ func (s *assistantStore) SetTitle(id, title string) error {
 // behind. A missing id reports errAssistantConversationNotFound (checked
 // with errors.Is).
 func (s *assistantStore) DeleteConversation(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.DeleteConversation")()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -570,8 +563,7 @@ func (s *assistantStore) DeleteConversation(id string) error {
 // errAssistantConversationNotFound rather than silently inserting an orphan
 // row that would never appear in any ListMessages call.
 func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.AppendMessage")()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -658,8 +650,7 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 // ListMessages returns every message in a conversation, oldest first - the
 // order a chat thread renders in.
 func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.ListMessages")()
 
 	rows, err := s.db.Query(
 		`SELECT id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, created_at
@@ -920,8 +911,7 @@ func (s *assistantStore) SearchConversations(query string, opts assistantConvers
 		opts.CandidateMessage = 300
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SearchConversations")()
 
 	// Conversations whose messages match. Grouped to the conversation before
 	// any limit, so a word that matches thousands of messages elsewhere cannot

@@ -245,8 +245,7 @@ func checkImportMatchTargets(q sqlQueryer, st stagedImport, d importDecisions, e
 //   - A file starts undecided, or skipped when an earlier import already
 //     stored it.
 func (s *documentStore) DefaultImportDecisions(st stagedImport) (importDecisions, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.DefaultImportDecisions")()
 
 	d := normalizeDecisions(importDecisions{})
 

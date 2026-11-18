@@ -364,8 +364,7 @@ func (s *documentStore) DeleteMaintenanceRule(id string) error {
 // and description columns are not its effective values: anything that shows or
 // acts on them resolves through ResolveMaintenanceRule instead.
 func (s *documentStore) GetMaintenanceRuleRow(id string) (maintenanceRule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.GetMaintenanceRuleRow")()
 	return maintenanceRuleByID(s.db, id)
 }
 
@@ -374,8 +373,7 @@ func (s *documentStore) GetMaintenanceRuleRow(id string) (maintenanceRule, error
 // table, not the schedule: a profile's untouched jobs have no rows, and a job
 // row's values are not effective (MaintenanceSchedule is the schedule).
 func (s *documentStore) ListMaintenanceRuleRows(filter maintenanceRuleFilter) ([]maintenanceRule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListMaintenanceRuleRows")()
 	return queryMaintenanceRuleRows(s.db, filter)
 }
 
@@ -804,8 +802,7 @@ func (s *documentStore) DeleteMaintenanceLogEntry(id string) error {
 // deleteMaintenanceLogEntry deletes under the lock and says what it removed: the
 // item it was on, and whether it had a "started showing" date.
 func (s *documentStore) deleteMaintenanceLogEntry(id string) (equipmentID *string, hadStart bool, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.deleteMaintenanceLogEntry")()
 
 	var item, startedAt sql.NullString
 	err = s.db.QueryRow(`DELETE FROM maintenance_log_entries WHERE id = ? RETURNING equipment_id, started_at`, id).Scan(&item, &startedAt)
@@ -820,8 +817,7 @@ func (s *documentStore) deleteMaintenanceLogEntry(id string) (equipmentID *strin
 
 // GetMaintenanceLogEntry reads a single entry with its parts/photos joined.
 func (s *documentStore) GetMaintenanceLogEntry(id string) (maintenanceLogEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.GetMaintenanceLogEntry")()
 	return maintenanceLogEntryByID(s.db, id)
 }
 
@@ -838,8 +834,7 @@ type maintenanceRepair struct {
 // ListMaintenanceRepairs returns the repairs on an item that have a "started
 // showing" date, without the parts and photos a log entry carries.
 func (s *documentStore) ListMaintenanceRepairs() ([]maintenanceRepair, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListMaintenanceRepairs")()
 	rows, err := s.db.Query(`SELECT id, equipment_id, description, started_at, performed_at FROM maintenance_log_entries
 		WHERE kind = 'repair' AND started_at IS NOT NULL AND equipment_id IS NOT NULL ORDER BY performed_at, id`)
 	if err != nil {
@@ -871,8 +866,7 @@ type maintenanceLogFilter struct {
 // performed_at first - the CSV export and an item's own Maintenance block
 // both read this, never the raw table.
 func (s *documentStore) ListMaintenanceLogEntries(filter maintenanceLogFilter) ([]maintenanceLogEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListMaintenanceLogEntries")()
 
 	query := `SELECT ` + maintenanceLogEntryColumns + ` FROM maintenance_log_entries WHERE 1=1`
 	var args []any
@@ -1082,8 +1076,7 @@ func (s *documentStore) AddMaintenanceLogPhoto(logEntryID, documentID string) er
 // only, never deletes the document itself (the handler decides that
 // separately, exactly like deleteEquipmentPhotoHandler does).
 func (s *documentStore) RemoveMaintenanceLogPhoto(logEntryID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.RemoveMaintenanceLogPhoto")()
 
 	res, err := s.db.Exec(`DELETE FROM maintenance_log_photos WHERE log_entry_id = ? AND document_id = ?`, logEntryID, documentID)
 	if err != nil {
@@ -1099,8 +1092,7 @@ func (s *documentStore) RemoveMaintenanceLogPhoto(logEntryID, documentID string)
 // log entry) and it meets documentDeletableAsOrphanPhotoClause's own two
 // conditions.
 func (s *documentStore) MaintenanceLogPhotoDeletableAsOrphan(documentID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.MaintenanceLogPhotoDeletableAsOrphan")()
 	return rowExists(s.db, `
 		SELECT 1 FROM documents d
 		WHERE d.id = ?
@@ -1152,8 +1144,7 @@ func (s *documentStore) RecordHourMeterReset(equipmentID string, oldReading, new
 // line can never disagree with which reset the status engine is actually
 // using.
 func (s *documentStore) ListHourMeterResets(equipmentID string) ([]hourMeterReset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListHourMeterResets")()
 	return hourMeterResetsFor(s.db, equipmentID)
 }
 
@@ -1198,7 +1189,6 @@ func nilIfEmpty(s string) *string {
 // helpers (a registered record type's Get) outside any write. fn must not
 // call another documentStore method.
 func (s *documentStore) Read(fn func(q sqlQueryer) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.Read")()
 	return fn(s.db)
 }

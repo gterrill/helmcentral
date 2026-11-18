@@ -103,8 +103,7 @@ func createAssistantRunsSchema(db *sql.DB) error {
 // with its assigned id. A call's args and result are kept up to
 // assistantToolCallMaxBytes each; Truncated and OriginalBytes then say so.
 func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SaveRun")()
 
 	run.ID = uuid.NewString()
 	budget, err := json.Marshal(run.Budget)
@@ -191,8 +190,7 @@ func scanAssistantRun(row assistantRunScanner) (assistantRunTrace, error) {
 // ListRuns returns a conversation's runs in the order they started, as
 // summaries: everything but the rounds, with RoundCount set.
 func (s *assistantStore) ListRuns(conversationID string) ([]assistantRunTrace, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.ListRuns")()
 	rows, err := s.db.Query(`SELECT `+assistantRunColumns+` FROM assistant_runs WHERE conversation_id = ? ORDER BY started_at, rowid`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -229,8 +227,7 @@ func scanAssistantCall(row assistantRunScanner, extra ...any) (assistantToolCall
 // it: a call's arguments are cut short and its result left out, with the
 // result's size in ResultBytes. ok is false when there is no such run.
 func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.GetRun")()
 	run, err := scanAssistantRun(s.db.QueryRow(`SELECT `+assistantRunColumns+` FROM assistant_runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantRunTrace{}, false, nil
@@ -290,8 +287,7 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 // answer after assistantFailedRunRetention. A run behind a rated answer is kept
 // while the rating stands; clearing the rating puts it back under the rule.
 func (s *assistantStore) PruneRuns() (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.PruneRuns")()
 	now := s.now()
 	// An answered run is as old as its answer, the same age the rating rule
 	// uses; the run's own start stands in when the answer is gone.

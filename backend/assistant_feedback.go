@@ -169,8 +169,7 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 		return assistantFeedback{}, fmt.Errorf("%w: the note is longer than %d characters", errAssistantFeedbackInvalid, assistantFeedbackNoteMax)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SetMessageFeedback")()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -221,8 +220,7 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 // ClearMessageFeedback removes the verdict on an assistant message. Clearing
 // an answer that has none is not an error; an unknown id is.
 func (s *assistantStore) ClearMessageFeedback(messageID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.ClearMessageFeedback")()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -284,8 +282,7 @@ func (s *assistantStore) ListFeedback(limit int, before string) ([]assistantFeed
 // readFeedbackPage does the reads, under the lock: the rated answers, then
 // every one's tool calls in a single query.
 func (s *assistantStore) readFeedbackPage(n int, curUpdated int64, curID string) ([]assistantFeedbackEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.readFeedbackPage")()
 
 	rows, err := s.db.Query(`
 		SELECT f.message_id, f.verdict, f.note, f.created_at, f.updated_at,

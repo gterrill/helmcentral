@@ -119,8 +119,7 @@ func insertHandHourReadingTx(tx *sql.Tx, now time.Time, equipmentID, readOn stri
 
 // ListHandHourReadings returns equipmentID's kept readings, latest date first.
 func (s *documentStore) ListHandHourReadings(equipmentID string) ([]handHourReading, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListHandHourReadings")()
 	rows, err := s.db.Query(`SELECT `+handHourReadingColumns+` FROM hand_hour_readings WHERE equipment_id = ? ORDER BY read_on DESC, created_at DESC, id DESC`, equipmentID)
 	if err != nil {
 		return nil, fmt.Errorf("list hand hour readings"+": %w", err)
@@ -144,8 +143,7 @@ func (s *documentStore) ListHandHourReadings(equipmentID string) ([]handHourRead
 // with its meter-reset history, under one lock: the kept readings plus the
 // hours on the item's service log entries (a Complete form writes one).
 func (s *documentStore) HandHourSamples(equipmentID string) ([]handHourSample, []hourMeterReset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.HandHourSamples")()
 	rows, err := s.db.Query(`
 		SELECT read_on, hours FROM hand_hour_readings WHERE equipment_id = ?
 		UNION ALL

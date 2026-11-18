@@ -143,8 +143,7 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 		return passageDecisionView{}, invalid("unknown state %q", state)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.SetOperatorPassageDecision")()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -220,8 +219,7 @@ func scanPassageDecisionRow(sc interface{ Scan(...any) error }) (passageDecision
 
 // PassageDecisionRow returns one decision, or errPassageDecisionNotFound.
 func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.PassageDecisionRow")()
 	r, err := scanPassageDecisionRow(s.db.QueryRow(`SELECT `+passageDecisionRowColumns+` FROM passage_decisions WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, errPassageDecisionNotFound
@@ -234,8 +232,7 @@ func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error
 
 // LinkedPassageIDs returns each passage id a decision is linked to, once.
 func (s *assistantStore) LinkedPassageIDs() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.LinkedPassageIDs")()
 	rows, err := s.db.Query(`SELECT DISTINCT passage_id FROM passage_decisions WHERE passage_id IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("list linked passages: %w", err)
@@ -257,8 +254,7 @@ func (s *assistantStore) LinkedPassageIDs() ([]string, error) {
 // and any older one linked to a passage in passageIDs (the passages the caller
 // woke, or whose passage is gone). The caller narrows these by row date.
 func (s *assistantStore) PassageDecisionsForInference(since time.Time, include []int64, passageIDs []string) ([]passageDecisionRow, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.PassageDecisionsForInference")()
 	where, args := `card_created_ms >= ?`, []any{since.UnixMilli()}
 	if len(include) > 0 {
 		marks := strings.TrimSuffix(strings.Repeat("?,", len(include)), ",")
@@ -297,8 +293,7 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 	if len(ups) == 0 {
 		return 0, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.ApplyPassageDecisionUpdates")()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin passage decision updates: %w", err)
@@ -361,8 +356,7 @@ type passagePlan struct {
 // PassagePlans returns the decisions linked to a passage, oldest card first.
 // A stored payload that cannot be read is an error, never a skipped entry.
 func (s *assistantStore) PassagePlans(passageID string) ([]passagePlan, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "assistant.PassagePlans")()
 	rows, err := s.db.Query(`SELECT d.id, d.card_created_ms, d.payload_json, d.state, COALESCE(d.row_date, ''), d.source, COALESCE(d.passage_id, ''), d.conversation_id, c.id IS NOT NULL
 		FROM passage_decisions d LEFT JOIN conversations c ON c.id = d.conversation_id
 		WHERE d.passage_id = ? ORDER BY d.card_created_ms, d.id`, passageID)

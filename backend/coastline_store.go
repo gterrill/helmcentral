@@ -127,8 +127,7 @@ func (s *coastlineStore) AddRequests(squares []coverageSquare) (int, error) {
 
 // Requests returns the waiting requests in the order they were made.
 func (s *coastlineStore) Requests() ([]coastlineRequest, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "coastline.Requests")()
 	rows, err := s.db.Query(`SELECT lat, lon, batch, pos FROM coastline_requests ORDER BY batch, pos`)
 	if err != nil {
 		return nil, fmt.Errorf("read coastline requests: %w", err)
@@ -370,8 +369,7 @@ const coastlineRecordColumns = `lat, lon, status, downloaded_at, edits_since, ch
 
 // Records returns every square the store has a row for, without geometry.
 func (s *coastlineStore) Records() ([]coastlineSquareRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "coastline.Records")()
 	rows, err := s.db.Query(`SELECT ` + coastlineRecordColumns + ` FROM coastline_squares ORDER BY lat, lon`)
 	if err != nil {
 		return nil, fmt.Errorf("read coastline squares: %w", err)
@@ -392,8 +390,7 @@ func (s *coastlineStore) Records() ([]coastlineSquareRecord, error) {
 // Reefs are fetched whole into every square they touch, so they are deduped
 // by id; coastline is clipped to its square and is simply joined.
 func (s *coastlineStore) Lines(squares []coverageSquare) ([]shorelineLine, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "coastline.Lines")()
 	var out []shorelineLine
 	seenReef := map[string]bool{}
 	sorted := append([]coverageSquare(nil), squares...)

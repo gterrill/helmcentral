@@ -292,16 +292,14 @@ func listOpenJobs(q sqlQueryer, f openJobFilter) ([]openJob, error) {
 }
 
 func (s *documentStore) GetOpenJob(id string) (openJob, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.GetOpenJob")()
 	return openJobByID(s.db, id)
 }
 
 // OpenJobStatus reads only a job's status, for a caller that needs to know
 // whether it is still open and not its photos.
 func (s *documentStore) OpenJobStatus(id string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.OpenJobStatus")()
 	var status string
 	err := s.db.QueryRow(`SELECT status FROM open_jobs WHERE id = ?`, id).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -314,8 +312,7 @@ func (s *documentStore) OpenJobStatus(id string) (string, error) {
 }
 
 func (s *documentStore) ListOpenJobs(f openJobFilter) ([]openJob, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.ListOpenJobs")()
 	return listOpenJobs(s.db, f)
 }
 
@@ -523,8 +520,7 @@ func (s *documentStore) CompleteOpenJobCmd(id string, req maintenanceLogEntryReq
 // OpenJobPhotoIDBySHA returns the id of the job's photo with these bytes, or
 // "" if the job has none. It answers for a closed job too: its photos stay.
 func (s *documentStore) OpenJobPhotoIDBySHA(jobID, sha string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.OpenJobPhotoIDBySHA")()
 	var id string
 	err := s.db.QueryRow(`
 		SELECT d.id FROM open_job_photos ojp
@@ -572,8 +568,7 @@ func (s *documentStore) AddOpenJobPhoto(jobID, documentID string) error {
 
 // RemoveOpenJobPhoto unlinks documentID from the job.
 func (s *documentStore) RemoveOpenJobPhoto(jobID, documentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.RemoveOpenJobPhoto")()
 	res, err := s.db.Exec(`DELETE FROM open_job_photos WHERE job_id = ? AND document_id = ?`, jobID, documentID)
 	if err != nil {
 		return fmt.Errorf("remove open job photo: %w", err)
@@ -584,8 +579,7 @@ func (s *documentStore) RemoveOpenJobPhoto(jobID, documentID string) error {
 // OpenJobPhotoDeletableAsOrphan is true when nothing else (an item's photo
 // strip, a log line, another job) still shows the document.
 func (s *documentStore) OpenJobPhotoDeletableAsOrphan(documentID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.OpenJobPhotoDeletableAsOrphan")()
 	return rowExists(s.db, `
 		SELECT 1 FROM documents d
 		WHERE d.id = ?

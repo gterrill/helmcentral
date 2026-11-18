@@ -84,8 +84,18 @@ has no fallback path that would leave statements untimed.
 `RunTx` records two numbers per op name: `tx.lock_wait.<op>` (queued on the
 store mutex behind other writers) and `tx.time.<op>` (begin to commit). One
 helper does the locking and timing, and the record store, the coastline store
-and the MCP store all call it. A slow write that shows a long wait was waiting
-on another write. Each pool's `sql.DBStats` `WaitCount` and `WaitDuration` are
+and the MCP store all call it (`runTxUnderLock`, or `lockTimed` plus
+`runTxTimed` where the record store keeps its test seam on the lock). A slow
+write that shows a long wait was waiting on another write.
+
+A call that is a read or a single statement, not a transaction, locks with
+`defer lockHeld(&s.mu, "documents.Get")()`. That records the same
+`tx.lock_wait.<op>` and adds `tx.lock_hold.<op>`, the time the lock was held.
+The op is a store name and a method name written in the code, never an id or a
+value from a request, so the keys stay bounded; the 171 such ops add about 340
+keys to the 2,000 budget. The record store, the assistant store, the alarm log,
+the MCP and web push stores, and the coastline store lock this way for their
+reads and single statements. Each pool's `sql.DBStats` `WaitCount` and `WaitDuration` are
 sampled once a minute, as `db.pool_wait_count.<store>` and
 `db.pool_wait_us.<store>`. The registry holds each pool through a weak
 pointer, so watching never keeps a pool alive: a collected pool drops out at
@@ -162,10 +172,12 @@ problem.
   new `sql.Open("sqlite", ...)`.
 - 2,000 keys is an estimate. If the overflow warning shows up in real use,
   the cap or the shapes need another look.
-- `tx.lock_wait.<op>` covers writers that lock through the shared helper:
-  `RunTx` on the three stores, `writeAlarmRules` and the changeset apply. About
-  30 writers in `documents_store.go` still lock `s.mu` directly and are not in
-  it yet.
+- `tx.lock_wait.<op>` covers every store call that locks through the shared
+  helpers. Mutexes that guard memory only (caches, registries, the telemetry
+  buffers) are not timed: some are taken once per SignalK delta, and timing
+  them would cost more than it shows. Two SQLite-backed locks are left out:
+  `alarmIgnoreStore` uses a `sync.RWMutex`, which `lockHeld` does not take, and
+  `nearbyContactStore` releases its lock by hand in the middle of a method.
 - The last partial minute before a stop is not written. The server has no
   graceful shutdown to hook into, so vitals start with `context.Background()`
   and nothing ever ends them.

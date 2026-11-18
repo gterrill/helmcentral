@@ -38,8 +38,7 @@ var planSeenVerdictLevels = []string{"go", "marginal", "no_go", "no_data"}
 
 // PlanSeen returns the saved verdict of every leg of a plan, by key.
 func (s *documentStore) PlanSeen(planID int64) (map[string]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.PlanSeen")()
 	return s.planSeenLocked(planID)
 }
 
@@ -67,8 +66,7 @@ func (s *documentStore) planSeenLocked(planID int64) (map[string]string, error) 
 // key that is no longer a leg is dropped. A snapshot that is the one already
 // saved writes nothing.
 func (s *documentStore) SavePlanSeen(planID int64, currentKeys []string, seen []planSeenVerdict) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer lockHeld(&s.mu, "documents.SavePlanSeen")()
 	have, err := s.planSeenLocked(planID)
 	if err != nil {
 		return err
