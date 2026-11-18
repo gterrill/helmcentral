@@ -1,9 +1,8 @@
 import { Folder, type LucideIcon } from 'lucide-react'
 import { useCallback, useId, useState, type ReactNode } from 'react'
 
-import { SidebarPaneHeader, SidebarPaneRail } from '@/components/patterns/sidebar-pane'
+import { SidebarPane } from '@/components/patterns/sidebar-pane'
 import { Button } from '@/components/ui/button'
-import { Sidebar, SidebarContent } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
@@ -84,30 +83,21 @@ export function TreeLayout({ pane, paneLabel = 'Folders', paneIcon: PaneIcon = F
 
   return (
     <div className={cn('flex min-h-0 flex-1 gap-4', className)}>
-      {collapsed ? (
-        <SidebarPaneRail
-          side="left"
-          icon={PaneIcon}
-          label={`Show ${paneLabel.toLowerCase()}`}
-          onShow={() => setCollapsedAndRemember(false)}
-        />
-      ) : (
-        <div className="w-64 shrink-0">
-          <Sidebar side="left" collapsible="none" role="complementary" aria-label={paneLabel} className="h-full w-full rounded-xl border">
-            <SidebarPaneHeader
-              side="left"
-              icon={PaneIcon}
-              label={paneLabel}
-              hideLabel={`Hide ${paneLabel.toLowerCase()}`}
-              controlsId={contentId}
-              onHide={() => setCollapsedAndRemember(true)}
-            />
-            <SidebarContent id={contentId} className="p-2">
-              {renderPane({ dismiss: () => {} })}
-            </SidebarContent>
-          </Sidebar>
-        </div>
-      )}
+      <SidebarPane
+        side="left"
+        icon={PaneIcon}
+        label={paneLabel}
+        open={!collapsed}
+        onOpenChange={(open) => setCollapsedAndRemember(!open)}
+        hideLabel={`Hide ${paneLabel.toLowerCase()}`}
+        showLabel={`Show ${paneLabel.toLowerCase()}`}
+        contentId={contentId}
+        landmarkLabel={paneLabel}
+        paneClassName="w-64 shrink-0"
+        contentClassName="p-2"
+      >
+        {collapsed ? null : renderPane({ dismiss: () => {} })}
+      </SidebarPane>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">{children}</div>
     </div>
   )

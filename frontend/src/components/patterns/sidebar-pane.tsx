@@ -1,7 +1,8 @@
 import { ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
+import type { CSSProperties, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { SidebarHeader } from '@/components/ui/sidebar'
+import { Sidebar, SidebarContent, SidebarHeader } from '@/components/ui/sidebar'
 
 // The header and the collapsed rail shared by the Rode Planner (a right-hand
 // pane) and TreeLayout (a left-hand one), so the two read as one control.
@@ -73,6 +74,83 @@ export function SidebarPaneRail({ side, icon: Icon, label, onShow }: SidebarPane
         <Icon className="h-4 w-4" aria-hidden="true" />
         <Chevron className="h-4 w-4" aria-hidden="true" />
       </button>
+    </div>
+  )
+}
+
+export interface SidebarPaneProps {
+  side: Side
+  icon: LucideIcon
+  /** The pane's name, shown beside the icon in the header. */
+  label: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** The hide button's accessible name and title. */
+  hideLabel: string
+  /** The rail's accessible name and title. */
+  showLabel: string
+  /** The id given to the pane content, which the hide button controls. */
+  contentId: string
+  /** When set, the pane is a labelled complementary landmark. */
+  landmarkLabel?: string
+  /** Sets --sidebar-width on the open pane's wrapper, for a `w-(--sidebar-width)` class. */
+  width?: string
+  /** Classes on the wrapper around the open pane. */
+  paneClassName?: string
+  /** Wraps the collapsed rail in a div with these classes. Without it the rail stands alone. */
+  railWrapperClassName?: string
+  contentClassName?: string
+  /** Rendered inside the Sidebar after the content, e.g. a SidebarFooter. */
+  footer?: ReactNode
+  children: ReactNode
+}
+
+// The whole pane: a rail while closed, otherwise a Sidebar with the shared
+// header and the content. The caller owns the open state and where it is
+// remembered, since each pane keeps it somewhere different.
+export function SidebarPane({
+  side,
+  icon,
+  label,
+  open,
+  onOpenChange,
+  hideLabel,
+  showLabel,
+  contentId,
+  landmarkLabel,
+  width,
+  paneClassName,
+  railWrapperClassName,
+  contentClassName,
+  footer,
+  children,
+}: SidebarPaneProps) {
+  if (!open) {
+    const rail = <SidebarPaneRail side={side} icon={icon} label={showLabel} onShow={() => onOpenChange(true)} />
+    return railWrapperClassName ? <div className={railWrapperClassName}>{rail}</div> : rail
+  }
+  return (
+    <div className={paneClassName} style={width ? ({ '--sidebar-width': width } as CSSProperties) : undefined}>
+      <Sidebar
+        side={side}
+        collapsible="none"
+        role={landmarkLabel ? 'complementary' : undefined}
+        aria-label={landmarkLabel}
+        className="h-full w-full rounded-xl border"
+      >
+        <SidebarPaneHeader
+          side={side}
+          icon={icon}
+          label={label}
+          hideLabel={hideLabel}
+          controlsId={contentId}
+          onHide={() => onOpenChange(false)}
+        />
+        <SidebarContent id={contentId} className={contentClassName}>
+          {children}
+        </SidebarContent>
+        {footer}
+      </Sidebar>
     </div>
   )
 }

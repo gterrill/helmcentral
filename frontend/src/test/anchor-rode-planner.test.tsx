@@ -152,6 +152,29 @@ describe('AnchorRodePlanner — collapse state', () => {
     renderPlanner()
     expect(screen.getByText('Rode Planner')).toBeInTheDocument()
   })
+
+  it('collapses from the header button and remembers it under its key', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(localStorage.getItem('anchorWatch.rodePlanner.open')).toBe('true')
+    const hide = screen.getByRole('button', { name: 'Collapse rode planner' })
+    expect(hide).toHaveAttribute('aria-expanded', 'true')
+    expect(hide).toHaveAttribute('aria-controls', 'rode-planner-content')
+    expect(document.getElementById('rode-planner-content')).not.toBeNull()
+    fireEvent.click(hide)
+    expect(localStorage.getItem('anchorWatch.rodePlanner.open')).toBe('false')
+    expect(document.getElementById('rode-planner-content')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Expand Rode Planner' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('keeps its 20rem wrapper and no landmark role', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.queryByRole('complementary')).toBeNull()
+    const wrapper = document.getElementById('rode-planner-content')!.closest<HTMLElement>('[style*="--sidebar-width"]')!
+    expect(wrapper).toHaveClass('w-full', 'shrink-0', 'lg:w-(--sidebar-width)')
+    expect(wrapper.style.getPropertyValue('--sidebar-width')).toBe('20rem')
+  })
 })
 
 describe('AnchorRodePlanner — no false-positive scope badge (regression guard)', () => {

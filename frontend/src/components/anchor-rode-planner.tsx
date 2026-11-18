@@ -1,5 +1,5 @@
 import { Link } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
@@ -36,14 +36,12 @@ import { WarningNote } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Sidebar,
-  SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
 } from '@/components/ui/sidebar'
-import { SidebarPaneHeader, SidebarPaneRail } from '@/components/patterns/sidebar-pane'
+import { SidebarPane } from '@/components/patterns/sidebar-pane'
 
 const RODE_PLANNER_OPEN_KEY = 'anchorWatch.rodePlanner.open'
 const RODE_PLANNER_CONTENT_ID = 'rode-planner-content'
@@ -509,247 +507,244 @@ export function AnchorRodePlanner({
     return 'From the bow roller, no tide station'
   })()
 
-  if (!open) {
-    return (
-      <SidebarPaneRail side="right" icon={Link} label="Expand Rode Planner" onShow={() => setOpen(true)} />
-    )
-  }
+  const footer = (
+    <>
+      <SidebarFooter className="border-t">
+        {!loaConfigured && (
+          <WarningNote className="mt-2">Set boat length (LOA) in Settings → Anchor to get a swing radius.</WarningNote>
+        )}
+        {/* Says why the configured method can't give a figure to set. When
+            LOA itself is unresolved the warning above already says why, so
+            this slot stays quiet instead of repeating it. */}
+        {configuredMethodResult.unavailableReason && (
+          <p className="text-xs text-muted-foreground">
+            {configuredMethodResult.label} unavailable — {configuredMethodResult.unavailableReason}
+          </p>
+        )}
+        {applyLockedReason !== null && (
+          <p className="text-xs text-muted-foreground">{applyLockedReason}</p>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isInactive || configuredSwingRadiusM === null || applyLockedReason !== null}
+          onClick={handleApplyAlarmRadius}
+        >
+          {configuredSwingRadiusM !== null
+            ? `Set alarm to ${formatRadiusDisplay(configuredSwingRadiusM, isImperial)}`
+            : 'Set alarm'}
+        </Button>
+      </SidebarFooter>
+      <div className="border-t px-3 py-2 empty:hidden">{saveDepth}</div>
+    </>
+  )
 
   return (
-    <div className="w-full shrink-0 lg:w-(--sidebar-width)" style={{ '--sidebar-width': '20rem' } as CSSProperties}>
-      <Sidebar side="right" collapsible="none" className="h-full w-full rounded-xl border">
-        {/* A chain link, the rode itself — same icon the collapsed rail
-            shows, so the expanded and collapsed states read as one control. */}
-        <SidebarPaneHeader
-          side="right"
-          icon={Link}
-          label="Rode Planner"
-          hideLabel="Collapse rode planner"
-          controlsId={RODE_PLANNER_CONTENT_ID}
-          onHide={() => setOpen(false)}
-        />
+    <SidebarPane
+      side="right"
+      // A chain link, the rode itself: the same icon the rail shows, so the
+      // expanded and collapsed states read as one control.
+      icon={Link}
+      label="Rode Planner"
+      open={open}
+      onOpenChange={setOpen}
+      hideLabel="Collapse rode planner"
+      showLabel="Expand Rode Planner"
+      contentId={RODE_PLANNER_CONTENT_ID}
+      width="20rem"
+      paneClassName="w-full shrink-0 lg:w-(--sidebar-width)"
+      footer={footer}
+    >
+      <SidebarGroup>
+        <SidebarGroupLabel>Conditions</SidebarGroupLabel>
+        {/* 2x2 from `lg` up, where this is a 20rem sidebar: depth beside
+            wind (the two planning inputs), sea state beside seabed (the two
+            holding inputs). Below `lg` the planner is full-width above the
+            map and keeps the single-column stack. min-w-0 on each cell so a
+            long caption can't widen its 1fr track past half the sidebar. */}
+        <SidebarGroupContent className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Depth ({unit})</p>
+            {/* Holds the figure the plan is actually computed against —
+                depth at the next high tide plus bow roller height
+                (planningFigureM), not the raw sounder/recorded reading.
+                Typing over it does not store that figure as raw:
+                handleDepthInputChange inverts it back to the raw depth
+                first (rawDepthFromPlanningFigureM), stamped with the
+                tide right now, which is what avoids feeding the rise
+                back in and compounding it on every render (ADR 0063's
+                amendment; see the "input holds the raw reading" ADR for
+                the original, higher-consequence version of this trap).
+                Empty (not prefilled with live depth) when anchored with
+                nothing recorded — that is the strict no-fallback rule
+                made visible, and this input is the remedy. */}
+            <input
+              aria-label="Depth"
+              type="number"
+              step={isImperial ? 1 : 0.1}
+              value={depthInputValue}
+              onChange={(e) => handleDepthInputChange(e.target.value)}
+              className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{depthCaption}</p>
+          </label>
 
-        <SidebarContent id={RODE_PLANNER_CONTENT_ID}>
-          <SidebarGroup>
-            <SidebarGroupLabel>Conditions</SidebarGroupLabel>
-            {/* 2x2 from `lg` up, where this is a 20rem sidebar: depth beside
-                wind (the two planning inputs), sea state beside seabed (the two
-                holding inputs). Below `lg` the planner is full-width above the
-                map and keeps the single-column stack. min-w-0 on each cell so a
-                long caption can't widen its 1fr track past half the sidebar. */}
-            <SidebarGroupContent className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-              <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Depth ({unit})</p>
-                {/* Holds the figure the plan is actually computed against —
-                    depth at the next high tide plus bow roller height
-                    (planningFigureM), not the raw sounder/recorded reading.
-                    Typing over it does not store that figure as raw:
-                    handleDepthInputChange inverts it back to the raw depth
-                    first (rawDepthFromPlanningFigureM), stamped with the
-                    tide right now, which is what avoids feeding the rise
-                    back in and compounding it on every render (ADR 0063's
-                    amendment; see the "input holds the raw reading" ADR for
-                    the original, higher-consequence version of this trap).
-                    Empty (not prefilled with live depth) when anchored with
-                    nothing recorded — that is the strict no-fallback rule
-                    made visible, and this input is the remedy. */}
-                <input
-                  aria-label="Depth"
-                  type="number"
-                  step={isImperial ? 1 : 0.1}
-                  value={depthInputValue}
-                  onChange={(e) => handleDepthInputChange(e.target.value)}
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">{depthCaption}</p>
-              </label>
+          <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Wind</p>
+            <select
+              aria-label="Forecast wind"
+              className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
+              value={selectedBand?.id ?? ''}
+              onChange={(e) => onWindBandChange(e.target.value)}
+            >
+              {/* Only reachable with no wind reading at all; picking any
+                  band replaces it and it never comes back. */}
+              {selectedBand === null && <option value="">—</option>}
+              {WIND_BANDS.map((band) => (
+                <option key={band.id} value={band.id}>{band.label}</option>
+              ))}
+            </select>
+          </label>
 
-              <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Wind</p>
-                <select
-                  aria-label="Forecast wind"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
-                  value={selectedBand?.id ?? ''}
-                  onChange={(e) => onWindBandChange(e.target.value)}
-                >
-                  {/* Only reachable with no wind reading at all; picking any
-                      band replaces it and it never comes back. */}
-                  {selectedBand === null && <option value="">—</option>}
-                  {WIND_BANDS.map((band) => (
-                    <option key={band.id} value={band.id}>{band.label}</option>
-                  ))}
-                </select>
-              </label>
+          <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Sea State</p>
+            <select
+              aria-label="Sea state"
+              className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
+              value={pendingSeaState}
+              onChange={(e) => handleSeaStateChange(e.target.value as SeaState)}
+            >
+              <option value="calm">Calm</option>
+              <option value="choppy">Choppy</option>
+              <option value="rough">Rough</option>
+              <option value="storm">Storm</option>
+            </select>
+          </label>
 
-              <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Sea State</p>
-                <select
-                  aria-label="Sea state"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
-                  value={pendingSeaState}
-                  onChange={(e) => handleSeaStateChange(e.target.value as SeaState)}
-                >
-                  <option value="calm">Calm</option>
-                  <option value="choppy">Choppy</option>
-                  <option value="rough">Rough</option>
-                  <option value="storm">Storm</option>
-                </select>
-              </label>
+          <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Seabed</p>
+            <select
+              aria-label="Seabed"
+              className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
+              value={pendingSeabedType}
+              onChange={(e) => handleSeabedChange(e.target.value as SeabedType)}
+            >
+              <option value="sand">Sand</option>
+              <option value="mud">Mud</option>
+              <option value="rock">Rock</option>
+              <option value="grass">Grass</option>
+            </select>
+          </label>
+        </SidebarGroupContent>
+      </SidebarGroup>
 
-              <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Seabed</p>
-                <select
-                  aria-label="Seabed"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
-                  value={pendingSeabedType}
-                  onChange={(e) => handleSeabedChange(e.target.value as SeabedType)}
-                >
-                  <option value="sand">Sand</option>
-                  <option value="mud">Mud</option>
-                  <option value="rock">Rock</option>
-                  <option value="grass">Grass</option>
-                </select>
-              </label>
-            </SidebarGroupContent>
-          </SidebarGroup>
+      {/* One method on screen at a time. Two full recommendations stacked
+          in a 20rem sidebar pushed the deployed-rode input and Apply below
+          the fold, and the operator only plans against one method anyway —
+          the other is there to compare, not to read alongside. The
+          configured method leads and opens first (orderedMethodResults
+          above), so the panel starts on the figure Apply will use. */}
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <Tabs value={activeMethodId} onValueChange={(value) => setActiveMethodId(value as ScopeMethod)}>
+            {/* The line variant, not the default pill: --sidebar-background
+                is var(--card) — the same 8% lightness as --background — so a
+                bg-background pill would be invisible against the panel it
+                sits on, and --muted being lighter would make the *unselected*
+                tabs the ones that stand out. */}
+            <TabsList variant="line">
+              {orderedMethodResults.map((result) => (
+                <TabsTrigger key={result.id} value={result.id} className="text-xs">
+                  {result.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-          {/* One method on screen at a time. Two full recommendations stacked
-              in a 20rem sidebar pushed the deployed-rode input and Apply below
-              the fold, and the operator only plans against one method anyway —
-              the other is there to compare, not to read alongside. The
-              configured method leads and opens first (orderedMethodResults
-              above), so the panel starts on the figure Apply will use. */}
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <Tabs value={activeMethodId} onValueChange={(value) => setActiveMethodId(value as ScopeMethod)}>
-                {/* The line variant, not the default pill: --sidebar-background
-                    is var(--card) — the same 8% lightness as --background — so a
-                    bg-background pill would be invisible against the panel it
-                    sits on, and --muted being lighter would make the *unselected*
-                    tabs the ones that stand out. */}
-                <TabsList variant="line">
-                  {orderedMethodResults.map((result) => (
-                    <TabsTrigger key={result.id} value={result.id} className="text-xs">
-                      {result.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-
-                {orderedMethodResults.map((result) => {
-                  // Swing (that method's own recommended rode + bow offset + LOA)
-                  // renders in every panel — each method proposes its own circle.
-                  // Chain-onboard is genuinely per-method — each method can
-                  // recommend a different rode, so each can separately outgrow
-                  // what's aboard — and stays here. The LOA warning describes the
-                  // single shared LOA input, not anything specific to a method, so
-                  // it renders once in SidebarFooter instead, directly above Set
-                  // alarm, where it gates it (ADR 0059 §4).
-                  const methodSwingRadiusM = !result.unavailableReason
-                    ? computeSwingRadiusM(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
-                    : null
-                  return (
-                    <TabsContent key={result.id} value={result.id}>
-                      {result.unavailableReason ? (
-                        <p className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
-                          Unavailable — {result.unavailableReason}
-                        </p>
-                      ) : (
-                        <div className="rounded-md border bg-background/60 px-3 py-2">
-                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Pay Out</p>
-                          <p className="font-display text-3xl text-gauge-primary tabular-nums">
-                            {payOutDisplayValue(result.recommendedRodeM, isImperial)}
-                            <span className="ml-1 text-base text-muted-foreground">{unit}</span>
-                          </p>
-                          {result.depthFromHawseM !== undefined && (
-                            <RodeProfileDiagram
-                              rodeM={result.recommendedRodeM}
-                              depthFromHawseM={result.depthFromHawseM}
-                              bowRollerHeightM={bowRollerHeightM}
-                              tideCorrected={result.tideCorrected === true}
-                              liftWarning={result.liftWarning}
-                              catenaryParameterM={result.catenaryParameterM}
-                              isImperial={isImperial}
-                            />
-                          )}
-                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                            <span>Scope {result.scopeRatio.toFixed(1)}:1{result.scopeFloorApplied ? ' minimum' : ''}</span>
-                            {methodSwingRadiusM !== null && (
-                              <span>Swing {formatRadiusDisplay(methodSwingRadiusM, isImperial)}</span>
-                            )}
-                          </div>
-                          {payOutDisplayValue(result.recommendedRodeM, isImperial) > payOutDisplayValue(anchorConfig.chainOnboardM, isImperial) && (
-                            <WarningNote className="mt-2">
-                              Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {payOutDisplayValue(anchorConfig.chainOnboardM, isImperial)} {unit} aboard
-                            </WarningNote>
-                          )}
-                        </div>
+            {orderedMethodResults.map((result) => {
+              // Swing (that method's own recommended rode + bow offset + LOA)
+              // renders in every panel — each method proposes its own circle.
+              // Chain-onboard is genuinely per-method — each method can
+              // recommend a different rode, so each can separately outgrow
+              // what's aboard — and stays here. The LOA warning describes the
+              // single shared LOA input, not anything specific to a method, so
+              // it renders once in SidebarFooter instead, directly above Set
+              // alarm, where it gates it (ADR 0059 §4).
+              const methodSwingRadiusM = !result.unavailableReason
+                ? computeSwingRadiusM(result.recommendedRodeM, effectiveBowOffsetM, resolvedLoaM)
+                : null
+              return (
+                <TabsContent key={result.id} value={result.id}>
+                  {result.unavailableReason ? (
+                    <p className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                      Unavailable — {result.unavailableReason}
+                    </p>
+                  ) : (
+                    <div className="rounded-md border bg-background/60 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Pay Out</p>
+                      <p className="font-display text-3xl text-gauge-primary tabular-nums">
+                        {payOutDisplayValue(result.recommendedRodeM, isImperial)}
+                        <span className="ml-1 text-base text-muted-foreground">{unit}</span>
+                      </p>
+                      {result.depthFromHawseM !== undefined && (
+                        <RodeProfileDiagram
+                          rodeM={result.recommendedRodeM}
+                          depthFromHawseM={result.depthFromHawseM}
+                          bowRollerHeightM={bowRollerHeightM}
+                          tideCorrected={result.tideCorrected === true}
+                          liftWarning={result.liftWarning}
+                          catenaryParameterM={result.catenaryParameterM}
+                          isImperial={isImperial}
+                        />
                       )}
-                    </TabsContent>
-                  )
-                })}
-              </Tabs>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>Scope {result.scopeRatio.toFixed(1)}:1{result.scopeFloorApplied ? ' minimum' : ''}</span>
+                        {methodSwingRadiusM !== null && (
+                          <span>Swing {formatRadiusDisplay(methodSwingRadiusM, isImperial)}</span>
+                        )}
+                      </div>
+                      {payOutDisplayValue(result.recommendedRodeM, isImperial) > payOutDisplayValue(anchorConfig.chainOnboardM, isImperial) && (
+                        <WarningNote className="mt-2">
+                          Needs {payOutDisplayValue(result.recommendedRodeM, isImperial)} {unit} — only {payOutDisplayValue(anchorConfig.chainOnboardM, isImperial)} {unit} aboard
+                        </WarningNote>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+              )
+            })}
+          </Tabs>
+        </SidebarGroupContent>
+      </SidebarGroup>
 
-          <SidebarGroup>
-            <SidebarGroupLabel>Deployed</SidebarGroupLabel>
-            <SidebarGroupContent className="flex flex-col gap-2">
-              <label className="rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode Deployed ({unit})</p>
-                <input
-                  aria-label="Rode deployed"
-                  type="number"
-                  min={0}
-                  step={isImperial ? 5 : 1}
-                  value={Number.isFinite(pendingRode) ? pendingRode : 0}
-                  onChange={(e) => handleRodeChange(e.target.value)}
-                  disabled={isInactive}
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50"
-                />
-              </label>
+      <SidebarGroup>
+        <SidebarGroupLabel>Deployed</SidebarGroupLabel>
+        <SidebarGroupContent className="flex flex-col gap-2">
+          <label className="rounded-md border bg-background/60 px-3 py-2 text-left">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode Deployed ({unit})</p>
+            <input
+              aria-label="Rode deployed"
+              type="number"
+              min={0}
+              step={isImperial ? 5 : 1}
+              value={Number.isFinite(pendingRode) ? pendingRode : 0}
+              onChange={(e) => handleRodeChange(e.target.value)}
+              disabled={isInactive}
+              className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50"
+            />
+          </label>
 
-              {scopeBadge !== null && (
-                <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold ${scopeBadgeClass(scopeBadge.status)}`}>
-                  {scopeBadge.status === 'ok' ? 'Enough rode' : `Short by ${scopeBadge.shortfall} ${unit}`}
-                </div>
-              )}
-
-              {isInactive && (
-                <p className="text-xs text-muted-foreground">{inactiveReason}</p>
-              )}
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-
-        <SidebarFooter className="border-t">
-          {!loaConfigured && (
-            <WarningNote className="mt-2">Set boat length (LOA) in Settings → Anchor to get a swing radius.</WarningNote>
+          {scopeBadge !== null && (
+            <div className={`rounded-md border px-2 py-1 text-center text-xs font-semibold ${scopeBadgeClass(scopeBadge.status)}`}>
+              {scopeBadge.status === 'ok' ? 'Enough rode' : `Short by ${scopeBadge.shortfall} ${unit}`}
+            </div>
           )}
-          {/* Says why the configured method can't give a figure to set. When
-              LOA itself is unresolved the warning above already says why, so
-              this slot stays quiet instead of repeating it. */}
-          {configuredMethodResult.unavailableReason && (
-            <p className="text-xs text-muted-foreground">
-              {configuredMethodResult.label} unavailable — {configuredMethodResult.unavailableReason}
-            </p>
+
+          {isInactive && (
+            <p className="text-xs text-muted-foreground">{inactiveReason}</p>
           )}
-          {applyLockedReason !== null && (
-            <p className="text-xs text-muted-foreground">{applyLockedReason}</p>
-          )}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isInactive || configuredSwingRadiusM === null || applyLockedReason !== null}
-            onClick={handleApplyAlarmRadius}
-          >
-            {configuredSwingRadiusM !== null
-              ? `Set alarm to ${formatRadiusDisplay(configuredSwingRadiusM, isImperial)}`
-              : 'Set alarm'}
-          </Button>
-        </SidebarFooter>
-        <div className="border-t px-3 py-2 empty:hidden">{saveDepth}</div>
-      </Sidebar>
-    </div>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </SidebarPane>
   )
 }
