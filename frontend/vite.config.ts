@@ -1,3 +1,4 @@
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
@@ -15,6 +16,30 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:80
 // environment before the test workers start: setting it from inside a worker
 // does not change the zone Date has already read.
 if (process.env.VITEST) process.env.TZ = 'UTC'
+
+// The load cap, for `make check` only. Several sessions often share this Mac,
+// and a full run at the default worker count, on a machine already past half
+// its cores, failed a few random files a run on 30 s timeouts and workers that
+// never started, while the same files passed alone. scripts/check.sh hands over
+// the 1-minute load from when its run started, before its own backend tests,
+// and once that is at least half the cores vitest takes only the cores left
+// free (2 to the usual cores - 1) and gives each test and hook 90 s. Plain
+// `npm test`, CI and the dev server and build never see the variable and run
+// as before.
+function checkLoadCap(): { workers: number; timeout: number } | null {
+  const raw = process.env.HELMCENTRAL_CHECK_START_LOAD
+  if (!process.env.VITEST || raw === undefined) return null
+  const load = Number(raw)
+  if (!Number.isFinite(load) || load < 0) {
+    throw new Error(`HELMCENTRAL_CHECK_START_LOAD must be a load average, got ${JSON.stringify(raw)}`)
+  }
+  const cores = os.availableParallelism()
+  if (load < cores / 2) return null
+  const workers = Math.min(cores - 1, Math.max(2, Math.floor(cores - load)))
+  console.info(`vitest load cap: load ${load.toFixed(1)} on ${cores} cores, ${workers} workers, 90 s per test and hook`)
+  return { workers, timeout: 90_000 }
+}
+const loadCap = checkLoadCap()
 
 export default defineConfig(({ mode }) => ({
   // React Fast Refresh. Without this plugin Vite has no component boundary to
@@ -316,8 +341,10 @@ export default defineConfig(({ mode }) => ({
     setupFiles: ['./src/test/setup.ts'],
     // Tests that render whole pages or hundreds of frames take 2 s or more on an
     // idle Mac, and the default 5 s turned them red under CI load, on a required
-    // check, for PRs that never touched them.
+    // check, for PRs that never touched them. Under `make check` on a busy
+    // machine, the load cap above raises it, lengthens hooks and caps workers.
     testTimeout: 30_000,
+    ...(loadCap ? { maxWorkers: loadCap.workers, testTimeout: loadCap.timeout, hookTimeout: loadCap.timeout } : {}),
     // Worker threads rather than Vitest's default child-process forks. Nearly
     // all of this suite's wall clock is per-file fixed cost (happy-dom setup, then
     // transforming and importing the module graph) rather than the test bodies
