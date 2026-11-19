@@ -11,23 +11,27 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-11-19
+
 ### Breaking
 
-- **On a systemd install, copy over the new `helmcentral.service`.** With login
-  set to SignalK, Helmcentral now waits for SignalK after a power cut instead
-  of exiting. Whenever SignalK gives no answer at all, it tries again 5 seconds
-  after each failed try. The log shows the real error on the first try and then
-  once a minute, and says when SignalK answers. If SignalK does answer and its
-  security is switched off, it still refuses to start. An answer that its
-  login address doesn't exist (404) is waited on for up to 2 minutes first,
-  because SignalK can give it before it has finished starting. The updated
-  service file also keeps retrying any failed start every 5 seconds for about
-  eleven minutes. That gives a fault that clears slowly, such as the data disk
-  mounting late after a power cut, time to clear. If starts keep failing
+- **On a systemd install, copy over the new `helmcentral.service`.** The
+  updated service file keeps retrying any failed start every 5 seconds for
+  about eleven minutes. That gives a fault that clears slowly, such as the data
+  disk mounting late after a power cut, time to clear. If starts keep failing
   quickly after that, it gives up and `systemctl status helmcentral` shows it
   as failed. The old file never gave up. What to do: copy the updated
   `helmcentral.service` over the old one and run
   `sudo systemctl daemon-reload`. Docker installs need nothing.
+
+  Separately, and whichever service file you run, Helmcentral with login set
+  to SignalK now waits for SignalK after a power cut instead of exiting.
+  Whenever SignalK gives no answer at all, it tries again 5 seconds after each
+  failed try. The log shows the real error on the first try and then once a
+  minute, and says when SignalK answers. If SignalK does answer and its
+  security is switched off, it still refuses to start. An answer that its
+  login address doesn't exist (404) is waited on for up to 2 minutes first,
+  because SignalK can give it before it has finished starting.
 
 ### Changed
 
@@ -39,7 +43,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   name, such as two engines both called Cummins QSB 6.7, each row, the **Item**
   picker in the rule editor and any dialog opened from such a row now say which
   one it's for, using the item's alias or else its location. Names that differ
-  only in capitals or spacing count as the same. A rule with no interval offers
+  only in capitals or extra spaces count as the same. A rule with no interval offers
   **Set interval**. **Complete** steps back to a quieter button unless a
   service is due or overdue.
 - **Inventory's sections now sit under Inventory in the sidebar.** Equipment,
@@ -67,7 +71,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   when the report runs.
   The Alarms section still lists everything raised. Without that navigation
   state nothing is left out, and neither are alarms raised before you update.
-
+  If Helmcentral can't read which alarms are still active, it counts them all
+  and says why in the report.
 - **The Anchor Watch tile no longer shows the current.** The Wind tile
   already shows the set and drift, so the Anchor Watch tile leaves it out.
   The Anchor Watch page still shows it.
@@ -91,7 +96,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   while the boat sits still. That can make the boat look like it's under way
   at the dock and reset your collision profile. The page walks through ranking
   the receivers in SignalK's Source Priorities. See
-  [Choose which GPS SignalK uses when you have several](docs/how-to/choose-a-gps-when-you-have-several.md).
+  [Choose which GPS SignalK uses when you have several](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/choose-a-gps-when-you-have-several.md).
 - **Mark engines stopped when their data goes quiet.** Some engine gateways
   stop sending anything when the engine is switched off, so SignalK goes on
   saying the engine is started and the autostate plugin calls the boat motoring
@@ -109,14 +114,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   corrected. It's off until you turn it on, so nothing changes on upgrade, and
   it writes the state only, never an RPM. Turn it on only if your gateway really
   goes quiet when the engine stops.
-
 - **Drop pins on the Anchor Watch map before you anchor.** Tap or click open
   water and choose **Pin** while no watch is set. Each pin shows its range and
   bearing from the boat, so you can mark both sides of a channel and see how
   wide it is. Pins you drop this way stay for the next anchoring, and Drop
   leaves them alone. Raise still clears every pin, and you can remove one by
   hand at any time.
-
 - **A record of how Helmcentral itself is running.** Helmcentral now keeps track
   of how long its own database work takes and how much memory it uses. It adds
   one line a minute to a file in a `vitals` folder beside your database, and
@@ -3940,7 +3943,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.67.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.68.0...HEAD
+[0.68.0]: https://github.com/gterrill/helmcentral/compare/v0.67.0...v0.68.0
 [0.67.0]: https://github.com/gterrill/helmcentral/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/gterrill/helmcentral/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/gterrill/helmcentral/compare/v0.64.0...v0.65.0
