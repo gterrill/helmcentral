@@ -124,6 +124,13 @@ describe('the sign card the photo grows from', () => {
     expect(surface().style.width).toBe(`${SIGN_CARD_TEXT_W_PX}px`)
   })
 
+  it('lets a long title wrap to two lines on the card instead of cutting it off', () => {
+    render(<SignCard sign={{ ...sign, title: 'Double Masted Catamaran off Rurutu' }} canOpenPhoto={false} still onOpenPhoto={() => {}} noteLines={[]} />)
+    const title = screen.getByText('Double Masted Catamaran off Rurutu')
+    expect(title.className).toContain('line-clamp-2')
+    expect(title.className).not.toContain('truncate')
+  })
+
   it('shows the note as the lines it was wrapped into, one line each', () => {
     render(<SignCard sign={sign} canOpenPhoto={false} still onOpenPhoto={() => {}} noteLines={['A humpback and her calf', 'off the bow of the boat']} />)
     expect(screen.getByText('A humpback and her calf').style.lineHeight).toBe('16px')

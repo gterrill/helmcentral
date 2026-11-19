@@ -11,19 +11,47 @@ export type Bounds = [number, number, number, number]
 
 export const FIT_PADDING = { top: 48, bottom: 80, left: 48, right: 48 }
 
+export type FitPadding = typeof FIT_PADDING
+
+/** The overview map's size in the passage page's map, and the gap kept round it. */
+const INSET_W_PX = 176
+const INSET_H_PX = 128
+const INSET_GAP_PX = 8
+/** Below this width the overview map would take too much of the map's width, so its height is kept clear instead. */
+const INSET_SIDE_MIN_W_PX = 560
+
+/** The margin the passage page's map fits the track with: small, with room on
+ * the right for the map buttons and at the foot for the map credit. While the
+ * overview map is showing, the room it fills in its corner is kept clear too:
+ * its width on a wide map, its height on a narrow one. (The video and the
+ * exported page keep FIT_PADDING, which their own frames are laid out for.) */
+export function passageMapPadding(size: { w: number; h: number }, insetCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | null): FitPadding {
+  const pad = { top: 24, bottom: 36, left: 24, right: 56 }
+  if (!insetCorner) return pad
+  if (size.w >= INSET_SIDE_MIN_W_PX) {
+    if (insetCorner.endsWith('right')) pad.right += INSET_W_PX + INSET_GAP_PX
+    else pad.left += INSET_W_PX + INSET_GAP_PX
+  } else if (insetCorner.startsWith('top')) {
+    pad.top += INSET_H_PX + INSET_GAP_PX
+  } else {
+    pad.bottom += INSET_H_PX + INSET_GAP_PX
+  }
+  return pad
+}
+
 /** What the framing asks of a map. A maplibre-gl Map satisfies it. */
 export interface FitMap {
   cameraForBounds(
     bounds: [[number, number], [number, number]],
-    options: { padding: typeof FIT_PADDING; maxZoom: number },
+    options: { padding: FitPadding; maxZoom: number },
   ): { center?: unknown; zoom?: number } | undefined
   getContainer(): { clientWidth: number; clientHeight: number }
 }
 
 /** MapLibre's own fit of the bounds as a flat camera: the centre as lon/lat and
  * the zoom, or null when it cannot be worked out. */
-export function flatFit(map: FitMap, bounds: Bounds): { centre: { lon: number; lat: number }; zoom: number } | null {
-  const fit = map.cameraForBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, maxZoom: 14 })
+export function flatFit(map: FitMap, bounds: Bounds, padding: FitPadding = FIT_PADDING): { centre: { lon: number; lat: number }; zoom: number } | null {
+  const fit = map.cameraForBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding, maxZoom: 14 })
   if (!fit || !fit.center) return null
   const fc = fit.center as [number, number] | { lng: number; lat: number } | { lon: number; lat: number }
   const centre = Array.isArray(fc) ? { lon: fc[0], lat: fc[1] } : 'lng' in fc ? { lon: fc.lng, lat: fc.lat } : { lon: fc.lon, lat: fc.lat }
@@ -33,23 +61,23 @@ export function flatFit(map: FitMap, bounds: Bounds): { centre: { lon: number; l
 /** The whole track framed at `pitch`. Pitched, MapLibre's flat fit loses the
  * near and far ends, so the zoom is backed off until every corner is inside
  * the padding. Null when flat (pitch 0) or when no fit can be worked out. */
-export function pitchedFit(map: FitMap, bounds: Bounds, pitch: number): Camera | null {
+export function pitchedFit(map: FitMap, bounds: Bounds, pitch: number, padding: FitPadding = FIT_PADDING): Camera | null {
   if (pitch === 0) return null
-  const flat = flatFit(map, bounds)
+  const flat = flatFit(map, bounds, padding)
   if (!flat) return null
   const c = map.getContainer()
   const zoom = fitZoomForPitch({
-    bounds, centre: flat.centre, zoom: flat.zoom, pitch, width: c.clientWidth, height: c.clientHeight, padding: FIT_PADDING,
+    bounds, centre: flat.centre, zoom: flat.zoom, pitch, width: c.clientWidth, height: c.clientHeight, padding,
   })
   return { center: [flat.centre.lon, flat.centre.lat], zoom, pitch, bearing: 0 }
 }
 
 /** The whole-track framing as a camera, flat or pitched; null when it cannot
  * be worked out. */
-export function overviewCameraFor(map: FitMap, bounds: Bounds, pitch: number): Camera | null {
-  const pitched = pitchedFit(map, bounds, pitch)
+export function overviewCameraFor(map: FitMap, bounds: Bounds, pitch: number, padding: FitPadding = FIT_PADDING): Camera | null {
+  const pitched = pitchedFit(map, bounds, pitch, padding)
   if (pitched) return pitched
-  const flat = flatFit(map, bounds)
+  const flat = flatFit(map, bounds, padding)
   return flat ? { center: [flat.centre.lon, flat.centre.lat], zoom: flat.zoom, pitch: 0, bearing: 0 } : null
 }
 
@@ -79,12 +107,12 @@ export function passageBoundsOf(passages: readonly { id: string; segments: Timed
  * be worked out. A passage that cannot be framed on its own (it has no track,
  * or no fit) is left out of `passages`, and the camera uses the whole cruise
  * while it plays. */
-export function cruiseFramingFor(map: FitMap, whole: Bounds, passages: readonly { id: string; bounds: Bounds | null }[], pitch: number): CruiseFraming | null {
-  const overview = overviewCameraFor(map, whole, pitch)
+export function cruiseFramingFor(map: FitMap, whole: Bounds, passages: readonly { id: string; bounds: Bounds | null }[], pitch: number, padding: FitPadding = FIT_PADDING): CruiseFraming | null {
+  const overview = overviewCameraFor(map, whole, pitch, padding)
   if (!overview) return null
   const out = new Map<string, Camera>()
   for (const p of passages) {
-    const cam = p.bounds ? overviewCameraFor(map, p.bounds, pitch) : null
+    const cam = p.bounds ? overviewCameraFor(map, p.bounds, pitch, padding) : null
     if (cam) out.set(p.id, cam)
   }
   return { overview, passages: out }

@@ -48,7 +48,7 @@ vi.mock('react-map-gl/maplibre', async () => {
     getBearing: () => m.current.bearing,
     getCenter: () => m.current.center,
     getCanvasContainer: () => document.createElement('div'),
-    getContainer: () => ({ clientWidth: 800, clientHeight: 400 }),
+    getContainer: () => ({ clientWidth: 800, clientHeight: 400, addEventListener: () => {}, querySelector: () => null }),
     // The fit depends on the bounds: a passage is closer in than the whole cruise.
     cameraForBounds: (b: [[number, number], [number, number]]) => ({ center: { lng: (b[0][0] + b[1][0]) / 2, lat: (b[0][1] + b[1][1]) / 2 }, zoom: 11 - Math.log2(1 + (b[1][0] - b[0][0]) * 20) }),
     getLayer: () => undefined,

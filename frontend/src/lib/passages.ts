@@ -1,7 +1,7 @@
 import type { DistanceUnits } from '@/config/app-config'
 import type { PassageDetailExtras } from '@/lib/passage-plans'
 import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
-import { formatDayMonthIn, formatTimeOfDay, formatWeekday, zonedDateTimeParts } from '@/lib/vessel-time'
+import { formatDayMonthIn, formatTimeOfDay, formatWeekday, zonedDateTimeParts, zoneKnown, zoneOffsetLabel } from '@/lib/vessel-time'
 
 // Passages page: the record shapes the backend returns and the pure helpers
 // the page draws from (figure formatting, track segments, replay timeline,
@@ -222,6 +222,17 @@ export function formatLocalDateTime(unixSeconds: number, timeZone: string | null
   if (!timeZone) return ABSENT
   const { date, time, zone } = zonedDateTimeParts(unixSeconds, timeZone)
   return `${date} ${time} ${zone}`
+}
+
+/** `14 Mar 9.30 AM`, with the offset (`UTC+10`) only when the passage's zone is
+ * not the boat's own at that instant. The boat's zone is the one the page reads
+ * everything else in, so the offset on every line would say nothing. While the
+ * boat has reported no zone there is nothing to compare with, so it is shown. */
+export function formatBoatDateTime(unixSeconds: number, passageZone: string | null | undefined, boatZone: string | null | undefined): string {
+  if (!passageZone) return ABSENT
+  const { date, time, zone } = zonedDateTimeParts(unixSeconds, passageZone)
+  const same = boatZone && zoneKnown(boatZone) && zoneOffsetLabel(boatZone, unixSeconds * 1000) === zone
+  return same || !zone ? `${date} ${time}` : `${date} ${time} ${zone}`
 }
 
 /** The pieces of formatLocalDateTime: `14 Mar`, `09:32` and `UTC+10`. */

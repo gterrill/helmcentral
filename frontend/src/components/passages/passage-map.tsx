@@ -25,7 +25,7 @@ import { INTRO_START_ZOOM, MERCATOR, type MapProjection } from '@/lib/replay-int
 import type { ReplayLight } from '@/lib/replay-light'
 import { applyLight, hillshadeLayer, imageryLayerProps, plainSailedOverlay, sailedEndFor, seamarkLayer, wholeLineOpacity, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, type OverlaySpec } from '@/lib/replay-map-style'
 import type { SpeedFrame } from '@/lib/replay-speed'
-import { cruiseFramingFor, overviewCameraFor, passageBoundsOf, type CruiseFraming } from '@/lib/replay-framing'
+import { cruiseFramingFor, overviewCameraFor, passageBoundsOf, passageMapPadding, type CruiseFraming } from '@/lib/replay-framing'
 import { drawnPieces, type DrawnPiece, type PassageLeg } from '@/lib/passage-legs'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
@@ -102,6 +102,8 @@ export interface PassageMapProps {
   inset?: ReactNode
   /** Where `inset` sits; top right when absent. */
   insetCorner?: InsetCorner
+  /** The overview map is on: the track is fitted clear of the room it takes in its corner. Kept apart from `inset` itself, which is empty during the opening move. */
+  reserveInset?: boolean
   /** Map markers drawn over the track: the replay's signs. */
   markers?: ReactNode
   /** The legs each passage is drawn in, one colour per leg. Without it every
@@ -155,7 +157,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, pieces: given, controlsDisabled = false, introActive = false, momentActive = false, onInterrupt, light = null, speed = null, onZoomBucket },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, pieces: given, controlsDisabled = false, introActive = false, momentActive = false, onInterrupt, light = null, speed = null, onZoomBucket, reserveInset = false },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -248,16 +250,17 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   // The whole-track framing as a camera, flat or pitched (see replay-framing).
   // Remembered per track, pitch and size: working it out searches for a zoom.
   const overviewCache = useRef<{ key: string; camera: Camera } | null>(null)
+  const fitCorner = reserveInset ? insetCorner : null
   const overviewCamera = useCallback((map: MapInstance): Camera | null => {
     if (!bounds) return null
     const c = map.getContainer()
-    const key = `${boundsKey}|${pitch}|${c.clientWidth}x${c.clientHeight}`
+    const key = `${boundsKey}|${pitch}|${c.clientWidth}x${c.clientHeight}|${fitCorner}`
     if (overviewCache.current?.key === key) return overviewCache.current.camera
-    const camera = overviewCameraFor(map, bounds, pitch)
+    const camera = overviewCameraFor(map, bounds, pitch, passageMapPadding({ w: c.clientWidth, h: c.clientHeight }, fitCorner))
     if (!camera) return null
     overviewCache.current = { key, camera }
     return camera
-  }, [bounds, boundsKey, pitch])
+  }, [bounds, boundsKey, pitch, fitCorner])
 
   // A replay of several passages also frames each on its own, for the camera to
   // move between (see cruiseCamera in lib/replay-framing). Remembered the same way.
@@ -269,13 +272,13 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   const cruiseFraming = useCallback((map: MapInstance): CruiseFraming | null => {
     if (!bounds || passageBounds.list.length === 0) return null
     const c = map.getContainer()
-    const key = `${boundsKey}|${passageBounds.key}|${pitch}|${c.clientWidth}x${c.clientHeight}`
+    const key = `${boundsKey}|${passageBounds.key}|${pitch}|${c.clientWidth}x${c.clientHeight}|${fitCorner}`
     if (cruiseCache.current?.key === key) return cruiseCache.current.framing
-    const framing = cruiseFramingFor(map, bounds, passageBounds.list, pitch)
+    const framing = cruiseFramingFor(map, bounds, passageBounds.list, pitch, passageMapPadding({ w: c.clientWidth, h: c.clientHeight }, fitCorner))
     if (!framing) return null
     cruiseCache.current = { key, framing }
     return framing
-  }, [bounds, boundsKey, passageBounds, pitch])
+  }, [bounds, boundsKey, passageBounds, pitch, fitCorner])
 
   // On load, and whenever the passages change, the whole track is framed.
   const frame = useCallback(() => {
@@ -332,7 +335,9 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     // Fail fast: the place labels draw from the style's own vector source.
     if (map) warnIfBaseVectorSourceMissing(map)
     frame()
-  }, [frame])
+    // The credit opens itself the first time it has text; fold it now, not only once the map has gone idle, which a slow tile can hold off.
+    collapseAttribution()
+  }, [frame, collapseAttribution])
 
   // The camera tilts up when the terrain is in and levels out when 3D goes off
   // or the terrain fails; the gestures are taken away once it has levelled.
@@ -530,6 +535,16 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundsKey])
 
+  // The overview map coming or going changes the room the track has: fit it again,
+  // except under the opening move and while the replay plays, which place the camera themselves.
+  const fitRoom = useRef(fitCorner)
+  useEffect(() => {
+    if (fitRoom.current === fitCorner) return
+    fitRoom.current = fitCorner
+    if (loadedRef.current && !introActive && !controlsDisabled) frame()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitCorner])
+
   if (!canRender) {
     return (
       <div
@@ -547,7 +562,10 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
       <Map
         ref={mapRef}
         mapLib={maplibregl}
-        initialViewState={{ ...centre, zoom: INTRO_START_ZOOM, pitch }}
+        // Opens on the track itself, so a map slow to load is not left on the whole world; the fit on load takes over (it knows the pitch and the map's size).
+        initialViewState={bounds
+          ? { bounds, fitBoundsOptions: { padding: passageMapPadding({ w: 640, h: 416 }, null), maxZoom: 14 }, pitch }
+          : { ...centre, zoom: INTRO_START_ZOOM, pitch }}
         maxPitch={tiltable ? REPLAY_3D_MAX_PITCH : 0}
         // Only null clears terrain once set; undefined leaves it as it was. The
         // prop's type leaves null out.

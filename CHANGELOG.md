@@ -29,6 +29,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   to match "kn". The heading's second line is now the day and time the passage
   ran in the boat's own time. The score you pick under How it went is now
   clearly filled in.
+- **Tapping a sign on a passage's map or slider no longer opens the editor.**
+  It moves the replay to that sign and, if the sign has a photo, shows a small
+  thumbnail beside the boat instead of a large card over the route. Tap the
+  thumbnail to see the photo full size. To edit a sign, press **Signs** first,
+  then pick the sign there. Nothing to do on upgrade.
+- **A passage's map now fits the route snugly.** The map opens with the whole
+  route framed with a small margin, where a short passage used to fill a small
+  part of it. With the **Overview map** on, the route is framed clear of it.
+- **A sign's title can run to two lines.** A long title on a photo card is no
+  longer cut off after one line.
+- **The replay time shows its zone only when it's different.** A time such as
+  "17 Nov 5.05 AM" is in the boat's own zone. The label, such as UTC+10, now
+  appears only when the passage was sailed in another zone.
+- **The replay length list now has a label.** It reads **Replay length** beside
+  the list.
+
+### Fixed
+
+- **The bar across the bottom of a passage's map is readable again.** The map
+  credit showed as white text on a white bar, so it looked empty. It's now
+  white text on a dark pill, and folds down to its small icon when the map has
+  loaded.
 
 ## [0.68.0] - 2026-11-19
 
