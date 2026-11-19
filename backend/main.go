@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -15,6 +17,11 @@ import (
 )
 
 const (
+	// serverShutdownWait bounds how long a stop waits for requests in flight,
+	// inside Docker's default 10 s stop grace. Open streams never finish, so
+	// they are cut when it runs out.
+	serverShutdownWait = 5 * time.Second
+
 	defaultSignalKAddress  = "localhost"
 	defaultSignalKPort     = 3000
 	metersPerSecondToKnots = 1.943844
@@ -64,7 +71,10 @@ func main() {
 
 	// Server vitals (ADR 0290) start before any store opens, so the startup
 	// statements are timed too.
-	serverVitals.start(context.Background(), vitalsDir())
+	// The vitals context ends after the server has drained, so the final
+	// roll-up covers the last requests too.
+	vitalsCtx, endVitals := context.WithCancel(context.Background())
+	vitalsDone := serverVitals.start(vitalsCtx, vitalsDir())
 
 	e := echo.New()
 	e.IPExtractor = clientIPExtractor()
@@ -612,8 +622,8 @@ func main() {
 		log.Fatalf("signalk unit store: %v", err)
 	}
 	// Writes the declared units in batches, off the stream goroutine. Pending
-	// units reach disk within about 2 s. main has no signal handling, so
-	// streamCtx never ends in production and no final flush runs: a restart
+	// units reach disk within about 2 s. streamCtx ends only when main
+	// returns, so no final flush runs: a restart
 	// inside that window loses them until the device declares them again,
 	// which SignalK does on every subscribe.
 	go globalSignalKSnapshot.runUnitFlusher(streamCtx)
@@ -692,12 +702,35 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)
+	// SIGINT and SIGTERM (systemctl stop, docker stop) drain the server so the
+	// cleanup below runs. e.Start returns the moment Shutdown is called, so
+	// main also waits for the drain itself to finish.
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-sigCtx.Done()
+		// A second Ctrl-C now kills the process instead of being swallowed.
+		stopSignals()
+		log.Printf("Stop signal received, shutting down")
+		shutCtx, cancel := context.WithTimeout(context.Background(), serverShutdownWait)
+		defer cancel()
+		if err := e.Shutdown(shutCtx); err != nil {
+			log.Printf("server shutdown did not finish cleanly, closing open connections: %v", err)
+			_ = e.Close()
+		}
+	}()
 	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("error starting server: %v", err)
 	}
+	<-drained
 	// The server has stopped: end any alarm review under way and let it record
 	// that, for a short while.
 	globalAlarmReviewer.stop(alarmReviewShutdownWait)
+	// Last, so the final minute of vitals is on disk before the process exits.
+	endVitals()
+	<-vitalsDone
 }
 
 // buildAPIRoutes composes the /api route table from the per-feature route

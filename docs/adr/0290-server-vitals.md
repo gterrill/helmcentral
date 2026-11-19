@@ -202,9 +202,10 @@ problem.
   them would cost more than it shows. Two SQLite-backed locks are left out:
   `alarmIgnoreStore` uses a `sync.RWMutex`, which a `lockOp` does not take, and
   `nearbyContactStore` releases its lock by hand in the middle of a method.
-- The last partial minute before a stop is not written. The server has no
-  graceful shutdown to hook into, so vitals start with `context.Background()`
-  and nothing ever ends them.
+- A clean stop keeps its last partial minute. SIGINT and SIGTERM make `main`
+  drain the HTTP server (up to 5 s, then it cuts open streams), then end the vitals context and wait
+  for the final roll-up to reach disk. A crash or SIGKILL still loses up to
+  a minute.
 - Slow-statement log lines are limited to one per key per minute, with a count
   of the lines held back. A query's time includes the caller reading its rows.
 - Percentiles are bucket estimates. Compare them as trends, not to the

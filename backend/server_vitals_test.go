@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -779,5 +780,29 @@ func TestVitalsSummary_RejectsABadLineWithItsPosition(t *testing.T) {
 	}
 	if err := writeVitalsSummary(&bytes.Buffer{}, nil); err == nil || errors.Is(err, os.ErrNotExist) {
 		t.Errorf("no files: err = %v, want a usage error", err)
+	}
+}
+
+// A clean stop keeps the final minute: cancelling the context writes one last
+// line, and the channel start returns closes only once that line is on disk.
+func TestVitals_CancellingTheContextWritesTheFinalMinuteBeforeDoneCloses(t *testing.T) {
+	dir := t.TempDir()
+	v, _ := newTestVitals(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := v.start(ctx, dir)
+	v.record("db.x", time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("done never closed after the context ended")
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "server-vitals-*.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files = %v, err = %v, want one", files, err)
+	}
+	lines := readVitalsFile(t, files[0])
+	if len(lines) != 1 || lines[0].Timings["db.x"].Count != 1 {
+		t.Fatalf("final line = %+v, want the minute's one db.x call", lines)
 	}
 }

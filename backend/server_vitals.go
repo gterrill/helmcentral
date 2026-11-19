@@ -576,12 +576,16 @@ func (v *vitalsRegistry) timing(name string) (histogramJSON, bool) {
 
 // start points the roll-up at dir and runs it every minute until ctx ends,
 // with a last roll-up on the way out so a clean stop keeps its final minute.
-func (v *vitalsRegistry) start(ctx context.Context, dir string) {
+// The returned channel closes once the loop has ended and that last roll-up is
+// written; a caller that is about to exit waits on it.
+func (v *vitalsRegistry) start(ctx context.Context, dir string) <-chan struct{} {
 	v.mu.Lock()
 	v.writer = &vitalsFileWriter{dir: dir, keepDays: vitalsFileKeepDays}
 	v.lastRollup = v.now()
 	v.mu.Unlock()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		t := time.NewTicker(vitalsRollupEvery)
 		defer t.Stop()
 		for {
@@ -594,6 +598,7 @@ func (v *vitalsRegistry) start(ctx context.Context, dir string) {
 			}
 		}
 	}()
+	return done
 }
 
 // vitalsDir is where the minute files live: a "vitals" folder beside the
