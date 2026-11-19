@@ -73,9 +73,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   overdue or due soon, with the same **Complete** and **Ack** buttons you have
   in the Service schedule. The row in the sidebar shows how many there are, and
   the number goes away when there's nothing to do. A service you've
-  acknowledged isn't counted. If an item's profile is missing or invalid,
-  Helmcentral can't check its services, so the row shows an amber **!** in
-  place of the number. Open Jobs, where an alert names the item to fix. Open
+  acknowledged isn't counted or listed here. It stays in the Service
+  schedule. If an item's profile is missing or invalid, Helmcentral can't
+  check its services, so the row shows an amber **!** in place of the number.
+  Open Jobs, where an alert names the item to fix. Open
   jobs used to sit at the top of Inventory → Maintenance, and they've moved to
   Jobs. Mate's links to them go there too. Each item's own page still shows its
   jobs.
