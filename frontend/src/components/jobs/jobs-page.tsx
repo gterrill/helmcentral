@@ -41,7 +41,12 @@ export function JobsPage({ onOpenEquipment, onOpenServiceSchedule, canWrite = tr
   const jobs = useOpenJobs({})
   const services = useMaintenanceRules({})
 
-  const dueGroups = useMemo(() => groupRulesByStatus(services.rules, [...DUE_STATUSES]), [services.rules])
+  // An acknowledged service is left out, as it is from the sidebar badge: what
+  // the badge counts is what this page lists. It stays under Service schedule.
+  const dueGroups = useMemo(
+    () => groupRulesByStatus(services.rules.filter((rule) => !rule.acknowledged), [...DUE_STATUSES]),
+    [services.rules],
+  )
   const openCount = useMemo(() => jobs.jobs.filter((job) => job.status === 'open').length, [jobs.jobs])
 
   // Empty only on a clean, finished read of both lists: an unanswered or failed

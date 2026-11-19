@@ -15,8 +15,8 @@ boat you're asking "what needs doing", not "is this a rule or a job".
 - **Services due:** The rules that are overdue or due soon, overdue first. Each
   row has the same buttons as the Service schedule: **Complete**, **Ack** and,
   for gear with no hour meter, **Log a reading**. A service you've
-  acknowledged stays on the list with its **Ack** mark, below the ones nobody
-  has looked at yet.
+  acknowledged isn't listed, because **Ack** means you've decided it can wait.
+  It stays in the Service schedule.
 - **Service schedule:** The link above the services opens **Inventory →
   Service schedule**, where every rule is listed, including the ones that
   aren't due.

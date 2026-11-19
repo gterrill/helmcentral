@@ -54,15 +54,23 @@ describe('JobsPage', () => {
     expect(screen.queryByText('Raw water impeller')).not.toBeInTheDocument()
     expect(screen.queryByText('Never logged')).not.toBeInTheDocument()
 
-    const order = screen.getAllByText(/^(Engine oil|Anode check|Fuel filter)$/).map((el) => el.textContent)
-    expect(order).toEqual(['Engine oil', 'Anode check', 'Fuel filter'])
+    const order = screen.getAllByText(/^(Engine oil|Fuel filter)$/).map((el) => el.textContent)
+    expect(order).toEqual(['Engine oil', 'Fuel filter'])
   })
 
-  it('shows an acknowledged service with its Ack badge, after the unacknowledged ones', async () => {
+  it('leaves an acknowledged service out of the list, as the sidebar badge does', async () => {
     stubApi(routes([], RULES))
     render(<JobsPage onOpenEquipment={vi.fn()} onOpenServiceSchedule={vi.fn()} />)
-    const row = (await screen.findByText('Anode check')).closest('tr') as HTMLElement
-    expect(within(row).getByTitle('yard')).toHaveTextContent('Ack')
+    await screen.findByText('Engine oil')
+    expect(screen.queryByText('Anode check')).not.toBeInTheDocument()
+  })
+
+  it('says nothing needs doing when the only due service is acknowledged', async () => {
+    stubApi(routes([], [RULES[0], RULES[3]]))
+    render(<JobsPage onOpenEquipment={vi.fn()} onOpenServiceSchedule={vi.fn()} />)
+    expect(await screen.findByText('Nothing needs doing.')).toBeInTheDocument()
+    expect(screen.queryByText('Anode check')).not.toBeInTheDocument()
+    expect(screen.queryByText('Services due')).not.toBeInTheDocument()
   })
 
   it('has one Add job button, in the page header, and it opens the new job dialog', async () => {
