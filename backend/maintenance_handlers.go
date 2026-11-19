@@ -570,9 +570,21 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 		IncludeStored: c.QueryParam("include_stored") == "true",
 		System:        c.QueryParam("system"),
 	}
-	sched, err := globalDocumentStore.MaintenanceSchedule(filter)
+	views, removed, scheduleErrors, err := maintenanceRuleViews(filter, today)
 	if err != nil {
 		return writeDocumentError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rules": views, "removed": removed, "schedule_errors": scheduleErrors})
+}
+
+// maintenanceRuleViews is the schedule behind the list: every rule's view on
+// the given day, the parked ones, and the items whose schedule could not be
+// read. The Jobs count (jobs_count.go) reads the same list, so the two never
+// disagree on what is due.
+func maintenanceRuleViews(filter maintenanceRuleFilter, today time.Time) (views, removed []maintenanceRuleView, scheduleErrors []maintenanceScheduleError, err error) {
+	sched, err := globalDocumentStore.MaintenanceSchedule(filter)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	now := time.Now().UTC()
@@ -605,24 +617,24 @@ func listMaintenanceRulesHandler(c echo.Context) error {
 		return buildMaintenanceRuleView(rule, &eq, hoursCache[id], today), nil
 	}
 
-	views := make([]maintenanceRuleView, 0, len(sched.Rules))
+	views = make([]maintenanceRuleView, 0, len(sched.Rules))
 	for _, rule := range sched.Rules {
 		view, err := viewOf(rule)
 		if err != nil {
-			return writeDocumentError(c, err)
+			return nil, nil, nil, err
 		}
 		views = append(views, view)
 	}
-	removed := make([]maintenanceRuleView, 0, len(sched.Removed))
+	removed = make([]maintenanceRuleView, 0, len(sched.Removed))
 	for _, rule := range sched.Removed {
 		view, err := viewOf(rule)
 		if err != nil {
-			return writeDocumentError(c, err)
+			return nil, nil, nil, err
 		}
 		removed = append(removed, view)
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"rules": views, "removed": removed, "schedule_errors": sched.Errors})
+	return views, removed, sched.Errors, nil
 }
 
 func getMaintenanceRuleHandler(c echo.Context) error {

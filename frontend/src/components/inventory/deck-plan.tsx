@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 
 import { deckPlanUrl, type InventoryDeck, type InventoryZone } from '@/hooks/use-inventory'
 import { formatAppLocation } from '@/lib/app-location'
+import { isPlainLeftClick } from '@/lib/plain-click'
 import { useImageSize } from '@/lib/use-image-size'
 import { cn } from '@/lib/utils'
 
@@ -79,7 +80,7 @@ export function DeckPlan({
       onClick={(e) => {
         // Plain left click navigates inside the app; a modified click keeps
         // the browser's own open-in-new-tab behaviour.
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+        if (!isPlainLeftClick(e)) return
         e.preventDefault()
         onActivate()
       }}

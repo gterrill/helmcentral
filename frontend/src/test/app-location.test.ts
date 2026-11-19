@@ -105,6 +105,12 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/wall-displays/%E0%A4%A')).toEqual({ panel: 'wall-displays', route: { view: 'index' } })
   })
 
+  // ADR 0293: Jobs is a plain panel with one page.
+  it('parses /jobs as the Jobs panel and formats it back', () => {
+    expect(parseAppLocation('/jobs')).toEqual({ panel: 'jobs' })
+    expect(formatAppLocation({ panel: 'jobs' }, ctx)).toBe('/jobs')
+  })
+
   // ADR 0227: the Watches pages.
   it('parses /watches as the index and /watches/<id> as one watch', () => {
     expect(parseAppLocation('/watches')).toEqual({ panel: 'watches', route: { view: 'index' } })
@@ -759,6 +765,7 @@ describe('the order an index showed (details pages step through it)', () => {
     roundTrips(inv({ view: 'index', section: 'locations' }), '/inventory/locations')
     roundTrips(inv({ view: 'decks' }), '/inventory/decks')
     roundTrips({ panel: 'watches', route: { view: 'index' } }, '/watches')
+    roundTrips({ panel: 'jobs' }, '/jobs')
     expect(formatAppLocation(inv({ view: 'index', section: 'equipment', list: {} }), ctx)).toBe('/inventory')
   })
 

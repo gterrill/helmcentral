@@ -620,6 +620,7 @@ var assistantPanelLabels = map[string]string{
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",
 	"watches":      "Watches",
+	"jobs":         "Jobs",
 	"assistant":    "Mate",
 }
 
@@ -834,7 +835,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// 2a-iii. Maintenance (ADR 0145) - fixed wording, identical for every
 	// turn. The status of a rule is worked out by the host against the
 	// operator's own date; Mate reads it, never recomputes it.
-	b.WriteString("The boat's maintenance schedule lives in Helmcentral's Maintenance list. For any question about " +
+	b.WriteString("The boat's maintenance schedule lives in Helmcentral's Service schedule (Inventory, Service schedule). For any question about " +
 		"what is due, overdue or coming up, or how a schedule looks, call list_maintenance (get an equipment id " +
 		"from find_equipment first when the question names an item; use get_maintenance_log for what was actually " +
 		"done and when) and answer from what it returns, never from memory and never by working out a status " +
@@ -855,16 +856,16 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"override, and not_applicable can be set per item; changing it for every item means editing the profile, " +
 		"which you cannot do. Logging a job as done is creating a maintenance_log entry for its rule. " +
 		"After proposing, say that the proposal is waiting and they should tap Apply; never say it is done, added or changed. " +
-		"Hours in a proposal are meter readings, what their gauge shows, the same as the Maintenance form, never cumulative " +
+		"Hours in a proposal are meter readings, what their gauge shows, the same as the Service schedule form, never cumulative " +
 		"engine hours. If a change was dismissed, or went stale (its status line says why), do not propose it again " +
 		"unless the operator asks; if they do, read the rules again and make a fresh proposal. Earlier proposals appear in the conversation with their status (applied, dismissed, stale or " +
 		"waiting): go by that status when you talk about them. Deleting rules or log entries, photos, parts, meter " +
-		"replacements and procedure notes cannot be proposed: say the operator can do those in Inventory, Maintenance. " +
-		"The Open jobs list holds known problems that are not fixed yet, and list_maintenance returns it as open_jobs. " +
+		"replacements and procedure notes cannot be proposed: say the operator can do those in Inventory, Service schedule. " +
+		"The Jobs page holds known problems that are not fixed yet, next to the services that are due, and list_maintenance returns the problems as open_jobs. " +
 		"When the operator asks you to put a problem on the jobs list, propose an open_job create (an item id from find_equipment when " +
 		"it is on one item, a short title, notes if they gave any, before_on only if they gave a date). Do not use a maintenance rule " +
-		"for a one-off problem, and never call a job an alarm. Closing or dropping a job is the operator's own tap on the list. " +
-		"Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)` " +
+		"for a one-off problem, and never call a job an alarm. Closing or dropping a job is the operator's own tap on the Jobs page. " +
+		"Link a rule or log entry as `[Equipment › Rule](/inventory/maintenance)`, an open job as `[Equipment › Job](/jobs)`, " +
 		"and an item as `[Name](/inventory/equipment/<id>)`, using the link the tool returned.\n\n")
 
 	// 2a-iv. Changing records (ADR 0158) - fixed wording, identical for every

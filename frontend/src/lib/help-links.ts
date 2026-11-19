@@ -59,6 +59,7 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   inbox: { page: 'features/inbox' },
   passages: { page: 'features/passages' },
   watches: { page: 'features/watches' },
+  jobs: { page: 'features/jobs' },
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the help index, for totality.

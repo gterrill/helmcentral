@@ -15,11 +15,11 @@ import { formatListSort, parseListSort, type ListSort } from '@/lib/list-order'
 // its own carries a `route`, a single union of that panel's views, so going
 // to a view replaces the whole slice and no sibling field is ever left
 // behind to clear.
-export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'inbox', 'passages', 'watches'] as const
+export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'inbox', 'passages', 'watches', 'jobs'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** The panels with a single view and nothing to remember beyond being open. */
-export type PlainPanelId = 'forecast' | 'radar' | 'anchor-watch' | 'alarms'
+export type PlainPanelId = 'forecast' | 'radar' | 'anchor-watch' | 'alarms' | 'jobs'
 
 /** `/settings/<section>`, or the Import wizard at `/settings/import/<runId>`
  * ("new" is the upload page). The bare `/settings/import` list is the

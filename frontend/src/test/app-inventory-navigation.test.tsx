@@ -362,7 +362,7 @@ describe('App: Inventory sections in the sidebar', () => {
 
     await screen.findByLabelText('Scan')
     expect(subRows().map((row) => row.textContent?.trim())).toEqual([
-      'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+      'Equipment', 'Locations', 'Stocktake', 'Service schedule', 'Profiles',
     ])
     expect(activeRows()).toEqual(['Stocktake'])
   })
@@ -440,18 +440,18 @@ describe('App: Inventory sections in the sidebar', () => {
   describe('on a phone', () => {
     beforeEach(() => { setViewportWidth(390) })
 
-    it('lists the sections on another panel, none lit, and Maintenance is one tap away', async () => {
+    it('lists the sections on another panel, none lit, and the Service schedule is one tap away', async () => {
       window.history.replaceState({}, '', '/forecast')
       render(<App />)
 
       fireEvent.click(await screen.findByRole('button', { name: /toggle sidebar/i }))
       await screen.findByRole('button', { name: 'Inventory' })
       expect(subRows().map((row) => row.textContent?.trim())).toEqual([
-        'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+        'Equipment', 'Locations', 'Stocktake', 'Service schedule', 'Profiles',
       ])
       expect(activeRows()).toEqual([])
 
-      fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Maintenance')!)
+      fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Service schedule')!)
       await waitFor(() => expect(window.location.pathname).toBe('/inventory/maintenance'))
     })
   })
@@ -468,7 +468,7 @@ describe('App: Inventory sections in the sidebar', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Inventory' }))
       const items = await screen.findAllByRole('menuitemradio')
       expect(items.map((item) => item.textContent?.trim())).toEqual([
-        'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+        'Equipment', 'Locations', 'Stocktake', 'Service schedule', 'Profiles',
       ])
       expect(items.filter((item) => item.getAttribute('aria-checked') === 'true').map((item) => item.textContent?.trim())).toEqual(['Stocktake'])
 

@@ -3,6 +3,7 @@ import {
   BellRing,
   BookOpen,
   CircleHelp,
+  ClipboardList,
   CloudSun,
   FileText,
   Inbox,
@@ -19,10 +20,11 @@ import {
   Wind,
   Wrench,
 } from 'lucide-react'
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { useInboxCount } from '@/hooks/use-inbox'
+import { useJobsCount } from '@/hooks/use-jobs-count'
 import { LiveAlarmBanner } from '@/components/live-alarm-banner'
 import { LiveDisplayShell } from '@/components/display-shell'
 import { LiveAlarmsDrawer, LiveAnchorWatchDrawer, LiveForecastPage, LiveRadarDrawer } from '@/components/live-drawers'
@@ -44,6 +46,7 @@ const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then(
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
 const InboxRoutePanel = lazy(() => import('@/components/passages/inbox-route-panel').then((mod) => ({ default: mod.InboxRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
+const JobsRoutePanel = lazy(() => import('@/components/jobs/jobs-route-panel').then((mod) => ({ default: mod.JobsRoutePanel })))
 const WatchesRoutePanel = lazy(() => import('@/components/watches/watches-route-panel').then((mod) => ({ default: mod.WatchesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
 const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
@@ -165,19 +168,48 @@ import { isComposing } from '@/lib/keyboard'
 
 // The waiting count on the Inbox row. Its own component, so the poll that feeds
 // it re-renders the badge and not the whole shell.
-function InboxNavBadge() {
-  const count = useInboxCount()
+function NavCountBadge({ count, label }: { count: number | null; label: string }) {
   if (count === null || count === 0) return null
   return (
     <span
       role="img"
-      aria-label={`${count} waiting`}
+      aria-label={`${count} ${label}`}
       className="ml-auto min-w-5 rounded-md px-1 text-center text-xs font-medium tabular-nums group-data-[collapsible=icon]:hidden"
     >
       {count}
     </span>
   )
 }
+
+function InboxNavBadge() {
+  return <NavCountBadge count={useInboxCount()} label="waiting" />
+}
+
+// What needs doing on the Jobs row: open jobs plus services overdue or due soon
+// (ADR 0293). Its own component, memo'd by having no props, and fed by selectors
+// that hand back one number each, so a list read again with the same answer and
+// the live telemetry that re-renders the shell never reach it.
+//
+// An amber "!" in place of the number says an item's schedule could not be read,
+// so the count may be short; the Jobs page names the item. Nothing at all while
+// the read has not answered or has failed.
+const JobsNavBadge = memo(function JobsNavBadge() {
+  const jobs = useJobsCount()
+  if (jobs === null) return null
+  if (jobs.incomplete) {
+    return (
+      <span
+        role="img"
+        aria-label="Jobs list incomplete: an item's schedule couldn't be read"
+        title="Jobs list incomplete: an item's schedule couldn't be read"
+        className="ml-auto min-w-5 rounded-md px-1 text-center text-xs font-bold text-amber-400 group-data-[collapsible=icon]:hidden"
+      >
+        !
+      </span>
+    )
+  }
+  return <NavCountBadge count={jobs.count} label="to do" />
+})
 
 /**
  * Ordered the way the boat is actually run, not the order the panels were
@@ -210,6 +242,9 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'watches', label: 'Watches', icon: Eye },
   { id: 'documents', label: 'Documents', icon: FileText },
+  // ADR 0293: what needs doing on the boat, between the reference material and
+  // the registry it points into.
+  { id: 'jobs', label: 'Jobs', icon: ClipboardList },
   { id: 'inventory', label: 'Inventory', icon: Wrench },
   { id: 'assistant', label: 'Mate', icon: Sparkles },
   { id: 'wall-displays', label: 'Wall displays', icon: MonitorPlay },
@@ -1638,6 +1673,8 @@ function AppShell() {
         return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'watches':
         return <WatchesRoutePanel canWrite={canWrite} canAdmin={canAdmin} onAskMate={openMate} />
+      case 'jobs':
+        return <JobsRoutePanel canWrite={canWrite} />
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
@@ -1913,6 +1950,7 @@ function AppShell() {
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
                   {id === 'inbox' && <InboxNavBadge />}
+                  {id === 'jobs' && <JobsNavBadge />}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}

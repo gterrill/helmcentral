@@ -1,7 +1,7 @@
 # Set up a maintenance schedule
 
 Follow these steps to get an item's service jobs into Helmcentral, so that the
-Maintenance list can tell you what's due. It works whether the boat has years
+Service schedule can tell you what's due. It works whether the boat has years
 of history behind it or the item was fitted yesterday.
 
 If you'd rather describe the jobs and check a card, Mate can propose the rules.
@@ -29,7 +29,7 @@ the manufacturer lists doesn't apply to how this unit is fitted.
    interval or the months interval, or turn on **Not applicable to this
    item**.
 3. Save. The changed value is marked on the item's page and in the
-   Maintenance list, so you can see which jobs no longer follow the profile.
+   Service schedule, so you can see which jobs no longer follow the profile.
 4. **Reset to profile** beside a changed field puts it back.
 
 Due-soon windows and a fixed due date are set the same way and are always
@@ -52,7 +52,7 @@ deleted until those items use another one.
 For gear with no profile, or a job the profile doesn't cover. These show
 under **Added for this item**:
 
-1. From **Inventory → Maintenance**, tap **New rule**. Or, from the item's
+1. From **Inventory → Service schedule**, tap **New rule**. Or, from the item's
    own page, tap **Add rule** in its Maintenance block.
 2. Pick the item, or leave it blank for something that isn't a piece of
    gear, such as flares, the EPIRB battery, insurance or registration.
@@ -80,7 +80,7 @@ that never happened in Helmcentral:
 A rule on gear with no hour meter, such as a watermaker's filter change, counts
 from the gauge figures you type. Read the gauge, then:
 
-1. Open the item's own page, or find the rule in **Inventory → Maintenance**.
+1. Open the item's own page, or find the rule in **Inventory → Service schedule**.
 2. Tap **Log a reading** (on the item's page it's in the **Hand-read hours**
    section).
 3. Enter the figure on the gauge, the date you read it and, if you like, a
@@ -101,7 +101,7 @@ To attach the exact steps for a job on your own boat:
 2. A note titled from the rule opens, ready to write in. Write it as a
    plain description, or as a checklist if the job has a fixed sequence of
    steps. A checklist note offers **Start checklist** wherever it's opened,
-   including from a Maintenance rule.
+   including from a rule in the Service schedule.
 
 ## If the hour meter is ever replaced
 

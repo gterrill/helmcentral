@@ -13,9 +13,11 @@ the sidebar, then tap the section you want.
 
 - **Equipment, Locations and Stocktake:** These cover what is aboard and where
   it is stowed.
-- **Maintenance and Profiles:** These cover what keeps it running.
+- **Service schedule and Profiles:** These cover what keeps it running.
 
-Maintenance has its own page. See [Maintenance](maintenance.md).
+The Service schedule has its own page. See [Maintenance](maintenance.md). The
+problems you haven't fixed yet are on the **Jobs** page, which sits just above
+Inventory in the sidebar. See [Jobs](jobs.md).
 
 ## Equipment
 

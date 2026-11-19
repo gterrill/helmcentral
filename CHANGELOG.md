@@ -25,7 +25,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
-- **The Maintenance list tells same-named items apart.** When two items share a
+- **Inventory's Maintenance section is now called Service schedule.** It's the
+  same list of rules with the same address, so your saved links and tags still
+  work. The name changed in the sidebar, the page heading, the breadcrumb and
+  the help. Nothing to do on upgrade.
+- **The Service schedule tells same-named items apart.** When two items share a
   name, such as two engines both called Cummins QSB 6.7, each row, the **Item**
   picker in the rule editor and any dialog opened from such a row now say which
   one it's for, using the item's alias or else its location. Names that differ
@@ -33,7 +37,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   **Set interval**. **Complete** steps back to a quieter button unless a
   service is due or overdue.
 - **Inventory's sections now sit under Inventory in the sidebar.** Equipment,
-  Locations, Stocktake, Maintenance and Profiles are listed there while
+  Locations, Stocktake, Service schedule and Profiles are listed there while
   Inventory is open, the same way your dashboard pages sit under Dashboard.
   On a phone they're always listed in the sidebar, so you can open any of them
   straight from another page.
@@ -64,6 +68,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Jobs has its own page, between Documents and Inventory.** It's the list of
+  what needs doing on the boat: your open jobs, and the services that are
+  overdue or due soon, with the same **Complete** and **Ack** buttons you have
+  in the Service schedule. The row in the sidebar shows how many there are, and
+  the number goes away when there's nothing to do. A service you've
+  acknowledged isn't counted. If an item's profile is missing or invalid,
+  Helmcentral can't check its services, so the row shows an amber **!** in
+  place of the number. Open Jobs, where an alert names the item to fix. Open
+  jobs used to sit at the top of Inventory → Maintenance, and they've moved to
+  Jobs. Mate's links to them go there too. Each item's own page still shows its
+  jobs.
 - **A new help page shows how to choose which GPS SignalK uses.** On a boat
   with several receivers, SignalK can hop between them, so the position jumps
   while the boat sits still. That can make the boat look like it's under way

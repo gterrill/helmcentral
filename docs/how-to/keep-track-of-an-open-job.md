@@ -1,14 +1,14 @@
 # Keep track of an open job
 
 Write down a problem you've found and haven't fixed yet, then close it when
-it's done. For how open jobs differ from rules, see
+it's done. Open jobs sit on the **Jobs** page, next to the services that are
+due. For how they differ from rules, see [Jobs](../features/jobs.md) and
 [Maintenance](../features/maintenance.md).
 
 ## Add a job
 
-1. Open **Inventory → Maintenance**, or the page of the item the problem is on.
-2. In the **Open jobs** group, tap **Add job**. On an item's page, the job
-   starts on that item.
+1. Open **Jobs** in the sidebar, or the page of the item the problem is on.
+2. Tap **Add job**. On an item's page, the job starts on that item.
 3. Type a title, such as "Leaks at the outlet".
 4. Choose the item if it isn't already set. Leave it as **No item** for
    something that isn't one piece of gear.
@@ -47,6 +47,6 @@ If you leave the notes blank, the line reads as the job's title.
 
 ## Look at closed jobs
 
-Tap **Show closed** in the Open jobs group. Each closed job shows whether it was
+Tap **Show closed** in the Open jobs group on the Jobs page. Each closed job shows whether it was
 done or dropped, the date, and the reason if you gave one. A job that was done
 is in the service log under the item.

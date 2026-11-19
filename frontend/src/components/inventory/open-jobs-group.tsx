@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
@@ -16,8 +16,8 @@ import type { EquipmentSystem } from '@/hooks/use-inventory'
 import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 
 // ADR 0269: the Open jobs group. A list of known problems that are not fixed
-// yet, at the top of Inventory, Maintenance (above Overdue) and on each
-// item's own page. A list, not a board: no assignment, no comments, no
+// yet, on the Jobs page (ADR 0293 moved it there from the Service schedule) and
+// on each item's own page. A list, not a board: no assignment, no comments, no
 // priority. Each row shows its age and the date it should be done before.
 // Done writes the service log; Drop closes it with an optional reason. Jobs
 // are not alarms and are never counted as alarms.
@@ -25,11 +25,15 @@ import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 interface OpenJobsGroupProps {
   /** Narrows to one item's jobs (the item's own page). */
   equipmentId?: string
-  /** Narrows to one system's gear (the Maintenance list's filter). */
+  /** Narrows to one system's gear. */
   system?: EquipmentSystem | ''
   /** Opens the item a job is on. Left out on an item's own page, where the item is not repeated. */
   onOpenEquipment?: (id: string) => void
   canWrite?: boolean
+  /** False where the page has its own Add job (the Jobs page header): the group then draws no button of its own. */
+  showAdd?: boolean
+  /** Shown in place of the list when no job is open. Default: "No open jobs." */
+  empty?: ReactNode
 }
 
 function sourceLine(job: OpenJob) {
@@ -54,7 +58,7 @@ function closedLine(job: OpenJob): string {
   return job.drop_reason ? `${when}: ${job.drop_reason}` : when
 }
 
-export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWrite = true }: OpenJobsGroupProps) {
+export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWrite = true, showAdd = true, empty }: OpenJobsGroupProps) {
   const [showClosed, setShowClosed] = useState(false)
   const { jobs, loading, error, refresh } = useOpenJobs({
     equipment: equipmentId,
@@ -153,7 +157,7 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
           <Button type="button" variant="ghost" size="sm" onClick={() => setShowClosed((v) => !v)}>
             {showClosed ? 'Hide closed' : 'Show closed'}
           </Button>
-          {canWrite && (
+          {canWrite && showAdd && (
             <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setAdding(true)}>
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               Add job
@@ -170,7 +174,7 @@ export function OpenJobsGroup({ equipmentId, system = '', onOpenEquipment, canWr
         loading={loading}
         error={error}
         onRetry={() => { void refresh() }}
-        empty={<p className="px-4 py-3 text-sm text-muted-foreground">No open jobs.</p>}
+        empty={empty ?? <p className="px-4 py-3 text-sm text-muted-foreground">No open jobs.</p>}
       />
 
       {showClosed && closed.length > 0 && (

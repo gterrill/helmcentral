@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { ApiError, apiRequest, declareQuery, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import { invalidateJobsAndServices } from '@/hooks/use-open-jobs'
 import type { EquipmentDependants } from '@/lib/equipment-dependants'
 import type { SourceKind } from '@/lib/vessel-settings'
 
@@ -283,9 +284,6 @@ const EQUIPMENT = '/api/inventory/equipment'
 declareQuery([EQUIPMENT], { structuralSharing: true })
 const ZONES = '/api/inventory/zones'
 const DECKS = '/api/inventory/decks'
-// Owned by use-maintenance.ts. An equipment write can change its schedule
-// (profile, stored/deployed), so it invalidates the same prefix.
-const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
 const DISCOVERY = '/api/vessel/discovery'
 const SETUP_STATUS = '/api/setup/status'
 
@@ -312,7 +310,8 @@ function equipmentListsChanged() {
 // An item's own fields (profile, status) decide which maintenance jobs it has.
 function equipmentChanged() {
   invalidateQueries([EQUIPMENT])
-  invalidateQueries([MAINTENANCE_RULES])
+  // Storing an item hides its jobs and services; its profile decides the rest.
+  invalidateJobsAndServices()
   // An item owns a SignalK source, so Discovery's "assigned to" column and the
   // roles' vessel checks read from it.
   invalidateQueries([DISCOVERY])
@@ -329,7 +328,9 @@ function equipmentDeleted(id: string): Promise<void> {
   void invalidateQueries([SETUP_STATUS])
   // Deleting an item clears the roles that named it in settings.
   void invalidateQueries(['/api/settings'])
-  void invalidateQueries([MAINTENANCE_RULES], (key) => {
+  // Deleting it also cascades its open jobs. Its own filtered job and rule lists
+  // stay; the count's key has no filter object, so nothing there is skipped.
+  invalidateJobsAndServices((key) => {
     const filter = key[1] as { equipment?: string } | undefined
     return filter?.equipment === id
   })

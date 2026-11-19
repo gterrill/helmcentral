@@ -5,7 +5,8 @@ whether it came from a scheduled rule or not.
 
 ## Complete a scheduled rule
 
-1. From **Inventory → Maintenance**, find the rule and tap **Complete**.
+1. From **Jobs**, where the services that are due are listed, or from
+   **Inventory → Service schedule**, find the rule and tap **Complete**.
    (A rule that's already acknowledged, or overdue, still completes the same
    way.)
 2. The date defaults to today. When the item has a live gauge reading, the
@@ -56,7 +57,7 @@ photos.
 
 ## Export the service log
 
-1. Open **Inventory → Maintenance**.
+1. Open **Inventory → Service schedule**.
 2. Tap **Export CSV** for the whole log. To export just one item's history,
    open the item's own page and export from there.
 3. The file opens in any spreadsheet program. It has one row per entry, with

@@ -1527,6 +1527,14 @@ func TestAssistantScreenSentence_NamesTheRadarPanelWindy(t *testing.T) {
 	}
 }
 
+// ADR 0293: the Jobs page is its own panel, named the way the sidebar names it.
+func TestAssistantScreenSentence_NamesTheJobsPanel(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "jobs"})
+	if got != "The operator is looking at the Jobs panel.\n\n" {
+		t.Fatalf("expected the Jobs label, got %q", got)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_AlarmContextRule(t *testing.T) {
 	stable, live := assistantSystemPromptParts(basePromptContext())
 	for _, want := range []string{

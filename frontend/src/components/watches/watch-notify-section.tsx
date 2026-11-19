@@ -4,6 +4,7 @@ import type { MouseEvent, ReactNode } from 'react'
 import { buttonVariants } from '@/components/ui/button'
 import { ChoiceList, FormSection } from '@/components/patterns'
 import { useOptionalAppRouter } from '@/hooks/use-app-location'
+import { isPlainLeftClick } from '@/lib/plain-click'
 import { clearPendingSetupFocus, requestSetupFocus } from '@/lib/setup-status'
 import { WATCH_CHANNELS, type WatchSend } from '@/lib/watches'
 
@@ -39,7 +40,7 @@ const ASK_ADMIN = "Ask whoever runs this boat's Helmcentral to"
 function SettingsLink({ children, className }: { children: ReactNode; className?: string }) {
   const router = useOptionalAppRouter()
   const go = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (router === null || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+    if (router === null || !isPlainLeftClick(e)) return
     e.preventDefault()
     requestSetupFocus(NOTIFICATIONS_ANCHOR)
     if (router.navigate(ALARM_SETTINGS)) return

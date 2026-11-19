@@ -72,6 +72,10 @@ Open jobs group can show it again ("Show closed").
 
 ### 3. Where it lives
 
+*Amended by [ADR 0293](0293-jobs-gets-its-own-page.md): the group now sits on
+the Jobs page, not in Inventory → Maintenance, and the Maintenance section is
+called Service schedule.*
+
 The group sits at the top of Inventory → Maintenance, above Overdue, and on
 each item's own page. It filters with the Maintenance list's system filter, and
 leaves out the jobs of stored items the way the list leaves out their rules. It
