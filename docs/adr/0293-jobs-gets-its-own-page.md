@@ -31,8 +31,8 @@ It holds two lists:
   one, so the group draws no second button of its own on this page. On an
   item's page the group still draws its own.
 - **Services due,** the rules whose status is overdue or due soon, overdue
-  first. An acknowledged rule stays in the list with its Ack mark, below the
-  unacknowledged ones. The rows are the Service schedule's rows, one
+  first. An acknowledged rule is left out, as it is from the count, and stays
+  in the Service schedule. The rows are the Service schedule's rows, one
   component with one set of dialogs behind **Complete**, **Ack**, **Set last
   done** and **Log a reading**, so a rule reads and behaves the same in both
   places. The equipment labels keep the same-name disambiguation, worked out
@@ -51,7 +51,8 @@ soon, and nothing at all at zero.
 
 - **Acknowledged services are left out.** Ack means the operator has decided it
   can wait, so counting it would put a number on the row that the operator has
-  already answered. The page still lists them.
+  already answered. The page leaves them out too, so what the badge counts is
+  what the page lists.
 - **The server counts.** `GET /api/inventory/jobs/count` answers
   `{"count": N, "incomplete": bool}`. It runs the same reads as the two lists
   (the open jobs, and the rules on the boat's day through the function behind
