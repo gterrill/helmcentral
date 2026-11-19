@@ -148,6 +148,9 @@ func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL st
 		// power cut it is usually still starting. Nothing proceeds as if login
 		// worked; any HTTP answer is judged at once.
 		enabled, probeErr := probe(signalkURL)
+		if probeErr == nil {
+			firstNoLoginRoute = time.Time{}
+		}
 		if probeErr != nil {
 			var noRoute *signalKNoLoginRouteError
 			if errors.As(probeErr, &noRoute) {
@@ -163,6 +166,7 @@ func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL st
 				continue
 			}
 			var unreachable *signalKUnreachableError
+			firstNoLoginRoute = time.Time{}
 			if !errors.As(probeErr, &unreachable) {
 				return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
 			}

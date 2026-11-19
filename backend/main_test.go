@@ -1534,6 +1534,33 @@ func TestCheckAuthModeAtStartup_NotFoundForWholeWindowRefuses(t *testing.T) {
 	}
 }
 
+// The window runs over an unbroken stretch of 404s: SignalK going quiet in
+// between starts it again.
+func TestCheckAuthModeAtStartup_NotFoundWindowRestartsAfterAnotherAnswer(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		switch {
+		case calls == 1: // 404 at t=0
+			return false, noLoginRoute()
+		case calls <= 21: // unreachable from t=5 to t=100
+			return false, &signalKUnreachableError{err: errors.New("connection refused")}
+		case calls <= 25: // 404 again from t=105 to t=120
+			return false, noLoginRoute()
+		}
+		return true, nil
+	}
+
+	mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, noLoginWindow: 2 * time.Minute, now: clock.now, sleep: clock.sleep,
+	})
+	if err != nil || mode != authModeSignalK {
+		t.Fatalf("expected startup to succeed, got %q, %v", mode, err)
+	}
+}
+
 // An absent signalk section is not a read failure: the documented default
 // address applies.
 func TestCheckAuthModeAtStartup_AbsentSignalKSettingUsesDocumentedDefault(t *testing.T) {

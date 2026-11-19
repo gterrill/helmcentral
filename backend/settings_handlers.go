@@ -627,6 +627,12 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		if next.Auth.Mode == authModeSignalK {
 			signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
 			enabled, err := probeSignalKSecurityEnabled(signalkURL)
+			// A missing login route is an answer, not a failure: unlike startup,
+			// a save has nobody to wait for and refuses at once.
+			var noLoginRoute *signalKNoLoginRouteError
+			if errors.As(err, &noLoginRoute) {
+				err, enabled = nil, false
+			}
 			if err != nil {
 				return &settingsValidationError{
 					Field:   "auth.mode",
