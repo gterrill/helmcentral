@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
-import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { buildRegularSettingsPatch, initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { expectIdentifierInput } from '@/test/helpers/input-attributes'
 
 // The button used to be "Connect", and it persisted the address as a side
@@ -237,6 +237,21 @@ describe('SignalKConnectionSection', () => {
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
     expect(await screen.findByText(/unable to connect to signalk at http:\/\/10\.0\.0\.5:3000/i)).toBeInTheDocument()
+  })
+
+  it('offers the silent-engine switch, off until the operator turns it on, and saves it with the draft', () => {
+    stubFetch(() => secretsResponse)
+
+    const { latestDraft } = renderSection()
+    const toggle = screen.getByRole('switch', { name: 'Mark engines stopped when RPM goes quiet' })
+    expect(toggle).not.toBeChecked()
+    expect(latestDraft().markEnginesStopped).toBe(false)
+
+    // The label names the switch and toggles it, so a click on the words works.
+    fireEvent.click(screen.getByText('Mark engines stopped when RPM goes quiet'))
+
+    expect(latestDraft().markEnginesStopped).toBe(true)
+    expect(buildRegularSettingsPatch(latestDraft()).engines).toEqual({ mark_stopped_when_silent: true })
   })
 
   it('does not render a forecast refresh input — the poll interval is a hardcoded constant now', () => {

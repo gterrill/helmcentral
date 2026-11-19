@@ -32,6 +32,14 @@ const (
 	defaultMinClearanceAtLowM = 0.5
 )
 
+// enginesSettings is the engines block of the settings payload.
+type enginesSettings struct {
+	// MarkStoppedWhenSilent lets Helmcentral write "stopped" to
+	// propulsion.<instance>.state on SignalK when a mapped engine's data has
+	// gone quiet while SignalK still says started (ADR 0292). Off by default.
+	MarkStoppedWhenSilent bool `json:"mark_stopped_when_silent"`
+}
+
 type settingsPayload struct {
 	Signalk struct {
 		Address string `json:"address"`
@@ -163,7 +171,11 @@ type settingsPayload struct {
 	OfflineCoastline struct {
 		Enabled bool `json:"enabled"`
 	} `json:"offline_coastline"`
-	Auth struct {
+	// Engines holds the engine behaviours the operator opts into. A pointer so
+	// a save that omits it leaves the stored block alone, like Roles. GET
+	// always returns it.
+	Engines *enginesSettings `json:"engines,omitempty"`
+	Auth    struct {
 		Mode string `json:"mode"`
 	} `json:"auth"`
 	Units string `json:"units"`
@@ -406,6 +418,12 @@ func updateSettingsHandler(c echo.Context) error {
 	}
 	settings["offline_coastline"] = map[string]any{
 		"enabled": normalized.OfflineCoastline.Enabled,
+	}
+	// engines, like roles, is only touched when the request carries it.
+	if normalized.Engines != nil {
+		settings["engines"] = map[string]any{
+			"mark_stopped_when_silent": normalized.Engines.MarkStoppedWhenSilent,
+		}
 	}
 	settings["units"] = normalized.Units
 
@@ -835,6 +853,13 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 	}
 
+	payload.Engines = &enginesSettings{}
+	if enginesMap, ok := settings["engines"].(map[string]any); ok {
+		if v, ok := enginesMap["mark_stopped_when_silent"].(bool); ok {
+			payload.Engines.MarkStoppedWhenSilent = v
+		}
+	}
+
 	if authMap, ok := settings["auth"].(map[string]any); ok {
 		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
 	}
@@ -981,6 +1006,10 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits
 
 	normalized.OfflineCoastline.Enabled = req.OfflineCoastline.Enabled
+
+	if req.Engines != nil {
+		normalized.Engines = &enginesSettings{MarkStoppedWhenSilent: req.Engines.MarkStoppedWhenSilent}
+	}
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

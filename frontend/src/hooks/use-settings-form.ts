@@ -96,6 +96,11 @@ export type SettingsPayload = {
   offline_coastline?: {
     enabled?: boolean
   }
+  // Engine behaviours the operator opts into. Off by default.
+  engines?: {
+    // Mark an engine stopped on SignalK when its RPM has gone quiet.
+    mark_stopped_when_silent?: boolean
+  }
   // Which equipment item plays each single-choice part (house bank, port
   // alternator, ...). Saved with the rest of Settings. A payload that omits it
   // leaves the stored block alone on the server.

@@ -186,6 +186,48 @@ each engine the boat has.
 - The frozen-sensor check is ready once one engine is mapped. The
   engine-differential check (comparing engines against each other) needs two.
 
+### When an engine goes quiet instead of reading zero
+
+Some engine gateways stop sending anything once the engine is switched off,
+instead of sending an RPM of zero. SignalK then goes on saying the engine is
+started, and the autostate plugin reports motoring whenever the boat moves, even
+when you're sailing.
+
+If your boat does this, you can have Helmcentral correct SignalK:
+
+1. Open **Settings → SignalK** and find **Engines**.
+2. Turn on **Mark engines stopped when RPM goes quiet**.
+3. Choose **Save** in the bar across the top of the screen.
+
+After that, once a mapped engine's data has been quiet for about two minutes,
+Helmcentral sets that engine to stopped on SignalK. It writes the state only,
+never an RPM. SignalK sets the state back to started when the engine next runs.
+
+Helmcentral keeps checking every 15 seconds while the engine stays quiet. If
+SignalK still says started, it writes stopped again, and it stops once SignalK
+says stopped. That way a SignalK restart that brings the old started state back
+whilst the engine is still off gets corrected too.
+
+If a mapped engine has no state on SignalK at all, there's nothing to correct
+and Helmcentral can't mark it. It says so once in the log.
+
+It only acts when another device on the same connection to SignalK is still
+sending. If Helmcentral loses the whole connection to the engine data, that
+looks like a lost connection and not a switched-off engine, so nothing is
+marked. For the same reason, an engine that is alone on its connection is never
+marked, since a dead connection looks just the same as a switched-off engine
+there.
+
+Here's the risk you take by turning it on. If the engine's own interface fails
+or loses power while the engine is running, for example an engine gateway like
+a CANvu, and other devices on the same NMEA 2000 network keep talking, it looks
+exactly like the engine being switched off. After about two minutes Helmcentral
+marks the running engine stopped. SignalK puts started back as soon as RPM
+returns.
+
+It's off until you turn it on, because it only suits a gateway that really goes
+quiet when the engine stops.
+
 ## House bank
 
 1. Map the bank's battery source to an item as above, for example "House bank".
