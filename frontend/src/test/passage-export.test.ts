@@ -217,7 +217,7 @@ describe('stats strip', () => {
     const metric = prepareExport(input()).stats
     expect(metric.map((s) => s.l)).toEqual(['Distance', 'Underway', 'Fuel', 'Max gust'])
     expect(metric.find((s) => s.l === 'Fuel')?.v).toBe('120 L')
-    expect(metric.find((s) => s.l === 'Distance')?.v).toBe('42.3 NM')
+    expect(metric.find((s) => s.l === 'Distance')?.v).toBe('42.3 nm')
     expect(metric.find((s) => s.l === 'Underway')?.v).toBe('7 h 05 m')
     expect(metric.find((s) => s.l === 'Max gust')?.v).toBe('24.4 kn')
     const imperial = prepareExport(input({ units: 'imperial' })).stats
@@ -236,7 +236,7 @@ describe('stats strip', () => {
     const b = passage({ id: 'b', t0: T0 + 86400, stats: { ...STATS, fuel_burned_l: null } })
     const strip = prepareExport(input({ kind: 'combined', passages: [a, b] })).stats
     expect(strip.some((s) => s.l === 'Fuel')).toBe(false)
-    expect(strip.find((s) => s.l === 'Distance')?.v).toBe('84.6 NM')
+    expect(strip.find((s) => s.l === 'Distance')?.v).toBe('84.6 nm')
   })
 
   it('uses the cruise figures, with nights counted the way the cruise page counts them', () => {
@@ -248,7 +248,7 @@ describe('stats strip', () => {
     const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: two }))
     expect(cruiseStats.nights).toBe(5)
     expect(data.stats.map((s) => [s.l, s.v])).toEqual([
-      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Passages', '2'], ['Nights', '5'], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
+      ['Distance', '100.0 nm'], ['Underway', '10 h 00 m'], ['Passages', '2'], ['Nights', '5'], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
   })
 })

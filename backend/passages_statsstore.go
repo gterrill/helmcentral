@@ -14,6 +14,9 @@ import (
 // passageFigures is what is kept on the row: the stats, and the longitude of
 // the first point the page uses for the boat's own time zone.
 type passageFigures struct {
+	// Version is the shape the figures were worked out in. Rows stored in an
+	// older shape are worked out again from the points when next read.
+	Version  int          `json:"version"`
 	Stats    passageStats `json:"stats"`
 	StartLon *float64     `json:"start_lon"`
 	// StartLat is the latitude of the first point, kept with StartLon so the
@@ -25,6 +28,9 @@ type passageFigures struct {
 	// kept. Empty when the position has no zone.
 	Timezone string `json:"timezone,omitempty"`
 }
+
+// passageFiguresVersion 2 added the time of each maximum and the motion maxima.
+const passageFiguresVersion = 2
 
 // PassageStatsFor is the stored stats alone.
 func (s *passageStore) PassageStatsFor(rec passageRecord) (passageStats, error) {
@@ -45,7 +51,7 @@ func (s *passageStore) PassageFiguresFor(rec passageRecord) (passageFigures, err
 		if err := json.Unmarshal([]byte(raw.String), &f); err == nil {
 			// Rows stored before the start latitude was kept have a longitude
 			// and no latitude; they are worked out again below.
-			if f.StartLat != nil || f.StartLon == nil {
+			if f.Version >= passageFiguresVersion && (f.StartLat != nil || f.StartLon == nil) {
 				if f.Timezone == "" && f.StartLat != nil && f.StartLon != nil {
 					// Stored before the zone was kept: look it up this once
 					// and keep it.
@@ -67,7 +73,7 @@ func (s *passageStore) PassageFiguresFor(rec passageRecord) (passageFigures, err
 		// Nothing to work it out from; the stored figures stand.
 		return *cached, nil
 	}
-	st := passageFigures{Stats: computePassageStats(pts), StartLon: startLon(pts), StartLat: startLat(pts)}
+	st := passageFigures{Version: passageFiguresVersion, Stats: computePassageStats(pts), StartLon: startLon(pts), StartLat: startLat(pts)}
 	st.Timezone, _ = st.lookupStartZone(rec.ID)
 	if err := s.storeFigures(rec, st); err != nil {
 		return st, err

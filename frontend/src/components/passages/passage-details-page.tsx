@@ -28,6 +28,8 @@ import {
   passageHeading,
   riseLabelTime,
   passageRoute,
+  passageTimeSpan,
+  titleRepeatsRoute,
   type CruiseRecord,
   type PassageDetail,
   type PassageSummary,
@@ -113,6 +115,11 @@ export function PassageDetailsPage(props: PassageDetailsPageProps) {
 
 // ── one passage ───────────────────────────────────────────────────────────
 
+/** The heading is a title of the operator's own, so the route is not in it. */
+function titledApart(p: PassageDetail): boolean {
+  return p.title.trim() !== '' && !titleRepeatsRoute(p) && (p.from_name !== '' || p.to_name !== '')
+}
+
 function pagerTarget(p: PassageSummary | null, open: (id: string) => void) {
   if (!p) return null
   const named = p.title.trim() || p.from_name || p.to_name
@@ -123,6 +130,8 @@ function pagerTarget(p: PassageSummary | null, open: (id: string) => void) {
 function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const { passage, loading, error } = usePassageDetail(id)
   const cursorRef = useRef<ReplayCursor | null>(null)
+  const seekRef = useRef<((at: number) => void) | null>(null)
+  const seek = (at: number) => seekRef.current?.(at)
   const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
   const index = list.findIndex((p) => p.id === id)
   const neighbours = passageNeighbours(list, id, filter)
@@ -146,19 +155,20 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises
               olderNeighbour={index >= 0 ? list[index + 1] ?? null : null}
               newerNeighbour={index > 0 ? list[index - 1] : null}
               cursorRef={cursorRef}
+              onSeek={seek}
               canWrite={canWrite}
               onMerged={(mergedId) => { if (mergedId !== id) onOpenPassage(mergedId) }}
               onHidden={onBack}
             />
           }
         >
-          <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, passage.timezone)}</p>
+          <p className="text-sm text-muted-foreground">{titledApart(passage) ? `${passageRoute(passage)} · ` : ''}{passageTimeSpan(passage.start, passage.end, passage.timezone)}</p>
           <PassagePlans passageId={passage.id} plans={passage.plannedWithMate} error={passage.plannedWithMateError} canWrite={canWrite} />
           <div className="flex justify-end">
             <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
           </div>
-          <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} cursorRef={cursorRef} />
-          <PassageStatsStrip stats={passage.stats} units={units} />
+          <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} cursorRef={cursorRef} seekRef={seekRef} />
+          <PassageStatsStrip stats={passage.stats} units={units} onSeek={seek} />
         </DetailsLayout>
       )}
     </Page>

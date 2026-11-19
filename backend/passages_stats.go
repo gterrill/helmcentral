@@ -19,6 +19,33 @@ type passageStats struct {
 	SoCStartPct     *float64 `json:"soc_start_pct"`
 	SoCEndPct       *float64 `json:"soc_end_pct"`
 	SoCMinPct       *float64 `json:"soc_min_pct"`
+
+	// The time of each maximum, in Unix seconds, so the page can move the
+	// replay to it. It is the time of the stored point that carries the figure;
+	// a gust or motion peak is the largest since the point before it, so the
+	// moment itself lies in the interval just before.
+	MaxSOGAt  *int64 `json:"max_sog_at"`
+	MaxGustAt *int64 `json:"max_gust_at"`
+
+	// Motion maxima (degrees, metres), from the peaks the recorder keeps. Nil
+	// when no point has a reading, which is every passage recorded before
+	// motion was kept.
+	MaxRollDeg  *float64 `json:"max_roll_deg"`
+	MaxRollAt   *int64   `json:"max_roll_at"`
+	MaxPitchDeg *float64 `json:"max_pitch_deg"`
+	MaxPitchAt  *int64   `json:"max_pitch_at"`
+	MaxHeaveM   *float64 `json:"max_heave_m"`
+	MaxHeaveAt  *int64   `json:"max_heave_at"`
+}
+
+// raiseMax keeps the larger reading and the time it was taken. The first
+// point to reach a value keeps it: a later tie does not move the time.
+func raiseMax(best **float64, at **int64, reading *float64, t time.Time) {
+	if reading == nil || (*best != nil && **best >= *reading) {
+		return
+	}
+	v, ts := *reading, t.Unix()
+	*best, *at = &v, &ts
 }
 
 // A leg joins two consecutive points of one segment no further apart than the
@@ -52,13 +79,14 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 	)
 
 	for i, p := range pts {
-		if p.SOGKts != nil && (s.MaxSOGKts == nil || *p.SOGKts > *s.MaxSOGKts) {
-			v := *p.SOGKts
-			s.MaxSOGKts = &v
-		}
-		if p.GustKts != nil && (s.MaxGustKts == nil || *p.GustKts > *s.MaxGustKts) {
-			v := *p.GustKts
-			s.MaxGustKts = &v
+		raiseMax(&s.MaxSOGKts, &s.MaxSOGAt, p.SOGKts, p.At)
+		raiseMax(&s.MaxGustKts, &s.MaxGustAt, p.GustKts, p.At)
+		// A point's motion peak is the interval before it, which for the first
+		// point lies outside the passage.
+		if i > 0 {
+			raiseMax(&s.MaxRollDeg, &s.MaxRollAt, p.RollPeakDeg, p.At)
+			raiseMax(&s.MaxPitchDeg, &s.MaxPitchAt, p.PitchPeakDeg, p.At)
+			raiseMax(&s.MaxHeaveM, &s.MaxHeaveAt, p.HeavePeakM, p.At)
 		}
 		if p.TWSKts != nil {
 			twsSum += *p.TWSKts

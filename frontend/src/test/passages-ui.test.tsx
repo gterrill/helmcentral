@@ -69,7 +69,7 @@ describe('PassagesPanel', () => {
     render(<PassagesPanel {...baseProps} passages={[passage('p1')]} />)
     expect(screen.getAllByText('14 Mar').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Airlie → Hamilton').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('12.3 NM').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('12.3 nm').length).toBeGreaterThan(0)
     expect(screen.getAllByText('2 h 05 m').length).toBeGreaterThan(0)
   })
 

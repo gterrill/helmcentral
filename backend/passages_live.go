@@ -19,10 +19,14 @@ import (
 // stale reading.
 
 const (
-	trackSOGPath     = "navigation.speedOverGround"
-	trackCOGPath     = "navigation.courseOverGroundTrue"
-	trackWaterTanks  = "tanks.freshWater"
-	trackDetectEvery = time.Minute
+	trackSOGPath    = "navigation.speedOverGround"
+	trackCOGPath    = "navigation.courseOverGroundTrue"
+	trackWaterTanks = "tanks.freshWater"
+	// attitude is an object (roll, pitch, yaw in radians); heave is its own
+	// leaf under it, in metres.
+	trackAttitudePath = "navigation.attitude"
+	trackHeavePath    = "navigation.attitude.heave"
+	trackDetectEvery  = time.Minute
 )
 
 func freshReading(s alarmSample, now time.Time) (float64, bool) {
@@ -89,6 +93,32 @@ func trackFreshWaterLitres(read alarmReader, t telemetryReader, now time.Time) *
 	return &litres
 }
 
+// attitudeDegrees reads roll and pitch from the attitude object, in degrees.
+// A reading older than trackReadingMaxAge, or an object without the field, is
+// absent.
+func attitudeDegrees(t telemetryReader, now time.Time) (roll, pitch *float64) {
+	sample := t.Sample(trackAttitudePath)
+	if !sample.Present || sample.Received.IsZero() {
+		return nil, nil
+	}
+	if age := now.Sub(sample.Received); age > trackReadingMaxAge {
+		return nil, nil
+	}
+	obj, ok := sample.Value.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	field := func(name string) *float64 {
+		v, ok := numericTelemetryValue(obj[name])
+		if !ok {
+			return nil
+		}
+		deg := v * 180 / math.Pi
+		return &deg
+	}
+	return field("roll"), field("pitch")
+}
+
 // buildTrackSample reads one tick. houseSoCPath is empty when no house bank is
 // chosen in the roles; the state of charge is then absent.
 //
@@ -116,6 +146,8 @@ func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBan
 		deg := math.Mod(*cog+360, 360)
 		s.COGDeg = &deg
 	}
+	s.RollDeg, s.PitchDeg = attitudeDegrees(telemetry, now)
+	s.HeaveM = freshPtr(read, trackHeavePath, now, 1)
 	if houseBankPath != "" {
 		s.SoCPct = freshPtr(read, houseBankPath+".capacity.stateOfCharge", now, 100)
 	}

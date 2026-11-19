@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 )
@@ -32,8 +33,11 @@ type trackSample struct {
 	FixOK    bool
 
 	SOGKts, COGDeg, TWSKts, SoCPct, FuelLph, WaterL *float64
-	GenState                                        *string
-	AnchorSetAt                                     *time.Time
+	// RollDeg, PitchDeg and HeaveM are the boat's attitude on this tick, signed.
+	// The recorder keeps the largest magnitude between kept points.
+	RollDeg, PitchDeg, HeaveM *float64
+	GenState                  *string
+	AnchorSetAt               *time.Time
 }
 
 type trackRecorder struct {
@@ -44,6 +48,9 @@ type trackRecorder struct {
 	lastFixAt time.Time           // last accepted fix, kept or not
 	segment   int
 	maxTWS    *float64 // highest true wind speed seen since the last kept point
+
+	// Largest magnitudes of roll, pitch and heave since the last kept point.
+	peakRoll, peakPitch, peakHeave *float64
 
 	// rejected is the run of fixes thrown out as jumps that agree with one
 	// another. If it holds for trackJumpRecovery the kept reference was the
@@ -83,6 +90,10 @@ func (r *trackRecorder) Observe(s trackSample) (bool, error) {
 		v := *s.TWSKts
 		r.maxTWS = &v
 	}
+
+	r.peakRoll = peakOf(r.peakRoll, s.RollDeg)
+	r.peakPitch = peakOf(r.peakPitch, s.PitchDeg)
+	r.peakHeave = peakOf(r.peakHeave, s.HeaveM)
 
 	if !s.FixOK || !hasUsableVesselPosition(s.Lat, s.Lon) {
 		return false, nil
@@ -143,13 +154,28 @@ func (r *trackRecorder) keep(s trackSample) (bool, error) {
 		SOGKts: s.SOGKts, COGDeg: s.COGDeg, TWSKts: s.TWSKts, GustKts: r.maxTWS,
 		SoCPct: s.SoCPct, FuelLph: s.FuelLph, WaterL: s.WaterL,
 		GenState: s.GenState, AnchorSetAt: s.AnchorSetAt,
+		RollPeakDeg: r.peakRoll, PitchPeakDeg: r.peakPitch, HeavePeakM: r.peakHeave,
 	}
 	if err := r.store.AppendTrackPoint(p); err != nil {
 		return false, fmt.Errorf("record track point: %w", err)
 	}
 	r.last = &p
 	r.maxTWS = nil
+	r.peakRoll, r.peakPitch, r.peakHeave = nil, nil, nil
 	return true, nil
+}
+
+// peakOf returns the larger of the running peak and |reading|. A missing
+// reading leaves the peak as it was.
+func peakOf(peak, reading *float64) *float64 {
+	if reading == nil {
+		return peak
+	}
+	v := math.Abs(*reading)
+	if peak != nil && *peak >= v {
+		return peak
+	}
+	return &v
 }
 
 func (r *trackRecorder) shouldKeep(s trackSample, meters, dt float64) bool {

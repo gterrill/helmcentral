@@ -16,6 +16,7 @@ import {
   locate,
   passageHeading,
   passageRoute,
+  passageTimeSpan,
   positionAt,
   riseLabelTime,
   segmentBounds,
@@ -33,14 +34,14 @@ describe('figure formatting', () => {
   })
 
   it('prints zero as a real figure', () => {
-    expect(fmtNM(0)).toBe('0.0 NM')
+    expect(fmtNM(0)).toBe('0.0 nm')
     expect(fmtVolume(0, 'metric')).toBe('0 L')
     expect(fmtDuration(0)).toBe('0 m')
     expect(fmtPct(0)).toBe('0%')
   })
 
   it('formats units and durations', () => {
-    expect(fmtNM(12.34)).toBe('12.3 NM')
+    expect(fmtNM(12.34)).toBe('12.3 nm')
     expect(fmtKn(6.07)).toBe('6.1 kn')
     expect(fmtVolume(341.6, 'metric')).toBe('342 L')
     expect(fmtHours(2.26)).toBe('2.3 h')
@@ -172,5 +173,20 @@ describe('replay timeline', () => {
 describe('water rise label time', () => {
   it('names an instant inside the rise, not its edge', () => {
     expect(riseLabelTime({ start: '2026-03-14T01:00:00Z', end: '2026-03-14T01:20:00Z' })).toBe('2026-03-14T01:10:00.000Z')
+  })
+})
+
+describe('passageTimeSpan', () => {
+  it('reads the day and the span in the boat\'s own clock', () => {
+    // 05.05 to 11.44 in Brisbane (UTC+10)
+    expect(passageTimeSpan('2026-11-16T19:05:00Z', '2026-11-17T01:44:00Z', 'Australia/Brisbane')).toBe('Tue 17 Nov, 5.05 AM to 11.44 AM')
+  })
+
+  it('names the second day when the passage crosses midnight', () => {
+    expect(passageTimeSpan('2026-11-17T13:00:00Z', '2026-11-17T20:10:00Z', 'Australia/Brisbane')).toBe('Tue 17 Nov, 11.00 PM to Wed 18 Nov, 6.10 AM')
+  })
+
+  it('is -- without a zone, never the device clock', () => {
+    expect(passageTimeSpan('2026-11-16T19:05:00Z', '2026-11-17T01:44:00Z', null)).toBe('--')
   })
 })

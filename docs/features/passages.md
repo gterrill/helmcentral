@@ -12,7 +12,9 @@ Helmcentral keeps its own log of where the boat has been. It notes a position
 whenever the boat has moved about 25 m, and every ten minutes while she sits
 still. Along with each position it notes whatever it can read at that moment:
 speed and course, wind and gusts, house battery charge, fuel rate, whether the
-generator is running and how much fresh water is in the tanks.
+generator is running and how much fresh water is in the tanks. It also notes
+the biggest roll, pitch and heave the boat had since the last position, so a
+rough patch shows up even when it was over in a few seconds.
 
 This runs on its own whether or not anyone has a screen open, and it starts when
 Helmcentral does. A position with no GPS fix is left out. So is one that jumps
@@ -21,6 +23,10 @@ further than the boat could have travelled.
 A reading that was too old when the position was noted is left out of that
 point. It is never copied from an earlier one, so the page shows `--` rather
 than a figure that might be wrong.
+
+Roll, pitch and heave come from the boat's attitude sensor. They are only
+recorded from the release that added them. Earlier passages show **Motion not
+recorded for this passage**, and Helmcentral doesn't make a figure up for them.
 
 The log begins on the day you install the release that adds it. Earlier trips
 can be added from a chartplotter's GPX files, see
@@ -67,7 +73,14 @@ plan still exists, an **Open chat** link takes you back to it. A passage that
 was never planned with Mate shows no line, and if the plans can't be read, the
 page says so instead of leaving the line out.
 
-In the edit panel, **How it went** lets you rate the passage as **Comfortable**,
+Under the passage's name is the day and the time it ran, such as "Tue 17 Nov,
+5.05 AM to 11.44 AM", in the boat's own time. If the passage crossed midnight,
+the end gets its day too.
+
+In the edit panel, **How it went** first shows the largest roll, pitch and heave
+the boat had, such as "Max roll 14°, pitch 6°, heave 0.8 m", so you can judge
+the passage before you rate it. Each of those figures is a button that moves the
+replay to the moment it happened. Then it lets you rate the passage as **Comfortable**,
 **Lively** or **Shouldn't have gone**. The rating is yours alone. Helmcentral
 never fills it in. Mate reads it, along with your notes, when you ask about your
 season or your passages. When you merge passages, the
@@ -395,11 +408,16 @@ Under the map are the passage's figures:
 
 - distance and time under way
 - mean and maximum speed
-- fuel burned
+- fuel burned, with the fuel per nautical mile under it
 - mean wind and the strongest gust
 - house battery at the start and end, and its lowest point
 
-A figure Helmcentral couldn't read shows `--`. It is never estimated.
+The battery tile is left out when the battery stayed within 5 points, whether
+it fell or charged, since there's nothing to look at.
+
+The maximum speed and the strongest gust are buttons. Tap one and the replay
+moves to the moment it happened. A figure Helmcentral couldn't read shows `--`.
+It is never estimated, and a figure with no time recorded is plain text.
 
 You can give the passage a title, change its two ends and keep notes on it.
 Splitting, trimming, merging, hiding and moving are in

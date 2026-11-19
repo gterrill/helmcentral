@@ -12,7 +12,7 @@ const measure: Measure = (text, font) => {
 }
 
 const STATS = [
-  { l: 'Distance', v: '93.9 NM' },
+  { l: 'Distance', v: '93.9 nm' },
   { l: 'Underway', v: '12 h 25 m' },
   { l: 'Nights', v: '2' },
   { l: 'Fuel', v: '300 L' },
@@ -59,7 +59,7 @@ describe('composeImageLayout', () => {
   it('shows every figure in order with the title and dates on one row', () => {
     const l = composeImageLayout(spec(), measure)
     expect(l.stats.map((s) => [s.label.text, s.value.text])).toEqual([
-      ['DISTANCE', '93.9 NM'], ['UNDERWAY', '12 h 25 m'], ['NIGHTS', '2'], ['FUEL', '300 L'], ['MAX GUST', '33.0 kn'],
+      ['DISTANCE', '93.9 nm'], ['UNDERWAY', '12 h 25 m'], ['NIGHTS', '2'], ['FUEL', '300 L'], ['MAX GUST', '33.0 kn'],
     ])
     expect(l.title.text).toBe('Hamilton Island to Mackay')
     expect(l.title.y).toBe(l.dates.y)
@@ -157,7 +157,7 @@ describe('paintOverlay', () => {
     expect(texts).toContain('Hamilton Island to Mackay')
     expect(texts).toContain('14 to 16 Sep 2026')
     expect(texts).toContain('DISTANCE')
-    expect(texts).toContain('93.9 NM')
+    expect(texts).toContain('93.9 nm')
     expect(calls.filter((c) => c.startsWith('fillRect')).length).toBeGreaterThanOrEqual(1)
   })
 })

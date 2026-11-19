@@ -8,6 +8,7 @@ import {
   fmtHours,
   fmtKn,
   fmtVolume,
+  fmtVolumePerNM,
   fmtNM,
   fmtPct,
   formatLocalDate,
@@ -40,20 +41,101 @@ function Grid({ children, testId }: { children: ReactNode; testId: string }) {
   )
 }
 
-export function PassageStatsStrip({ stats, units }: { stats: PassageStats; units: DistanceUnits }) {
+/** A maximum that moves the replay to the moment it happened. Plain text when
+ * there is no replay to move or the time is not known. */
+export function MaxButton({
+  label, shown, what, at, onSeek, className,
+}: { label: string; shown: string; what: string; at: number | null | undefined; onSeek?: (at: number) => void; className?: string }) {
+  if (!onSeek || at === null || at === undefined) return <>{label}</>
   return (
-    <Grid testId="passage-stats">
-      <Kpi label="Distance" value={fmtNM(stats.distance_nm)} />
-      <Kpi label="Underway" value={fmtDuration(stats.underway_seconds)} />
-      <Kpi label="Mean speed" value={fmtKn(stats.mean_sog_kts)} sub={`Max ${fmtKn(stats.max_sog_kts)}`} />
-      <Kpi label="Fuel burned" value={fmtVolume(stats.fuel_burned_l, units)} />
-      <Kpi label="Wind" value={fmtKn(stats.tws_mean_kts)} sub={`Gust ${fmtKn(stats.max_gust_kts)}`} />
+    <button
+      type="button"
+      aria-label={`Show max ${what} ${shown} on the replay`}
+      className={cn('-mx-1 rounded-sm px-1 underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring', className)}
+      onClick={() => onSeek(at)}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** The roll, pitch and heave the boat peaked at, each a button to its moment.
+ * A figure that was not recorded is left out; with none, it says so. */
+export function PassageMotion({ stats, onSeek }: { stats: PassageStats; onSeek?: (at: number) => void }) {
+  const figures = [
+    { key: 'roll', value: stats.max_roll_deg, at: stats.max_roll_at, text: (v: number) => `${Math.round(v)}°` },
+    { key: 'pitch', value: stats.max_pitch_deg, at: stats.max_pitch_at, text: (v: number) => `${Math.round(v)}°` },
+    { key: 'heave', value: stats.max_heave_m, at: stats.max_heave_at, text: (v: number) => `${v.toFixed(1)} m` },
+  ].flatMap((f) => (typeof f.value === 'number' && Number.isFinite(f.value) ? [{ ...f, shown: f.text(f.value) }] : []))
+  if (figures.length === 0) {
+    return <p className="text-xs text-muted-foreground">Motion not recorded for this passage</p>
+  }
+  return (
+    <p data-testid="passage-motion" className="text-sm tabular-nums text-foreground">
+      Max{' '}
+      {figures.map((f, i) => (
+        <span key={f.key}>
+          {i > 0 && ', '}
+          <MaxButton label={`${f.key} ${f.shown}`} shown={f.shown} what={f.key} at={f.at} onSeek={onSeek} />
+        </span>
+      ))}
+    </p>
+  )
+}
+
+/** A bank that stayed within five points, down or up, is not worth a tile.
+ * Without the readings the tile stays and says `--`. */
+function batteryMoved(stats: PassageStats): boolean {
+  const { soc_start_pct: start, soc_min_pct: low, soc_end_pct: end } = stats
+  if (start === null || low === null) return true
+  return Math.max(start, end ?? start) - low >= 5
+}
+
+// One row when it fits; otherwise a tile never sits alone: a last odd tile
+// takes the whole row. Classes are spelled out so Tailwind sees them.
+const WIDE_COLUMNS: Record<number, string> = {
+  5: '@3xl:grid-cols-5',
+  6: '@3xl:grid-cols-6',
+}
+
+export function PassageStatsStrip({ stats, units, onSeek }: { stats: PassageStats; units: DistanceUnits; onSeek?: (at: number) => void }) {
+  const tiles: ReactNode[] = [
+    <Kpi key="distance" label="Distance" value={fmtNM(stats.distance_nm)} />,
+    <Kpi key="underway" label="Underway" value={fmtDuration(stats.underway_seconds)} />,
+    <Kpi
+      key="speed"
+      label="Mean speed"
+      value={fmtKn(stats.mean_sog_kts)}
+      sub={<MaxButton label={`Max ${fmtKn(stats.max_sog_kts)}`} shown={fmtKn(stats.max_sog_kts)} what="speed" at={stats.max_sog_at} onSeek={stats.max_sog_kts === null ? undefined : onSeek} />}
+    />,
+    <Kpi key="fuel" label="Fuel burned" value={fmtVolume(stats.fuel_burned_l, units)} sub={fmtVolumePerNM(stats.fuel_burned_l, stats.distance_nm, units) ?? undefined} />,
+    <Kpi
+      key="wind"
+      label="Mean wind"
+      value={fmtKn(stats.tws_mean_kts)}
+      sub={<MaxButton label={`Gust ${fmtKn(stats.max_gust_kts)}`} shown={fmtKn(stats.max_gust_kts)} what="gust" at={stats.max_gust_at} onSeek={stats.max_gust_kts === null ? undefined : onSeek} />}
+    />,
+  ]
+  if (batteryMoved(stats)) {
+    tiles.push(
       <Kpi
+        key="battery"
         label="House battery"
         value={fmtPct(stats.soc_end_pct)}
         sub={`Start ${fmtPct(stats.soc_start_pct)} · Low ${fmtPct(stats.soc_min_pct)}`}
-      />
-    </Grid>
+      />,
+    )
+  }
+  return (
+    <div className="@container">
+      <div
+        data-testid="passage-stats"
+        data-tiles={tiles.length}
+        className={cn('grid grid-cols-2 gap-2 @md:grid-cols-3 [&>*:last-child:nth-child(odd)]:col-span-2 @md:[&>*:last-child:nth-child(odd)]:col-span-1', WIDE_COLUMNS[tiles.length])}
+      >
+        {tiles}
+      </div>
+    </div>
   )
 }
 

@@ -300,7 +300,7 @@ func TestListPassagesOneUnresolvablePassageDoesNotTakeDownTheList(t *testing.T) 
 	appendAll(t, store, b.pts)
 	good, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "good"})
 	bad, _ := store.InsertPassage(passageRecord{Start: b.pts[360].At.Add(time.Hour), End: b.pts[360].At.Add(2 * time.Hour), Title: "bad"})
-	broken, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": 95.0, "start_lon": 10.0})
+	broken, _ := json.Marshal(map[string]any{"version": passageFiguresVersion, "stats": passageStats{}, "start_lat": 95.0, "start_lon": 10.0})
 	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(broken), bad.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestPassageZoneIsKeptWithTheFigures(t *testing.T) {
 	appendAll(t, store, b.pts)
 	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
 	// A row stored before the zone was kept: position, no zone.
-	old, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": -20.0, "start_lon": 149.0})
+	old, _ := json.Marshal(map[string]any{"version": passageFiguresVersion, "stats": passageStats{}, "start_lat": -20.0, "start_lon": 149.0})
 	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(old), rec.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestPassageZoneFailureIsLookedUpOncePerProcess(t *testing.T) {
 	b := simpleTrip(2 * time.Hour)
 	appendAll(t, store, b.pts)
 	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
-	broken, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": 95.0, "start_lon": 11.0})
+	broken, _ := json.Marshal(map[string]any{"version": passageFiguresVersion, "stats": passageStats{}, "start_lat": 95.0, "start_lon": 11.0})
 	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(broken), rec.ID); err != nil {
 		t.Fatal(err)
 	}
