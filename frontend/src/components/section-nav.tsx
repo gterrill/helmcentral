@@ -6,8 +6,7 @@ import { cn } from '@/lib/utils'
 export interface SectionNavGroup<Id extends string> {
   /** Omitted for a page with a single, unlabelled group of sections -
    * present for a page whose sections fall into named groups (e.g.
-   * Settings' "Boat & app" / "Connections", Inventory's "Inventory" /
-   * "Servicing"). */
+   * Settings' "Boat & app" / "Connections"). */
   label?: string
   items: Array<{ id: Id; label: string }>
 }

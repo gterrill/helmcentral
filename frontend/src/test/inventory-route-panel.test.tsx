@@ -26,7 +26,6 @@ type StubProps = {
   locationsView: string
   planDeckId: string | null
   newEquipmentPreset: unknown
-  onSectionChange: (id: string) => void
   onOpenEquipment: (id: string) => void
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   onCloseEditor: () => void
@@ -70,8 +69,6 @@ vi.mock('@/components/inventory/inventory-panel', () => ({
         <button type="button" onClick={() => props.onEquipmentCreated('eq-new')}>created</button>
         <button type="button" onClick={() => props.onEquipmentDeleted('photo file stayed')}>deleted</button>
         <button type="button" onClick={props.onEquipmentDiscarded}>discarded</button>
-        <button type="button" onClick={() => props.onSectionChange('profiles')}>nav-profiles</button>
-        <button type="button" onClick={() => props.onSectionChange('locations')}>nav-locations</button>
         <button type="button" onClick={() => props.onOpenBin('LAZ-02')}>open-bin</button>
         <button type="button" onClick={() => props.onCloseBin('z9')}>close-bin-z9</button>
         <button type="button" onClick={() => props.onCloseBin()}>close-bin</button>
@@ -154,14 +151,6 @@ describe('InventoryRoutePanel route wiring', () => {
     expect(history.path()).toBe('/inventory/locations?view=plan&deck=d4')
   })
 
-  it('the nav\'s Locations returns to Plan once Plan has been chosen', () => {
-    const { history } = mount('/inventory/locations')
-    fireEvent.click(screen.getByText('view-plan'))
-    fireEvent.click(screen.getByText('nav-profiles'))
-    expect(history.path()).toBe('/inventory/profiles')
-    fireEvent.click(screen.getByText('nav-locations'))
-    expect(history.path()).toBe('/inventory/locations?view=plan')
-  })
 })
 
 describe('InventoryRoutePanel: a move that already settled', () => {
@@ -204,6 +193,21 @@ describe('InventoryRoutePanel: a move that already settled', () => {
     fireEvent.click(screen.getByText('deck-deleted'))
     expect(router.getSnapshot().pending).toBeNull()
     expect(shape()).toBe('locations - - - - decks - table -')
+  })
+
+  it('forgets a deleted deck, so the sidebar never builds a Plan link to it', () => {
+    const { router } = mount('/inventory/locations?view=plan&deck=d1')
+    expect(router.locationsIndex()).toEqual({ plan: true, deckId: 'd1' })
+    fireEvent.click(screen.getByText('open-deck-d1'))
+    fireEvent.click(screen.getByText('deck-deleted'))
+    expect(router.locationsIndex()).toEqual({ plan: true, deckId: null })
+  })
+
+  it('keeps the remembered deck when a different deck is deleted', () => {
+    const { router } = mount('/inventory/locations?view=plan&deck=d2')
+    fireEvent.click(screen.getByText('open-deck-d1'))
+    fireEvent.click(screen.getByText('deck-deleted'))
+    expect(router.locationsIndex()).toEqual({ plan: true, deckId: 'd2' })
   })
 
   describe('the index state (filter, search, sort)', () => {

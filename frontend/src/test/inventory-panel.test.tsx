@@ -124,7 +124,6 @@ vi.mock('@/components/inventory/stocktake-section', () => ({
 function baseProps() {
   return {
     activeSectionId: 'equipment' as const,
-    onSectionChange: vi.fn(),
     equipmentEditId: null,
     creatingEquipment: false,
     onOpenEquipment: vi.fn(),
@@ -324,10 +323,8 @@ describe('InventoryPanel', () => {
     expect(props.onOpenEquipment).toHaveBeenCalledWith('eq-1')
   })
 
-  it('clicking a nav section reports it through onSectionChange', () => {
-    const props = baseProps()
-    render(<InventoryPanel {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Locations' }))
-    expect(props.onSectionChange).toHaveBeenCalledWith('locations')
+  it('carries no section nav of its own', () => {
+    render(<InventoryPanel {...baseProps()} />)
+    expect(screen.queryByRole('navigation', { name: 'Inventory sections' })).not.toBeInTheDocument()
   })
 })

@@ -17,7 +17,7 @@ interface InventoryRoutePanelProps {
 // what they hold.
 // AppShell re-renders on every live delta; memo keeps this page out of it.
 export const InventoryRoutePanel = memo(function InventoryRoutePanel({ canWrite }: InventoryRoutePanelProps) {
-  const { route, go, close, goSection, locationsHome } = useInventoryRoute()
+  const { route, go, close, locationsHome, forgetDeck } = useInventoryRoute()
 
   const section = inventorySectionOf(route)
 
@@ -47,7 +47,6 @@ export const InventoryRoutePanel = memo(function InventoryRoutePanel({ canWrite 
   return (
     <InventoryPanel
       activeSectionId={section}
-      onSectionChange={(id) => { goSection(id) }}
       equipmentEditId={route.view === 'equipment' ? route.id : null}
       creatingEquipment={creating}
       newEquipmentPreset={route.view === 'equipment-new' ? route.preset : null}
@@ -95,7 +94,10 @@ export const InventoryRoutePanel = memo(function InventoryRoutePanel({ canWrite 
       onOpenDeck={(id) => { go({ view: 'deck', id, ...carry(inDecks) }) }}
       onCloseDecks={() => { go(locationsHome()) }}
       onCloseDeck={() => { go({ view: 'decks', ...carry(inDecks) }) }}
-      onDeckDeleted={() => { settle({ view: 'decks', ...carry(inDecks) }) }}
+      onDeckDeleted={() => {
+        if (route.view === 'deck') forgetDeck(route.id)
+        settle({ view: 'decks', ...carry(inDecks) })
+      }}
     />
   )
 })

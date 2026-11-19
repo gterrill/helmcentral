@@ -17,7 +17,7 @@ import {
   type LocationContext,
 } from '@/lib/app-location'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
-import type { InventorySectionId } from '@/components/inventory/inventory-nav'
+import type { InventorySectionId } from '@/lib/inventory-sections'
 
 const ctx: Pick<LocationContext, 'firstPageId'> = { firstPageId: 'p1' }
 

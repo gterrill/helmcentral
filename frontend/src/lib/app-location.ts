@@ -1,5 +1,5 @@
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
-import type { InventorySectionId } from '@/components/inventory/inventory-nav'
+import type { InventorySectionId } from '@/lib/inventory-sections'
 import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
 import { formatListSort, parseListSort, type ListSort } from '@/lib/list-order'
 

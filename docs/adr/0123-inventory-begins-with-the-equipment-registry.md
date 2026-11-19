@@ -195,3 +195,39 @@ in the data model, which is the wrong way round.
 **A separate `inventory.sqlite`.** See §2.
 
 **A role column on the link table.** See §3.
+
+## Amendment, 2026-11-19: the section nav moves to the sidebar
+
+The in-page section nav is gone. The five sections now sit under the
+Inventory row in the sidebar as a flat sub-menu, in the order Equipment,
+Locations, Stocktake, Maintenance, Profiles, and only while Inventory is the
+open panel, except on a phone (below). A record inside a section (an item, a location, a bin, a deck)
+keeps its parent section lit. Each section carries its own page heading,
+since the nav no longer names it.
+
+Three things drove the change:
+
+- **Width beside tables.** The nav took about 190 px of every index, which
+  is the width the Equipment and Maintenance tables most needed.
+- **The phone strip.** Below the medium breakpoint the nav became a
+  horizontal scroller above the page, and a section off the edge was easy to
+  miss.
+- **It matches Dashboard.** Dashboard already lists its pages as sub-rows in
+  the sidebar, so Inventory's sections now work the same way.
+
+A click goes through the router, as the old nav did, so an unsaved editor or
+a stocktake pass still gets to veto the move. On a phone the sidebar sheet
+closes after the tap, like every other row. That closing is why the phone
+always lists the five sections under Inventory, as Dashboard always lists its
+pages: tapping Inventory would close the sheet, so showing the sections only
+while Inventory is open would cost two trips into the sheet. Any section opens
+from the sidebar on any panel, and only the open panel's section is lit.
+
+With the sidebar collapsed to icons the sub-menu is hidden, so while
+Inventory is open its icon opens the same five sections as a menu beside it,
+the open one ticked. Locations returns to Table or Plan, whichever was last
+showing, from the sidebar and from a page's Back alike; the router holds that
+one memory.
+
+Settings keeps its in-page nav. Its fourteen sections would swamp the
+sidebar, which has to stay short enough to scan at the helm.

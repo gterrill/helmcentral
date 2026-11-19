@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { LoadError } from '@/components/patterns'
+import { LoadError, Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BinPhotoGrid } from '@/components/inventory/bin-page'
@@ -326,7 +326,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
   const notSeen = currentBin ? binItems.filter((item) => !confirmedIds.has(item.id)) : []
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <Page title="Stocktake" className="max-w-3xl">
       <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           {nfcSupported() ? (
@@ -415,6 +415,6 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
           ))}
         </div>
       )}
-    </div>
+    </Page>
   )
 }

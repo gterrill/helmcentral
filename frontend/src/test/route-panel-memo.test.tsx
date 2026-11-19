@@ -39,7 +39,7 @@ beforeEach(() => {
     showFilter: vi.fn(), openPassage: vi.fn(), openCruise: vi.fn(), openCombined: vi.fn(), close: vi.fn(),
   })
   useInventoryRoute.mockReturnValue({
-    route: { view: 'index' }, go: vi.fn(), close: vi.fn(), goSection: vi.fn(), locationsHome: vi.fn(),
+    route: { view: 'index' }, go: vi.fn(), close: vi.fn(), locationsHome: vi.fn(), forgetDeck: vi.fn(),
   })
 })
 

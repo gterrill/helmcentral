@@ -24,8 +24,9 @@ describe('SettingsNav', () => {
     expect(screen.getByRole('button', { name: 'Mate' })).toBeInTheDocument()
   })
 
-  // ADR 0123: Equipment profiles moved to the Inventory panel's own nav
-  // (inventory-nav.test.tsx covers it there) - SettingsNav no longer offers it.
+  // ADR 0123: Equipment profiles moved to the Inventory panel's sections
+  // (app-inventory-navigation.test.tsx covers them there) - SettingsNav no
+  // longer offers it.
   it('does not render an Equipment nav button', () => {
     render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 

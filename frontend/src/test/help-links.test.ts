@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest'
 
 import { PANEL_IDS, type AppLocation, type PanelId } from '@/lib/app-location'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
-import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
+import { INVENTORY_SECTIONS } from '@/lib/inventory-sections'
 import {
   CREATE_PAGE_HELP_TARGET,
   DASHBOARD_HELP_TARGET,

@@ -6,20 +6,20 @@ import { DeckEditor } from '@/components/inventory/deck-editor'
 import { DecksIndex } from '@/components/inventory/decks-index'
 import { EquipmentEditor } from '@/components/inventory/equipment-editor'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
-import { InventoryNav, type InventorySectionId } from '@/components/inventory/inventory-nav'
 import { LocationEditor } from '@/components/inventory/location-editor'
 import { LocationsIndex, type LocationsView } from '@/components/inventory/locations-index'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
 import type { InventoryList } from '@/lib/app-location'
+import type { InventorySectionId } from '@/lib/inventory-sections'
 
-// ADR 0123: InventoryNav plus whichever section is active - the Settings
-// page shape (settings-page.tsx) exactly: the app location (ADR 0171) owns
-// the active view, including the Equipment index/editor split, and mirrors it
-// to the URL (ADR 0074); InventoryRoutePanel wires this component to it. This
-// component is a thin composition shell with no fetches or navigation state
-// of its own.
+// ADR 0123: whichever section is active. The sections themselves are listed
+// under Inventory in the sidebar (App.tsx), so this panel gets the full
+// width. The app location (ADR 0171) owns the active view, including the
+// Equipment index/editor split, and mirrors it to the URL (ADR 0074);
+// InventoryRoutePanel wires this component to it. This component is a thin
+// composition shell with no fetches or navigation state of its own.
 //
 // No Help button of its own (removed - it used to duplicate the header's `?`,
 // and worse, App.tsx's own `?` handler didn't pass inventorySection at all,
@@ -53,7 +53,6 @@ import type { InventoryList } from '@/lib/app-location'
 // popped the dialog after a save had already succeeded.
 interface InventoryPanelProps {
   activeSectionId: InventorySectionId
-  onSectionChange: (id: InventorySectionId) => void
   equipmentEditId: string | null
   creatingEquipment: boolean
   /** Index row click. Opening an item never discards anything. */
@@ -93,7 +92,7 @@ interface InventoryPanelProps {
    * discard - true of the equipment editor, but the quick-add form living on
    * this same page (ADR 0127) can hold a staged name/photos or a photo still
    * queued for Retry, so it goes through the same navigation guard
-   * onOpenBin/onSectionChange do. */
+   * onOpenBin does. */
   onCloseBin: (zoneId?: string) => void
   /** `/inventory/locations/<id>` - one location's own page. null is the
    * Locations index. Same index/page split as binCode and equipmentEditId. */
@@ -131,7 +130,6 @@ interface InventoryPanelProps {
 
 export function InventoryPanel({
     activeSectionId,
-    onSectionChange,
     equipmentEditId,
     creatingEquipment,
     onOpenEquipment,
@@ -284,12 +282,8 @@ export function InventoryPanel({
   })()
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row">
-      <InventoryNav activeSectionId={activeSectionId} onSelect={onSectionChange} />
-
-      <div className="min-w-0 flex-1 space-y-4">
-        {activeSection}
-      </div>
+    <div className="min-w-0 space-y-4">
+      {activeSection}
     </div>
   )
 }
