@@ -24,11 +24,21 @@ Each rule shows one of these states:
   might be.
 - **Interval not set:** This covers a job that's named but has no frequency
   yet. A manufacturer's schedule sometimes lists a service with no interval,
-  and this shows that plainly instead of hiding it.
+  and this shows that plainly instead of hiding it. The row offers **Set
+  interval**, which opens the rule so you can give it one.
 - **Hours unknown:** This appears when a rule runs on hours but the item has no
   hours reading to count from. Either its hour meter has never sent one, or it
   has no hour meter and nobody has logged a gauge reading. The calendar side of
   the rule, if it has one, still shows correctly underneath.
+
+If two items have the same name, say two engines that are both Cummins QSB 6.7,
+each row adds the item's alias in brackets, or its location if it has no alias,
+so you can tell which engine a rule is for. Two items whose names differ only in
+capitals or spacing count as the same name. The **Item** picker in the rule
+editor labels them the same way, so you can't move a rule to the wrong engine.
+The dialogs you open from such a row (**Complete**, **Ack**, **Set last done**,
+**Log a reading** and the profile job form) name the item too. An item whose
+name is unique shows just the name, in the row, the picker and the dialogs.
 
 ## Where hours come from
 
@@ -111,7 +121,11 @@ See [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 
 ## Completing a job
 
-**Complete** on a rule opens a short form. It asks for the date, the hours off
+**Complete** is a solid button on a rule that's due soon or overdue, and a
+quieter outline button on the rest, so the page only pushes you toward the
+jobs that need doing. Where a rule has no interval yet or nothing recorded,
+the row leads with **Set interval** or **Set last done** and **Complete**
+fades to plain text. It opens a short form. It asks for the date, the hours off
 the gauge, what was done, who did it, what it cost, and any parts used from
 inventory. The hours are filled in automatically where a live reading exists.
 A rule that runs on hours needs an hours figure to complete, so type it in from

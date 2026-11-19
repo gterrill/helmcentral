@@ -72,13 +72,15 @@ function changesOf(draft: Draft, rule: MaintenanceRule): MaintenanceOverridesInp
 
 interface MaintenanceProfileJobDialogProps {
   rule: MaintenanceRule
+  /** Set only when the list has another item with the same name; the bare equipment name when omitted. */
+  equipmentLabel?: string
   open: boolean
   onCancel: () => void
   /** A write landed: the caller re-reads its list. */
   onChanged: (rule: MaintenanceRule) => void
 }
 
-export function MaintenanceProfileJobDialog({ rule, open, onCancel, onChanged }: MaintenanceProfileJobDialogProps) {
+export function MaintenanceProfileJobDialog({ rule, equipmentLabel, open, onCancel, onChanged }: MaintenanceProfileJobDialogProps) {
   const [liveRule, setLiveRule] = useState(rule)
   const [draft, setDraft] = useState<Draft>(() => draftOf(rule))
   const [saving, setSaving] = useState(false)
@@ -148,7 +150,7 @@ export function MaintenanceProfileJobDialog({ rule, open, onCancel, onChanged }:
         <DialogHeader>
           <DialogTitle>Edit profile job</DialogTitle>
           <DialogDescription>
-            {liveRule.equipment_name}: this job comes from its equipment profile. Change a value here
+            {equipmentLabel ?? liveRule.equipment_name}: this job comes from its equipment profile. Change a value here
             to differ for this item only; everything else follows the profile.
           </DialogDescription>
         </DialogHeader>

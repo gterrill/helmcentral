@@ -41,6 +41,10 @@ export interface MaintenanceRule {
   id: string
   equipment_id: string | null
   equipment_name: string
+  /** The item's first alias, null when it has none. */
+  equipment_alias: string | null
+  /** The item's location (zone) name, null when it has none. */
+  equipment_location: string | null
   system: string
   description: string
   interval_hours: number | null

@@ -228,6 +228,162 @@ describe('MaintenanceSection', () => {
     expect(await screen.findByRole('heading', { name: 'Edit profile job' })).toBeInTheDocument()
   })
 
+  describe('action column hierarchy', () => {
+    async function renderWith(rule: MaintenanceRule) {
+      fetchMock.mockImplementation((url: string) => {
+        if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules: [rule], removed: [], schedule_errors: [] })
+        return jsonResponse(200, {})
+      })
+      render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+      await screen.findByText(rule.description)
+    }
+    const variantOf = (name: string) => screen.getByRole('button', { name }).getAttribute('data-variant')
+
+    it('keeps Complete solid on an overdue rule', async () => {
+      await renderWith(makeRule({ status: 'overdue' }))
+      expect(variantOf('Complete')).toBe('default')
+    })
+
+    it('keeps Complete solid on a due soon rule', async () => {
+      await renderWith(makeRule({ status: 'due_soon' }))
+      expect(variantOf('Complete')).toBe('default')
+    })
+
+    it('offers Set interval and a ghost Complete when no interval is set', async () => {
+      await renderWith(makeRule({ status: 'interval_not_set', interval_hours: null }))
+      expect(variantOf('Complete')).toBe('ghost')
+      expect(variantOf('Set interval')).toBe('outline')
+      fireEvent.click(screen.getByRole('button', { name: 'Set interval' }))
+      expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('puts the setup action above a ghost Complete when nothing is recorded yet', async () => {
+      await renderWith(makeRule({ status: 'never_recorded' }))
+      expect(variantOf('Set last done')).toBe('outline')
+      expect(variantOf('Complete')).toBe('ghost')
+    })
+
+    it('makes Complete an outline button on an ok rule and offers no Set interval', async () => {
+      await renderWith(makeRule({ status: 'ok' }))
+      expect(variantOf('Complete')).toBe('outline')
+      expect(screen.queryByRole('button', { name: 'Set interval' })).toBeNull()
+    })
+  })
+
+  it('tells two same-named items apart by location, or alias when there is one', async () => {
+    const rules = [
+      makeRule({ id: 'r1', equipment_id: 'eq-p', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Port', description: 'Oil port' }),
+      makeRule({ id: 'r2', equipment_id: 'eq-s', equipment_name: 'Cummins QSB 6.7', equipment_alias: 'Starboard engine', equipment_location: 'ER - Starboard', description: 'Oil stbd' }),
+      makeRule({ id: 'r3', equipment_id: 'eq-g', equipment_name: 'Genset', description: 'Genset oil' }),
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    // Both truncate on one line, but the name gives way first: it shrinks
+    // three times as fast as the qualifier and keeps only a 3ch floor.
+    const qualifier = await screen.findByText(/\(ER - Port\)/)
+    expect(qualifier.className).toContain('truncate')
+    expect(qualifier.className).not.toContain('shrink-0')
+    const button = qualifier.closest('button')!
+    expect(qualifier.textContent).toBe('(ER - Port)')
+    const nameSpan = within(button).getByText('Cummins QSB 6.7')
+    expect(nameSpan.textContent).toBe('Cummins QSB 6.7')
+    expect(nameSpan.className).toContain('truncate')
+    expect(nameSpan.className).toContain('shrink-[3]')
+    expect(button.className).not.toContain('whitespace-normal')
+    expect(screen.getByText('(Starboard engine)')).toBeInTheDocument()
+    expect(screen.getByText('Genset')).toBeInTheDocument()
+    expect(screen.getByText('Genset').closest('button')!.textContent).toBe('Genset')
+  })
+
+  it('treats names differing only in case or spacing as the same name', async () => {
+    const rules = [
+      makeRule({ id: 'r1', equipment_id: 'eq-p', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Port', description: 'Oil port' }),
+      makeRule({ id: 'r2', equipment_id: 'eq-s', equipment_name: 'cummins  QSB 6.7', equipment_location: 'ER - Starboard', description: 'Oil stbd' }),
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    expect(await screen.findByText('(ER - Port)')).toBeInTheDocument()
+    expect(screen.getByText('(ER - Starboard)')).toBeInTheDocument()
+  })
+
+  it('names the item with its qualifier in the Log a reading dialog', async () => {
+    const rules = [
+      makeRule({ id: 'r1', equipment_id: 'eq-p', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Port', has_hour_meter_path: false, description: 'Oil port' }),
+      makeRule({ id: 'r2', equipment_id: 'eq-s', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Starboard', has_hour_meter_path: false, description: 'Oil stbd' }),
+    ]
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+      return jsonResponse(200, {})
+    })
+    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    await screen.findByText('Oil port')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Log a reading' })[1])
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Cummins QSB 6\.7 \(ER - Starboard\) has no hour meter/)).toBeInTheDocument()
+  })
+
+  describe('dialogs name the item when two share a name', () => {
+    const twins = (over: Partial<MaintenanceRule> = {}) => [
+      makeRule({ id: 'r1', equipment_id: 'eq-p', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Port', description: 'Oil port', ...over }),
+      makeRule({ id: 'r2', equipment_id: 'eq-s', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Starboard', description: 'Oil stbd', ...over }),
+    ]
+    async function open(rules: MaintenanceRule[], button: string) {
+      fetchMock.mockImplementation((url: string) => {
+        if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules, removed: [], schedule_errors: [] })
+        return jsonResponse(200, {})
+      })
+      render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+      await screen.findByText(rules[0].description)
+      fireEvent.click(screen.getAllByRole('button', { name: button })[1])
+      return screen.findByRole('dialog')
+    }
+
+    it('Complete', async () => {
+      const dialog = await open(twins(), 'Complete')
+      expect(within(dialog).getByText(/Cummins QSB 6\.7 \(ER - Starboard\)/)).toBeInTheDocument()
+    })
+
+    it('leaves a unique item\'s Complete dialog wording as it was', async () => {
+      const dialog = await open([
+        makeRule({ id: 'r1', equipment_id: 'eq-a', equipment_name: 'Watermaker', description: 'Membrane' }),
+        makeRule({ id: 'r2', equipment_id: 'eq-b', equipment_name: 'Genset', description: 'Genset oil' }),
+      ], 'Complete')
+      expect(within(dialog).getByText('Logs this service. If it is the latest one, the next falls due counted from it.')).toBeInTheDocument()
+      expect(dialog.textContent).not.toContain('For ')
+    })
+
+    it('Ack', async () => {
+      const dialog = await open(twins({ status: 'overdue' }), 'Ack')
+      expect(within(dialog).getByText(/Cummins QSB 6\.7 \(ER - Starboard\)/)).toBeInTheDocument()
+    })
+
+    it('Set last done', async () => {
+      const dialog = await open(twins({ status: 'never_recorded' }), 'Set last done')
+      expect(within(dialog).getByText(/Cummins QSB 6\.7 \(ER - Starboard\)/)).toBeInTheDocument()
+    })
+
+    it('profile job', async () => {
+      const jobs = [
+        makeProfileJob({ id: 'job:p', equipment_id: 'eq-p', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Port', description: 'Oil port', status: 'ok' }),
+        makeProfileJob({ id: 'job:s', equipment_id: 'eq-s', equipment_name: 'Cummins QSB 6.7', equipment_location: 'ER - Starboard', description: 'Oil stbd', status: 'ok' }),
+      ]
+      fetchMock.mockImplementation((url: string) => {
+        if (String(url).includes('/api/inventory/maintenance/rules')) return jsonResponse(200, { rules: jobs, removed: [], schedule_errors: [] })
+        return jsonResponse(200, {})
+      })
+      render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Oil stbd' }))
+      const dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText(/Cummins QSB 6\.7 \(ER - Starboard\): this job comes from/)).toBeInTheDocument()
+    })
+  })
+
   it('warns, per item, when a profile is missing or invalid', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (String(url).includes('/api/inventory/maintenance/rules')) {

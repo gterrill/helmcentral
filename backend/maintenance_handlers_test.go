@@ -191,6 +191,59 @@ func TestListMaintenanceRulesHandler_ComputesStatusAndFiltersBySystemAndStored(t
 	}
 }
 
+func TestListMaintenanceRulesHandler_CarriesAliasAndLocation(t *testing.T) {
+	withTestDocumentStore(t)
+
+	zone, err := globalDocumentStore.CreateZone("ER - Port")
+	if err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	located, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Cummins QSB 6.7", Category: "mechanical", System: "propulsion", ZoneID: &zone.ID, Aliases: []string{"Port engine", "PE"}})
+	if err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
+	}
+	bare := mustCreateHandlerTestEquipment(t, "Bilge pump")
+	months := 6
+	for _, id := range []string{located.ID, bare.ID} {
+		id := id
+		if _, err := globalDocumentStore.CreateMaintenanceRule(maintenanceRuleInput{EquipmentID: &id, Description: "Check " + id, IntervalMonths: &months}); err != nil {
+			t.Fatalf("CreateMaintenanceRule: %v", err)
+		}
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/inventory/maintenance/rules", "", "")
+	if err := listMaintenanceRulesHandler(c); err != nil {
+		t.Fatalf("listMaintenanceRulesHandler: %v", err)
+	}
+	var resp struct {
+		Rules []maintenanceRuleView `json:"rules"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(resp.Rules))
+	}
+	for _, r := range resp.Rules {
+		switch *r.EquipmentID {
+		case located.ID:
+			if r.EquipmentAlias == nil || *r.EquipmentAlias != "Port engine" {
+				t.Errorf("alias = %v, want Port engine", r.EquipmentAlias)
+			}
+			if r.EquipmentLocation == nil || *r.EquipmentLocation != "ER - Port" {
+				t.Errorf("location = %v, want ER - Port", r.EquipmentLocation)
+			}
+		case bare.ID:
+			if r.EquipmentAlias != nil || r.EquipmentLocation != nil {
+				t.Errorf("bare item should have null alias and location, got %v / %v", r.EquipmentAlias, r.EquipmentLocation)
+			}
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"equipment_alias":null`) {
+		t.Errorf("a missing alias must serialise as null: %s", rec.Body.String())
+	}
+}
+
 func TestGetMaintenanceRuleHandler_NotFound(t *testing.T) {
 	withTestDocumentStore(t)
 

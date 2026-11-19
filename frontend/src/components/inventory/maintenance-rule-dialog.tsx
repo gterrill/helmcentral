@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 
 import {
@@ -34,6 +34,7 @@ import {
   type MaintenanceRuleInput,
 } from '@/hooks/use-maintenance'
 import { errorMessage } from '@/lib/errors'
+import { joinEquipmentLabel, labelEquipmentList } from '@/lib/maintenance-equipment-labels'
 
 // ADR 0138: create or edit a rule's own core fields (spec §1). A rule
 // belongs to one item, optionally none (a calendar-only certificate/expiry
@@ -51,6 +52,8 @@ interface MaintenanceRuleDialogProps {
   /** Preselects the item picker for "New rule" launched from an item's own
    * Maintenance block - undefined/omitted for the plain list's own button. */
   presetEquipmentId?: string
+  /** Set only when the list has another item with the same name; passed to a profile job's dialog. */
+  equipmentLabel?: string
   open: boolean
   onCancel: () => void
   onSave: (input: MaintenanceRuleInput) => Promise<MaintenanceRule>
@@ -104,6 +107,15 @@ function HandRuleDialog({ rule, presetEquipmentId, open, onCancel, onSave, onDel
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, rule?.id])
 
+  const itemLabels = useMemo(
+    () => labelEquipmentList(items.map((i) => ({ id: i.id, name: i.name, alias: i.aliases[0] ?? null, location: i.zone_name || null }))),
+    [items],
+  )
+  const itemText = (id: string): string | undefined => {
+    const label = itemLabels.get(id)
+    return label ? joinEquipmentLabel(label) : undefined
+  }
+
   const isEditing = Boolean(rule)
 
   const handleSave = async () => {
@@ -139,13 +151,13 @@ function HandRuleDialog({ rule, presetEquipmentId, open, onCancel, onSave, onDel
               >
                 <SelectTrigger id="maintenance-rule-item" aria-label="Item">
                   <SelectValue>
-                    {(value: string) => value === NO_EQUIPMENT_VALUE ? 'No item (certificate or expiry)' : (items.find((i) => i.id === value)?.name ?? value)}
+                    {(value: string) => value === NO_EQUIPMENT_VALUE ? 'No item (certificate or expiry)' : (itemText(value) ?? value)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
                   <SelectItem value={NO_EQUIPMENT_VALUE}>No item (certificate or expiry)</SelectItem>
                   {items.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                    <SelectItem key={item.id} value={item.id}>{itemText(item.id)}</SelectItem>
                   ))}
                 </SelectPopup>
               </Select>
@@ -294,6 +306,7 @@ export function MaintenanceRuleDialog(props: MaintenanceRuleDialogProps) {
     return (
       <MaintenanceProfileJobDialog
         rule={props.rule}
+        equipmentLabel={props.equipmentLabel}
         open={props.open}
         onCancel={props.onCancel}
         onChanged={(rule) => props.onRuleChanged?.(rule)}
