@@ -67,6 +67,8 @@ export interface ReplayPanelProps {
   onLengthChange: (length: ReplaySpeedId) => void
   /** Written with the replay position as it moves, for the edit buttons. */
   cursorRef?: MutableRefObject<ReplayCursor | null>
+  /** Written with a function that pauses the replay and moves it to a Unix-seconds moment, for buttons outside the panel. */
+  seekRef?: MutableRefObject<((at: number) => void) | null>
 }
 
 const MODE_NAMES: Record<CameraMode, string> = { overview: 'Overview', follow: 'Follow', orbit: 'Orbit' }
@@ -103,7 +105,7 @@ function useWriteQueue(setError: (message: string | null) => void) {
   return { run, writes }
 }
 
-export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthChange, cursorRef }: ReplayPanelProps) {
+export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthChange, cursorRef, seekRef }: ReplayPanelProps) {
   const [cameraOpen, setCameraOpen] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
   const [shotError, setShotError] = useState<string | null>(null)
@@ -347,6 +349,13 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     if (clock === null) return
     seekClock(clock, { onSign: true, at })
   }
+  useEffect(() => {
+    if (seekRef) seekRef.current = (at) => {
+      const entry = entryAt(live.current.timeline, at)
+      const clock = entry ? clockFor(live.current.timeline, entry.id, at) : null
+      if (clock !== null) seekClock(clock)
+    }
+  })
   const addSign = () => {
     if (!here) return
     setSignNotice(null)

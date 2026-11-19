@@ -42,7 +42,7 @@ describe('the card on load', () => {
     expect(root.querySelector('.hcp-dates')?.textContent).toBe('14 to 16 Sep 2026')
     expect(root.querySelectorAll('img')).toHaveLength(0)
     const stats = [...root.querySelectorAll('.hcp-stat')].map((s) => s.textContent)
-    expect(stats).toEqual(['Distance20.0 NM', 'Underway2 h 00 m', 'Passages2', 'Nights2'])
+    expect(stats).toEqual(['Distance20.0 nm', 'Underway2 h 00 m', 'Passages2', 'Nights2'])
   })
 
   it('shows the whole track and waits for a tap: no camera move, no projection change, no play', () => {

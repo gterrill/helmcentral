@@ -45,7 +45,7 @@ func loadLogbookFixture(t *testing.T) (*passageStore, logbookFixture) {
 		if _, err := s.InsertPassage(p.passageRecord); err != nil {
 			t.Fatalf("insert passage: %v", err)
 		}
-		buf, _ := json.Marshal(passageFigures{Stats: p.Stats, StartLon: p.StartLon, StartLat: p.StartLat})
+		buf, _ := json.Marshal(passageFigures{Version: passageFiguresVersion, Stats: p.Stats, StartLon: p.StartLon, StartLat: p.StartLat})
 		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), p.ID); err != nil {
 			t.Fatalf("store stats: %v", err)
 		}
@@ -615,7 +615,7 @@ func TestListPassages_LabelsNameTheYearOutsideTheCurrentOne(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		buf, _ := json.Marshal(passageFigures{StartLat: &lat, StartLon: &lon, Timezone: "Australia/Sydney"})
+		buf, _ := json.Marshal(passageFigures{Version: passageFiguresVersion, StartLat: &lat, StartLon: &lon, Timezone: "Australia/Sydney"})
 		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), saved.ID); err != nil {
 			t.Fatal(err)
 		}

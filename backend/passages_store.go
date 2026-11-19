@@ -38,6 +38,14 @@ type recordedTrackPoint struct {
 	WaterL   *float64 `json:"water_l"`
 	GenState *string  `json:"gen_state"`
 
+	// The largest roll and pitch (degrees) and heave (metres), as magnitudes,
+	// seen between the previous point and this one. Nil when the boat's
+	// attitude sensor gave no reading in that time, and for every point taken
+	// before motion was recorded.
+	RollPeakDeg  *float64 `json:"roll_peak_deg"`
+	PitchPeakDeg *float64 `json:"pitch_peak_deg"`
+	HeavePeakM   *float64 `json:"heave_peak_m"`
+
 	// AnchorSetAt is when the anchor watch in force at this moment was set.
 	// The detector ends a passage when it sees a value later than the
 	// passage start.
@@ -134,7 +142,10 @@ func createPassageSchema(db *sql.DB) error {
 			water_l REAL,
 			gen_state TEXT,
 			anchor_set_ms INTEGER,
-			source TEXT NOT NULL DEFAULT 'recorded'
+			source TEXT NOT NULL DEFAULT 'recorded',
+			roll_peak_deg REAL,
+			pitch_peak_deg REAL,
+			heave_peak_m REAL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_track_points_t ON track_points(t_ms)`,
 		`CREATE TABLE IF NOT EXISTS cruises (
@@ -210,6 +221,12 @@ func createPassageSchema(db *sql.DB) error {
 	}
 	if err := addTrackPointSourceColumn(db); err != nil {
 		return err
+	}
+	// Motion peaks: older rows keep null, which reads as not recorded.
+	for _, c := range []string{"roll_peak_deg", "pitch_peak_deg", "heave_peak_m"} {
+		if err := ensureColumn(db, "track_points", c, "REAL"); err != nil {
+			return err
+		}
 	}
 	return addPassageNameAttemptColumn(db)
 }
@@ -288,31 +305,33 @@ func insertTrackPoint(db sqlExecer, p recordedTrackPoint) error {
 		source = trackSourceRecorded
 	}
 	_, err := db.Exec(`INSERT INTO track_points
-		(t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source, roll_peak_deg, pitch_peak_deg, heave_peak_m)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.At.UnixMilli(), p.Segment, p.Lat, p.Lon,
 		nullFloat(p.SOGKts), nullFloat(p.COGDeg), nullFloat(p.TWSKts), nullFloat(p.GustKts),
-		nullFloat(p.SoCPct), nullFloat(p.FuelLph), nullFloat(p.WaterL), gen, anchor, source)
+		nullFloat(p.SoCPct), nullFloat(p.FuelLph), nullFloat(p.WaterL), gen, anchor, source,
+		nullFloat(p.RollPeakDeg), nullFloat(p.PitchPeakDeg), nullFloat(p.HeavePeakM))
 	if err != nil {
 		return fmt.Errorf("append track point: %w", err)
 	}
 	return nil
 }
 
-const trackPointColumns = `id, t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source`
+const trackPointColumns = `id, t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source, roll_peak_deg, pitch_peak_deg, heave_peak_m`
 
 func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 	var p recordedTrackPoint
 	var ms int64
-	var sog, cog, tws, gust, soc, fuel, water sql.NullFloat64
+	var sog, cog, tws, gust, soc, fuel, water, roll, pitch, heave sql.NullFloat64
 	var gen sql.NullString
 	var anchor sql.NullInt64
-	if err := r.Scan(&p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor, &p.Source); err != nil {
+	if err := r.Scan(&p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor, &p.Source, &roll, &pitch, &heave); err != nil {
 		return p, err
 	}
 	p.At = time.UnixMilli(ms).UTC()
 	p.SOGKts, p.COGDeg, p.TWSKts, p.GustKts = nullToPtr(sog), nullToPtr(cog), nullToPtr(tws), nullToPtr(gust)
 	p.SoCPct, p.FuelLph, p.WaterL = nullToPtr(soc), nullToPtr(fuel), nullToPtr(water)
+	p.RollPeakDeg, p.PitchPeakDeg, p.HeavePeakM = nullToPtr(roll), nullToPtr(pitch), nullToPtr(heave)
 	if gen.Valid {
 		g := gen.String
 		p.GenState = &g

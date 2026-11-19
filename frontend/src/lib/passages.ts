@@ -1,7 +1,7 @@
 import type { DistanceUnits } from '@/config/app-config'
 import type { PassageDetailExtras } from '@/lib/passage-plans'
-import { formatQuantity, unitOption } from '@/lib/quantities'
-import { zonedDateTimeParts } from '@/lib/vessel-time'
+import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
+import { formatDayMonthIn, formatTimeOfDay, formatWeekday, zonedDateTimeParts } from '@/lib/vessel-time'
 
 // Passages page: the record shapes the backend returns and the pure helpers
 // the page draws from (figure formatting, track segments, replay timeline,
@@ -32,6 +32,18 @@ export interface PassageStats {
   soc_start_pct: number | null
   soc_end_pct: number | null
   soc_min_pct: number | null
+  /** When each maximum happened, Unix seconds. Absent or null when the figure
+   * is, and from a server that does not send them. */
+  max_sog_at?: number | null
+  max_gust_at?: number | null
+  /** Motion maxima from the boat's attitude sensor: degrees, metres. Null on a
+   * passage recorded before motion was kept. */
+  max_roll_deg?: number | null
+  max_roll_at?: number | null
+  max_pitch_deg?: number | null
+  max_pitch_at?: number | null
+  max_heave_m?: number | null
+  max_heave_at?: number | null
 }
 
 export interface PassageSummary extends PassageRecord {
@@ -133,7 +145,7 @@ export function fmtFigure(v: number | null | undefined, digits = 1): string {
   return present(v) ? v.toFixed(digits) : ABSENT
 }
 
-export const fmtNM = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} NM` : ABSENT)
+export const fmtNM = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} nm` : ABSENT)
 export const fmtKn = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} kn` : ABSENT)
 /** Litres as the Units setting asks: litres for metric, US gallons for
  * imperial. Distance and speed stay nautical (NM, kn) in both. */
@@ -141,6 +153,14 @@ export function fmtVolume(litres: number | null | undefined, units: DistanceUnit
   if (!present(litres)) return ABSENT
   const unitId = units === 'imperial' ? 'gal' : 'L'
   return `${formatQuantity(litres / 1000, 'volume', unitId)} ${unitOption('volume', unitId).label}`
+}
+/** Fuel per nautical mile as `4.4 L/nm` (`1.2 gal/nm` for imperial), one decimal
+ * because a mile of fuel is a small number. Null when fuel or distance is
+ * missing or the distance is nothing. */
+export function fmtVolumePerNM(litres: number | null | undefined, nm: number | null | undefined, units: DistanceUnits): string | null {
+  if (!present(litres) || !present(nm) || nm <= 0) return null
+  const unitId = units === 'imperial' ? 'gal' : 'L'
+  return `${convertFromSI(litres / nm / 1000, 'volume', unitId).toFixed(1)} ${unitOption('volume', unitId).label}/nm`
 }
 export const fmtPct = (v: number | null | undefined) => (present(v) ? `${Math.round(v)}%` : ABSENT)
 export const fmtHours = (v: number | null | undefined) => (present(v) ? `${v.toFixed(1)} h` : ABSENT)
@@ -180,6 +200,18 @@ export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 't
   if (p.title.trim()) return p.title.trim()
   if (!p.from_name && !p.to_name) return `Passage · ${formatLocalDate(p.start, p.timezone)}`
   return passageRoute(p)
+}
+
+/** `Tue 17 Nov, 5.05 AM to 11.44 AM` in the passage's own zone; the end gets its
+ * day too when it falls on another one. `--` without a zone. */
+export function passageTimeSpan(startIso: string, endIso: string, timeZone: string | null | undefined): string {
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  if (!timeZone || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ABSENT
+  const day = (d: Date) => `${formatWeekday(d, timeZone)} ${formatDayMonthIn(d, timeZone)}`
+  const from = `${day(start)}, ${formatTimeOfDay(start, timeZone)}`
+  const sameDay = day(start) === day(end)
+  return `${from} to ${sameDay ? '' : `${day(end)}, `}${formatTimeOfDay(end, timeZone)}`
 }
 
 // ── boat-local time ──────────────────────────────────────────────────────

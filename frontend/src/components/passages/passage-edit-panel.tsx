@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { toast } from 'sonner'
 
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
+import { PassageMotion } from '@/components/passages/passage-stats'
 import type { ReplayCursor } from '@/components/passages/replay-panel'
 import { ConfirmDelete, FormSection } from '@/components/patterns'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
@@ -10,7 +11,6 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Textarea } from '@/components/ui/textarea'
 import type { PassageRating } from '@/lib/passage-plans'
 import { passagesApi } from '@/lib/passages-api'
@@ -37,10 +37,12 @@ export interface PassageEditPanelProps {
   canWrite: boolean
   onMerged: (id: string) => void
   onHidden: () => void
+  /** Moves the replay to a Unix-seconds moment, for the maxima under How it went. */
+  onSeek?: (at: number) => void
 }
 
 export function PassageEditPanel({
-  passage, cruises, olderNeighbour, newerNeighbour, cursorRef, canWrite, onMerged, onHidden,
+  passage, cruises, olderNeighbour, newerNeighbour, cursorRef, canWrite, onMerged, onHidden, onSeek,
 }: PassageEditPanelProps) {
   const [title, setTitle] = useState(passage.title)
   const [fromName, setFromName] = useState(passage.from_name)
@@ -172,19 +174,22 @@ export function PassageEditPanel({
       </FormSection>
 
       <FormSection title="How it went">
-        <ToggleGroup
-          variant="outline"
-          size="sm"
-          aria-label="How it went"
-          value={passage.rating ? [passage.rating] : []}
-          disabled={disabled}
-          onValueChange={(v) => { void rate((v[0] as PassageRating | undefined) ?? '') }}
-          className="flex-wrap"
-        >
+        <PassageMotion stats={passage.stats} onSeek={onSeek} />
+        <div role="group" aria-label="How it went" className="flex flex-wrap gap-2">
           {RATINGS.map((r) => (
-            <ToggleGroupItem key={r.value} value={r.value} className="text-xs">{r.label}</ToggleGroupItem>
+            <Button
+              key={r.value}
+              type="button"
+              size="sm"
+              variant={passage.rating === r.value ? 'default' : 'outline'}
+              aria-pressed={passage.rating === r.value}
+              disabled={disabled}
+              onClick={() => { void rate(passage.rating === r.value ? '' : r.value) }}
+            >
+              {r.label}
+            </Button>
           ))}
-        </ToggleGroup>
+        </div>
         {passage.ratingError && <p role="alert" className="text-sm text-destructive">{passage.ratingError}</p>}
       </FormSection>
 

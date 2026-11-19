@@ -11,6 +11,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **A passage now records how much the boat rolled, pitched and heaved.** Under
+  "How it went" the passage page shows the biggest roll, pitch and heave, such
+  as "Max roll 14°, pitch 6°, heave 0.8 m", to help you choose the score. The
+  maximum speed, the strongest gust and each of those motion figures is a
+  button that jumps the replay to the moment it happened. Motion is only
+  recorded from this version on, so earlier passages say "Motion not recorded
+  for this passage".
+
+### Changed
+
+- **The passage page's figures are tidier.** The wind tile says it's the mean
+  wind, fuel burned shows the fuel per nautical mile, the house battery tile is
+  left out when the battery stayed within 5 points, and distances read "nm"
+  to match "kn". The heading's second line is now the day and time the passage
+  ran in the boat's own time. The score you pick under How it went is now
+  clearly filled in.
+
 ## [0.68.0] - 2026-11-19
 
 ### Breaking
