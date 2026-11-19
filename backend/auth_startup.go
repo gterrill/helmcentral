@@ -40,6 +40,19 @@ func checkAuthModeAtStartup(settingsPath string) (mode string, err error) {
 // SignalK can't be reached. There is no cap: SignalK is a required source.
 const signalKStartupRetryInterval = 5 * time.Second
 
+// signalKNoLoginRouteWindow is how long startup keeps waiting while SignalK
+// answers 404 on its login route, before it concludes security is off. After a
+// power cut SignalK, or a proxy in front of it, can answer 404 before the
+// security routes are mounted.
+const signalKNoLoginRouteWindow = 2 * time.Minute
+
+// signalKNoLoginRouteError marks SignalK answering 404 on the login route.
+type signalKNoLoginRouteError struct{ status int }
+
+func (e *signalKNoLoginRouteError) Error() string {
+	return fmt.Sprintf("SignalK answered HTTP %d: no login route yet", e.status)
+}
+
 // signalKUnreachableError marks a request that got no HTTP answer at all, for
 // any reason; its text is the underlying cause.
 type signalKUnreachableError struct{ err error }
@@ -61,7 +74,7 @@ func (e *signalKUnreachableError) Unwrap() error { return e.err }
 // section is absent from such a file.
 func checkAuthModeAtStartupWith(settingsPath string, probe func(signalkURL string) (bool, error), retryInterval time.Duration) (mode string, err error) {
 	return checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
-		retry: retryInterval, summary: signalKStartupSummaryInterval, now: time.Now, sleep: time.Sleep,
+		retry: retryInterval, summary: signalKStartupSummaryInterval, noLoginWindow: signalKNoLoginRouteWindow, now: time.Now, sleep: time.Sleep,
 	})
 }
 
@@ -73,14 +86,17 @@ const signalKStartupSummaryInterval = time.Minute
 // between log summaries, and the clock, injectable so tests need no real time.
 type startupWait struct {
 	retry, summary time.Duration
-	now            func() time.Time
-	sleep          func(time.Duration)
+	// noLoginWindow bounds the wait while SignalK answers 404 on its login route.
+	noLoginWindow time.Duration
+	now           func() time.Time
+	sleep         func(time.Duration)
 }
 
 func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL string) (bool, error), w startupWait) (mode string, err error) {
 	tries := 0
 	var lastSummary time.Time
 	sawSignalK := false
+	var firstNoLoginRoute time.Time
 	// failedTry counts one more failed try and logs it: in full the first time,
 	// then once per summary interval. what names the thing that failed.
 	failedTry := func(first, still string, cause error) {
@@ -133,6 +149,19 @@ func checkAuthModeAtStartupWaiting(settingsPath string, probe func(signalkURL st
 		// worked; any HTTP answer is judged at once.
 		enabled, probeErr := probe(signalkURL)
 		if probeErr != nil {
+			var noRoute *signalKNoLoginRouteError
+			if errors.As(probeErr, &noRoute) {
+				now := w.now()
+				if firstNoLoginRoute.IsZero() {
+					firstNoLoginRoute = now
+				}
+				if now.Sub(firstNoLoginRoute) >= w.noLoginWindow {
+					return mode, securityEnabledError(signalkURL, false)
+				}
+				failedTry(fmt.Sprintf("auth: SignalK at %s answers but has no login route yet", signalkURL),
+					fmt.Sprintf("auth: SignalK at %s still has no login route yet", signalkURL), probeErr)
+				continue
+			}
 			var unreachable *signalKUnreachableError
 			if !errors.As(probeErr, &unreachable) {
 				return mode, fmt.Errorf("auth.mode is %q but SignalK's security status could not be checked at %s: %w", authModeSignalK, signalkURL, probeErr)
@@ -172,7 +201,8 @@ func securityEnabledError(signalkURL string, enabled bool) error {
 // assumption rather than hiding it). The reasoning it rests on:
 // signalk-server only wires the /signalk/v1/auth/login route when a
 // security strategy is active, so a 404 (route not found at all) is read as
-// "security disabled", and any other response — including a rejection of
+// "security disabled" (reported as signalKNoLoginRouteError, which startup
+// waits on for signalKNoLoginRouteWindow first), and any other response — including a rejection of
 // the deliberately bad credentials — means the login route exists and is
 // therefore read as "security enabled".
 func probeSignalKSecurityEnabled(signalkURL string) (bool, error) {
@@ -191,5 +221,8 @@ func probeSignalKSecurityEnabled(signalkURL string) (bool, error) {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
-	return resp.StatusCode != http.StatusNotFound, nil
+	if resp.StatusCode == http.StatusNotFound {
+		return false, &signalKNoLoginRouteError{status: resp.StatusCode}
+	}
+	return true, nil
 }

@@ -1020,9 +1020,14 @@ func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOffStubFailsFast(t *te
 
 	settingsPath := writeAuthStartupSettingsFixture(t, srv.URL, "signalk")
 
-	_, err := checkAuthModeAtStartup(settingsPath)
+	// A 404 is waited on for the whole window, then refused. The fake clock
+	// keeps the two minutes from being real.
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	_, err := checkAuthModeAtStartupWaiting(settingsPath, probeSignalKSecurityEnabled, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, noLoginWindow: 2 * time.Minute, now: clock.now, sleep: clock.sleep,
+	})
 	if err == nil {
-		t.Fatal("expected checkAuthModeAtStartup to fail fast when auth.mode is signalk but SignalK security is off")
+		t.Fatal("expected checkAuthModeAtStartup to refuse when auth.mode is signalk but SignalK has no login route")
 	}
 	if !strings.Contains(err.Error(), "security is disabled") {
 		t.Fatalf("expected the error to name the unsatisfiable combination, got: %v", err)
@@ -1074,17 +1079,18 @@ func TestCheckAuthModeAtStartup_UnrecognisedModeFailsFast(t *testing.T) {
 
 // ── SignalK security probe ───────────────────────────────────────────────────
 
-func TestProbeSignalKSecurityEnabled_404MeansDisabled(t *testing.T) {
+func TestProbeSignalKSecurityEnabled_404IsNoLoginRoute(t *testing.T) {
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusNotFound, "not found")
 
 	enabled, err := probeSignalKSecurityEnabled(srv.URL)
-	if err != nil {
-		t.Fatalf("probeSignalKSecurityEnabled: %v", err)
+	var noRoute *signalKNoLoginRouteError
+	if !errors.As(err, &noRoute) {
+		t.Fatalf("expected a no-login-route error for a 404, got: %v", err)
 	}
 	if enabled {
-		t.Fatal("expected a 404 from the login route to mean security is disabled")
+		t.Fatal("a 404 from the login route must not report security enabled")
 	}
 }
 
@@ -1465,6 +1471,66 @@ func TestCheckAuthModeAtStartup_WaitLogIsFirstTryThenOneSummaryPerInterval(t *te
 	}
 	if !strings.Contains(lines[3], "answering") {
 		t.Fatalf("expected a final answered line, got: %s", lines[3])
+	}
+}
+
+// A 404 from the login route can mean SignalK's security routes are not
+// mounted yet, so it is waited on for a bounded window before it counts as
+// "security is disabled".
+func noLoginRoute() error {
+	return &signalKNoLoginRouteError{status: http.StatusNotFound}
+}
+
+func TestCheckAuthModeAtStartup_NotFoundThenLoginRouteStarts(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	logs := captureLog(t)
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		if calls <= 3 {
+			return false, noLoginRoute()
+		}
+		return true, nil
+	}
+
+	mode, err := checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, noLoginWindow: 2 * time.Minute, now: clock.now, sleep: clock.sleep,
+	})
+	if err != nil || mode != authModeSignalK {
+		t.Fatalf("expected startup to succeed once the login route appeared, got %q, %v", mode, err)
+	}
+	if calls != 4 {
+		t.Fatalf("expected 4 probes, got %d", calls)
+	}
+	if !strings.Contains(logs.String(), "no login route yet") {
+		t.Fatalf("expected the log to say SignalK has no login route yet:\n%s", logs.String())
+	}
+}
+
+func TestCheckAuthModeAtStartup_NotFoundForWholeWindowRefuses(t *testing.T) {
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://signalk.test", "signalk")
+	logs := captureLog(t)
+	clock := &fakeStartupClock{t: time.Unix(0, 0)}
+	calls := 0
+	probe := func(string) (bool, error) {
+		calls++
+		return false, noLoginRoute()
+	}
+
+	_, err := checkAuthModeAtStartupWaiting(settingsPath, probe, startupWait{
+		retry: 5 * time.Second, summary: time.Minute, noLoginWindow: 2 * time.Minute, now: clock.now, sleep: clock.sleep,
+	})
+	if err == nil || !strings.Contains(err.Error(), "reports security is disabled") {
+		t.Fatalf("expected the security-disabled refusal, got: %v", err)
+	}
+	// Tries at t=0,5,...,120 s: the one at 120 s ends the window.
+	if calls != 25 {
+		t.Fatalf("expected 25 probes across the window, got %d", calls)
+	}
+	// First line, then one summary at 60 s: never one line per try.
+	if n := strings.Count(logs.String(), "auth: SignalK"); n != 2 {
+		t.Fatalf("expected 2 log lines, got %d:\n%s", n, logs.String())
 	}
 }
 

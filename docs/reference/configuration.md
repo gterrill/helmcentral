@@ -363,9 +363,12 @@ depends on the answer:
   far and the latest error. It writes one more line when SignalK does answer.
   A SignalK that never comes up leaves Helmcentral waiting, so check the
   address in `settings.yaml` and the error in the log if the lines keep coming.
-- SignalK's security is off: Helmcentral refuses to start straight away.
-  SignalK says so by answering that its login address doesn't exist (HTTP
-  404). Settings → Security won't save `signalk` unless SignalK's security is
+- SignalK answers that its login address doesn't exist (HTTP 404): Helmcentral
+  waits for 2 minutes, trying again every 5 seconds, because after a power cut
+  SignalK can answer before its login address is ready. The log says SignalK
+  answers but has no login route yet, on the first try and then once a
+  minute. If the answer is still 404 after 2 minutes, Helmcentral takes it
+  that SignalK's security is off and refuses to start. Settings → Security won't save `signalk` unless SignalK's security is
   on. So either SignalK's security was turned off afterwards, or
   `settings.yaml` was edited by hand. A wrong SignalK address in
   `settings.yaml` can look like this too, if something else answers at that
