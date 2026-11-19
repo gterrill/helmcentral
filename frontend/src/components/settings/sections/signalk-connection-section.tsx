@@ -2,8 +2,9 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { FormSection, SettingsLayout } from '@/components/patterns'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import { SignalKDiscoverySection } from '@/components/settings/sections/signalk-discovery-section'
 import { SignalKRolesSection } from '@/components/settings/sections/signalk-roles-section'
@@ -203,6 +204,25 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
       <SignalKDiscoverySection />
 
       <SignalKRolesSection draft={draft} onChange={onChange} />
+
+      <FormSection title="Engines">
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <Switch
+              id="mark-engines-stopped"
+              checked={draft.markEnginesStopped}
+              onCheckedChange={(checked) => onChange({ markEnginesStopped: checked })}
+            />
+            <FieldContent>
+              <FieldLabel htmlFor="mark-engines-stopped">Mark engines stopped when RPM goes quiet</FieldLabel>
+              <FieldDescription>
+                For engine gateways that go silent when the engine is switched off instead of sending zero. After the
+                engine's data has been quiet for about two minutes, Helmcentral sets the engine to stopped on SignalK.
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+        </FieldGroup>
+      </FormSection>
     </SettingsLayout>
   )
 }

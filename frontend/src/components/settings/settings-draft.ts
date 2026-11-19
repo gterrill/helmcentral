@@ -344,6 +344,9 @@ const draftFields = {
 
   // Off until the operator turns it on: it downloads in the background.
   offlineCoastlineEnabled: flag(['offline_coastline', 'enabled'], false),
+
+  // Off until the operator turns it on: it writes to SignalK.
+  markEnginesStopped: flag(['engines', 'mark_stopped_when_silent'], false),
 }
 
 type DraftFields = typeof draftFields

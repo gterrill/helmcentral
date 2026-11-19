@@ -30,6 +30,10 @@ var globalBusEchoReconciler = newBusEchoReconciler(globalSignalKSnapshot)
 // than on every tick.
 var globalCollisionProfileSyncer = newCollisionProfileSyncer(globalSignalKSnapshot)
 
+// globalEngineSilentStopper marks an engine stopped on the bus when its RPM goes
+// silent, if the operator has switched that on (ADR 0292).
+var globalEngineSilentStopper = newEngineSilentStopper(getEnv("SETTINGS_FILE", "../settings.yaml"))
+
 // globalNotificationSyncer re-reads each held vessel context's notifications
 // against the server's REST tree every 30s, so a notification the server has
 // forgotten (a restart, a debounced clear the stream dropped, its clean()
@@ -99,6 +103,10 @@ func evaluateAlarmsOnce(now time.Time) {
 	for _, event := range globalCollisionProfileSyncer.check(now) {
 		recordAlarmEvent(event, now)
 	}
+
+	// Off unless the operator turned it on; runs on its own goroutine because a
+	// publish waits on the SignalK server (ADR 0292).
+	globalEngineSilentStopper.tick(now)
 
 	// Clears any owned notification left live on the bus with nothing behind
 	// it in this engine — a ghost. Re-reads the snapshot each tick for the

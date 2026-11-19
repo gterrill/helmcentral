@@ -60,6 +60,7 @@ const changed: RegularSettingsDraft = {
     daylightArrival: true,
   },
   offlineCoastlineEnabled: true,
+  markEnginesStopped: true,
   roles: { ...emptyVesselRoles, house_bank: 'bank-1' },
 }
 
@@ -147,6 +148,7 @@ describe('settings draft fields', () => {
       daylightArrival: true,
     },
     offlineCoastlineEnabled: false,
+    markEnginesStopped: true,
   }
 
   const typedPatch = {
@@ -192,6 +194,7 @@ describe('settings draft fields', () => {
       },
     },
     offline_coastline: { enabled: false },
+    engines: { mark_stopped_when_silent: true },
   }
 
   it('saves exactly what the hand-written patch saved', () => {
