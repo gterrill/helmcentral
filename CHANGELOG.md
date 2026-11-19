@@ -25,6 +25,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Maintenance list tells same-named items apart.** When two items share a
+  name, such as two engines both called Cummins QSB 6.7, each row, the **Item**
+  picker in the rule editor and any dialog opened from such a row now say which
+  one it's for, using the item's alias or else its location. Names that differ
+  only in capitals or spacing count as the same. A rule with no interval offers
+  **Set interval**. **Complete** steps back to a quieter button unless a
+  service is due or overdue.
 - **Outside assistants no longer see the facts Mate keeps.** The list under
   the standing notes in Settings → Mate now stays with Mate. Claude, ChatGPT
   and any other connected assistant used to read it in the boat context, and

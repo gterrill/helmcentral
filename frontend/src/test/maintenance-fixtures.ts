@@ -11,8 +11,11 @@ export const ITEM_RULE_PROVENANCE = {
   first_at_hours: null,
   supersedes: [],
   removed_from_profile: false,
+  // Not provenance, but every rule view carries them and most tests want null.
+  equipment_alias: null,
+  equipment_location: null,
 } satisfies Pick<MaintenanceRule,
-  'source' | 'profile_id' | 'overridden_fields' | 'not_applicable' | 'profile_values' | 'first_at_hours' | 'supersedes' | 'removed_from_profile'>
+  'source' | 'profile_id' | 'overridden_fields' | 'not_applicable' | 'profile_values' | 'first_at_hours' | 'supersedes' | 'removed_from_profile' | 'equipment_alias' | 'equipment_location'>
 
 /** A live profile job for equipment item eq-1, e.g. makeProfileJob({ overridden_fields: ['interval_hours'] }). */
 export function makeProfileJob(overrides: Partial<MaintenanceRule> = {}): MaintenanceRule {

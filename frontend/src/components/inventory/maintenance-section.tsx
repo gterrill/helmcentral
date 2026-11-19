@@ -32,6 +32,7 @@ import {
 } from '@/hooks/use-maintenance'
 import { useBoatDayKey } from '@/hooks/use-vessel-clock'
 import { documentViewerHref } from '@/lib/document-citation'
+import { equipmentLabeller, joinEquipmentLabel } from '@/lib/maintenance-equipment-labels'
 
 // ADR 0138: the Maintenance section - a plain sortable list grouped by
 // status (spec §9), NOT kanban: recurring work has no "column" it belongs
@@ -60,6 +61,15 @@ function remainingLabel(rule: MaintenanceRule): string {
 function groupLabel(system: string): string {
   if (system === '') return 'Certificates and expiries'
   return EQUIPMENT_SYSTEM_LABELS[system as EquipmentSystem] ?? system
+}
+
+// Complete is the one solid button only where the work is due now. A rule with
+// no schedule, or no record yet, leads with a setup action instead (Set
+// interval, Set last done), so Complete steps back to ghost there.
+function completeVariant(status: MaintenanceRule['status']): 'default' | 'outline' | 'ghost' {
+  if (status === 'overdue' || status === 'due_soon') return 'default'
+  if (status === 'interval_not_set' || status === 'never_recorded') return 'ghost'
+  return 'outline'
 }
 
 export function MaintenanceSection({ onOpenEquipment, canWrite = true }: MaintenanceSectionProps) {
@@ -95,6 +105,14 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
       }))
       .filter((g) => g.rules.length > 0)
   }, [rules])
+  const labelFor = useMemo(() => equipmentLabeller(rules), [rules])
+  // The one-line label for a dialog's wording, only where the list has another
+  // item of the same name; otherwise the dialog keeps its own wording.
+  const labelOf = (rule: MaintenanceRule | null): string | undefined => {
+    if (!rule || !rule.equipment_id) return undefined
+    const label = labelFor(rule)
+    return label.detail ? joinEquipmentLabel(label) : undefined
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -204,9 +222,12 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                             <button
                               type="button"
                               onClick={() => onOpenEquipment(rule.equipment_id!)}
-                              className="truncate text-left text-xs font-medium text-muted-foreground hover:underline"
+                              className="flex min-w-0 items-baseline gap-1 text-left text-xs font-medium text-muted-foreground hover:underline"
                             >
-                              {rule.equipment_name}
+                              {/* Detail outranks the name: the name gives way
+                                  first (shrink 3 to 1, 3ch floor), then both truncate. */}
+                              <span className="min-w-[3ch] shrink-[3] truncate">{labelFor(rule).name}</span>
+                              {labelFor(rule).detail && <span className="min-w-0 shrink truncate">({labelFor(rule).detail})</span>}
                             </button>
                           ) : (
                             <span className="truncate text-xs font-medium text-muted-foreground">{groupLabel('')}</span>
@@ -279,7 +300,18 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
                                 Ack
                               </Button>
                             )}
-                            <Button type="button" size="sm" className="gap-1.5" onClick={() => setCompletingRule(rule)}>
+                            {rule.status === 'interval_not_set' && (
+                              <Button type="button" variant="outline" size="sm" onClick={() => setEditingRule(rule)}>
+                                Set interval
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant={completeVariant(rule.status)}
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => setCompletingRule(rule)}
+                            >
                               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                               Complete
                             </Button>
@@ -297,6 +329,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
 
       <MaintenanceRuleDialog
         rule={creatingRule ? undefined : editingRule}
+        equipmentLabel={labelOf(editingRule)}
         open={creatingRule || editingRule !== null}
         onCancel={() => { setCreatingRule(false); setEditingRule(null) }}
         onSave={async (input) => {
@@ -313,6 +346,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
 
       <MaintenanceCompleteDialog
         rule={completingRule}
+        equipmentLabel={labelOf(completingRule)}
         onCancel={() => setCompletingRule(null)}
         onComplete={async (input) => {
           return completeMaintenanceRule(completingRule!.id, input)
@@ -321,6 +355,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
 
       <MaintenanceAckDialog
         rule={acknowledgingRule}
+        equipmentLabel={labelOf(acknowledgingRule)}
         onCancel={() => setAcknowledgingRule(null)}
         onConfirm={async (reason) => {
           await acknowledgeMaintenanceRule(acknowledgingRule!.id, reason)
@@ -329,7 +364,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
       />
 
       <HandHoursDialog
-        equipmentName={loggingReadingRule?.equipment_name ?? ''}
+        equipmentName={labelOf(loggingReadingRule) ?? loggingReadingRule?.equipment_name ?? ''}
         open={loggingReadingRule !== null}
         onCancel={() => setLoggingReadingRule(null)}
         onSave={async (input) => {
@@ -340,6 +375,7 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
 
       <MaintenanceLastDoneDialog
         rule={settingLastDoneRule}
+        equipmentLabel={labelOf(settingLastDoneRule)}
         onCancel={() => setSettingLastDoneRule(null)}
         onConfirm={async (lastDoneAt, lastDoneHours) => {
           await setMaintenanceRuleLastDone(settingLastDoneRule!.id, lastDoneAt, lastDoneHours)

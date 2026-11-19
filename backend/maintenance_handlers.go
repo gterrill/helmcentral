@@ -48,22 +48,27 @@ import (
 // false for a calendar-only rule (EquipmentID nil) - there is no item to
 // join them from.
 type maintenanceRuleView struct {
-	ID               string   `json:"id"`
-	EquipmentID      *string  `json:"equipment_id"`
-	EquipmentName    string   `json:"equipment_name"`
-	System           string   `json:"system"`
-	Description      string   `json:"description"`
-	IntervalHours    *float64 `json:"interval_hours"`
-	IntervalMonths   *int     `json:"interval_months"`
-	DueSoonHours     *float64 `json:"due_soon_hours"`
-	DueSoonMonths    *int     `json:"due_soon_months"`
-	FixedDueDate     string   `json:"fixed_due_date"`
-	LastDoneAt       string   `json:"last_done_at"`
-	LastDoneHours    *float64 `json:"last_done_hours"`
-	ProfileServiceID string   `json:"profile_service_id"`
-	ProcedureNoteID  string   `json:"procedure_note_id"`
-	AckReason        string   `json:"ack_reason"`
-	Acknowledged     bool     `json:"acknowledged"`
+	ID            string  `json:"id"`
+	EquipmentID   *string `json:"equipment_id"`
+	EquipmentName string  `json:"equipment_name"`
+	// EquipmentAlias (the item's first alias) and EquipmentLocation (its zone
+	// name) are null when the item has none; the list uses them to tell apart
+	// two items that share a name.
+	EquipmentAlias    *string  `json:"equipment_alias"`
+	EquipmentLocation *string  `json:"equipment_location"`
+	System            string   `json:"system"`
+	Description       string   `json:"description"`
+	IntervalHours     *float64 `json:"interval_hours"`
+	IntervalMonths    *int     `json:"interval_months"`
+	DueSoonHours      *float64 `json:"due_soon_hours"`
+	DueSoonMonths     *int     `json:"due_soon_months"`
+	FixedDueDate      string   `json:"fixed_due_date"`
+	LastDoneAt        string   `json:"last_done_at"`
+	LastDoneHours     *float64 `json:"last_done_hours"`
+	ProfileServiceID  string   `json:"profile_service_id"`
+	ProcedureNoteID   string   `json:"procedure_note_id"`
+	AckReason         string   `json:"ack_reason"`
+	Acknowledged      bool     `json:"acknowledged"`
 	// CreatedAt/UpdatedAt are null for a profile job nothing has been written
 	// to yet: it has no row, so no timestamps to report.
 	CreatedAt *time.Time `json:"created_at"`
@@ -205,6 +210,14 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 	}
 	if eq != nil {
 		view.EquipmentName = eq.Name
+		if len(eq.Aliases) > 0 {
+			alias := eq.Aliases[0]
+			view.EquipmentAlias = &alias
+		}
+		if eq.ZoneName != "" {
+			location := eq.ZoneName
+			view.EquipmentLocation = &location
+		}
 		view.System = eq.System
 		view.HasHourMeterPath = eq.HourMeterSource != ""
 	}

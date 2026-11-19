@@ -24,6 +24,8 @@ import { errorMessage } from '@/lib/errors'
 
 interface MaintenanceAckDialogProps {
   rule: MaintenanceRule | null
+  /** Set only when the list has another item with the same name. */
+  equipmentLabel?: string
   onCancel: () => void
   onConfirm: (reason: string) => Promise<void>
 }
@@ -34,7 +36,7 @@ interface MaintenanceAckDialogProps {
  * so re-opening an already-acknowledged rule shows what was said rather
  * than an empty box.
  */
-export function MaintenanceAckDialog({ rule, onCancel, onConfirm }: MaintenanceAckDialogProps) {
+export function MaintenanceAckDialog({ rule, equipmentLabel, onCancel, onConfirm }: MaintenanceAckDialogProps) {
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,7 +64,7 @@ export function MaintenanceAckDialog({ rule, onCancel, onConfirm }: MaintenanceA
         <DialogHeader>
           <DialogTitle>Acknowledge</DialogTitle>
           <DialogDescription>
-            {rule?.description} stays overdue or due soon and still counts - acknowledging just
+            {equipmentLabel ? `${equipmentLabel}: ` : ''}{rule?.description} stays overdue or due soon and still counts - acknowledging just
             says you know about it, with a short reason ("yard", "waiting on parts").
           </DialogDescription>
         </DialogHeader>
@@ -97,6 +99,8 @@ export function MaintenanceAckDialog({ rule, onCancel, onConfirm }: MaintenanceA
 
 interface MaintenanceLastDoneDialogProps {
   rule: MaintenanceRule | null
+  /** Set only when the list has another item with the same name. */
+  equipmentLabel?: string
   onCancel: () => void
   onConfirm: (lastDoneAt: string | undefined, lastDoneHours: number | undefined) => Promise<void>
 }
@@ -108,7 +112,7 @@ interface MaintenanceLastDoneDialogProps {
  * app - it only records what was already true before the rule existed
  * here).
  */
-export function MaintenanceLastDoneDialog({ rule, onCancel, onConfirm }: MaintenanceLastDoneDialogProps) {
+export function MaintenanceLastDoneDialog({ rule, equipmentLabel, onCancel, onConfirm }: MaintenanceLastDoneDialogProps) {
   const [date, setDate] = useState('')
   const [hours, setHours] = useState('')
   const [saving, setSaving] = useState(false)
@@ -140,7 +144,7 @@ export function MaintenanceLastDoneDialog({ rule, onCancel, onConfirm }: Mainten
         <DialogHeader>
           <DialogTitle>Set last done</DialogTitle>
           <DialogDescription>
-            Record what was already true for {rule?.description} before it was entered here -
+            Record what was already true for {rule?.description}{equipmentLabel ? ` on ${equipmentLabel}` : ''} before it was entered here -
             a date and/or an hours reading. This does not add a service log entry.
           </DialogDescription>
         </DialogHeader>

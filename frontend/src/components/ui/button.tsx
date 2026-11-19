@@ -44,6 +44,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <ButtonPrimitive
         className={cn(buttonVariants({ variant, size, className }))}
+        data-variant={variant ?? 'default'}
         ref={ref}
         {...props}
       />

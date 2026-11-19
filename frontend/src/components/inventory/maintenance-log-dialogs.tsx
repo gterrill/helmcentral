@@ -327,6 +327,8 @@ async function uploadPhotoFiles(logEntryId: string, files: File[]): Promise<Main
 
 interface MaintenanceCompleteDialogProps {
   rule: MaintenanceRule | null
+  /** Set only when the list has another item with the same name. */
+  equipmentLabel?: string
   onCancel: () => void
   onComplete: (input: Omit<MaintenanceLogEntryInput, 'equipment_id' | 'kind'>) => Promise<{ rule: MaintenanceRule; entry: MaintenanceLogEntry }>
 }
@@ -347,7 +349,7 @@ function requiresNewDueDateNow(rule: MaintenanceRule): boolean {
   return rule.fixed_due_date !== '' && rule.interval_months == null
 }
 
-export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: MaintenanceCompleteDialogProps) {
+export function MaintenanceCompleteDialog({ rule, equipmentLabel, onCancel, onComplete }: MaintenanceCompleteDialogProps) {
   // What the form was when it was opened or last reset: "unsaved" means
   // different from this, not different from a blank rebuilt on each render
   // (which moves at midnight and when the hours reading refreshes).
@@ -429,7 +431,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
         <DialogHeader>
           <DialogTitle>Complete: {rule?.description}</DialogTitle>
           <DialogDescription>
-            Logs this service. If it is the latest one, the next falls due counted from it.
+            {equipmentLabel ? `For ${equipmentLabel}. ` : ''}Logs this service. If it is the latest one, the next falls due counted from it.
           </DialogDescription>
         </DialogHeader>
 
