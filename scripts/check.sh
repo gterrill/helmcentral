@@ -45,7 +45,7 @@ counts() {
 		echo "   $(grep -c '^ok' "$log") package(s) ok"
 		;;
 	npm-test)
-		found=$(grep -E '^ +(Test Files|Tests) ' "$log" | sed 's/^ */   /')
+		found=$(grep -E '^ +(Test Files|Tests) |^vitest load cap:' "$log" | sed 's/^ */   /')
 		echo "${found:-   (no pass counts found in the log)}"
 		;;
 	backend | frontend)
@@ -92,6 +92,18 @@ esac
 machine_lock_reexec HELMCENTRAL_CHECK_LOCK_HELD "${HELMCENTRAL_CHECK_LOCKFILE:-/tmp/helmcentral-check.lock}" check "make check" sh "$PWD/scripts/check.sh" "$target"
 
 mkdir -p "$logdir"
+
+# The machine's 1-minute load as this run starts, taken once by the outermost
+# run and handed to the nested ones, so vitest's load cap
+# (frontend/vite.config.ts) judges other sessions' work and not the backend
+# tests this run has just finished. The marker, not the value, says whether it
+# was taken, so a value left in the shell is never trusted. Backend-only runs
+# skip it and need no node.
+if [ -z "${HELMCENTRAL_CHECK_LOAD_SAMPLED:-}" ] && [ "$target" != backend ]; then
+	HELMCENTRAL_CHECK_START_LOAD=$(node -p 'require("node:os").loadavg()[0].toFixed(2)') || exit 2
+	HELMCENTRAL_CHECK_LOAD_SAMPLED=1
+	export HELMCENTRAL_CHECK_START_LOAD HELMCENTRAL_CHECK_LOAD_SAMPLED
+fi
 
 case $target in
 backend)
