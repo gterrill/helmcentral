@@ -385,7 +385,9 @@ again. Here's how to get going once SignalK is up and its security is on:
   container started with plain `docker run` and no `--restart` stays down, so
   start it again.
 - The systemd service: It restarts Helmcentral after a failure, but it stops
-  trying after five failed starts within two minutes. If
+  trying after 135 quick failed starts within 20 minutes. It waits 5 seconds
+  between starts, so it keeps at it for about eleven minutes. That gives a
+  data disk that mounts late after a power cut time to appear. If
   `systemctl status helmcentral` shows it as failed, run
   `sudo systemctl reset-failed helmcentral` and then
   `sudo systemctl start helmcentral`. A plain restart can be refused until

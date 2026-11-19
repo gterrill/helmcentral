@@ -20,9 +20,15 @@ After=network-online.target signalk.service
 # StartLimitInterval=) still work in [Service] for compatibility, so the old
 # unit ran with a burst of 5 over the default 10 s interval, which restarts
 # 5 s apart never reached. A SignalK that is slow to start does not use up the
-# cap: Helmcentral waits for it inside one start.
-StartLimitIntervalSec=120
-StartLimitBurst=5
+# cap: Helmcentral waits for it inside one start. Some boot faults take minutes
+# to clear, such as the data disk mounting late after a power cut, so the cap
+# is loose: 135 starts 5 s apart is about 11 minutes of retries. The unit is
+# left failed only when 135 starts land inside the 20 minute window, which
+# holds while each start fails within about 3.9 s. A start that runs longer
+# than that before failing spaces the cycles out, the window forgets the early
+# ones and the unit keeps retrying.
+StartLimitIntervalSec=1200
+StartLimitBurst=135
 
 [Service]
 Type=simple

@@ -20,10 +20,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   once a minute, and says when SignalK answers. If SignalK does answer and its
   security is switched off, it still refuses to start. An answer that its
   login address doesn't exist (404) is waited on for up to 2 minutes first,
-  because SignalK can give it before it has finished starting. What to do: copy the
-  updated `helmcentral.service` over the old one and run
-  `sudo systemctl daemon-reload`. Without it the restart limit never took
-  effect. Docker installs need nothing.
+  because SignalK can give it before it has finished starting. The updated
+  service file also keeps retrying any failed start every 5 seconds for about
+  eleven minutes. That gives a fault that clears slowly, such as the data disk
+  mounting late after a power cut, time to clear. If starts keep failing
+  quickly after that, it gives up and `systemctl status helmcentral` shows it
+  as failed. The old file never gave up. What to do: copy the updated
+  `helmcentral.service` over the old one and run
+  `sudo systemctl daemon-reload`. Docker installs need nothing.
 
 ### Changed
 
