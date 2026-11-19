@@ -9,35 +9,31 @@
 > SignalK and is willing to try it. Feedback on installing it on other
 > platforms would help most.
 
-Helmcentral is a dashboard, alarm system and boat logbook for
-[SignalK](https://signalk.org/). It puts anchor watch, tides, weather, tanks,
-engines and electrical monitoring on one screen at the helm, drives wall
-displays on its own, and sends alarms to your phone when you're off the boat.
-It also keeps the paperwork side of the boat: equipment, spares, maintenance,
-manuals and notes.
+Helmcentral is a self hosted, open source, app for cruising boats. It combines data from your boat's NMEA network, along with weather forecasts, to bring together everything (except the charts) into one central app:
 
-It runs on the boat as a single program with the web app built in. There's no
-database server to run and no cloud account to sign up for. If you already have
-a SignalK server, one command installs it.
+- dashboards for different scenarios: underway, anchored etc. showing wind strength and direction, tides, tank & battery levels, nearby AIS traffic, engine and electrical data, or embedded HTML frames from other apps
+- alarm system: equipment profile tolerances, anomaly detection, trend analysis, "surviving the storm" heuristics
+- anchor watch with rode planner: track nearby AIS targets showing their swing circle, calibrated tide forecast based on your depth readings, pin nearby landmarks to measure distances
+- weather forecasts: temperature, wind, waves, 500 mb pressure height and lightning for your current location or where you plan to be
+- passage logging: record your voyages and upload photos for the timeline. Export a pasage for social media.
+- inventory: use RFID and BLE tags to scan items, get notified when items need servicing; location mapping of zones and bins 
+- maintenance: equipment profiles used to schedule servicing or replacing parts based on hours or calendar days.
+- document management: keep track of manuals, invoices, receipts, notes, marina maps, pdf files; all freetext indexed to make searching easy
+- optional AI integration: BYOK (openrouter) and let AI help diagnose issues or plan passages. Or, use your own AI and use MCP to access Helmcentral
+- works off the boat (via Tailscale) and supports push notifications
+
+Helmcentral depends on [SignalK](https://signalk.org/). It's built as a self hosted app you run on the boat as a single program with the web app built in. There's no database server to run and no cloud accounts to sign up for. If you already have a SignalK server installed, one command installs Helmcentral. It should run fine on anything from a Raspberry Pi to NAS boxes to full blown servers.
 
 ![The Helmcentral dashboard at anchor](docs/images/dashboard.png)
 
 ## Why I built it
 
-I spent my working life building software, and I now live aboard full time.
-That changes what you want from software on a boat.
+I spent my working life building software, and now live aboard full time with my wife cruising the east coast of Australia. We found lots of disparate apps out there when we started, a lot of them behind subscriptions, but we wanted something that had everything in one place, was easy to use and looked consistent.
 
-Power comes and goes, the internet is patchy, and the person responsible for
-the boat is often asleep. So the alarms have to keep running with every
-browser closed, an old reading has to look old, and a notification that fails
-to send has to be tried again rather than dropped.
-
-That's why anchor watch and alarms run on the server, not in the browser.
-Every alarm rule has a dwell time and a clear point, so a reading hovering on
-the line doesn't chatter. A watchdog raises its own alarm when the instruments
-go quiet, and a heartbeat sent off the boat lets an outside monitor notice when
-the whole server goes down. Failed notifications are queued and retried for up
-to a day.
+Not sure it suits your boat? The [FAQ](docs/reference/faq.md) covers what it
+needs, what it costs, where it works and what works without an internet
+connection. If you're stuck, ask in
+[Discussions](https://github.com/gterrill/helmcentral/discussions).
 
 ## Install
 
@@ -53,11 +49,6 @@ for your boat, so the engine, battery and tank tiles stay empty until you do.
 
 Docker, manual binaries and upgrading:
 [docs/how-to/install.md](docs/how-to/install.md).
-
-Not sure it suits your boat? The [FAQ](docs/reference/faq.md) covers what it
-needs, what it costs, where it works and what works without an internet
-connection. If you're stuck, ask in
-[Discussions](https://github.com/gterrill/helmcentral/discussions).
 
 > [!WARNING]
 > **Login is off by default** (`auth.mode: none`). On a fresh install, anyone
