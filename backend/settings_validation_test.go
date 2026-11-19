@@ -277,6 +277,9 @@ func TestValidateSettingsChange_RejectsAuthSignalKWhenSignalKSecurityIsDisabled(
 	if invalid.Field != "auth.mode" {
 		t.Fatalf("error should pin to the field the operator changed, got %q", invalid.Field)
 	}
+	if !strings.Contains(invalid.Message, "has security disabled") {
+		t.Fatalf("a 404 must say SignalK's security is off, not that it is unreachable, got %q", invalid.Message)
+	}
 }
 
 // Turning auth off must always be allowed: it is the way out of a lockout, and
