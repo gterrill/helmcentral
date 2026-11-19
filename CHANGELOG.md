@@ -32,6 +32,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   only in capitals or spacing count as the same. A rule with no interval offers
   **Set interval**. **Complete** steps back to a quieter button unless a
   service is due or overdue.
+- **Inventory's sections now sit under Inventory in the sidebar.** Equipment,
+  Locations, Stocktake, Maintenance and Profiles are listed there while
+  Inventory is open, the same way your dashboard pages sit under Dashboard.
+  On a phone they're always listed in the sidebar, so you can open any of them
+  straight from another page.
+  The list that used to take up the left of every table is gone, so tables get
+  the full width, and on a phone there's no scrolling strip above the page.
+  Each section now has its own heading. Nothing to do on upgrade, and your
+  saved links still work.
 - **Outside assistants no longer see the facts Mate keeps.** The list under
   the standing notes in Settings → Mate now stays with Mate. Claude, ChatGPT
   and any other connected assistant used to read it in the boat context, and

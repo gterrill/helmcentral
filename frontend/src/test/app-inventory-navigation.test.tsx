@@ -13,11 +13,12 @@
  * test.tsx's own full-dashboard mock block) so the bug's actual symptom -
  * clicking Open and nothing appearing - can be reproduced and pinned.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from '../App'
+import { setViewportWidth } from './viewport'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
 
 // bin-quick-add.test.tsx's own comment on why: canvas/createImageBitmap
@@ -337,6 +338,173 @@ describe('App: Open/Full item guards against losing stocktake or quick-add work'
     fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
 
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Spare impeller'))
+  })
+})
+
+// The section list lives in the sidebar under Inventory (ADR 0123 amendment),
+// not beside the tables, and only while Inventory is the open panel.
+describe('App: Inventory sections in the sidebar', () => {
+  // Dashboard's page list is the other sub-menu; Inventory's follows its row.
+  function subMenu(): HTMLElement | null {
+    const menus = Array.from(document.querySelectorAll<HTMLElement>('[data-sidebar="menu-sub"]'))
+    return menus.find((menu) => menu.previousElementSibling?.textContent?.trim() === 'Inventory') ?? null
+  }
+  function subRows(): HTMLElement[] {
+    return Array.from(subMenu()?.querySelectorAll<HTMLElement>('[data-sidebar="menu-sub-button"]') ?? [])
+  }
+  function activeRows(): string[] {
+    return subRows().filter((row) => row.getAttribute('data-active') === 'true').map((row) => row.textContent?.trim() ?? '')
+  }
+
+  it('lists the five sections flat, in order, with the open one active', async () => {
+    window.history.replaceState({}, '', '/inventory/stocktake')
+    render(<App />)
+
+    await screen.findByLabelText('Scan')
+    expect(subRows().map((row) => row.textContent?.trim())).toEqual([
+      'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+    ])
+    expect(activeRows()).toEqual(['Stocktake'])
+  })
+
+  it('has no in-page section nav beside the tables', async () => {
+    window.history.replaceState({}, '', '/inventory/equipment')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Equipment' })
+    expect(screen.queryByRole('navigation', { name: 'Inventory sections' })).not.toBeInTheDocument()
+  })
+
+  it('is not shown while another panel is open', async () => {
+    window.history.replaceState({}, '', '/documents')
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Inventory' })
+    expect(screen.queryByRole('button', { name: 'Stocktake' })).not.toBeInTheDocument()
+    expect(subRows().map((row) => row.textContent?.trim())).not.toContain('Equipment')
+  })
+
+  it('keeps the parent section active on a record inside it', async () => {
+    window.history.replaceState({}, '', '/inventory/equipment/eq-1')
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Spare impeller'))
+    expect(activeRows()).toEqual(['Equipment'])
+  })
+
+  it('keeps Locations active on a bin page', async () => {
+    window.history.replaceState({}, '', '/inventory/bins/LAZ-02')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    expect(activeRows()).toEqual(['Locations'])
+  })
+
+  it('goes to a section when its row is clicked', async () => {
+    window.history.replaceState({}, '', '/inventory/equipment')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Equipment' })
+    fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Profiles')!)
+
+    await waitFor(() => expect(window.location.pathname).toBe('/inventory/profiles'))
+    await waitFor(() => expect(activeRows()).toEqual(['Profiles']))
+    expect(await screen.findByRole('heading', { name: 'Profiles' })).toBeInTheDocument()
+  })
+
+  // Locations returns to Table or Plan, whichever was last showing, for the
+  // sidebar row and the panel's Back alike: one memory, in the router.
+  it('Locations in the sidebar lands on Plan after a trip through a bin and the dashboard', async () => {
+    window.history.replaceState({}, '', '/inventory/locations?view=plan')
+    render(<App />)
+    await screen.findByRole('button', { name: 'Plan' })
+
+    window.history.pushState({}, '', '/inventory/bins/LAZ-02')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+
+    window.history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'LAZ-02' })).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inventory' }))
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Locations')!)
+
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/inventory/locations?view=plan'))
+    expect(await screen.findByRole('button', { name: 'Plan' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // On a phone the sidebar is a sheet and tapping Inventory closes it, so the
+  // sections are always listed: any section is one tap from any panel.
+  describe('on a phone', () => {
+    beforeEach(() => { setViewportWidth(390) })
+
+    it('lists the sections on another panel, none lit, and Maintenance is one tap away', async () => {
+      window.history.replaceState({}, '', '/forecast')
+      render(<App />)
+
+      fireEvent.click(await screen.findByRole('button', { name: /toggle sidebar/i }))
+      await screen.findByRole('button', { name: 'Inventory' })
+      expect(subRows().map((row) => row.textContent?.trim())).toEqual([
+        'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+      ])
+      expect(activeRows()).toEqual([])
+
+      fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Maintenance')!)
+      await waitFor(() => expect(window.location.pathname).toBe('/inventory/maintenance'))
+    })
+  })
+
+  describe('collapsed to icons', () => {
+    beforeEach(() => { window.localStorage.setItem('sidebar.open', 'false') })
+    afterEach(() => { window.localStorage.removeItem('sidebar.open') })
+
+    it('opens the sections as a menu from the Inventory icon, marks the open one and goes to the pick', async () => {
+      window.history.replaceState({}, '', '/inventory/stocktake')
+      render(<App />)
+      await screen.findByLabelText('Scan')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Inventory' }))
+      const items = await screen.findAllByRole('menuitemradio')
+      expect(items.map((item) => item.textContent?.trim())).toEqual([
+        'Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles',
+      ])
+      expect(items.filter((item) => item.getAttribute('aria-checked') === 'true').map((item) => item.textContent?.trim())).toEqual(['Stocktake'])
+
+      fireEvent.click(items.find((item) => item.textContent?.trim() === 'Profiles')!)
+      await waitFor(() => expect(window.location.pathname).toBe('/inventory/profiles'))
+    })
+
+    it('still resumes Inventory from the icon when another panel is open', async () => {
+      window.history.replaceState({}, '', '/documents')
+      render(<App />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Inventory' }))
+      await waitFor(() => expect(window.location.pathname).toMatch(/^\/inventory/))
+      expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
+    })
+  })
+
+  it('asks before leaving a stocktake pass, and Stay keeps the pass', async () => {
+    window.history.replaceState({}, '', '/inventory/stocktake')
+    render(<App />)
+
+    const scanField = await screen.findByLabelText('Scan')
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/bins/LAZ-02' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByRole('heading', { name: 'LAZ-02' })
+    fireEvent.change(scanField, { target: { value: 'https://boat.example/inventory/equipment/eq-1' } })
+    fireEvent.keyDown(scanField, { key: 'Enter' })
+    await screen.findByText('Confirmed')
+
+    fireEvent.click(subRows().find((row) => row.textContent?.trim() === 'Equipment')!)
+
+    await screen.findByText('Leave stocktake?')
+    expect(window.location.pathname).toBe('/inventory/stocktake')
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }))
+    expect(window.location.pathname).toBe('/inventory/stocktake')
+    expect(activeRows()).toEqual(['Stocktake'])
   })
 })
 

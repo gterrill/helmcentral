@@ -529,6 +529,31 @@ describe('ProfilesSection', () => {
     expect(screen.getByLabelText('Profile name')).toHaveValue('Uploaded Generator')
   })
 
+  it('disables the header New profile action while an upload is in flight, like the Upload button', async () => {
+    render(<ProfilesSection />)
+    await waitForFirstProfile()
+    expect(screen.getByRole('button', { name: 'New profile' })).toBeEnabled()
+
+    let releaseUpload: () => void = () => {}
+    const uploadGate = new Promise<void>((resolve) => { releaseUpload = resolve })
+    const baseImpl = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/equipment-profiles') && init?.method === 'POST') {
+        return uploadGate.then(() => ({ ok: true, status: 201, json: async () => ({ profile }) }))
+      }
+      return baseImpl(url, init)
+    })
+
+    const uploadFile = new File([JSON.stringify(profile)], 'p.json', { type: 'application/json' })
+    fireEvent.change(screen.getByLabelText('Upload equipment profile file'), { target: { files: [uploadFile] } })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Uploading...' })).toBeDisabled())
+    expect(screen.getByRole('button', { name: 'New profile' })).toBeDisabled()
+
+    releaseUpload()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New profile' })).toBeEnabled())
+  })
+
   // ADR 0123 moved this section from admin-only Settings into Inventory,
   // which any signed-in operator can open - without its own write gate, a
   // read-only session saw New/Upload/Edit/Delete controls that would 403.

@@ -1,6 +1,6 @@
 import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId } from '@/lib/app-location'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
-import type { InventorySectionId } from '@/components/inventory/inventory-nav'
+import type { InventorySectionId } from '@/lib/inventory-sections'
 import { normalizePath, slugifyHeading } from '@/lib/markdown-links'
 
 // slugifyHeading and normalizePath now live in markdown-links.ts (note-links.ts

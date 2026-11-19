@@ -13,7 +13,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { ProfileCatalogueDialog } from '@/components/inventory/profile-catalogue-dialog'
-import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Page } from '@/components/patterns'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
@@ -439,11 +440,16 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <FieldSet>
-        <FieldLegend variant="label">Equipment profiles</FieldLegend>
-
-        <div className="mt-3 space-y-4">
+    <Page
+      title="Profiles"
+      primaryAction={
+        canWrite
+          ? { label: 'New profile', icon: <Plus className="h-4 w-4" aria-hidden="true" />, onClick: handleNew, disabled: uploading || saving || deleting }
+          : undefined
+      }
+    >
+      <div className="max-w-3xl">
+        <div className="space-y-4">
           {loadError && (
             // A failed fetch and an empty profile list must not look
             // the same: one means "nothing installed," the other means the
@@ -463,10 +469,6 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
                   setSelectedID(id)
                 }}
               />
-              <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>
-                <Plus className="h-4 w-4" />
-                New profile
-              </Button>
               <Button type="button" variant="outline" className="gap-2" onClick={() => setCatalogueOpen(true)}>
                 <Library className="h-4 w-4" />
                 Add from catalogue
@@ -659,7 +661,7 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
             )}
           </Field>
         </div>
-      </FieldSet>
+      </div>
 
       <AlertDialog
         open={pendingDelete !== null}
@@ -685,6 +687,6 @@ export function ProfilesSection({ canWrite = true }: ProfilesSectionProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Page>
   )
 }

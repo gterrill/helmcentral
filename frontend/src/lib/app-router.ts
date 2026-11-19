@@ -158,6 +158,14 @@ export interface AppRouter {
   /** Moves to `target`. Returns false when a guard held it; the held move is
    * in the snapshot's `pending`. */
   navigate: (target: AppLocation, options?: NavigateOptions) => boolean
+  /** The Locations index as the operator last had it: Table or Plan, and the
+   * deck tab open in Plan. Neither is in the address of a bin, location or
+   * deck page, so the router keeps them for everyone who goes "back to
+   * Locations" (the panel's Back, the sidebar's Locations row). */
+  locationsIndex: () => { plan: boolean; deckId: string | null }
+  /** Drops a deleted deck from the Locations memory, so Plan is never opened
+   * on a deck that no longer exists. Other decks are left alone. */
+  forgetDeck: (deckId: string) => void
   /** The location a panel was last left at, or its start page. */
   resume: {
     <P extends NonNullable<ResumablePanel>>(panel: P): Extract<AppLocation, { panel: P }>
@@ -233,6 +241,16 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
   const memory = new Map<string, AppLocation>()
   const startKey = memoryKey(location)
   if (startKey !== null) memory.set(startKey, location)
+  let locationsIndex: { plan: boolean; deckId: string | null } = { plan: false, deckId: null }
+  function noteLocationsIndex(at: AppLocation) {
+    if (at.panel !== 'inventory') return
+    const route = at.route
+    if (route.view === 'plan') locationsIndex = { plan: true, deckId: route.deckId }
+    else if (route.view === 'index' && route.section === 'locations') {
+      locationsIndex = { plan: false, deckId: locationsIndex.deckId }
+    }
+  }
+  noteLocationsIndex(location)
 
   let context: RouterContext = { firstPageId: null, knownPageIds: null, canAdmin: true, shellVisible: false }
   // Whether the address has been reconciled with the location yet. The first
@@ -312,6 +330,7 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
     // An unsaved watch has no address to come back to, so it is not remembered.
     const isDraft = next.panel === 'watches' && next.route.view === 'new'
     if (key !== null && !isDraft) memory.set(key, next)
+    noteLocationsIndex(next)
     const pageId = next.panel === null ? next.pageId : snapshot.pageId
     snapshot = { ...snapshot, location: next, pageId, pending: null }
     writeAddress(replaceRequested)
@@ -411,6 +430,10 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
       writeAddress(false)
     },
     navigate,
+    locationsIndex: () => locationsIndex,
+    forgetDeck(deckId) {
+      if (locationsIndex.deckId === deckId) locationsIndex = { plan: locationsIndex.plan, deckId: null }
+    },
     resume: ((panel: ResumablePanel) => {
       const key = panel ?? 'dashboard'
       const remembered = memory.get(key)

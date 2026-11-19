@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RefreshFailedNote } from '@/components/patterns'
+import { Page, RefreshFailedNote } from '@/components/patterns'
 import { BookOpen, CheckCircle2, Download, Plus, Wrench } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -115,7 +115,14 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <Page
+      title="Maintenance"
+      primaryAction={
+        canWrite
+          ? { label: 'New rule', icon: <Plus className="h-4 w-4" aria-hidden="true" />, onClick: () => setCreatingRule(true) }
+          : undefined
+      }
+    >
       <div className="flex flex-wrap items-end gap-2">
         <Select value={system || ALL_VALUE} onValueChange={(value) => setSystem(value === ALL_VALUE ? '' : (value as EquipmentSystem))}>
           <SelectTrigger aria-label="Filter by system" className="h-9 w-auto min-w-32">
@@ -138,12 +145,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
             <Download className="h-4 w-4" aria-hidden="true" />
             Export CSV
           </a>
-          {canWrite && (
-            <Button type="button" size="sm" className="gap-2" onClick={() => setCreatingRule(true)}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              New rule
-            </Button>
-          )}
         </div>
       </div>
 
@@ -169,14 +170,14 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
       )}
 
       {error && rules.length > 0 && <RefreshFailedNote reason={error} onRetry={() => { void refresh() }} />}
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-card">
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
         {error && rules.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
             <p role="alert" className="text-sm text-destructive">{error}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => { void refresh() }}>Retry</Button>
           </div>
         ) : !loading && groups.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <Wrench className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="max-w-md text-sm text-muted-foreground">
               No maintenance rules yet. Add one by hand, or give an item an equipment profile and
@@ -382,6 +383,6 @@ export function MaintenanceSection({ onOpenEquipment, canWrite = true }: Mainten
           setSettingLastDoneRule(null)
         }}
       />
-    </div>
+    </Page>
   )
 }

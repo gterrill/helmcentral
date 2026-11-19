@@ -9,6 +9,7 @@ import { useAppLocation } from '@/hooks/use-app-location'
 import { useDocumentsRoute } from '@/hooks/use-documents-route'
 import { useInventoryRoute } from '@/hooks/use-inventory-route'
 import { useSettingsRoute } from '@/hooks/use-settings-route'
+import { inventorySectionRoute } from '@/lib/inventory-sections'
 import { testRouter } from './helpers/router'
 
 describe('useSettingsRoute', () => {
@@ -204,13 +205,41 @@ describe('useInventoryRoute', () => {
   })
 
   it('the nav goes to a section index, and Locations to wherever Locations last was', () => {
-    const { wrapper } = testRouter('/inventory/locations?view=plan')
+    const { wrapper, router } = testRouter('/inventory/locations?view=plan')
     const { result } = renderHook(() => useInventoryRoute(), { wrapper })
-    act(() => { result.current.goSection('profiles') })
+    act(() => { result.current.go(inventorySectionRoute(router, 'profiles')) })
     expect(result.current.route).toEqual({ view: 'index', section: 'profiles' })
-    act(() => { result.current.goSection('locations') })
+    act(() => { result.current.go(inventorySectionRoute(router, 'locations')) })
     expect(result.current.route).toEqual({ view: 'plan', deckId: null })
-    act(() => { result.current.goSection('equipment') })
+    act(() => { result.current.go(inventorySectionRoute(router, 'equipment')) })
     expect(result.current.route).toEqual({ view: 'index', section: 'equipment' })
+  })
+
+  // The sidebar and the panel are two readers of one memory: a hook instance
+  // that mounts after Plan was last shown must still land on Plan.
+  it('a second instance mounted later agrees on where Locations last was', () => {
+    const { wrapper, router } = testRouter('/inventory/locations?view=plan&deck=d1')
+    const first = renderHook(() => useInventoryRoute(), { wrapper })
+    act(() => { first.result.current.go({ view: 'bin', code: 'LAZ-02' }) })
+    first.unmount()
+
+    const second = renderHook(() => useInventoryRoute(), { wrapper })
+    expect(second.result.current.locationsHome()).toEqual({ view: 'plan', deckId: 'd1' })
+    expect(inventorySectionRoute(router, 'locations')).toEqual({ view: 'plan', deckId: 'd1' })
+    act(() => { second.result.current.close() })
+    expect(second.result.current.route).toEqual({ view: 'plan', deckId: 'd1' })
+  })
+
+  it('the sidebar target for Locations is Plan after a trip away and back, and Table once Table was chosen', () => {
+    const { wrapper, router } = testRouter('/inventory/locations?view=plan')
+    const { result } = renderHook(() => useInventoryRoute(), { wrapper })
+    act(() => { result.current.go({ view: 'bin', code: 'LAZ-02' }) })
+    act(() => { router.navigate({ panel: null, pageId: 'p1' }) })
+    expect(inventorySectionRoute(router, 'locations')).toEqual({ view: 'plan', deckId: null })
+    expect(inventorySectionRoute(router, 'profiles')).toEqual({ view: 'index', section: 'profiles' })
+
+    act(() => { router.navigate(router.resume('inventory')) })
+    act(() => { router.navigate({ panel: 'inventory', route: { view: 'index', section: 'locations' } }) })
+    expect(inventorySectionRoute(router, 'locations')).toEqual({ view: 'index', section: 'locations' })
   })
 })

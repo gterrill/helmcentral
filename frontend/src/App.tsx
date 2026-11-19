@@ -37,7 +37,8 @@ import type { TideCapture } from '@/lib/tide-datum'
 // file's doc comment) — importing the function itself here costs nothing.
 import { prefetchNoteEditor } from '@/components/note-editor'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
-import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
+import { InventorySidebarRow } from '@/components/inventory/inventory-sidebar-row'
+import { INVENTORY_SECTIONS, inventorySectionRoute, type InventorySectionId } from '@/lib/inventory-sections'
 
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
@@ -216,7 +217,8 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
 ]
 
 // The header breadcrumb's second crumb, for the two panels that have their
-// own in-page SectionNav (Settings, Inventory) - every other panel is a
+// own sections (Settings has an in-page SectionNav, Inventory a sidebar
+// sub-menu) - every other panel is a
 // single crumb (see the breadcrumb JSX below). Panels are not children of
 // Dashboard, so the root crumb is always the panel's own name, never
 // "Dashboard"; this only ever supplies the section beneath it.
@@ -371,6 +373,14 @@ function AppShell() {
   const router = useAppRouter()
   const appLocation = useAppLocation()
   const navigate = useNavigate()
+  // The sidebar's Inventory sections go through the router, so an unsaved
+  // editor or stocktake pass still gets to veto the move. A plain function: it
+  // reads the router and does not subscribe the shell to the inventory route.
+  const goInventorySection = useCallback((section: InventorySectionId) => {
+    navigate({ panel: 'inventory', route: inventorySectionRoute(router, section) })
+  }, [navigate, router])
+  const openInventory = useCallback(() => navigate.toPanel('inventory'), [navigate])
+  const activeInventorySection = appLocation.panel === 'inventory' ? inventorySectionOf(appLocation.route) : null
   // The Forecast page follows a plan link once, then drops its ?plan from the
   // address (replacing the entry, not adding one), so a reload or back does not
   // jump to the plan again.
@@ -1867,7 +1877,21 @@ function AppShell() {
                 ))}
               </SidebarMenuSub>
             )}
-            {visiblePanelNavItems.map(({ id, label, icon: Icon }) => (
+            {visiblePanelNavItems.map(({ id, label, icon: Icon }) => id === 'inventory' ? (
+              // The Inventory sections, flat, only while Inventory is the open
+              // panel, or always on a phone (ADR 0123); a record inside a section still lights its
+              // section. Through the router, so an unsaved editor can veto
+              // the move.
+              <InventorySidebarRow
+                key={id}
+                label={label}
+                icon={Icon}
+                isActive={activePanel === id}
+                activeSection={activeInventorySection}
+                onOpen={openInventory}
+                onSelectSection={goInventorySection}
+              />
+            ) : (
               <SidebarMenuItem key={id}>
                 <SidebarMenuButton
                   isActive={activePanel === id}

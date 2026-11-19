@@ -354,6 +354,14 @@ describe('App sidebar navigation', () => {
     expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
   })
 
+  it('shows no Inventory sections until Inventory is open', () => {
+    render(<App />)
+
+    for (const label of ['Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles']) {
+      expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument()
+    }
+  })
+
   it('shows how many files wait in the Inbox on its sidebar row', async () => {
     render(<App />)
     const button = screen.getByRole('button', { name: /^Inbox/ })

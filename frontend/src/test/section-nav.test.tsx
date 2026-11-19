@@ -3,11 +3,11 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { SectionNav } from '@/components/section-nav'
 
 // The shared in-page section nav: a pure controlled list (no state, no
-// scroll-spy, no fetches) rendered once for Settings and once for
-// Inventory. Covers the group-heading rendering settings-nav.test.tsx and
-// inventory-nav.test.tsx don't need to, plus the single unlabelled
-// group case, plus the same active/onSelect contract those two already cover
-// via their thin wrappers.
+// scroll-spy, no fetches) that Settings is now the only user of (Inventory's
+// sections moved to the sidebar). Covers the group-heading rendering
+// settings-nav.test.tsx doesn't need to, plus the single unlabelled group
+// case, plus the same active/onSelect contract that test already covers via
+// its thin wrapper.
 describe('SectionNav', () => {
   const groups = [
     { label: 'Boat & app', items: [{ id: 'general', label: 'General' }, { id: 'plugins', label: 'Plugins' }] },
@@ -57,7 +57,7 @@ describe('SectionNav', () => {
         groups={[{ items: [{ id: 'equipment', label: 'Equipment' }, { id: 'profiles', label: 'Profiles' }] }]}
         activeId="equipment"
         onSelect={vi.fn()}
-        aria-label="Inventory sections"
+        aria-label="Sections"
       />,
     )
 

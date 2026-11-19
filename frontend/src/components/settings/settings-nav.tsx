@@ -1,7 +1,7 @@
 import { SectionNav, type SectionNavGroup } from '@/components/section-nav'
 
 // ADR 0123: 'equipment' (equipment profiles) moved out of this list into
-// the Inventory panel's own InventoryNav (inventory-nav.tsx) - profiles are
+// the Inventory panel's sections (lib/inventory-sections.ts) - profiles are
 // reference data about gear, not a setting, and now live beside the
 // equipment records that use them rather than here.
 export type SettingsSectionId =
