@@ -56,7 +56,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           getLayer: (id: string) => (id === 'terrain-hillshade' || id === 'world-imagery-layer' ? {} : undefined),
           getCanvasContainer: () => surface,
           cameraForBounds: () => ({ center: { lng: 148.05, lat: -20.05 }, zoom: 9 }),
-          getContainer: () => ({ clientWidth: 800, clientHeight: 400 }),
+          getContainer: () => ({ clientWidth: 800, clientHeight: 400, addEventListener: () => {}, querySelector: () => null }),
         }),
         getCanvas: () => ({}),
       }))

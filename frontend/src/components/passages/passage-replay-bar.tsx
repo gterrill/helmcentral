@@ -1,5 +1,5 @@
 import { Map as MapIcon, Minus, Pause, Play, Plus, RefreshCw, Signpost, SlidersHorizontal, Video } from 'lucide-react'
-import { useMemo, type ReactNode } from 'react'
+import { useId, useMemo, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupButton } from '@/components/ui/input-group'
@@ -76,6 +76,7 @@ export function PassageReplayBar({
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
 }: PassageReplayBarProps) {
   // The Select's items, built once for the lengths on offer and not on every frame of the replay.
+  const lengthLabelId = useId()
   const items = useMemo(() => lengths.map((l) => ({ value: l.id, label: l.label })), [lengths])
   return (
     <div className="border-t border-border bg-card" data-testid="passage-replay-bar">
@@ -143,20 +144,23 @@ export function PassageReplayBar({
       <span className="min-w-0 max-w-full truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
     </div>
     <div className="flex flex-wrap items-center gap-2" data-testid="replay-options">
-      <Select
-        items={items}
-        value={speed}
-        onValueChange={(value) => value && onSpeed(value as ReplaySpeedId)}
-      >
-        <SelectTrigger aria-label="Replay length" className="w-24">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          {lengths.map((s) => (
-            <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
+      <div className="flex items-center gap-2">
+        <span id={lengthLabelId} className="text-xs font-medium text-muted-foreground">Replay length</span>
+        <Select
+          items={items}
+          value={speed}
+          onValueChange={(value) => value && onSpeed(value as ReplaySpeedId)}
+        >
+          <SelectTrigger aria-labelledby={lengthLabelId} className="w-24">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {lengths.map((s) => (
+              <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
       {onCameraToggle && (
         <Button
           type="button"

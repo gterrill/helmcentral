@@ -19,6 +19,8 @@ const m = vi.hoisted(() => ({
   surface: null as unknown as HTMLElement,
   setSky: vi.fn(),
   current: { center: { lng: 0, lat: 0 }, zoom: 3, pitch: 0, bearing: 0 },
+  fitPadding: null as { top: number; bottom: number; left: number; right: number } | null,
+  credit: null as null | { classList: { contains: (c: string) => boolean; remove: (c: string) => void }; removeAttribute: (n: string) => void },
 }))
 
 vi.mock('react-map-gl/maplibre', async () => {
@@ -38,8 +40,8 @@ vi.mock('react-map-gl/maplibre', async () => {
     getCenter: () => m.current.center,
     getCanvasContainer: () => m.surface,
     setSky: m.setSky,
-    cameraForBounds: () => ({ center: { lng: 148.05, lat: -20.05 }, zoom: 9 }),
-    getContainer: () => ({ clientWidth: 800, clientHeight: 400 }),
+    cameraForBounds: (_b: unknown, o: { padding: NonNullable<typeof m.fitPadding> }) => { m.fitPadding = o.padding; return { center: { lng: 148.05, lat: -20.05 }, zoom: 9 } },
+    getContainer: () => ({ clientWidth: 800, clientHeight: 400, addEventListener: () => {}, querySelector: () => m.credit }),
     getLayer: () => undefined,
   }
   return {
@@ -85,6 +87,34 @@ beforeEach(() => {
   m.jumpTo.mockClear()
   m.handlers = {}
   m.projected = { x: 400, y: 200 }
+})
+
+describe('PassageMap framing the track on load', () => {
+  it('fits the track with a small margin, and leaves the overview map\'s room only while that map is on', () => {
+    const view = render(<PassageMap passages={passages} playedIds={new Set()} boat={boat} isDarkTheme={false} insetCorner="top-right" />)
+    act(() => { (m.props.onLoad as () => void)() })
+    const plain = m.fitPadding!
+    expect(plain.top).toBeLessThanOrEqual(32)
+    expect(plain.left).toBeLessThanOrEqual(32)
+    view.rerender(<PassageMap passages={passages} playedIds={new Set()} boat={boat} isDarkTheme={false} insetCorner="top-right" reserveInset />)
+    // The fit is asked for again with the overview map's room kept clear on its side (an 800 px wide map: the width).
+    expect(m.fitPadding!.right - plain.right).toBeGreaterThanOrEqual(176)
+  })
+
+  it('starts on the track\'s bounds, so a slow load does not leave the map on the whole world', () => {
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={boat} isDarkTheme={false} />)
+    const view = m.props.initialViewState as { bounds?: number[] }
+    expect(view.bounds).toEqual([148, -20.1, 148.1, -20])
+  })
+
+  it('folds the map credit down to its icon at load, rather than leaving the long strip until the map goes idle', () => {
+    const classes = new Set(['maplibregl-ctrl-attrib', 'maplibregl-compact', 'maplibregl-compact-show'])
+    m.credit = { classList: { contains: (c) => classes.has(c), remove: (c) => { classes.delete(c) } }, removeAttribute: () => {} }
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={boat} isDarkTheme={false} />)
+    act(() => { (m.props.onLoad as () => void)() })
+    m.credit = null
+    expect(classes.has('maplibregl-compact-show')).toBe(false)
+  })
 })
 
 describe('PassageMap and the zoom it reports', () => {

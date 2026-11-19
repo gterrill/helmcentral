@@ -38,7 +38,7 @@ vi.mock('react-map-gl/maplibre', async () => {
     on: mapOn,
     off: vi.fn(),
     cameraForBounds: () => ({ center: { lng: 148.05, lat: -20.05 }, zoom: 9 }),
-    getContainer: () => ({ clientWidth: 800, clientHeight: 400 }),
+    getContainer: () => ({ clientWidth: 800, clientHeight: 400, addEventListener: () => {}, querySelector: () => null }),
     getLayer: (id: string) => (present.has(id) ? {} : undefined),
     addLayer: (l: { id: string }) => { addLayer(l); present.add(l.id) },
     removeLayer: (id: string) => { present.delete(id); removeLayer(id) },

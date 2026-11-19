@@ -35,7 +35,7 @@ const photoSign = (extra: Partial<ReplaySign> = {}): ReplaySign => ({
   id: 's1', t_ms: 0, title: 'Reef', note: '', document_id: null, photo_url: '/api/x.jpg', visibility: 'always', show_s: 4, starts_leg: false, photo_moment: null, ...extra,
 })
 const resolvedOf = (sign: ReplaySign): ResolvedSign => ({ sign, clock: 0, at: 0, entryId: 'p1', lat: 0, lon: 0 })
-const mount = (sign = photoSign()) => render(<SignMarkers cards={[resolvedOf(sign)]} pins={[]} openId={null} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />)
+const mount = (sign = photoSign()) => render(<SignMarkers cards={[resolvedOf(sign)]} pins={[]} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} />)
 /** The card measured by the browser: 256 wide, as high as lib/replay-signs says for the lines of the note it shows. */
 const observeCard = (sign = photoSign(), lines?: number) => {
   const n = lines ?? signNoteLines(sign, box.clientWidth, (t) => t.length * 6).length
@@ -73,7 +73,7 @@ describe('SignMarkers placement', () => {
     const { rerender } = mount(sign)
     observeCard(sign)
     const before = placed()
-    const markers = (momentId: string | null) => <SignMarkers cards={[resolvedOf(sign)]} pins={[]} openId={null} momentId={momentId} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />
+    const markers = (momentId: string | null) => <SignMarkers cards={[resolvedOf(sign)]} pins={[]} momentId={momentId} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} />
     rerender(markers('s1'))
     expect(wrapper().style.visibility).toBe('hidden')
     expect(leader()).toBeNull()
@@ -85,7 +85,7 @@ describe('SignMarkers placement', () => {
   })
 
   it('shows the other cards during a photo moment', () => {
-    render(<SignMarkers cards={[resolvedOf(photoSign()), resolvedOf(photoSign({ id: 's2', title: 'Bommie' }))]} pins={[]} openId={null} momentId="s1" canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />)
+    render(<SignMarkers cards={[resolvedOf(photoSign()), resolvedOf(photoSign({ id: 's2', title: 'Bommie' }))]} pins={[]} momentId="s1" canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} />)
     const shown = (title: string) => (screen.getAllByTestId('sign-card').find((c) => c.textContent?.includes(title))!.parentElement as HTMLElement).style.visibility
     expect(shown('Reef')).toBe('hidden')
     expect(shown('Bommie')).toBe('')

@@ -178,14 +178,14 @@ a passage without replaying, the whole track shows as before.
   with 3D on and the terrain available. The dimming and the tint work in 2D as
   well.
 
-The map opens with the whole track framed. Pressing **Play** from the start
+The map opens with the whole track framed, with only a small margin round it. When the overview map is on, the track is framed clear of the corner it sits in. Pressing **Play** from the start
 starts on the globe, high above, and brings the map down onto the track,
 flattening out as it comes in, then runs the replay with a boat marker. If you
 touch the map while it comes down, the move stops where you are and the replay
 carries on from the start. The slider scrubs to any point, and Play from the middle just
-carries on with no zoom. The readout shows the local date and time at that
-point. Play, the slider and the readout have a row to themselves, so the slider
-keeps its width while the Camera or Signs editor is open. The length list,
+carries on with no zoom. The readout shows the date and time at that
+point in the boat's own time zone. It adds the zone label, such as UTC+10, only when the passage was sailed in a different zone from the boat's. Play, the slider and the readout have a row to themselves, so the slider
+keeps its width while the Camera or Signs editor is open. The length list, which has the label **Replay length**,
 **Camera**, **Signs** and the **Overview map** switch sit on a row underneath.
 The length list sets how long the replay takes to sail, 60, 30, 15 or 8
 seconds, however long the passage was. A cruise, or passages you select
@@ -193,7 +193,7 @@ together, also offer 2 and 3 minutes, as described under Cruises below. A sign's
 Signs, adds a couple of seconds of watching on top of that, and the slider still
 runs over the sailing alone. The **Overview map** switch puts a small
 map of the surrounding coast in the corner, with a box where the track is. It
-stays on or off the next time you open a passage.
+starts off, and then stays on or off the next time you open a passage.
 
 With the overview map on, the slider icon beside its switch lets you put it in
 any corner of the map (top left, top right, bottom left or bottom right). You
@@ -288,11 +288,16 @@ by. Only two cards show at once. When a third is due, the one that has been up
 longest steps aside. A sign set to **Always** doesn't step aside, so two of them
 leave no room for others.
 
-Before you press Play, each sign is a small mark on its place on the track, and
-a tap opens its card. While the replay is paused, a tap on a card opens its
-photo full size, and Escape closes it. Signs show as diamonds on the slider, apart
-from the marks for camera shots. Picking one jumps to it and opens it for
-editing.
+Before you press Play, each sign is a small mark on its place on the track.
+Signs also show as diamonds on the slider, apart from the marks for camera
+shots. Tapping a mark on the track or a diamond on the slider moves the replay
+to that sign and, if the sign has a photo, shows a small thumbnail of it beside
+the boat, off to one side so the route stays clear. It doesn't open the sign
+editor or put a card over the map. Tap the thumbnail to see the photo full
+size, and Escape closes it. Pressing Play or moving the slider takes the
+thumbnail away. To edit a sign, press **Signs** first, then pick the sign
+there or tap its diamond. A long title on a card runs to two lines before it's
+cut off.
 
 A photo is either uploaded, into a Documents folder called **Passage photos**
 that is made the first time, or chosen from a photo already in Documents. To

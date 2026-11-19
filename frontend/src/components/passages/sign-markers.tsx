@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Marker, useMap } from 'react-map-gl/maplibre'
 
-import { SignCard, SignPin } from '@/components/passages/sign-card'
-import { SIGN_EDGE_MARGIN_PX, SIGN_LIFT_PX, placeSignCard, type CardMode, type CardPlacement, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { SignCard, SignPin, SignThumb } from '@/components/passages/sign-card'
+import { SIGN_EDGE_MARGIN_PX, SIGN_LIFT_PX, SIGN_TOP_MARGIN_PX, placeSignCard, type CardMode, type CardPlacement, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import { cardModes } from '@/lib/sign-modes'
 import { signMeasure, signNoteLines } from '@/lib/sign-note'
 
@@ -28,17 +28,15 @@ const sameLayout = (a: Layout, b: Layout) => a.x === b.x && a.y === b.y && a.sca
  * whole inside the map as the camera moves, with the leader and dot staying on
  * the point. Sizes are cached (card by observer, map on resize), so a camera
  * move costs one projection and the placement arithmetic. */
-function SignCardMarker({ c, lift, z, opened, growing, canOpenPhoto, still, onOpenPhoto, onClose }: {
+function SignCardMarker({ c, lift, z, growing, canOpenPhoto, still, onOpenPhoto }: {
   c: ResolvedSign
   lift: number
   z: number
-  opened: boolean
   /** A photo moment is growing this card over the map: it is hidden here, but stays placed so the moment grows from its place. */
   growing: boolean
   canOpenPhoto: boolean
   still: boolean
   onOpenPhoto: (sign: ReplaySign) => void
-  onClose: () => void
 }) {
   const { current: mapRef } = useMap()
   const map = mapRef?.getMap()
@@ -97,7 +95,7 @@ function SignCardMarker({ c, lift, z, opened, growing, canOpenPhoto, still, onOp
           className="absolute left-0 top-0"
           style={{ transform: `translate(${layout.x}px, ${layout.y}px) scale(${layout.scale})`, transformOrigin: '0 0', visibility: layout.hidden || growing ? 'hidden' : undefined }}
         >
-          <SignCard sign={c.sign} canOpenPhoto={canOpenPhoto} still={still} onOpenPhoto={onOpenPhoto} onClose={opened ? onClose : undefined} noteLines={noteLines} maxWidthPx={mapW > 0 ? Math.max(0, mapW - 2 * SIGN_EDGE_MARGIN_PX) : undefined} />
+          <SignCard sign={c.sign} canOpenPhoto={canOpenPhoto} still={still} onOpenPhoto={onOpenPhoto} noteLines={noteLines} maxWidthPx={mapW > 0 ? Math.max(0, mapW - 2 * SIGN_EDGE_MARGIN_PX) : undefined} />
         </div>
         {layout.leader && !layout.hidden && !growing && (
           <span
@@ -113,47 +111,77 @@ function SignCardMarker({ c, lift, z, opened, growing, canOpenPhoto, still, onOp
   )
 }
 
+/** Room the thumbnail needs beside its point: its width and height and the gap kept. */
+const THUMB_W_PX = 72
+const THUMB_H_PX = 64
+const THUMB_GAP_PX = 12
+
+/** The thumbnail of the picked sign, up and to the right of its point; it goes left or below instead when the map's edge is too near. */
+function SignThumbMarker({ c, onOpenPhoto }: { c: ResolvedSign; onOpenPhoto: (sign: ReplaySign) => void }) {
+  const { current: mapRef } = useMap()
+  const map = mapRef?.getMap()
+  const [side, setSide] = useState({ left: false, below: false })
+  useEffect(() => {
+    if (!map) return
+    const update = () => {
+      const p = map.project([c.lon, c.lat])
+      const box = map.getContainer()
+      const next = { left: p.x + THUMB_GAP_PX + THUMB_W_PX > box.clientWidth, below: p.y - THUMB_GAP_PX - THUMB_H_PX < SIGN_TOP_MARGIN_PX }
+      setSide((prev) => (prev.left === next.left && prev.below === next.below ? prev : next))
+    }
+    update()
+    map.on('move', update)
+    map.on('resize', update)
+    return () => { map.off('move', update); map.off('resize', update) }
+  }, [map, c.lon, c.lat])
+  const anchor = `${side.below ? 'top' : 'bottom'}-${side.left ? 'right' : 'left'}` as const
+  return (
+    <Marker longitude={c.lon} latitude={c.lat} anchor={anchor} offset={[side.left ? -THUMB_GAP_PX : THUMB_GAP_PX, side.below ? THUMB_GAP_PX : -THUMB_GAP_PX]} style={{ zIndex: 20 }}>
+      <SignThumb sign={c.sign} onOpenPhoto={onOpenPhoto} />
+    </Marker>
+  )
+}
+
 export interface SignMarkersProps {
   /** The cards on screen, in order. */
   cards: ResolvedSign[]
   /** Signs shown as small pins. */
   pins: ResolvedSign[]
-  /** A pin the operator opened into its card. */
-  openId: string | null
+  /** The sign the operator picked on the scrubber or the map: its photo shows as a small thumbnail beside the boat. */
+  preview?: ResolvedSign | null
   /** The sign whose photo moment is under way, if any. */
   momentId?: string | null
   canOpenPhoto: boolean
   still: boolean
   onOpenPhoto: (sign: ReplaySign) => void
   onPinClick: (id: string) => void
-  onCloseOpen: () => void
 }
 
 /** The signs as map markers: a card on a leader line from its point on the
  * track, or a pin. They are map markers, so they stay on their point through
  * pitch and terrain. */
-export function SignMarkers({ cards, pins, openId, momentId = null, canOpenPhoto, still, onOpenPhoto, onPinClick, onCloseOpen }: SignMarkersProps) {
+export function SignMarkers({ cards, pins, preview = null, momentId = null, canOpenPhoto, still, onOpenPhoto, onPinClick }: SignMarkersProps) {
   const shown = new Set(cards.map((c) => c.sign.id))
-  const opened = openId && !shown.has(openId) ? pins.find((p) => p.sign.id === openId) : undefined
+  // The picked sign is shown by its thumbnail, not by a card or a pin over the boat.
+  const previewId = preview?.sign.id ?? null
   return (
     <>
-      {pins.filter((p) => !shown.has(p.sign.id) && p.sign.id !== opened?.sign.id).map((p) => (
+      {preview && <SignThumbMarker c={preview} onOpenPhoto={onOpenPhoto} />}
+      {pins.filter((p) => !shown.has(p.sign.id) && p.sign.id !== previewId).map((p) => (
         <Marker key={`pin-${p.sign.id}`} longitude={p.lon} latitude={p.lat} anchor="center" style={{ zIndex: 5 }}>
           <SignPin sign={p.sign} onClick={() => onPinClick(p.sign.id)} />
         </Marker>
       ))}
-      {[...cards, ...(opened ? [opened] : [])].map((c, i) => (
+      {cards.map((c, i) => (
         <SignCardMarker
           key={`card-${c.sign.id}`}
           c={c}
           lift={SIGN_LIFT_PX[Math.min(i, SIGN_LIFT_PX.length - 1)]}
           z={10 + i}
-          opened={c === opened}
           growing={c.sign.id === momentId}
           canOpenPhoto={canOpenPhoto}
           still={still}
           onOpenPhoto={onOpenPhoto}
-          onClose={onCloseOpen}
         />
       ))}
     </>

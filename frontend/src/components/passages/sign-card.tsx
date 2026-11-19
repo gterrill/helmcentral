@@ -1,4 +1,4 @@
-import { ImageOff, X } from 'lucide-react'
+import { ImageOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -28,8 +28,6 @@ export interface SignCardProps {
   /** No entrance animation (reduced motion). */
   still: boolean
   onOpenPhoto: (sign: ReplaySign) => void
-  /** Present on a card opened from a pin: closes it again. */
-  onClose?: () => void
   /** The note, wrapped into the lines the card shows (lib/sign-note), which is what makes the card the height lib/replay-signs says. */
   noteLines: string[]
   /** The most the card may be wide, in pixels: the map's width less its margins. */
@@ -37,11 +35,11 @@ export interface SignCardProps {
   className?: string
 }
 
-/** The title (one line) and the note (the lines it was wrapped into), which the card and the photo moment both show. */
-export function SignCardCaption({ sign, noteLines }: { sign: Pick<ReplaySign, 'title'>; noteLines: readonly string[] }) {
+/** The title and the note (the lines it was wrapped into), which the card and the photo moment both show. The title is one line, cut with an ellipsis; the card on the map lets it run to two. */
+export function SignCardCaption({ sign, noteLines, wrapTitle = false }: { sign: Pick<ReplaySign, 'title'>; noteLines: readonly string[]; wrapTitle?: boolean }) {
   return (
     <span className="flex min-w-0 flex-col text-left">
-      <span style={{ lineHeight: `${SIGN_TITLE_LINE_PX}px` }} className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
+      <span style={{ lineHeight: `${SIGN_TITLE_LINE_PX}px` }} className={cn(wrapTitle ? 'line-clamp-2 break-words' : 'truncate', 'text-sm font-semibold text-foreground')}>{sign.title}</span>
       {noteLines.map((line, i) => (
         <span key={i} style={{ lineHeight: `${SIGN_NOTE_LINE_PX}px` }} className="truncate whitespace-pre text-xs text-muted-foreground">{line}</span>
       ))}
@@ -50,7 +48,7 @@ export function SignCardCaption({ sign, noteLines }: { sign: Pick<ReplaySign, 't
 }
 
 /** A sign on the chart: the photo above the title and note. */
-export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, noteLines, maxWidthPx, className }: SignCardProps) {
+export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, noteLines, maxWidthPx, className }: SignCardProps) {
   const src = signPhotoSrc(sign)
   // The photo is there on the server but would not load: say so, do not hide it.
   const [failed, setFailed] = useState(false)
@@ -74,7 +72,7 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, note
           Photo not available
         </span>
       )}
-      <SignCardCaption sign={sign} noteLines={noteLines} />
+      <SignCardCaption sign={sign} noteLines={noteLines} wrapTitle />
     </>
   )
   // The photo leads, full width; a note-only sign stays a compact text card.
@@ -95,17 +93,35 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, note
       ) : (
         <div style={surfaceStyle} className={surface} role="group" aria-label={`Sign: ${sign.title}`}>{body}</div>
       )}
-      {onClose && (
-        <button
-          type="button"
-          aria-label={`Close sign: ${sign.title}`}
-          className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={onClose}
-        >
-          <X className="h-3 w-3" aria-hidden="true" />
-        </button>
-      )}
     </div>
+  )
+}
+
+/** A small thumbnail of a sign's photo, beside the boat where the replay stands at the sign: it is
+ * set off to the upper right of the point so it leaves the route clear, and opens the photo full size. */
+export function SignThumb({ sign, onOpenPhoto }: { sign: ReplaySign; onOpenPhoto: (sign: ReplaySign) => void }) {
+  const src = signPhotoSrc(sign)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [src])
+  if (!src) return null
+  if (failed) {
+    return (
+      <span data-testid="sign-thumb" style={{ aspectRatio: PHOTO_ASPECT }} className="flex w-16 items-center justify-center rounded-sm border-2 border-card bg-muted text-muted-foreground shadow-md" title="Photo not available">
+        <ImageOff className="h-5 w-5" aria-hidden="true" />
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      aria-label={`Open photo: ${sign.title}`}
+      title={sign.title}
+      data-testid="sign-thumb"
+      className="block w-16 cursor-zoom-in overflow-hidden rounded-sm border-2 border-card bg-muted shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => onOpenPhoto(sign)}
+    >
+      <img src={src} alt="" style={{ aspectRatio: PHOTO_ASPECT }} className="w-full object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
+    </button>
   )
 }
 

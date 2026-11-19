@@ -12,6 +12,11 @@ import { stubApi, type StubRequest } from './helpers/stub-api'
 import { waitFor } from '@testing-library/react'
 
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
+const boat = vi.hoisted(() => ({ timeZone: null as string | null }))
+vi.mock('@/hooks/use-vessel-state', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-vessel-state')>()),
+  useVesselStateSelector: (select: (state: { timeZone: string | null }) => unknown) => select({ timeZone: boat.timeZone }),
+}))
 
 const getFraming = vi.fn(() => ({ overview: { center: [149.5, 0] as [number, number], zoom: 9, pitch: 0, bearing: 0 }, bearing: 0 }))
 vi.mock('@/lib/replay-intro', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/replay-intro')>()), INTRO_MS: 50 }))
@@ -20,7 +25,6 @@ const jumpTo = vi.fn()
 const setProjection = vi.fn()
 let interrupt: (() => void) | undefined
 let introActive = false
-let momentActive = false
 let lastLight: { key: string } | null = null
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
@@ -29,7 +33,6 @@ vi.mock('@/components/passages/passage-map', () => ({
     useImperativeHandle(ref, () => ({ getFraming, jumpTo, setProjection, project: () => ({ point: { x: 500, y: 300 }, container: { w: 1000, h: 400 } }) }))
     interrupt = p.onInterrupt
     introActive = !!p.introActive
-    momentActive = !!p.momentActive
     lastBoat = p.boat
     return <div data-testid="map" data-inset-corner={p.insetCorner}>{p.inset}</div>
   }),
@@ -67,9 +70,30 @@ const insetRoutes = () => ({
   },
 })
 
-beforeEach(() => { saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; getFraming.mockClear(); jumpTo.mockClear(); setProjection.mockClear() })
+beforeEach(() => { boat.timeZone = null; saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; getFraming.mockClear(); jumpTo.mockClear(); setProjection.mockClear() })
 
 describe('ReplayPanel', () => {
+  it('leaves the offset off the time when the passage is in the boat\'s own zone', () => {
+    boat.timeZone = 'Australia/Brisbane'
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    expect(screen.getByTestId('replay-readout')).toHaveTextContent(/^14 Mar 9\.00 AM$/)
+  })
+
+  it('shows the offset when the passage was sailed in another zone than the boat\'s', () => {
+    boat.timeZone = 'Pacific/Auckland'
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 9.00 AM UTC+10')
+  })
+
+  it('shows no overview map on a fresh page, and the switch turns it on', async () => {
+    localStorage.clear()
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    expect(screen.queryByTestId('inset')).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Overview map' })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('switch', { name: 'Overview map' }))
+    expect(await screen.findByTestId('inset')).toBeInTheDocument()
+  })
+
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
     const cursorRef = { current: null as ReplayCursor | null }
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} cursorRef={cursorRef} />)
@@ -274,17 +298,14 @@ describe('ReplayPanel', () => {
     // Jumping to a sign, from its mark on the slider: the one way to land on its moment.
     const jumpToSign = async () => fireEvent.click(await screen.findByRole('button', { name: /^Sign Whale at/ }))
 
-    it('shows the photo over the map where the replay is held on a sign, and not elsewhere', async () => {
+    it('jumping to a sign from its mark does not grow its photo over the route', async () => {
       withSign()
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
       await screen.findByRole('button', { name: /^Sign Whale at/ })
       scrub(200)
       expect(screen.queryByTestId('photo-moment')).toBeNull()
       await jumpToSign()
-      expect(await screen.findByTestId('photo-moment')).toHaveAttribute('data-phase', 'grow')
-      // Paused on the moment, a touch of the map is not what ends it.
-      expect(momentActive).toBe(false)
-      scrub(501)
+      expect(screen.getByLabelText('Replay position')).toHaveValue('500')
       expect(screen.queryByTestId('photo-moment')).toBeNull()
     })
 
@@ -298,16 +319,6 @@ describe('ReplayPanel', () => {
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
       await jumpToSign()
       expect(screen.queryByTestId('photo-moment')).toBeNull()
-    })
-
-    it('ends when a hand takes the map, and the replay stays where it is, past the sign', async () => {
-      withSign()
-      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-      await jumpToSign()
-      await screen.findByTestId('photo-moment')
-      act(() => { interrupt?.() })
-      expect(screen.queryByTestId('photo-moment')).toBeNull()
-      expect(screen.getByLabelText('Replay position')).toHaveValue('500')
     })
 
     it('does not fly in again when the replay is started again inside a moment at the very start', async () => {

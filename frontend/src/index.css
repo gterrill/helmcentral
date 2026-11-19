@@ -553,6 +553,10 @@
   doubled up for that same specificity contest: maplibre-gl.css is imported
   from the map components, so it lands after this file in the bundle, and
   the extra class beats it on specificity since layer membership is tied.
+  The compact state needs its own selector: maplibre-gl.css paints
+  `.maplibregl-ctrl-attrib.maplibregl-compact` white with a 12px radius, which
+  ties this rule on specificity and wins on order, and left the opened credit
+  as white text on a white bar.
 
   The control sits on map imagery rather than an app surface, so it follows
   the map's own chrome instead of the app's light/dark tokens: the same
@@ -560,7 +564,8 @@
   buttons already use, identical in both themes. MapLibre's stock light pill
   with dark text reads as a foreign element over Dark Matter or satellite.
 */
-.maplibregl-ctrl-attrib.maplibregl-ctrl {
+.maplibregl-ctrl-attrib.maplibregl-ctrl,
+.maplibregl-ctrl-attrib.maplibregl-ctrl.maplibregl-compact {
   background: rgb(0 0 0 / 0.55);
   backdrop-filter: blur(4px);
   border-radius: 9999px;

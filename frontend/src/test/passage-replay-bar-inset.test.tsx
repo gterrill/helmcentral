@@ -36,6 +36,15 @@ describe('the replay bar layout', () => {
   })
 })
 
+describe('the replay length control', () => {
+  it('says in words that it is the replay\'s length, beside the select, and the select carries the same name', () => {
+    bar()
+    const options = screen.getByTestId('replay-options')
+    expect(within(options).getByText('Replay length')).toBeVisible()
+    expect(within(options).getByRole('combobox', { name: 'Replay length' })).toHaveTextContent('15 s')
+  })
+})
+
 describe('the overview map placement controls', () => {
   it('stay in place but disabled while the overview map is off', () => {
     bar({ insetOn: false })

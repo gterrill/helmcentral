@@ -53,6 +53,8 @@ const sign = (id: string, offset: number, extra: Record<string, unknown> = {}) =
   id, t_ms: (start + offset) * 1000, title: `Sign ${id}`, note: `Note ${id}`, document_id: null, photo_url: null, visibility: 'passing', show_s: 4, ...extra,
 })
 
+const photoSign = (id: string, offset: number) => sign(id, offset, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })
+
 let signs: ReturnType<typeof sign>[] = []
 let writes: { method: string; url: string; body: unknown }[] = []
 
@@ -81,6 +83,13 @@ function stub(extra: Record<string, unknown> = {}) {
   })
 }
 
+// The editor opens from the Signs button alone; a mark then picks a sign in it.
+async function editSign(id: string) {
+  const tick = await screen.findByRole('button', { name: new RegExp(`^Sign Sign ${id} at`) })
+  if (!screen.queryByTestId('sign-editor')) fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+  fireEvent.click(tick)
+}
+
 const scrub = (clock: number) => fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: String(clock) } })
 
 beforeEach(() => {
@@ -92,47 +101,51 @@ beforeEach(() => {
 })
 
 describe('ReplayPanel signs: on the chart', () => {
-  it('shows every sign as a pin before the replay has moved, and a tap opens its card', async () => {
+  it('shows every sign as a pin before the replay has moved', async () => {
     signs = [sign('s1', 250), sign('s2', 600)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    const pins = await screen.findAllByTestId('sign-pin')
-    expect(pins).toHaveLength(2)
+    expect(await screen.findAllByTestId('sign-pin')).toHaveLength(2)
     expect(screen.queryByTestId('sign-card')).toBeNull()
-    fireEvent.click(pins[0])
-    const card = screen.getByTestId('sign-card')
-    expect(within(card).getByText('Sign s1')).toBeInTheDocument()
-    expect(within(card).getByText('Note s1')).toBeInTheDocument()
-    expect(screen.getAllByTestId('sign-pin')).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Close sign: Sign s1' }))
-    expect(screen.queryByTestId('sign-card')).toBeNull()
-    expect(screen.getAllByTestId('sign-pin')).toHaveLength(2)
   })
 
-  it('an opened pin is a paused preview: pressing play closes it and only visible cards remain', async () => {
-    signs = [sign('s1', 250), sign('s2', 600, { visibility: 'after' })]
+  it('a tap on a pin moves the replay to that sign and shows a small thumbnail of its photo, with no card and no editor', async () => {
+    // s3 is always up once the replay has moved; picking s1 puts even that card down.
+    signs = [photoSign('s1', 250), sign('s2', 600), sign('s3', 900, { visibility: 'always' })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     const pins = await screen.findAllByTestId('sign-pin')
     fireEvent.click(pins[0])
-    expect(screen.getByRole('button', { name: 'Close sign: Sign s1' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
-    expect(screen.queryAllByTestId('sign-card')).toHaveLength(0)
+    expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('250')
+    const thumb = screen.getByTestId('sign-thumb')
+    expect(thumb.querySelector('img')).toHaveAttribute('src', '/api/documents/doc1/content')
+    expect(screen.queryByTestId('sign-card')).toBeNull()
+    expect(screen.queryByTestId('sign-editor')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Signs' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('a pin pressed while playing leaves no card up', async () => {
+  it('a tap on a pin for a sign with no photo moves the replay and shows no thumbnail; its own card shows as it would, and the editor stays shut', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    await screen.findByTestId('sign-pin')
-    fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+    fireEvent.click(await screen.findByTestId('sign-pin'))
+    expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('250')
+    expect(screen.queryByTestId('sign-thumb')).toBeNull()
+    expect(screen.getByTestId('sign-card')).toHaveAttribute('data-sign-id', 's1')
+    expect(screen.queryByTestId('sign-editor')).toBeNull()
+  })
+
+  it('the thumbnail opens the photo full size, and goes when the replay plays or is scrubbed', async () => {
+    signs = [photoSign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByTestId('sign-pin'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open photo: Sign s1' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    scrub(400)
+    expect(screen.queryByTestId('sign-thumb')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Sign Sign s1 at/ }))
+    expect(screen.getByTestId('sign-thumb')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument())
-    fireEvent.click(screen.getByTestId('sign-pin'))
-    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
-    // The press must not wait to pop open when playback pauses.
-    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Play replay' })).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
+    await waitFor(() => expect(screen.queryByTestId('sign-thumb')).toBeNull())
   })
 
   it('puts a sign on the track where the boat is at its time', async () => {
@@ -248,20 +261,30 @@ describe('ReplayPanel signs: on the chart', () => {
 })
 
 describe('ReplayPanel signs: the editor', () => {
-  it('draws a diamond tick for each sign and a click seeks there and opens its fields', async () => {
-    signs = [sign('s1', 250)]
+  it('draws a diamond tick for each sign and a click seeks there and shows its thumbnail without opening the editor', async () => {
+    signs = [photoSign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
     const tick = await screen.findByRole('button', { name: /^Sign Sign s1 at 22 Oct 9.04 AM/ })
     expect(tick).toHaveStyle({ left: '25%' })
     fireEvent.click(tick)
     expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('250')
+    expect(screen.getByTestId('sign-thumb')).toBeInTheDocument()
+    expect(screen.queryByTestId('sign-card')).toBeNull()
+    expect(screen.queryByTestId('sign-editor')).toBeNull()
+  })
+
+  it('the Signs button opens the editor, and a tick then picks the sign in it', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    const tick = await screen.findByRole('button', { name: /^Sign Sign s1 at/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+    expect(screen.getByTestId('sign-editor')).toBeInTheDocument()
+    fireEvent.click(tick)
     const editor = screen.getByTestId('sign-editor')
     expect(within(editor).getByLabelText('Sign title')).toHaveValue('Sign s1')
     expect(within(editor).getByLabelText('Sign note')).toHaveValue('Note s1')
     expect(within(editor).getByRole('button', { name: 'While passing' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(editor).getByLabelText('Seconds shown')).toHaveValue(4)
-    // Pins show in the editor even though the replay has moved.
-    expect(screen.queryAllByTestId('sign-pin').length + screen.queryAllByTestId('sign-card').length).toBeGreaterThan(0)
   })
 
   it('lists the signs as chips and a chip seeks to its sign and selects it', async () => {
@@ -297,7 +320,7 @@ describe('ReplayPanel signs: the editor', () => {
   it('edits title, note, visibility and seconds, each sent to the server, and deletes', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const title = screen.getByLabelText('Sign title')
     fireEvent.change(title, { target: { value: 'Humpback' } })
     fireEvent.blur(title)
@@ -325,7 +348,7 @@ describe('ReplayPanel signs: the editor', () => {
   it('an emptied title goes back rather than being sent', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const title = screen.getByLabelText('Sign title')
     fireEvent.change(title, { target: { value: '  ' } })
     fireEvent.blur(title)
@@ -336,7 +359,7 @@ describe('ReplayPanel signs: the editor', () => {
   it('removes a photo with null', async () => {
     signs = [sign('s1', 250, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove' }))
     await waitFor(() => expect(writes).toHaveLength(1))
@@ -356,7 +379,7 @@ describe('ReplayPanel signs: the photo controls', () => {
   it('offers one menu to add a photo sign, and one Photo control on a sign', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const editor = screen.getByTestId('sign-editor')
     expect(within(editor).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent).filter((n) => /photo/i.test(n ?? ''))).toEqual(['Add photo sign', 'Photo'])
     fireEvent.click(within(editor).getByRole('button', { name: 'Add photo sign' }))
@@ -367,7 +390,7 @@ describe('ReplayPanel signs: the photo controls', () => {
   it('on a sign without a photo the menu has no Remove; with one it shows the thumbnail', async () => {
     signs = [sign('s1', 250), sign('s2', 600, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     expect(screen.queryByTestId('sign-editor-thumb')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
     expect(await screen.findByRole('menuitem', { name: 'Upload' })).toBeInTheDocument()
@@ -382,7 +405,7 @@ describe('ReplayPanel signs: saving on blur', () => {
   it('editing the note then clicking Delete works with one click', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const note = screen.getByLabelText('Sign note')
     fireEvent.change(note, { target: { value: 'Changed' } })
     const del = screen.getByRole('button', { name: 'Delete sign' })
@@ -397,7 +420,7 @@ describe('ReplayPanel signs: saving on blur', () => {
   it('editing the note then clicking Always works with one click', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const note = screen.getByLabelText('Sign note')
     fireEvent.change(note, { target: { value: 'Changed' } })
     fireEvent.blur(note)
@@ -411,7 +434,7 @@ describe('ReplayPanel signs: saving on blur', () => {
   it('keeps the typed text on show until the saved value comes back', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const note = screen.getByLabelText('Sign note')
     fireEvent.change(note, { target: { value: 'Changed' } })
     fireEvent.blur(note)
@@ -430,7 +453,7 @@ describe('ReplayPanel signs: writes in order', () => {
       'POST /api/documents': () => new Promise<Response>((resolve) => { releaseUpload = resolve }),
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const editor = screen.getByTestId('sign-editor')
     fireEvent.change(screen.getByLabelText('Photo file for a new sign'), { target: { files: [new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' })] } })
     await waitFor(() => expect(editor).toHaveAttribute('aria-busy', 'true'))
@@ -467,7 +490,7 @@ describe('ReplayPanel signs: the placement note', () => {
     add()
     expect(await screen.findByTestId('sign-notice')).toBeInTheDocument()
     // another sign picked
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s2 at/ }))
+    await editSign('s2')
     expect(screen.queryByTestId('sign-notice')).toBeNull()
     // a field changes
     add()
@@ -544,7 +567,7 @@ describe('ReplayPanel signs: photos', () => {
     signs = [sign('s1', 250)]
     stubUpload()
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.change(screen.getByLabelText('Photo file for this sign'), { target: { files: [photo('2026:10:22 09:10:00')] } })
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]).toMatchObject({ method: 'PATCH', body: { document_id: 'doc1' } })
@@ -566,7 +589,7 @@ describe('ReplayPanel signs: moving a sign', () => {
   it('Move sign here sends the cursor time, keeps the sign selected, and is off while the cursor is on the sign', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     expect(screen.getByRole('button', { name: 'Move sign here' })).toBeDisabled()
     scrub(400)
     fireEvent.click(screen.getByRole('button', { name: 'Move sign here' }))
@@ -581,7 +604,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     signs = [sign('s1', 250)]
     stub({ 'PATCH /api/passages/signs/s1': () => jsonResponse({ error: 'invalid passage request: t_ms is not inside any passage' }, 400) })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     scrub(400)
     fireEvent.click(screen.getByRole('button', { name: 'Move sign here' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('not inside any passage')
@@ -590,7 +613,7 @@ describe('ReplayPanel signs: moving a sign', () => {
   it('a nudge moves the sign by its amount and seeks the replay there', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].body).toEqual({ t_ms: t(310) })
@@ -616,7 +639,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       },
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const later = screen.getByRole('button', { name: '+10 s' })
     fireEvent.click(later)
     fireEvent.click(later)
@@ -638,7 +661,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       },
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('not inside any passage')
     fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
@@ -657,7 +680,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       },
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Back to photo time' }))
     fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
@@ -673,7 +696,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       'GET /api/passages/signs': () => (++reads > 1 ? jsonResponse({ error: 'down' }, 500) : { signs }),
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
     await waitFor(() => expect(writes).toHaveLength(1))
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
@@ -693,7 +716,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       },
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     scrub(400)
@@ -710,7 +733,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     }
     signs = [sign('s1', 990)]
     render(<ReplayPanel passages={[passage, second]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('That moment is outside this replay, so the sign was not moved.')
     expect(writes).toHaveLength(0)
@@ -729,7 +752,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       },
     })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     fireEvent.click(screen.getByRole('button', { name: 'Delete sign' }))
     fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
     release()
@@ -742,7 +765,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     framing = { overview: { center: [149.5, 0], zoom: 9, pitch: 0, bearing: 0 }, bearing: 0 }
     try {
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      await editSign('s1')
       scrub(0)
       fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
       await waitFor(() => expect(screen.getByRole('button', { name: '+10 s' })).toBeDisabled())
@@ -759,7 +782,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     const photoBytes = (dt: string, offset?: string) => new Response(exifJpeg({ dt, offset }).buffer as ArrayBuffer, { status: 200 })
     const open = async () => {
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      await editSign('s1')
       fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Back to photo time' }))
     }
@@ -767,7 +790,7 @@ describe('ReplayPanel signs: moving a sign', () => {
     it('is not offered on a sign without a photo', async () => {
       signs = [sign('s1', 250)]
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      await editSign('s1')
       fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
       await screen.findByRole('menuitem', { name: 'Upload' })
       expect(screen.queryByRole('menuitem', { name: 'Back to photo time' })).toBeNull()
@@ -830,7 +853,7 @@ describe('ReplayPanel signs: legs', () => {
   it('"Starts a new leg" switch sends starts_leg', async () => {
     signs = [sign('s1', 250, { starts_leg: false })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const sw = screen.getByRole('switch', { name: 'Starts a new leg' })
     expect(sw).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(sw)
@@ -841,7 +864,9 @@ describe('ReplayPanel signs: legs', () => {
   it('an untitled join is listed as awaiting a name and draws no pin or card', async () => {
     signs = [sign('s1', 250, { title: '', starts_leg: true })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Awaiting a name at/ }))
+    await screen.findByRole('button', { name: /^Sign Awaiting a name at/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Sign Awaiting a name at/ }))
     expect(screen.getByRole('button', { name: /^Edit sign Awaiting a name at/ })).toBeInTheDocument()
     expect(screen.queryAllByTestId('sign-pin')).toHaveLength(0)
     scrub(300)
@@ -851,7 +876,9 @@ describe('ReplayPanel signs: legs', () => {
   it('turning the switch off on an untitled join asks for a title first', async () => {
     signs = [sign('s1', 250, { title: '', starts_leg: true })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Awaiting a name at/ }))
+    await screen.findByRole('button', { name: /^Sign Awaiting a name at/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Sign Awaiting a name at/ }))
     const sw = screen.getByRole('switch', { name: 'Starts a new leg' })
     fireEvent.click(sw)
     expect(writes).toHaveLength(0)
@@ -871,7 +898,7 @@ describe('ReplayPanel signs: photo moment', () => {
   it('offers the switch for a sign with a photo, on until it is switched off', async () => {
     signs = [sign('s1', 250, photo)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const sw = screen.getByRole('switch', { name: 'Photo moment' })
     expect(sw).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText(/replay pauses at this sign/i)).toBeInTheDocument()
@@ -883,7 +910,7 @@ describe('ReplayPanel signs: photo moment', () => {
   it('shows it off when the operator has switched it off, and switches it on again', async () => {
     signs = [sign('s1', 250, { ...photo, photo_moment: false })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const sw = screen.getByRole('switch', { name: 'Photo moment' })
     expect(sw).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(sw)
@@ -894,14 +921,14 @@ describe('ReplayPanel signs: photo moment', () => {
   it('is not there for a sign without a photo', async () => {
     signs = [sign('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     expect(screen.queryByRole('switch', { name: 'Photo moment' })).toBeNull()
   })
 
   it('is not offered when the photo is not available, though the sign still names a document', async () => {
     signs = [sign('s1', 250, { document_id: 'doc1', photo_url: null })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     expect(screen.queryByRole('switch', { name: 'Photo moment' })).toBeNull()
   })
 })
@@ -938,7 +965,7 @@ describe('ReplayPanel signs: the photo upload', () => {
     signs = [sign('s1', 250)]
     stub({ 'POST /api/passage-photos-folder': { id: 'pp', name: 'Passage photos' } })
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    await editSign('s1')
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'receipt.pdf', { type: 'application/pdf' })
     for (const label of ['Photo file for a new sign', 'Photo file for this sign']) {
       fireEvent.change(screen.getByLabelText(label), { target: { files: [pdf] } })

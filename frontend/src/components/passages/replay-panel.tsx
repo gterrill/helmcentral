@@ -20,6 +20,8 @@ import { cameraShotsKey, useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
 import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { cameraShotsApi, type CameraShotPatch } from '@/lib/camera-shots-api'
 import { getQueryData, setQueryData } from '@/lib/api-query'
@@ -44,7 +46,7 @@ import {
   buildTimeline,
   clockFor,
   isMultiPassage,
-  formatLocalDateTime, localDateTimeParts,
+  formatBoatDateTime, formatLocalDateTime, localDateTimeParts,
   segmentBounds,
   type PassageDetail,
 } from '@/lib/passages'
@@ -116,14 +118,16 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   const [signError, setSignError] = useState<string | null>(null)
   const { run: runSignWrite, writes: signWrites } = useWriteQueue(setSignError)
   const [signNotice, setSignNotice] = useState<string | null>(null)
-  // A pin the operator opened into its card, and the sign whose photo is open full size.
-  const [openPinId, setOpenPinId] = useState<string | null>(null)
+  // The sign picked on the scrubber or the map, whose photo shows as a small thumbnail beside the boat; and the sign whose photo is open full size.
+  const [previewSignId, setPreviewSignId] = useState<string | null>(null)
   const [photoSignId, setPhotoSignId] = useState<string | null>(null)
   // Bumped when the operator takes the camera back from a drag (Play, a scrub).
   const [resume, setResume] = useState(0)
   // The map says whether it is flat: 3D off, or the terrain failed.
   const [mapFlat, setMapFlat] = useState(false)
   const reducedMotion = usePrefersReducedMotion()
+  // The boat's own zone: a time is labelled with its offset only when the passage's zone is another.
+  const boatZone = useVesselStateSelector(selectTimeZone)
   const [insetOn, setInsetOn] = useInsetPreference()
   // The opening move is running: from the press of Play until it has landed.
   // The controller owns the move; React hears only of its start and its end.
@@ -295,8 +299,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   // the zoom-in; resuming from a pause or a scrub just plays.
   const handlePlay = () => {
     if (replay.playing) { replay.toggle(); return }
-    // An opened pin is a paused preview; playing hands the cards back to each sign's own window.
-    setOpenPinId(null)
+    // A picked sign's thumbnail is a paused preview; playing hands the cards back to each sign's own window.
+    setPreviewSignId(null)
     setResume((n) => n + 1)
     const framing = replay.wall <= 0 || replay.ended ? mapHandle.current?.getFraming() : null
     if (framing && bounds) {
@@ -326,8 +330,6 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
       }
     : null
 
-  // A pin pressed mid-play or mid-fly-in must not open a card that outlasts its window.
-  const openId = !replay.playing && !flying && pins.some((p) => p.sign.id === openPinId) ? openPinId : null
   const photoSign = signs.find((s) => s.id === photoSignId) ?? null
   const momentAt = frame.moment ? labelled.find((r) => r.sign.id === frame.moment!.signId) : undefined
 
@@ -339,6 +341,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   }
   // Every jump the operator makes: pause, set the clock, and give the camera back to the shots.
   const seekClock = (clock: number, opts?: Parameters<typeof replay.setClock>[1]) => {
+    setPreviewSignId(null)
     replay.setPlaying(false)
     replay.setClock(clock, opts)
     setResume((n) => n + 1)
@@ -477,13 +480,26 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
       seekToSign(placement.at)
     })
   }
+  // A chip in the sign editor: go to the sign and pick it for editing.
   const pickSign = (id: string) => {
     const r = placedSigns.find((x) => x.sign.id === id)
     if (!r) return
     seekToSign(r.at)
     selectSign(id)
-    setSignsOpen(true)
   }
+  // A mark on the scrubber or a sign on the map: go to the sign's time and show its photo small beside the boat.
+  // The editor opens only from the Signs button; if it is open already, the sign is picked in it too.
+  // A sign with no photo has no thumbnail to show, so it only moves the replay and its card shows as it would at that moment.
+  const previewSign = (id: string) => {
+    if (flying) return
+    const r = placedSigns.find((x) => x.sign.id === id)
+    if (!r) return
+    seekToSign(r.at)
+    setPreviewSignId(signPhotoSrc(r.sign) ? id : null)
+    if (signsOpen) selectSign(id)
+  }
+  // The thumbnail belongs to the paused replay: playing, or the opening move, takes it away.
+  const previewed = !replay.playing && !flying ? labelled.find((r) => r.sign.id === previewSignId) ?? null : null
   const signTicks = placedSigns.map((r) => ({
     id: r.sign.id,
     fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
@@ -670,23 +686,20 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
           controlsDisabled={replay.playing || flying}
           markers={
             <SignMarkers
-              cards={cards}
+              // A picked sign is looked at on its own: the cards the replay would have up at that moment stay down.
+              cards={previewed ? [] : cards}
               pins={pins}
-              openId={openId}
+              preview={previewed}
               momentId={momentAt?.sign.id ?? null}
               canOpenPhoto={!replay.playing}
               still={reducedMotion}
               onOpenPhoto={(sign) => setPhotoSignId(sign.id)}
-              onPinClick={(id) => {
-                // A press during playback or the fly-in opens nothing, now or when it pauses.
-                if (!replay.playing && !flying) setOpenPinId(id)
-                if (signsOpen) selectSign(id)
-              }}
-              onCloseOpen={() => setOpenPinId(null)}
+              onPinClick={previewSign}
             />
           }
           isDarkTheme={isDarkTheme}
           insetCorner={insetView?.corner}
+          reserveInset={insetOn && insetView !== undefined}
           inset={
             insetOn && !flying && insetView ? (
               <InsetMap
@@ -700,7 +713,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         />
         {mapSize && frame.stay && <MapLabel testId="stay-label" text={frame.stay.stay.label} box={stayLabelBox(mapSize, frame.stay.elapsed, labelInset)} />}
         {mapSize && frame.passageLabel && <MapLabel testId="passage-label" text={frame.passageLabel.label.text} box={passageLabelBox(mapSize, frame.passageLabel.elapsed, labelInset)} />}
-        {frame.moment && momentAt && (
+        {frame.moment && momentAt && !previewed && (
           <PhotoMoment
             view={frame.moment}
             sign={momentAt.sign}
@@ -713,7 +726,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         clock={replay.clock}
         total={timeline.total}
         playing={replay.playing}
-        readout={here ? formatLocalDateTime(here.at, timeZone) : '--'}
+        readout={here ? formatBoatDateTime(here.at, timeZone, boatZone) : '--'}
         speed={length}
         lengths={lengths}
         insetOn={insetOn}
@@ -734,7 +747,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         signTicks={signTicks}
         signsOpen={signsOpen}
         onSignsToggle={() => setSignsOpen((o) => !o)}
-        onSignTickClick={pickSign}
+        onSignTickClick={previewSign}
         signsEditor={
           <SignEditor
             sign={selectedSign}

@@ -78,7 +78,8 @@ passage. It appears on the map as the boat goes by.
 4. Type a **Title** and, if you want, a **Note**. Click outside the field to
    save it.
 
-A diamond appears on the slider. Pick it to jump back and edit the sign.
+A diamond appears on the slider. Pick it to jump back to the sign. To edit the
+sign again, open **Signs** first, then pick its diamond or its name in the list.
 
 Choose when it shows:
 
@@ -126,14 +127,17 @@ delete a photo there, the sign keeps its title and note and shows no picture.
 
 ## Look at a sign's photo
 
-Before you press Play, every sign is a small mark on the track. Tap one to open
-its card. While the replay is paused, tap a card to open its photo full size.
-Press Escape to close it. While the replay plays, a tap does nothing, so you
-don't lose the picture by accident.
+Before you press Play, every sign is a small mark on the track. Tap one, or tap
+its diamond on the slider, and the replay moves to that sign. If the sign has a
+photo, a small thumbnail of it appears beside the boat, to one side so the route
+stays clear. Tap the thumbnail to open the photo full size, and press Escape to
+close it. Pressing Play or moving the slider takes the thumbnail away. This
+doesn't open the sign editor. For that, press **Signs**.
 
 ## Delete a sign
 
-Pick its diamond on the slider and press **Delete sign**.
+Press **Signs**, pick the sign by its diamond on the slider or its name in the
+list, and press **Delete sign**.
 
 ## Good to know
 

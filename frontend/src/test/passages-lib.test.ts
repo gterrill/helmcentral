@@ -11,6 +11,7 @@ import {
   fmtNM,
   fmtPct,
   formatLocalDate,
+  formatBoatDateTime,
   formatLocalDateTime,
   localDateTimeParts,
   locate,
@@ -90,6 +91,25 @@ describe('boat-local time', () => {
     expect(formatLocalDateTime(t, 'Australia/Brisbane')).toBe('14 Mar 9.30 AM UTC+10')
     expect(formatLocalDate(new Date(t * 1000).toISOString(), 'Australia/Brisbane')).toBe('14 Mar')
     expect(formatLocalDate('garbage', 'Australia/Brisbane')).toBe('--')
+  })
+})
+
+describe('formatBoatDateTime', () => {
+  const t = Date.UTC(2026, 2, 13, 23, 30) / 1000
+  it('leaves the offset off when the passage was read in the boat\'s own zone', () => {
+    expect(formatBoatDateTime(t, 'Australia/Brisbane', 'Australia/Brisbane')).toBe('14 Mar 9.30 AM')
+  })
+  it('compares offsets at that instant, so two names for the same offset agree', () => {
+    expect(formatBoatDateTime(t, 'Australia/Brisbane', 'Australia/Lindeman')).toBe('14 Mar 9.30 AM')
+  })
+  it('keeps the offset when the passage was sailed in another zone than the boat\'s', () => {
+    expect(formatBoatDateTime(t, 'Pacific/Fiji', 'Australia/Brisbane')).toBe('14 Mar 11.30 AM UTC+12')
+  })
+  it('keeps the offset while the boat has reported no zone, as there is nothing to compare with', () => {
+    expect(formatBoatDateTime(t, 'Australia/Brisbane', undefined)).toBe('14 Mar 9.30 AM UTC+10')
+  })
+  it('still says -- for a passage with no zone', () => {
+    expect(formatBoatDateTime(t, null, 'Australia/Brisbane')).toBe('--')
   })
 })
 
