@@ -354,7 +354,13 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 		// about this $source's publishing cadence, not which paths a given
 		// block happened to carry (a block that is entirely radar targets,
 		// dropped below, is still a real heartbeat from that source).
-		if update.SourceRef != "" && len(update.Values) > 0 {
+		//
+		// Helmcentral's own deltas (its notifications, the engine stop it
+		// writes) are skipped: they come back on this stream, but they are not
+		// a device on the network speaking. Counted, they would make a quiet
+		// engine read running, and an alarm of ours would vouch for a
+		// connection that may be dead.
+		if update.SourceRef != "" && len(update.Values) > 0 && !isOwnPublishSource(update.SourceRef) {
 			key := d.Context + "|" + update.SourceRef
 			entry := s.sourceSeen[key]
 

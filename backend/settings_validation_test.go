@@ -773,3 +773,73 @@ func TestUpdateSettings_UnchangedSignalKAddressLeavesCredentialsAlone(t *testing
 		t.Fatalf("expected SIGNALK_PASSWORD to survive an unrelated edit, has=%v err=%v", has, err)
 	}
 }
+
+// A save whose request does not mention engines (an older client, a scripted
+// partial post) leaves the stored block alone, the way roles do.
+func TestSettingsPostWithoutEnginesLeavesTheStoredBlockAlone(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	if code, body := postSettings(t, settingsPath, func(p *settingsPayload) { p.Engines.MarkStoppedWhenSilent = true }); code != http.StatusOK {
+		t.Fatalf("setup save: %d (%v)", code, body)
+	}
+
+	current, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(buildSettingsPayload(current))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request map[string]any
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Fatal(err)
+	}
+	delete(request, "engines")
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := updateSettingsHandler(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save without engines: %d %s", rec.Code, rec.Body.String())
+	}
+	if on, err := markEnginesStoppedFromSettingsFile(settingsPath)(); err != nil || !on {
+		t.Fatalf("a save without engines changed the stored setting: on=%v err=%v", on, err)
+	}
+}
+
+func TestSettingsPayloadRoundTripsMarkEnginesStopped(t *testing.T) {
+	if buildSettingsPayload(map[string]any{}).Engines.MarkStoppedWhenSilent {
+		t.Fatal("the setting is off until the operator turns it on")
+	}
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) { p.Engines.MarkStoppedWhenSilent = true })
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%v)", code, body)
+	}
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !buildSettingsPayload(saved).Engines.MarkStoppedWhenSilent {
+		t.Fatal("engines.mark_stopped_when_silent did not round-trip")
+	}
+	on, err := markEnginesStoppedFromSettingsFile(settingsPath)()
+	if err != nil || !on {
+		t.Fatalf("reader: %v %v", on, err)
+	}
+	code, _ = postSettings(t, settingsPath, func(p *settingsPayload) { p.Engines.MarkStoppedWhenSilent = false })
+	if code != http.StatusOK {
+		t.Fatalf("save off: expected 200, got %d", code)
+	}
+	if on, _ := markEnginesStoppedFromSettingsFile(settingsPath)(); on {
+		t.Fatal("turning it off must stick")
+	}
+}

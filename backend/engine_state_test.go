@@ -196,6 +196,54 @@ func TestEngineStatesTieOnLastIsDeterministic(t *testing.T) {
 	}
 }
 
+// Helmcentral's own delta (the silent-engine stopper writes
+// propulsion.<id>.state) comes back on the read stream. It is not the engine
+// speaking, so it must neither make an off engine read running nor vouch for
+// the connection.
+func TestOwnPublishedDeltaIsNotEngineActivity(t *testing.T) {
+	now := time.Now().UTC()
+	snapshot := offEngineSnapshot(t, now)
+	for _, source := range []string{signalKPublishSourceLabel, signalKPublishSourceLabel + ".XX"} {
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{SourceRef: source, Timestamp: now.Format(time.RFC3339),
+				Values: []signalKValue{{Path: "propulsion.port.state", Value: "stopped"}}}},
+		}, now)
+		got := engineStatesFor(snapshot, now)
+		if got["port"].State != engineStateOff {
+			t.Fatalf("after a %q delta: port %+v, want off", source, got["port"])
+		}
+	}
+}
+
+// Only the labels Helmcentral's own publish produces are skipped. A real N2K
+// provider that happens to be named helmcentral ("helmcentral.115", the label
+// plus its source address) is a device speaking, and is recorded.
+func TestOnlyExactOwnSourceLabelsAreNotEngineActivity(t *testing.T) {
+	for source, own := range map[string]bool{
+		"helmcentral":     true,
+		"helmcentral.XX":  true,
+		"helmcentral.115": false,
+		"helmcentral.":    false,
+		"helmcentralx":    false,
+	} {
+		if got := isOwnPublishSource(source); got != own {
+			t.Errorf("isOwnPublishSource(%q) = %v, want %v", source, got, own)
+		}
+	}
+
+	now := time.Now().UTC()
+	snapshot := offEngineSnapshot(t, now)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{SourceRef: "helmcentral.115", Timestamp: now.Format(time.RFC3339),
+			Values: []signalKValue{{Path: "propulsion.port.revolutions", Value: 30.0}}}},
+	}, now)
+	if got := engineStatesFor(snapshot, now); got["port"].State != engineStateRunning {
+		t.Fatalf("a device called helmcentral.115 speaking for port: %+v, want running", got["port"])
+	}
+}
+
 func TestGaugeValuesPayloadCarriesEngineStates(t *testing.T) {
 	now := time.Now().UTC()
 	snapshot := newSignalKSnapshot()

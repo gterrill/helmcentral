@@ -200,8 +200,8 @@ type collisionProfileSyncer struct {
 	lastReadErr    string
 }
 
-// saveBackoff is the wait between save retries: one poll interval after the
-// first failure, doubling up to collisionSaveBackoffMax. Neither
+// saveBackoff is the wait between retries: the caller's first delay after the
+// first failure, doubling up to the caller's cap. Neither
 // notifyBackoffFor nor placeNameBackoffState fits: one counts attempts for a
 // queue, the other reads the wall clock and logs.
 type saveBackoff struct {
@@ -217,12 +217,12 @@ type saveBackoff struct {
 func (b saveBackoff) due(now time.Time) bool { return !now.Before(b.until) }
 
 // fail records a failed save at now and schedules the next try.
-func (b *saveBackoff) fail(now time.Time, err error) {
+func (b *saveBackoff) fail(now time.Time, err error, first, limit time.Duration) {
 	b.err = err
 	if b.delay == 0 {
-		b.delay = collisionProfilePollInterval
+		b.delay = first
 	} else {
-		b.delay = min(2*b.delay, collisionSaveBackoffMax)
+		b.delay = min(2*b.delay, limit)
 	}
 	b.until = now.Add(b.delay)
 }
@@ -444,7 +444,7 @@ func (s *collisionProfileSyncer) evaluate(state, want, current string, profiles 
 		if s.saveFailures == nil {
 			s.saveFailures = map[string]saveBackoff{}
 		}
-		failed.fail(s.checkedAt, err)
+		failed.fail(s.checkedAt, err, collisionProfilePollInterval, collisionSaveBackoffMax)
 		s.saveFailures[want] = failed
 		return s.refuse(want, current, err, saveFailureMessage(want, state, err))
 	}

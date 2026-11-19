@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,14 @@ const signalKPublishStreamPath = "/signalk/v1/stream?subscribe=none"
 // signalKPublishSourceLabel names Helmcentral on the bus, so an operator
 // looking at a notification's $source can see which producer raised it.
 const signalKPublishSourceLabel = "helmcentral"
+
+// isOwnPublishSource reports whether a $source on the read stream is
+// Helmcentral's own publisher: the label alone, or the label with the
+// server's "XX" suffix. Any other suffix ("helmcentral.115") is a real device
+// on the network that happens to share the name.
+func isOwnPublishSource(ref string) bool {
+	return ref == signalKPublishSourceLabel || ref == signalKPublishSourceLabel+".XX"
+}
 
 var (
 	// A publish is confirmed by reading the value back out of the server's own
@@ -132,11 +141,28 @@ func sendSignalKDelta(ctx context.Context, streamURL, token, path string, value 
 // "normal". Confirming a clear by absence therefore fails against every real
 // server, however well it works against a stub that deletes.
 func confirmSignalKNotification(ctx context.Context, httpBaseURL, token, path string, raised bool) error {
+	return confirmSignalKPublish(ctx, path,
+		func() (bool, error) {
+			live, err := signalKNotificationLive(ctx, httpBaseURL, token, path)
+			return live == raised, err
+		},
+		func() string {
+			if raised {
+				return fmt.Sprintf("SignalK did not accept the raise of %s: the delta was sent but the notification is not live in the server's model", path)
+			}
+			return fmt.Sprintf("SignalK did not accept the clear of %s: the delta was sent but the notification is still live in the server's model", path)
+		})
+}
+
+// confirmSignalKPublish polls matches until it reports true or the confirm
+// window expires. rejected words the failure when the read worked but the
+// server's model does not hold what was published.
+func confirmSignalKPublish(ctx context.Context, path string, matches func() (bool, error), rejected func() string) error {
 	deadline := time.Now().Add(signalKPublishConfirmWindow)
 
 	for {
-		live, err := signalKNotificationLive(ctx, httpBaseURL, token, path)
-		if err == nil && live == raised {
+		ok, err := matches()
+		if err == nil && ok {
 			return nil
 		}
 
@@ -144,10 +170,7 @@ func confirmSignalKNotification(ctx context.Context, httpBaseURL, token, path st
 			if err != nil {
 				return fmt.Errorf("published %s but could not confirm it: %w", path, err)
 			}
-			if raised {
-				return fmt.Errorf("SignalK did not accept the raise of %s: the delta was sent but the notification is not live in the server's model", path)
-			}
-			return fmt.Errorf("SignalK did not accept the clear of %s: the delta was sent but the notification is still live in the server's model", path)
+			return errors.New(rejected())
 		}
 
 		select {
@@ -158,14 +181,14 @@ func confirmSignalKNotification(ctx context.Context, httpBaseURL, token, path st
 	}
 }
 
-// signalKNotificationLive reports whether the server's model currently carries
-// a raised notification at a dotted SignalK path.
-func signalKNotificationLive(ctx context.Context, httpBaseURL, token, path string) (bool, error) {
+// signalKSelfLeaf reads one leaf of the self vessel over REST at a dotted path
+// and returns its raw JSON value. found is false on a 404 or a missing value.
+func signalKSelfLeaf(ctx context.Context, httpBaseURL, token, path string) (value json.RawMessage, found bool, err error) {
 	url := strings.TrimRight(httpBaseURL, "/") + signalKSelfAPIPath + "/" + strings.ReplaceAll(path, ".", "/")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -173,28 +196,42 @@ func signalKNotificationLive(ctx context.Context, httpBaseURL, token, path strin
 
 	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
 
 	if response.StatusCode == http.StatusNotFound {
-		return false, nil
+		return nil, false, nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return false, fmt.Errorf("signalk returned status %d: %s", response.StatusCode, string(body))
+		return nil, false, fmt.Errorf("signalk returned status %d: %s", response.StatusCode, string(body))
 	}
 
 	var payload struct {
-		Value map[string]any `json:"value"`
+		Value json.RawMessage `json:"value"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, false, fmt.Errorf("signalk returned an unreadable body for %s: %w", path, err)
+	}
+	return payload.Value, len(payload.Value) > 0, nil
+}
+
+// signalKNotificationLive reports whether the server's model currently carries
+// a raised notification at a dotted SignalK path.
+func signalKNotificationLive(ctx context.Context, httpBaseURL, token, path string) (bool, error) {
+	raw, found, err := signalKSelfLeaf(ctx, httpBaseURL, token, path)
+	if err != nil || !found {
+		return false, err
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
 		return false, fmt.Errorf("signalk returned an unreadable body for %s: %w", path, err)
 	}
-	if payload.Value == nil {
+	if value == nil {
 		return false, nil
 	}
 	// The same rule the read path applies, so publishing and reading cannot
 	// disagree about what counts as cleared.
-	return notificationValueIsLive(payload.Value), nil
+	return notificationValueIsLive(value), nil
 }

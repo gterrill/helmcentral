@@ -61,6 +61,24 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   at the dock and reset your collision profile. The page walks through ranking
   the receivers in SignalK's Source Priorities. See
   [Choose which GPS SignalK uses when you have several](docs/how-to/choose-a-gps-when-you-have-several.md).
+- **Mark engines stopped when their data goes quiet.** Some engine gateways
+  stop sending anything when the engine is switched off, so SignalK goes on
+  saying the engine is started and the autostate plugin calls the boat motoring
+  whenever it moves. A new switch under Settings → SignalK → Engines, **Mark
+  engines stopped when RPM goes quiet**, lets Helmcentral set a mapped engine to
+  stopped on SignalK once the engine's data has been quiet for about two
+  minutes. It only acts when another device on the same connection to SignalK is
+  still sending, and an engine that is alone on its connection is never marked.
+  If the engine's own interface, such as a CANvu, fails or loses power while the
+  engine runs and the rest of the NMEA 2000 network keeps talking, that looks
+  the same as a key-off, so after about two minutes the running engine is marked
+  stopped until RPM returns. While the engine
+  stays quiet, Helmcentral checks every 15 seconds that SignalK still says
+  stopped, so a SignalK restart that brings the old started state back gets
+  corrected. It's off until you turn it on, so nothing changes on upgrade, and
+  it writes the state only, never an RPM. Turn it on only if your gateway really
+  goes quiet when the engine stops.
+
 - **Drop pins on the Anchor Watch map before you anchor.** Tap or click open
   water and choose **Pin** while no watch is set. Each pin shows its range and
   bearing from the boat, so you can mark both sides of a channel and see how
