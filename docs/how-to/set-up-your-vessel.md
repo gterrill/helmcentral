@@ -218,10 +218,10 @@ marked. For the same reason, an engine that is alone on its connection is never
 marked, since a dead connection looks just the same as a switched-off engine
 there.
 
-Here's the risk you take by turning it on. If the engine's own interface fails
-or loses power while the engine is running, for example an engine gateway like
-a CANvu, and other devices on the same NMEA 2000 network keep talking, it looks
-exactly like the engine being switched off. After about two minutes Helmcentral
+Here's the risk you take by turning it on. Say the engine's own interface, for
+example an engine gateway like a CANvu, fails or loses power while the engine
+is running. If other devices on the same NMEA 2000 network keep talking, that
+looks exactly like the engine being switched off. After about two minutes Helmcentral
 marks the running engine stopped. SignalK puts started back as soon as RPM
 returns.
 
