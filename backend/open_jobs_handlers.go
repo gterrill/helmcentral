@@ -232,6 +232,7 @@ func deleteOpenJobPhotoHandler(c echo.Context) error {
 // own auth tier (docs/adr/0177).
 func openJobRoutes() []apiRoute {
 	return []apiRoute{
+		{http.MethodGet, "/api/inventory/jobs/count", tierRead, jobsCountHandler},
 		{http.MethodGet, "/api/inventory/open-jobs", tierRead, listOpenJobsHandler},
 		{http.MethodGet, "/api/inventory/open-jobs/:id", tierRead, getOpenJobHandler},
 		{http.MethodPost, "/api/inventory/open-jobs", tierWrite, createOpenJobHandler},

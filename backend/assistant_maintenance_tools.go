@@ -21,9 +21,12 @@ import (
 // injects a different store into d.documents must set the global to match.
 
 // assistantMaintenanceLink is where a rule or log row is cited: the
-// Inventory panel's Maintenance section. The section has no per-rule URL, so
-// every rule and log row shares this one.
+// Inventory panel's Service schedule section. The section has no per-rule
+// URL, so every rule and log row shares this one.
 const assistantMaintenanceLink = "/inventory/maintenance"
+
+// assistantJobsLink is where an open job is cited: the Jobs page (ADR 0293).
+const assistantJobsLink = "/jobs"
 
 // assistantEquipmentLink is an item's editor page, the same
 // /inventory/equipment/<id> route formatAppLocation produces.
@@ -466,7 +469,7 @@ func (d assistantToolDeps) executeListMaintenance(ctx context.Context, raw json.
 			openJobs = append(openJobs, assistantOpenJobRow{
 				ID: j.ID, EquipmentID: j.EquipmentID, EquipmentName: j.EquipmentName, Title: j.Title, Notes: j.Notes,
 				OpenedOn: j.OpenedOn, AgeDays: openJobAgeDays(j.OpenedOn, today), BeforeOn: j.BeforeOn,
-				Source: j.Source, SourceLabel: j.SourceLabel, Link: assistantMaintenanceLink,
+				Source: j.Source, SourceLabel: j.SourceLabel, Link: assistantJobsLink,
 			})
 		}
 	}

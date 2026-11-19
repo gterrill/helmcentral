@@ -49,12 +49,14 @@ Helmcentral suits your boat.
 - [Notes and the manual](features/notes-and-the-manual.md): write down what you
   know about the boat in one step, then gather it into an operations manual the
   crew and the next owner can follow.
+- [Jobs](features/jobs.md): what needs doing on the boat, the problems you
+  haven't fixed yet together with the services that are overdue or due soon.
 - [Inventory](features/inventory-tracking.md): the equipment register, with one
   record per system aboard, its documents, where it's stowed, and the profile
   it follows.
 - [Maintenance](features/maintenance.md): jobs that fall due on running hours,
-  on the calendar, or both, the service log you sign them off in, and the open
-  jobs you haven't fixed yet.
+  on the calendar, or both, the service log you sign them off in, and the
+  Service schedule that lists them all.
 - [Outside assistants](features/outside-assistants.md): let Claude or ChatGPT
   read the boat's status, alarms and logs. It can only read, and only on your
   network or through one Tailscale Funnel address.
@@ -137,7 +139,8 @@ Step-by-step instructions for specific jobs.
 - [Log a service](how-to/log-a-service.md): complete a scheduled job, or record
   a repair or improvement.
 - [Keep track of an open job](how-to/keep-track-of-an-open-job.md): write down
-  a problem you haven't fixed yet, then mark it done or drop it.
+  a problem you haven't fixed yet on the Jobs page, then mark it done or drop
+  it.
 - [Import GPX tracks](how-to/import-gpx-tracks.md): add trips Helmcentral
   didn't record.
 - [Edit a passage](how-to/edit-passages.md): split, trim, merge and hide

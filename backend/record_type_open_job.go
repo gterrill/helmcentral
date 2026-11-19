@@ -25,7 +25,7 @@ func openJobRecordType() *recordType {
 	return &recordType{
 		Name:  recordTypeOpenJob,
 		Label: "open job",
-		Summary: "A known problem that is not fixed yet, on the operator's Open jobs list (Inventory, Maintenance), such as \"shower pump leaks at the outlet\". " +
+		Summary: "A known problem that is not fixed yet, on the operator's Jobs page, such as \"shower pump leaks at the outlet\". " +
 			"It is not a maintenance rule: a rule repeats, a job is done once. It is not an alarm. " +
 			"You can add one; closing or dropping a job is the operator's own tap.",
 		Actions: []string{changeCreate},
@@ -46,7 +46,7 @@ func openJobRecordType() *recordType {
 		List:     listOpenJobRecords,
 		Create:   createOpenJobRecord,
 		Describe: describeOpenJob,
-		Href:     func(recordSnapshot) string { return "/inventory/maintenance" },
+		Href:     func(recordSnapshot) string { return assistantJobsLink },
 	}
 }
 
@@ -124,7 +124,7 @@ func createOpenJobRecord(env changeEnv, fields fieldSet) (createdRecord, error) 
 }
 
 func describeOpenJob(d describeInput) string {
-	summary := "Add to open jobs: " + d.After.Label
+	summary := "Add to jobs: " + d.After.Label
 	if before := stringOf(d.Op.Fields["before_on"]); before != "" {
 		summary += ", before " + formatProposalDate(before)
 	}

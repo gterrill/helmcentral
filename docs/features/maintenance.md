@@ -6,6 +6,10 @@ flare kit doesn't go out of date unnoticed in a locker. The running hours and
 calendar dates you'd otherwise keep in a logbook or your head become one list:
 what's due, what's overdue, what's been done.
 
+The full list of rules is **Inventory → Service schedule**. What's overdue or
+due soon also shows on the **Jobs** page, next to your open jobs. See
+[Jobs](jobs.md).
+
 ## What it tracks
 
 A maintenance rule is one job on one piece of gear: "engine oil and filter
@@ -50,7 +54,7 @@ hours from you instead. That's covered under "Gear with no hour meter" below.
 
 An hour meter only changes while the machine is running. The last reading it
 sent stays current for as long as the engine is off, whether you're at anchor
-or mid-service, so it doesn't show as unknown. The Maintenance list and the
+or mid-service, so it doesn't show as unknown. The Service schedule and the
 Complete form show how long ago that reading came in.
 
 Whenever you type an hours figure by hand, it's the number on the physical
@@ -71,7 +75,7 @@ An item with no hour meter counts its hours from the latest gauge figure you've
 typed for it. Helmcentral takes that figure from any of these:
 
 - **Log a reading:** Tap **Log a reading** on the item's own page or on the rule
-  in the Maintenance list. You give the date, the figure on the gauge and, if
+  in the Service schedule. You give the date, the figure on the gauge and, if
   you like, a note. Every reading is kept, so the item has a short history and
   you can delete one you typed wrongly.
 - **Completing a rule or logging a service:** The hours you enter on the form
@@ -113,7 +117,7 @@ follows.
   marked as such, and you can reset it.
 - **A job that doesn't apply:** You can set it to not applicable.
 - **A missing or damaged profile:** If an item's profile is missing or damaged,
-  its profile jobs aren't shown at all. The Maintenance list says which item
+  its profile jobs aren't shown at all. The Service schedule says which item
   and why, because Helmcentral won't count down from numbers that may no longer
   be right.
 
@@ -158,9 +162,9 @@ fixed yet is different: "shower pump leaks at the outlet" is open until you
 fix it or decide you won't. **Open jobs** is where those go, so they don't live
 only in your head.
 
-- **Where it is:** The **Open jobs** group sits at the top of **Inventory →
-  Maintenance**, above Overdue, and on the page of the item the problem is on.
-  The Maintenance list's system filter applies to it.
+- **Where it is:** The **Open jobs** group sits at the top of the **Jobs** page,
+  above the services that are due, and on the page of the item the problem is on.
+  See [Jobs](jobs.md).
 - **What a job holds:** A title, the item if there is one, notes, photos, and an
   optional **Before** date for when you want it fixed by. Each row shows how
   many days it has been open, such as "12 d", and the Before date, which is
@@ -195,10 +199,11 @@ ready to fill in. If it's written as a checklist, opening it offers to start a
 run and tick items off like any other checklist in Helmcentral. Afterward, the
 completion form links straight to it, in case anything needs updating.
 
-## The list
+## The Service schedule
 
-**Inventory → Maintenance** starts with the open jobs, then shows every rule
-grouped by status: overdue first, then due soon, then the rest. You can filter by system, so you can check the
+**Inventory → Service schedule** shows every rule grouped by status: overdue
+first, then due soon, then the rest. The open jobs aren't here, because they're
+on the Jobs page. You can filter by system, so you can check the
 electrical side of the boat without scrolling past the rest. Each item's own
 page also shows its rules and recent service history, alongside where the hours
 come from. Jobs from the item's profile and jobs added for that item alone are
@@ -207,7 +212,7 @@ listed separately.
 ## Exporting the service log
 
 You can export the whole service log, or one item's own, as a spreadsheet-ready
-file from the Maintenance list. It's useful for a broker's survey, an insurance
+file from the Service schedule. It's useful for a broker's survey, an insurance
 claim, or handing the history to a new owner. A part named on a past entry
 stays there by name, even if that spare is later removed from inventory.
 Deleting the item never rewrites what was actually fitted on the day.
@@ -254,7 +259,7 @@ rule. It answers with a card listing each change in one line, such as
   Apply refuses and says so, and you should ask Mate to redo it.
 
 You can also say "add the shower pump to the jobs list". Mate answers with a
-card for the job, and tapping **Apply** adds it to Open jobs.
+card for the job, and tapping **Apply** adds it to the Jobs page.
 
 Hours on the card are what the gauge shows, the same as the forms here. See
 [Set up a maintenance schedule with Mate](../how-to/set-up-a-maintenance-schedule-with-mate.md).
@@ -262,7 +267,7 @@ Hours on the card are what the gauge shows, the same as the forms here. See
 ## What this is not
 
 - **Not an alarm:** A rule going overdue doesn't raise a notification the way a
-  system warning does. Maintenance is the record and the list, not a reminder
+  system warning does. The Service schedule is the record and the list, not a reminder
   that follows you around the boat. An open job is the same: it never raises an
   alarm and is never counted with the alarms.
 - **Not a task board:** An open job has no assignee, no comments and no
@@ -274,4 +279,4 @@ Hours on the card are what the gauge shows, the same as the forms here. See
   it can't close, drop or change one. It also can't delete a rule or a log
   entry, edit an existing log entry, add photos or parts, record a meter
   replacement or attach a procedure note. You do those here, in Inventory →
-  Maintenance.
+  Service schedule.

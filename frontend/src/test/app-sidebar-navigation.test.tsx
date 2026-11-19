@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
@@ -43,9 +43,27 @@ vi.mock('@/hooks/use-auth', () => ({
 // regardless of panel, so its own useAssistantConversations fetches
 // unconditionally too - answered with an empty list so it settles quietly
 // rather than tripping the "Unhandled fetch" guard other suites use.
+// What the Jobs row's badge reads. Null leaves both lists unanswered, so the row
+// shows no count and the order test sees plain labels.
+let jobsFixture: { jobs: unknown[]; rules: unknown[] } | null = null
+// What the server's Jobs count answers: a count, a failure, or (null) no answer.
+let jobsCountFixture: { count: number; incomplete: boolean } | 'fail' | null = null
+
 beforeEach(() => {
+  jobsFixture = null
+  jobsCountFixture = null
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
+    if (jobsCountFixture && url.endsWith('/api/inventory/jobs/count')) {
+      if (jobsCountFixture === 'fail') return { ok: false, status: 500, json: async () => ({ error: 'boom' }) }
+      return { ok: true, json: async () => jobsCountFixture }
+    }
+    if (jobsFixture && url.endsWith('/api/inventory/open-jobs')) {
+      return { ok: true, json: async () => ({ jobs: jobsFixture!.jobs }) }
+    }
+    if (jobsFixture && url.endsWith('/api/inventory/maintenance/rules')) {
+      return { ok: true, json: async () => ({ rules: jobsFixture!.rules, removed: [], schedule_errors: [] }) }
+    }
     if (url.endsWith('/api/health')) {
       return { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
     }
@@ -357,7 +375,7 @@ describe('App sidebar navigation', () => {
   it('shows no Inventory sections until Inventory is open', () => {
     render(<App />)
 
-    for (const label of ['Equipment', 'Locations', 'Stocktake', 'Maintenance', 'Profiles']) {
+    for (const label of ['Equipment', 'Locations', 'Stocktake', 'Service schedule', 'Profiles']) {
       expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument()
     }
   })
@@ -373,6 +391,69 @@ describe('App sidebar navigation', () => {
     // Collapsed to icons, the row is a square icon and the count is hidden by the
     // same group state the sidebar uses for its other badges.
     expect(badge.className).toContain('group-data-[collapsible=icon]:hidden')
+  })
+
+  // ADR 0293: what needs doing on the boat, counted by the server.
+  it('shows the server count on the Jobs row', async () => {
+    jobsCountFixture = { count: 4, incomplete: false }
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Jobs/ })
+    const badge = await within(button).findByLabelText('4 to do')
+    expect(badge).toHaveTextContent('4')
+    expect(badge.className).toContain('group-data-[collapsible=icon]:hidden')
+  })
+
+  it('reads one job as "1 to do"', async () => {
+    jobsCountFixture = { count: 1, incomplete: false }
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Jobs/ })
+    expect(await within(button).findByLabelText('1 to do')).toHaveTextContent('1')
+  })
+
+  it('does not download the lists to count them', async () => {
+    jobsCountFixture = { count: 2, incomplete: false }
+    render(<App />)
+    await within(screen.getByRole('button', { name: /^Jobs/ })).findByLabelText('2 to do')
+    const urls = vi.mocked(fetch).mock.calls.map(([u]) => String(u))
+    expect(urls.some((u) => u.endsWith('/api/inventory/open-jobs'))).toBe(false)
+    expect(urls.some((u) => u.endsWith('/api/inventory/maintenance/rules'))).toBe(false)
+  })
+
+  it('shows an amber "!" with no number when an item\'s schedule could not be read', async () => {
+    jobsCountFixture = { count: 3, incomplete: true }
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Jobs/ })
+    const badge = await within(button).findByLabelText("Jobs list incomplete: an item's schedule couldn't be read")
+    expect(badge).toHaveTextContent('!')
+    expect(badge).not.toHaveTextContent('3')
+    expect(badge).toHaveAttribute('title', "Jobs list incomplete: an item's schedule couldn't be read")
+    expect(badge.className).toContain('text-amber-400')
+  })
+
+  it('shows no badge on the Jobs row when nothing needs doing', async () => {
+    jobsCountFixture = { count: 0, incomplete: false }
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Jobs/ })
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).endsWith('/api/inventory/jobs/count'))).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(within(button).queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('shows no badge on the Jobs row when the count could not be read', async () => {
+    jobsCountFixture = 'fail'
+    render(<App />)
+    const button = screen.getByRole('button', { name: /^Jobs/ })
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).endsWith('/api/inventory/jobs/count'))).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(within(button).queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('opens the Jobs page from its sidebar row', async () => {
+    jobsFixture = { jobs: [], rules: [] }
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Jobs/ }))
+    await waitFor(() => expect(window.location.pathname).toBe('/jobs'))
+    expect(await screen.findByRole('heading', { name: 'Jobs' })).toBeInTheDocument()
   })
 
   // The order of the top-level sidebar items is a deliberate product
@@ -397,6 +478,7 @@ describe('App sidebar navigation', () => {
       'Passages',
       'Watches',
       'Documents',
+      'Jobs',
       'Inventory',
       'Mate',
       'Wall displays',

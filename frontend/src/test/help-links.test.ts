@@ -37,10 +37,16 @@ describe('helpTargetFor', () => {
       { panel: 'wall-displays', route: { view: 'index' } },
       { panel: 'inbox', route: { view: 'index' } },
       { panel: 'inbox', route: { view: 'upload' } },
+      { panel: 'jobs' },
     ]
     for (const location of plain) {
       expect(helpTargetFor(location)).toEqual(PANEL_HELP_TARGETS[location.panel as PanelId])
     }
+  })
+
+  it('sends the Jobs page to its own feature page and the Service schedule to its own', () => {
+    expect(helpTargetFor({ panel: 'jobs' })).toEqual({ page: 'features/jobs' })
+    expect(INVENTORY_HELP_TARGETS.maintenance).toEqual({ page: 'features/maintenance' })
   })
 
   it('sends the Windy panel to its own help section, not the marine radar one', () => {

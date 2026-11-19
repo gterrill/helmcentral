@@ -200,7 +200,8 @@ in the data model, which is the wrong way round.
 
 The in-page section nav is gone. The five sections now sit under the
 Inventory row in the sidebar as a flat sub-menu, in the order Equipment,
-Locations, Stocktake, Maintenance, Profiles, and only while Inventory is the
+Locations, Stocktake, Maintenance (called Service schedule from
+[ADR 0293](0293-jobs-gets-its-own-page.md)), Profiles, and only while Inventory is the
 open panel, except on a phone (below). A record inside a section (an item, a location, a bin, a deck)
 keeps its parent section lit. Each section carries its own page heading,
 since the nav no longer names it.

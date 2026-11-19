@@ -215,7 +215,7 @@ hyphens, starting with a letter or number.
 ## Service intervals
 
 The `service` block is the maintenance schedule of every equipment record
-that uses the profile. **Inventory → Maintenance** reads it live, so if you
+that uses the profile. **Inventory → Service schedule** reads it live, so if you
 change an interval here, every item using the profile follows at once. An entry
 with no interval shows as a job whose interval isn't set yet. It isn't skipped.
 An item can change a job's description or intervals, or mark it not applicable,
@@ -231,5 +231,5 @@ they don't yet change when a job falls due. See
 [Maintenance](../features/maintenance.md) and
 [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 
-There is no service-due alarm. Maintenance is a list and a service log, not a
-notification.
+There is no service-due alarm. The Service schedule is a list and a service log,
+not a notification.

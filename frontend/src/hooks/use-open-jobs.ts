@@ -63,18 +63,47 @@ const LOG = '/api/inventory/maintenance/log'
 const RULES = '/api/inventory/maintenance/rules'
 const NO_JOBS: OpenJob[] = []
 
+/** The Jobs badge's count (ADR 0293), the server's own answer. */
+export const JOBS_COUNT_QUERY = { queryKey: ['/api/inventory/jobs/count'], path: '/api/inventory/jobs/count' }
+
+/**
+ * Something the Jobs page shows may have changed: the open jobs, the service
+ * rules and the badge's count all read again. Every write that can move any of
+ * them calls this: open-job and maintenance writes, and equipment writes (an
+ * item's delete removes its jobs, storing it hides them, its profile decides its
+ * services). `skip` leaves matching list keys alone, for a deleted item's own
+ * filtered lists, which would only answer 404.
+ */
+export function invalidateJobsAndServices(skip?: (key: readonly unknown[]) => boolean): void {
+  if (skip) {
+    invalidateQueries([JOBS], skip)
+    invalidateQueries([RULES], skip)
+  } else {
+    invalidateQueries([JOBS])
+    invalidateQueries([RULES])
+  }
+  invalidateQueries(JOBS_COUNT_QUERY.queryKey)
+}
+
+/** The cache key and request path of a filtered open-jobs list, as useOpenJobs
+ * reads it. The Jobs page asks for the unfiltered one by building it here. */
+export function openJobsQuery(filter: OpenJobFilter): { queryKey: unknown[]; path: string } {
+  const params = new URLSearchParams()
+  if (filter.equipment) params.set('equipment', filter.equipment)
+  if (filter.system) params.set('system', filter.system)
+  if (filter.status) params.set('status', filter.status)
+  if (filter.includeStored) params.set('include_stored', 'true')
+  const qs = params.toString()
+  return {
+    queryKey: [JOBS, { equipment: filter.equipment ?? '', system: filter.system ?? '', status: filter.status ?? '', stored: filter.includeStored ?? false }],
+    path: `${JOBS}${qs ? `?${qs}` : ''}`,
+  }
+}
+
 /** GET /api/inventory/open-jobs. `filter === null` fetches nothing. */
 export function useOpenJobs(filter: OpenJobFilter | null) {
-  const params = new URLSearchParams()
-  if (filter?.equipment) params.set('equipment', filter.equipment)
-  if (filter?.system) params.set('system', filter.system)
-  if (filter?.status) params.set('status', filter.status)
-  if (filter?.includeStored) params.set('include_stored', 'true')
-  const qs = params.toString()
-
   const { data, error, isLoading, refetch } = useApiQuery<OpenJob[]>({
-    queryKey: [JOBS, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', status: filter?.status ?? '', stored: filter?.includeStored ?? false }],
-    path: `${JOBS}${qs ? `?${qs}` : ''}`,
+    ...openJobsQuery(filter ?? {}),
     enabled: filter !== null,
     select: (raw: { jobs?: OpenJob[] }) => raw.jobs ?? NO_JOBS,
   })
@@ -85,14 +114,14 @@ export function useOpenJobs(filter: OpenJobFilter | null) {
 /** POST /api/inventory/open-jobs */
 export async function createOpenJob(input: OpenJobInput): Promise<OpenJob> {
   const data = await apiRequest<{ job: OpenJob }>(JOBS, { method: 'POST', json: input })
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
   return data.job
 }
 
 /** PUT /api/inventory/open-jobs/:id */
 export async function updateOpenJob(id: string, input: OpenJobInput): Promise<OpenJob> {
   const data = await apiRequest<{ job: OpenJob }>(`${JOBS}/${encodeURIComponent(id)}`, { method: 'PUT', json: input })
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
   return data.job
 }
 
@@ -105,10 +134,10 @@ export async function completeOpenJob(
   const data = await apiRequest<{ job: OpenJob; entry: MaintenanceLogEntry }>(
     `${JOBS}/${encodeURIComponent(id)}/done`, { method: 'POST', json: input },
   )
-  invalidateQueries([JOBS])
+  // The entry's hours are the item's hand-read hours (ADR 0268): the helper
+  // reads the rules again too.
+  invalidateJobsAndServices()
   invalidateQueries([LOG])
-  // The entry's hours are the item's hand-read hours (ADR 0268).
-  invalidateQueries([RULES])
   return data
 }
 
@@ -118,7 +147,7 @@ export async function dropOpenJob(id: string, reason: string): Promise<OpenJob> 
   const data = await apiRequest<{ job: OpenJob }>(
     `${JOBS}/${encodeURIComponent(id)}/drop`, { method: 'POST', json: { reason } },
   )
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
   return data.job
 }
 
@@ -127,7 +156,7 @@ export async function uploadOpenJobPhoto(id: string, file: Blob, filename: strin
   const form = new FormData()
   form.append('file', file, filename)
   const data = await apiRequest<{ job: OpenJob }>(`${JOBS}/${encodeURIComponent(id)}/photos`, { method: 'POST', body: form })
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
   return data.job
 }
 
@@ -138,13 +167,13 @@ export async function deleteOpenJobPhoto(id: string, documentId: string, deleteP
   const data = await apiRequest<{ job: OpenJob }>(
     `${JOBS}/${encodeURIComponent(id)}/photos/${encodeURIComponent(documentId)}${qs}`, { method: 'DELETE' },
   )
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
   return data.job
 }
 
 /** A job changed outside this screen: Mate's Apply added one, or the Inbox filed photos on one. */
 export function openJobRecordApplied(): void {
-  invalidateQueries([JOBS])
+  invalidateJobsAndServices()
 }
 
 /** Whole days from the day the job opened to `today` (or to the day it was

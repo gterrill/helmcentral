@@ -16,8 +16,10 @@ export const INVENTORY_SECTIONS: Array<{ id: InventorySectionId; label: string }
   // designed-not-built (docs/features/inventory-tracking.md says so).
   { id: 'stocktake', label: 'Stocktake' },
   // ADR 0138: service rules and the log they're completed into - a
-  // plain sortable list, not a fifth index/editor split.
-  { id: 'maintenance', label: 'Maintenance' },
+  // plain sortable list, not a fifth index/editor split. ADR 0293: the
+  // operator reads "Service schedule"; the id and the /inventory/maintenance
+  // address stay, so saved links keep working.
+  { id: 'maintenance', label: 'Service schedule' },
   { id: 'profiles', label: 'Profiles' },
 ]
 

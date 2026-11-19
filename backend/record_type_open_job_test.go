@@ -131,7 +131,7 @@ func TestListMaintenance_ShowsOpenJobsWithTheirAge(t *testing.T) {
 	}
 	first := all.OpenJobs[0]
 	if first.Title != "Leaks at the outlet" || first.AgeDays != 12 || first.BeforeOn != "2026-10-15" || first.EquipmentName != "Shower pump" ||
-		first.Source != openJobSourceManual || first.Link != assistantMaintenanceLink {
+		first.Source != openJobSourceManual || first.Link != assistantJobsLink {
 		t.Fatalf("unexpected first open job: %+v", first)
 	}
 	if len(all.Rules) != 0 || all.Total != 0 {
@@ -160,6 +160,35 @@ func TestListMaintenance_ShowsOpenJobsWithTheirAge(t *testing.T) {
 	}
 	if len(due.OpenJobs) != 0 {
 		t.Fatalf("a job has no due status, so a status filter leaves them out, got %+v", due.OpenJobs)
+	}
+}
+
+// ADR 0293: open jobs live on the Jobs page, so that is where a card and a
+// tool row send the operator.
+func TestOpenJobLinksGoToTheJobsPage(t *testing.T) {
+	if assistantJobsLink != "/jobs" {
+		t.Fatalf("expected the Jobs page link, got %q", assistantJobsLink)
+	}
+	rt := openJobRecordType()
+	if got := rt.Href(recordSnapshot{}); got != "/jobs" {
+		t.Fatalf("expected the open_job record to link to /jobs, got %q", got)
+	}
+	if strings.Contains(rt.Summary, "Inventory, Maintenance") || !strings.Contains(rt.Summary, "Jobs page") {
+		t.Fatalf("expected the summary to name the Jobs page, got %q", rt.Summary)
+	}
+}
+
+func TestMaintenancePromptSendsOpenJobsToTheJobsPage(t *testing.T) {
+	stable, _ := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{"Service schedule", "Jobs page", "(/jobs)"} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prefix to contain %q", want)
+		}
+	}
+	for _, gone := range []string{"Inventory, Maintenance", "Helmcentral's Maintenance list"} {
+		if strings.Contains(stable, gone) {
+			t.Errorf("expected the stable prefix to no longer say %q", gone)
+		}
 	}
 }
 

@@ -144,7 +144,7 @@ export default [
     files: [
       'src/components/patterns/**/*.{ts,tsx}',
       'src/components/display-editor-panel.tsx',
-      'src/components/inventory/maintenance-section.tsx',
+      'src/components/inventory/maintenance-rules-table.tsx',
       'src/components/wall-displays-panel.tsx',
     ],
     rules: {

@@ -19,13 +19,13 @@ read-only session sees the card but has no buttons.
    you asked it to. Then it answers with a card under its reply.
 
 Give hours as the number on the gauge at the time, the same as the forms in
-Maintenance. If the item has had a meter replaced, Helmcentral keeps the
+the Service schedule. If the item has had a meter replaced, Helmcentral keeps the
 running total for you.
 
 ## Check the card
 
 Each change is one line, with the fields it sets listed under it: what a field
-is now and what it becomes. Read them the way you'd read the Maintenance list.
+is now and what it becomes. Read them the way you'd read the Service schedule.
 Here's what each kind of line means:
 
 - **Add:** These lines are new rules, such as "Add Generator · Belts: every 12
@@ -47,7 +47,7 @@ offer the same proposal again unless you ask.
 1. Tap **Apply**.
 2. Every line on the card is made together. If anything can't be made, none of
    it is, and the card says why.
-3. Once applied, each line links to **Inventory → Maintenance**, where the new
+3. Once applied, each line links to **Inventory → Service schedule**, where the new
    rules and their status are.
 
 If you tap Apply twice, or reload the page and tap it again, nothing is added
@@ -56,7 +56,7 @@ twice. An applied card stays applied.
 ## If Apply refuses
 
 Apply refuses if the schedule no longer matches the card. That happens when a
-rule was edited after Mate wrote the card, by you in Maintenance or from
+rule was edited after Mate wrote the card, by you in the Service schedule or from
 another device. It also happens when you added the same entries by hand in the
 meantime. Nothing is made. The card is marked **Out of date**, names the rule
 that changed, and stays that way when you reload the page. If you ask Mate to
@@ -66,7 +66,7 @@ redo it, it reads the schedule again and writes a fresh card.
 
 Mate can't delete a rule or a log entry, and it can't edit an entry already in
 the service log. It can't add photos or parts to a job, record a meter
-replacement or attach a procedure note either. Do those in **Inventory → Maintenance**. See
+replacement or attach a procedure note either. Do those in **Inventory → Service schedule**. See
 [Maintenance](../features/maintenance.md) for the whole feature, and
 [Set up a maintenance schedule](set-up-a-maintenance-schedule.md) for doing it
 by hand.

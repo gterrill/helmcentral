@@ -76,7 +76,7 @@ above.
 - **Dates in Maintenance and Mate:** Whether a service is due, due soon or
   overdue depends on today's date on the boat. Helmcentral works that date out
   from the boat's zone, and Mate uses the same one. Until the boat has reported
-  a position, the Maintenance page shows "the boat has not reported a position
+  a position, the Service schedule and the Jobs page show "the boat has not reported a position
   yet, so today's date on the boat is not known" instead of any statuses, and
   Mate says it can't work out a status. Saving a rule, a service or a hand
   reading, opening or dropping a job, and applying a change from Mate stop with
@@ -84,7 +84,7 @@ above.
   place with a depth either, because every change it makes is dated. Helmcentral doesn't fall back to the
   date on your device. If the boat has had a fix but its saved time zone can't
   be read, the words say that instead, with the reason.
-- **After midnight on the boat:** A Maintenance page left open, on the wall
+- **After midnight on the boat:** A Service schedule or Jobs page left open, on the wall
   screen for one, reads the list again when the boat's date turns over, so a
   service that falls due overnight shows as due.
 

@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
+import { JobsPage } from '@/components/jobs/jobs-page'
 import { MaintenanceEquipmentBlock } from '@/components/inventory/maintenance-equipment-block'
 import { PROPOSAL_REFRESH } from '@/lib/assistant-proposal-actions'
 import { stubApi } from '@/test/helpers/stub-api'
 import { makeProfileJob } from './maintenance-fixtures'
 
-// ADR 0269: where the Open jobs group sits. At the top of Inventory,
-// Maintenance, above Overdue, and on each item's own page.
+// ADR 0269, amended by ADR 0293: where the Open jobs group sits. On the Jobs
+// page and on each item's own page; no longer on the Service schedule.
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -18,26 +19,24 @@ const JOB = {
 }
 
 describe('Open jobs placement', () => {
-  it('sits above Overdue on the Maintenance list', async () => {
-    stubApi({
-      'GET /api/inventory/open-jobs': { jobs: [JOB] },
+  it('is not on the Service schedule', async () => {
+    const fetchMock = stubApi({
       'GET /api/inventory/maintenance/rules': { rules: [makeProfileJob({ description: 'Oil change', status: 'overdue' })], removed: [], schedule_errors: [] },
     })
     render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
-    const job = await screen.findByText('Weeping hose clamp')
-    const overdue = await screen.findByText('Oil change')
-    expect(job.compareDocumentPosition(overdue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /open jobs/i })).toBeInTheDocument()
+    await screen.findByText('Oil change')
+    expect(screen.queryByRole('heading', { name: /open jobs/i })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/inventory/open-jobs'))).toBe(false)
   })
 
-  it('is still there when no rule exists yet', async () => {
+  it('sits on the Jobs page', async () => {
     stubApi({
       'GET /api/inventory/open-jobs': { jobs: [JOB] },
       'GET /api/inventory/maintenance/rules': { rules: [], removed: [], schedule_errors: [] },
     })
-    render(<MaintenanceSection onOpenEquipment={vi.fn()} />)
+    render(<JobsPage onOpenEquipment={vi.fn()} onOpenServiceSchedule={vi.fn()} />)
     expect(await screen.findByText('Weeping hose clamp')).toBeInTheDocument()
-    expect(await screen.findByText(/no maintenance rules yet/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /open jobs/i })).toBeInTheDocument()
   })
 
   it('shows the items own open jobs on its page', async () => {
