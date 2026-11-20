@@ -23,14 +23,25 @@ Helmcentral also records how the boat moved between one position and the next:
 - Sway: how far she rolled and pitched, and how much she heaved up and down.
 - Rolling: how fast she rolled, and how sharply the roll changed.
 - Pounding: how hard she was pushed up and down, worked out from the heave.
+- Sideways g: the sideways push felt at the helm, in g, which is how hard the
+  roll throws someone standing there. Helmcentral works this out from how sharply she rolled and the
+  helm height you've entered, ready for the passage page to come. No screen
+  shows it yet. Leave the height blank and there's no figure. Change it and
+  every passage, old ones too, uses the new height. It takes the waterline as
+  the point she rolls about, so use it to compare one passage with another, not
+  as a measure of the load on a person.
 
 These come from the boat's attitude sensor, through a second connection to
 SignalK that listens to that sensor alone and takes every update the sensor
 sends. Sway is always recorded. The figures for how fast she rolled, how sharply
 the roll changed and how hard she pounded need the sensor to send at least 8
-times a second. Below that they're left empty rather than guessed. They're kept
-for scoring how comfortable a passage was, and the passage page doesn't show
-them yet.
+times a second. Below that they're left empty rather than guessed. To see how
+fast the sensor was sending, look at the **Motion feed** line under **Settings →
+SignalK**. It gives the rates from the last position Helmcentral recorded and
+how long ago that was, so it shows what the recording got. If the feed has gone
+quiet, never connected, or sends timestamps Helmcentral can't use, the line says
+so under the rates. They're kept for scoring how comfortable a passage was, and
+the passage page doesn't show them yet.
 
 This runs on its own whether or not anyone has a screen open, and it starts when
 Helmcentral does. A position with no GPS fix is left out. So is one that jumps

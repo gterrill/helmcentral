@@ -36,6 +36,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   InfluxDB keeps about one reading a second, so they stay empty on those
   passages. Nothing recorded live is changed, and a gap after this release stays
   empty. Without InfluxDB nothing happens.
+- **Enter your helm height to get the sideways push felt at the helm.** Under
+  **Settings → Vessel → Particulars**, **Helm height above the waterline (m)**
+  turns how sharply the boat rolled into the sideways push at the helm, in g.
+  It's blank until you fill it in, and with it blank there's no figure. Change
+  it and every passage, old ones too, uses the new height. No screen shows the
+  figure yet.
+- **Settings → SignalK shows how fast the attitude sensor was sending.** The new
+  **Motion feed** line gives the attitude and heave rates from the last position
+  Helmcentral recorded and how long ago that was, like "attitude 10 Hz (12 s
+  ago)". Below 8 times a second it says that roll sharpness and pounding aren't
+  being recorded. If the feed has never connected, has gone quiet, or sends
+  timestamps Helmcentral can't use, it says why.
 
 ### Changed
 

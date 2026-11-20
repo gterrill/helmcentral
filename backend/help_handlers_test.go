@@ -156,7 +156,7 @@ func TestHelpRoute_RegisteredAtTierReadAndMatchesNestedWildcard(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	registry := registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
+	registry := registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()))
 
 	tier, ok := registry[http.MethodGet+" /api/help/*"]
 	if !ok {

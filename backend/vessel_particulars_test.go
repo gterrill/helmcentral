@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -155,6 +156,39 @@ func TestVesselParticulars_OwnerAndInsuranceRoundTrip(t *testing.T) {
 		if !asVesselParticularsError(err, &verr) || verr.Field != field {
 			t.Fatalf("%s: expected a field error, got %v", field, err)
 		}
+	}
+}
+
+func TestVesselParticulars_HelmHeightIsBlankOrAPositiveHeightUpToThirtyMetres(t *testing.T) {
+	store := newTestDocumentStore(t)
+	got, err := store.GetVesselParticulars()
+	if err != nil || got.HelmHeightM != nil {
+		t.Fatalf("a new boat has no helm height, got %+v err=%v", got.HelmHeightM, err)
+	}
+	h := 3.4
+	saved, err := store.SetVesselParticulars(vesselParticulars{HelmHeightM: &h})
+	if err != nil || saved.HelmHeightM == nil || *saved.HelmHeightM != 3.4 {
+		t.Fatalf("round trip = %+v err=%v", saved.HelmHeightM, err)
+	}
+	cleared, err := store.SetVesselParticulars(vesselParticulars{})
+	if err != nil || cleared.HelmHeightM != nil {
+		t.Fatalf("blank clears it, got %v err=%v", cleared.HelmHeightM, err)
+	}
+	for _, bad := range []float64{0, -1, 30.1, math.NaN(), math.Inf(1)} {
+		bad := bad
+		_, err := store.SetVesselParticulars(vesselParticulars{HelmHeightM: &bad})
+		var verr *vesselParticularsError
+		if !asVesselParticularsError(err, &verr) || verr.Field != "helm_height_m" || verr.Message == "" {
+			t.Errorf("%v: expected a helm_height_m field error, got %v", bad, err)
+			continue
+		}
+		if want := "helm height must be above 0 and at most 30 metres"; verr.Message != want {
+			t.Errorf("%v: message %q, want %q", bad, verr.Message, want)
+		}
+	}
+	top := 30.0
+	if _, err := store.SetVesselParticulars(vesselParticulars{HelmHeightM: &top}); err != nil {
+		t.Errorf("30 m is the limit and is allowed: %v", err)
 	}
 }
 

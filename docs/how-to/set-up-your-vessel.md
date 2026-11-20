@@ -413,3 +413,21 @@ they are worth entering once. None of them is needed for anomaly detection.
 
 Leave a field blank if you don't want Mate to use it. It asks instead. See
 [Fill in a form with Mate](fill-in-a-form-with-mate.md).
+
+## Helm height
+
+Helmcentral turns how sharply the boat rolls into the sideways push you feel at
+the helm, in g. For that it needs to know how high the helm sits above the
+waterline. There's no standard figure for a boat, so it doesn't guess one.
+
+1. Open **Settings → Vessel** and find **Particulars**.
+2. In **Helm height above the waterline (m)**, enter the height in metres,
+   measured from the waterline up to where you stand or sit at the helm. It
+   must be more than 0 and no more than 30. Leave it blank if you'd rather not
+   set it.
+3. Choose **Save** in the bar across the top of the screen.
+
+Until you enter a height, there's no sideways g for any passage. Change it
+later and every passage, old ones included, uses the new height straight away,
+because Helmcentral works the figure out each time it reads one. No screen shows
+it yet. For how the figure behaves, see [Passages](../features/passages.md).

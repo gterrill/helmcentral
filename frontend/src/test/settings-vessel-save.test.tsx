@@ -69,7 +69,7 @@ let settingsFixture = defaultSettings()
 const particularsStored = {
   builder: 'Granocean', model: 'W-60', year: 2024, hin: '', flag: 'Cook Islands', hailing_port: '',
   hull_type: '', hull_material: '', displacement_kg: null, shore_power: '', system_voltage: '',
-  registration: '', imo: '', epirb_id: '', date_acquired: '', loa_m: null, beam_m: null, owner_name: '', owner_phone: '', owner_email: '', insurer: '', policy_number: '', home_marina: '', berth: '', storm_delegate: '', updated_at: '2026-10-01T05:00:00Z',
+  registration: '', imo: '', epirb_id: '', date_acquired: '', loa_m: null, beam_m: null, helm_height_m: null, owner_name: '', owner_phone: '', owner_email: '', insurer: '', policy_number: '', home_marina: '', berth: '', storm_delegate: '', updated_at: '2026-10-01T05:00:00Z',
 }
 
 const bankItem = {
@@ -216,6 +216,30 @@ describe('Settings -> Vessel and the Save bar', () => {
 
     fireEvent.click(saveBar().getByRole('button', { name: 'Discard' }))
     await waitFor(() => expect((screen.getByLabelText('Year built') as HTMLInputElement).value).toBe('2024'))
+  })
+
+  const HELM = 'Helm height above the waterline (m)'
+  const helmMessage = 'helm height must be above 0 and at most 30 metres'
+
+  it.each(['0', '-2', '31'])('refuses a helm height of %s before sending anything, in the server\'s words', async (value) => {
+    await openVessel()
+    fireEvent.change(screen.getByLabelText(HELM), { target: { value } })
+
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveBar().getByRole('alert')).toHaveTextContent(helmMessage))
+    expect(screen.getAllByText(helmMessage).length).toBeGreaterThanOrEqual(2)
+    expect(putCalls()).toHaveLength(0)
+  })
+
+  it.each([['0.05', 0.05], ['1.25', 1.25]])('sends a helm height of %s', async (value, sent) => {
+    await openVessel()
+    fireEvent.change(screen.getByLabelText(HELM), { target: { value } })
+
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(putCalls()).toHaveLength(1))
+    expect(JSON.parse(String((putCalls()[0][1] as RequestInit).body))).toMatchObject({ helm_height_m: sent })
   })
 })
 

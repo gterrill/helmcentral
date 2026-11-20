@@ -1,5 +1,5 @@
 import { FormRow, FormSection } from '@/components/patterns'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useVesselFields } from '@/hooks/use-vessel-state'
 
@@ -159,6 +159,23 @@ export function VesselParticularsForm() {
               {...invalidProps('beam_m')}
             />
             {fieldErrorText('beam_m')}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="particulars-helm-height">Helm height above the waterline (m)</FieldLabel>
+            <Input
+              id="particulars-helm-height"
+              type="number"
+              max={30}
+              step="any"
+              value={draft.helm_height_m ?? ''}
+              onChange={(e) => update({ helm_height_m: numberOrNull(e.target.value) })}
+              {...invalidProps('helm_height_m')}
+            />
+            <FieldDescription>
+              Turns how sharply the boat rolls into the sideways push felt at the helm, in g, on each passage. Leave
+              blank and no sideways g is shown.
+            </FieldDescription>
+            {fieldErrorText('helm_height_m')}
           </Field>
           <Field>
             <FieldLabel htmlFor="particulars-date-acquired">Date acquired</FieldLabel>

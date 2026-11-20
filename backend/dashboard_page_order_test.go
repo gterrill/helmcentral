@@ -171,7 +171,7 @@ func TestDashboardPageOrder_MigratesUnpositionedPagesDeterministically(t *testin
 
 func TestDashboardPageOrder_ProductionRouteRequiresWriteAccess(t *testing.T) {
 	sessions := newTestSessionStore(t)
-	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		if route.Method == http.MethodPut && route.Path == "/api/dashboard-pages/order" {
 			if route.Tier != tierWrite {
 				t.Fatalf("reorder route tier = %v, want tierWrite", route.Tier)

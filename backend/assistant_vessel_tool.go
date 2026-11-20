@@ -44,6 +44,7 @@ var vesselParticularsLabels = []vesselParticularsLabel{
 	{"insurer", "Insurer"}, {"policy_number", "Policy number"},
 	{"home_marina", "Home marina"}, {"berth", "Berth"}, {"storm_delegate", "Storm delegate"},
 	{"loa_m", "Length overall (m)"}, {"beam_m", "Beam (m)"},
+	{"helm_height_m", "Helm height above the waterline (m)"},
 	{"builder", "Builder"}, {"model", "Model"}, {"year", "Year built"}, {"hin", "Hull ID (HIN)"},
 	{"flag", "Flag"}, {"hailing_port", "Hailing port"}, {"hull_type", "Hull type"}, {"hull_material", "Hull material"},
 	{"displacement_kg", "Displacement (kg)"}, {"registration", "Registration"}, {"imo", "IMO number"},

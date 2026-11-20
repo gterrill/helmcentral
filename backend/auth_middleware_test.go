@@ -168,7 +168,7 @@ func TestAPIRouteCoverage_EveryRegisteredAPIRouteHasATier(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient())
+	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator())
 	registry := registerAPIRoutes(e, sessions, routes)
 	registerStaticHandler(e)
 
@@ -195,7 +195,7 @@ func TestAPIRouteCoverage_EveryRegisteredAPIRouteHasATier(t *testing.T) {
 // error in the route table silently shadowing an earlier tier assignment.
 func TestAPIRouteCoverage_NoDuplicateMethodPathEntries(t *testing.T) {
 	sessions := newTestSessionStore(t)
-	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient())
+	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator())
 
 	seen := make(map[string]bool, len(routes))
 	for _, route := range routes {
@@ -214,7 +214,7 @@ func TestAPIRouteCoverage_NoDuplicateMethodPathEntries(t *testing.T) {
 // tier, exactly the wrong direction to fail silently toward.
 func TestAPIRouteCoverage_EveryProductionRouteHasAnExplicitTier(t *testing.T) {
 	sessions := newTestSessionStore(t)
-	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient())
+	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator())
 
 	for _, route := range routes {
 		switch route.Tier {

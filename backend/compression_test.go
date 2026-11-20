@@ -354,7 +354,7 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 // uncompressed.
 func TestCompression_SkipListMatchesRegisteredRoutes(t *testing.T) {
 	sessions := newTestSessionStore(t)
-	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient())
+	routes := buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator())
 	registered := make(map[string]bool, len(routes))
 	for _, r := range routes {
 		registered[r.Path] = true

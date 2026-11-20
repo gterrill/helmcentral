@@ -74,7 +74,7 @@ func TestBuildAPIRoutes_ComposesEveryFeatureRoutesFunc(t *testing.T) {
 func TestBuildAPIRoutes_AdminPrefixesAreAdminTier(t *testing.T) {
 	sessions := newTestSessionStore(t)
 	seen := 0
-	for _, r := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+	for _, r := range buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		admin := r.Path == "/api/settings" ||
 			strings.HasPrefix(r.Path, "/api/settings/") ||
 			strings.HasPrefix(r.Path, "/api/plugins/") ||

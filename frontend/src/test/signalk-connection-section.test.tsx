@@ -254,6 +254,94 @@ describe('SignalKConnectionSection', () => {
     expect(buildRegularSettingsPatch(latestDraft()).engines).toEqual({ mark_stopped_when_silent: true })
   })
 
+  describe('Motion feed', () => {
+    function stubMotionFeed(body: Record<string, unknown>, ok = true) {
+      stubFetch((url) => {
+        if (url.includes('/api/signalk/motion-feed')) return { ok, json: async () => body }
+        return secretsResponse
+      })
+    }
+    const feed = {
+      connected: true,
+      attitude_hz: 10, attitude_recorded_ago_s: 12, attitude_last_sample_s: 0,
+      heave_hz: 10, heave_recorded_ago_s: 12, heave_last_sample_s: 3,
+    }
+    const none = {
+      attitude_hz: null, attitude_recorded_ago_s: null, attitude_last_sample_s: null,
+      heave_hz: null, heave_recorded_ago_s: null, heave_last_sample_s: null,
+    }
+
+    it('says the rates the recorder stored, how long ago, and how long since each last sample', async () => {
+      stubMotionFeed(feed)
+      renderSection()
+      expect(
+        await screen.findByText(
+          'Motion feed: attitude 10 Hz, recorded 12s ago, last sample 0s ago; heave 10 Hz, recorded 12s ago, last sample 3s ago',
+        ),
+      ).toBeInTheDocument()
+    })
+
+    it("shows the server's rate as sent, without rounding it again", async () => {
+      stubMotionFeed({ ...feed, attitude_hz: 8, attitude_reason: 'The last recorded position had attitude under 8 Hz, so it was not worked out.' })
+      renderSection()
+      expect(await screen.findByText(/attitude 8 Hz, recorded 12s ago/)).toBeInTheDocument()
+      expect(screen.getByText('The last recorded position had attitude under 8 Hz, so it was not worked out.')).toBeInTheDocument()
+    })
+
+    it('says an old recording is old', async () => {
+      stubMotionFeed({ ...feed, attitude_recorded_ago_s: 300, heave_recorded_ago_s: 7200 })
+      renderSection()
+      expect(await screen.findByText(/attitude 10 Hz, recorded 5m ago.*heave 10 Hz, recorded 2h ago/)).toBeInTheDocument()
+    })
+
+    it('says a window was taken but no rate could be measured, with its age', async () => {
+      stubMotionFeed({ ...feed, attitude_hz: null, attitude_reason: 'Attitude samples are arriving, but no rate could be measured.' })
+      renderSection()
+      expect(
+        await screen.findByText(/attitude: no rate could be measured, window taken 12s ago, last sample 0s ago/),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/no attitude rate recorded yet/)).not.toBeInTheDocument()
+    })
+
+    it("shows each signal's reason, heave as well as attitude", async () => {
+      stubMotionFeed({
+        ...feed, heave_hz: 5,
+        heave_reason: 'The last recorded position had heave under 8 Hz, so pounding from heave was not recorded.',
+        attitude_reason: 'No attitude has arrived for 9 seconds.',
+      })
+      renderSection()
+      expect(await screen.findByText('No attitude has arrived for 9 seconds.')).toBeInTheDocument()
+      expect(screen.getByText('The last recorded position had heave under 8 Hz, so pounding from heave was not recorded.')).toBeInTheDocument()
+    })
+
+    it('says a signal has no recorded rate yet', async () => {
+      stubMotionFeed({ ...feed, heave_hz: null, heave_recorded_ago_s: null, heave_last_sample_s: null, heave_reason: 'Connected, but SignalK has sent no heave since the stream opened.' })
+      renderSection()
+      expect(await screen.findByText(/heave: no position recorded yet, no sample yet/)).toBeInTheDocument()
+      expect(screen.getByText('Connected, but SignalK has sent no heave since the stream opened.')).toBeInTheDocument()
+    })
+
+    it('waits for the first recorded position instead of showing a rate', async () => {
+      stubMotionFeed({ connected: true, ...none })
+      renderSection()
+      expect(
+        await screen.findByText('Motion feed: attitude: no position recorded yet, no sample yet; heave: no position recorded yet, no sample yet'),
+      ).toBeInTheDocument()
+    })
+
+    it('gives the reason when the stream is not connected', async () => {
+      stubMotionFeed({ connected: false, ...none, reason: 'Helmcentral has never connected to the SignalK motion stream.' })
+      renderSection()
+      expect(await screen.findByText('Motion feed: not connected. Helmcentral has never connected to the SignalK motion stream.')).toBeInTheDocument()
+    })
+
+    it('shows the error instead of guessing when the status cannot be read', async () => {
+      stubMotionFeed({ error: 'the motion feed is not running' }, false)
+      renderSection()
+      expect(await screen.findByText(/Motion feed: could not be read/)).toBeInTheDocument()
+    })
+  })
+
   it('does not render a forecast refresh input — the poll interval is a hardcoded constant now', () => {
     stubFetch(() => secretsResponse)
 

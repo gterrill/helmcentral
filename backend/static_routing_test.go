@@ -29,7 +29,7 @@ func TestStaticHandler_ServesDashboardAtRoot(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()))
 	registerStaticHandlerFS(e, testDistFS())
 
 	rec := httptest.NewRecorder()
@@ -87,7 +87,7 @@ func TestStaticHandler_APIRoutesStillWin(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()))
 	registerStaticHandlerFS(e, testDistFS())
 
 	rec := httptest.NewRecorder()
@@ -185,7 +185,7 @@ func TestStaticHandler_HeadMatchesGet(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()))
 	registerStaticHandlerFS(e, testDistFS())
 
 	for _, path := range []string{"/", "/display/flybridge", "/assets/index-abc.js", "/api/no-such-endpoint"} {
@@ -215,7 +215,7 @@ func TestStaticHandler_HeadOnAPIRouteIsNotTheShell(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()))
 	registerStaticHandlerFS(e, testDistFS())
 
 	// /api/watches/a%2Fb only reaches /api/watches/:id when the lookup routes

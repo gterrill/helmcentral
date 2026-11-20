@@ -311,7 +311,7 @@ func TestBuildAPIRoutes_DisplayProbeRouteIsPublic(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	got := map[string]apiTier{}
-	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		got[route.Method+" "+route.Path] = route.Tier
 	}
 
