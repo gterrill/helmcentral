@@ -217,8 +217,9 @@ sampling at 50 to 100 Hz, which is a later hardware change.
   default.
 - Not a comfort verdict. These are the measurements a verdict will be fitted
   to.
-- Not backfilled. A passage recorded before this change has the ADR 0294
-  peaks at most, and the RMS-only history in InfluxDB is a separate change.
+- Not backfilled here. A passage recorded before this change has the ADR 0294
+  peaks at most. [ADR 0296](0296-passage-motion-is-backfilled-from-influxdb-history.md)
+  fills the RMS-only history from InfluxDB.
 - Not a change to the main stream's rate or to what the shared snapshot sees.
 
 ## When it can't run

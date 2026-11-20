@@ -41,8 +41,48 @@ point. It is never copied from an earlier one, so the page shows `--` rather
 than a figure that might be wrong.
 
 Motion, heading, wind angle, speed through the water and engine speed are only
-recorded from the release that added them. Earlier passages show **Motion not
-recorded for this passage**, and Helmcentral doesn't make a figure up for them.
+recorded live from the release that added them. Earlier passages show **Motion
+not recorded for this passage**, and Helmcentral doesn't make a figure up for
+them.
+
+If you've set up InfluxDB, Helmcentral goes back over the positions it logged
+before this release and fills them in from the history InfluxDB kept, as far
+back as that history goes:
+
+- Sway: for each position it looks at the minute of readings before it and works
+  out how far she rolled and pitched and how much she heaved. InfluxDB keeps
+  about one reading a second, so the biggest roll, pitch and heave stay empty.
+- Rolling and pounding: how fast she rolled, how sharply the roll changed and how
+  hard she pounded can't be recovered from history. They need readings at 8 times
+  a second or more, and InfluxDB only kept one a second, so these positions leave
+  them empty. The figures say the sensor was read at about once a second.
+- Heading, wind angle, speed through the water and engine speed: filled in from
+  the latest reading from the 10 seconds up to that position, never one taken
+  after it, as when Helmcentral recorded it live. This is filled in even where the
+  attitude sensor kept nothing. Engine speed is left empty when an
+  engine's reading is missing at that moment, because InfluxDB can't tell an
+  engine that was switched off from one that stopped reporting.
+- Without InfluxDB: nothing is filled in. Helmcentral says so in its log each
+  time it starts and carries on.
+- If InfluxDB refuses the connection, the token or the bucket: Helmcentral logs
+  one line and stops for that start. Nothing is marked as tried, so it asks
+  again at the next start.
+
+This only covers positions logged before the live motion feed first started.
+Helmcentral works that out from the first position that has live figures, so it
+doesn't depend on the clock having been right. A
+stretch after that where the feed was silent stays empty, so you can see that it
+was. Helmcentral only fills the blanks in a position, so it never changes
+anything that was recorded live. InfluxDB drops old readings after its retention
+period, so the older the passage, the less there is to find. A stretch InfluxDB
+has nothing for is noted and not asked about again.
+
+Helmcentral works through the older positions on each start until every one has
+been tried, and then it stops for good and says in its log that it's finished. If
+InfluxDB can't be reached, it gives up for that start and tries again the next
+time Helmcentral starts. If InfluxDB can be reached but can't answer for one
+stretch, that stretch is left as it was and tried again on the next start, and
+the stretches after it are still filled in.
 
 The log begins on the day you install the release that adds it. Earlier trips
 can be added from a chartplotter's GPX files, see

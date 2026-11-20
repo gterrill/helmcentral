@@ -53,15 +53,8 @@ type recordedTrackPoint struct {
 	// every point taken before this was recorded.
 	motionFigures
 
-	// What else the boat was doing, from the shared snapshot at this point,
-	// for the fits that relate comfort and speed to heading, wind angle and
-	// throttle. HeadingDeg is true, 0 to 360. TWADeg is the true wind angle
-	// through the water, signed, positive from starboard. RPMMean is the mean
-	// across the engines that are running. Nil when not published or too old.
-	HeadingDeg *float64 `json:"heading_deg"`
-	TWADeg     *float64 `json:"twa_deg"`
-	STWKts     *float64 `json:"stw_kts"`
-	RPMMean    *float64 `json:"rpm_mean"`
+	// What else the boat was doing, from the shared snapshot at this point.
+	trackContext
 
 	// AnchorSetAt is when the anchor watch in force at this moment was set.
 	// The detector ends a passage when it sees a value later than the
@@ -179,7 +172,8 @@ func createPassageSchema(db *sql.DB) error {
 			heading_deg REAL,
 			twa_deg REAL,
 			stw_kts REAL,
-			rpm_mean REAL
+			rpm_mean REAL,
+			motion_backfill_ms INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_track_points_t ON track_points(t_ms)`,
 		`CREATE TABLE IF NOT EXISTS cruises (
@@ -225,6 +219,11 @@ func createPassageSchema(db *sql.DB) error {
 			error_class TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (cruise_id, at_ms)
 		)`,
+		// Two moments of the motion backfill (ADR 0296), each written once.
+		`CREATE TABLE IF NOT EXISTS passage_motion_state (
+			key TEXT PRIMARY KEY,
+			at_ms INTEGER NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS passage_detector_state (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			resume_ms INTEGER NOT NULL
@@ -268,6 +267,11 @@ func createPassageSchema(db *sql.DB) error {
 		if err := ensureColumn(db, "track_points", c.name, "REAL"); err != nil {
 			return err
 		}
+	}
+	// When the motion backfill last asked InfluxDB about this point (ADR 0296),
+	// so a point it had nothing for is not asked about again at every start.
+	if err := ensureColumn(db, "track_points", "motion_backfill_ms", "INTEGER"); err != nil {
+		return err
 	}
 	return addPassageNameAttemptColumn(db)
 }

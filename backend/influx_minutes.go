@@ -98,18 +98,37 @@ type normalMinuteRow struct {
 // labels each minute with its first instant, which is how the trainer joins
 // minutes. It is a pure function so its escaping can be tested without InfluxDB.
 func buildNormalMinutesFlux(bucket, field string, paths []string, start, stop time.Time) (string, error) {
-	if len(paths) == 0 {
+	head, err := buildFloatRowsFlux(bucket, field, paths, "", start, stop)
+	if err != nil {
+		return "", err
+	}
+	return head + ` |> aggregateWindow(every: 1m, fn: mean, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value", "_measurement", "source"])`, nil
+}
+
+// buildFloatRowsFlux builds the part of a query both readers share: the float
+// readings of several measurements over [start, stop), unaggregated. pattern is
+// an optional anchored regular expression (without its slashes) for measurements
+// that are not listed by name, such as every engine's revolutions. The caller
+// appends what to do with the rows, and keeps the measurement and source tag.
+func buildFloatRowsFlux(bucket, field string, paths []string, pattern string, start, stop time.Time) (string, error) {
+	if len(paths) == 0 && pattern == "" {
 		return "", errors.New("no paths to read")
 	}
 	// An OR chain of equalities is pushed down to storage. contains() is not, and
 	// scans every series in the bucket.
-	alternatives := make([]string, len(paths))
-	for i, p := range paths {
+	alternatives := make([]string, 0, len(paths)+1)
+	for _, p := range paths {
 		lit, err := fluxStringLiteral(p)
 		if err != nil {
 			return "", fmt.Errorf("path: %w", err)
 		}
-		alternatives[i] = "r._measurement == " + lit
+		alternatives = append(alternatives, "r._measurement == "+lit)
+	}
+	if pattern != "" {
+		if strings.Contains(pattern, "/") {
+			return "", errors.New("pattern: a slash would end the expression")
+		}
+		alternatives = append(alternatives, "r._measurement =~ /"+pattern+"/")
 	}
 	bucketLiteral, err := fluxStringLiteral(bucket)
 	if err != nil {
@@ -120,9 +139,9 @@ func buildNormalMinutesFlux(bucket, field string, paths []string, start, stop ti
 		return "", fmt.Errorf("field: %w", err)
 	}
 	// SignalK also logs words and on/off flags, and a mean of those fails the whole
-	// query, so only floats go on to be averaged (the how-to's own task does the same).
+	// query, so only floats go on to be read (the how-to's own task does the same).
 	return fmt.Sprintf(
-		`import "types"`+"\n"+`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => (%s) and r._field == %s) |> filter(fn: (r) => types.isType(v: r._value, type: "float")) |> aggregateWindow(every: 1m, fn: mean, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value", "_measurement", "source"])`,
+		`import "types"`+"\n"+`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => (%s) and r._field == %s) |> filter(fn: (r) => types.isType(v: r._value, type: "float"))`,
 		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), strings.Join(alternatives, " or "), fieldLiteral,
 	), nil
 }
@@ -132,6 +151,8 @@ type normalInflux struct {
 	client     influxdb2.Client
 	org        string
 	mainBucket string
+	// field is the InfluxDB field the readings are stored under.
+	field string
 	// close ends a connection opened for this run. It is nil for one that is shared.
 	close func()
 }
@@ -150,25 +171,33 @@ var openNormalInflux = func(settingsPath string) (normalInflux, error) {
 		return normalInflux{}, errNormalNoInflux
 	}
 	client := influxdb2.NewClient(cfg.URL, cfg.Token)
-	return normalInflux{client: client, org: cfg.Org, mainBucket: cfg.Bucket, close: client.Close}, nil
+	return normalInflux{
+		client: client, org: cfg.Org, mainBucket: cfg.Bucket,
+		field: trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value")),
+		close: client.Close,
+	}, nil
 }
 
 // runNormalMinutesQuery is one chunk's I/O, a variable so a test can answer it
 // without InfluxDB (the same seam idiom as fetchInfluxRangeChunked).
 var runNormalMinutesQuery = func(ctx context.Context, in normalInflux, src normalSource, paths []string, from, to time.Time) ([]normalMinuteRow, error) {
-	client, org, mainBucket := in.client, in.org, in.mainBucket
-	bucket := mainBucket
+	bucket := in.mainBucket
 	if src.Kind == normalSourceMinuteBucket {
 		bucket = src.Bucket
 	}
-	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
-	flux, err := buildNormalMinutesFlux(bucket, field, paths, from, to)
+	flux, err := buildNormalMinutesFlux(bucket, in.field, paths, from, to)
 	if err != nil {
 		return nil, err
 	}
+	return queryFloatRows(ctx, in, flux)
+}
+
+// queryFloatRows runs one Flux query and returns its float rows with the
+// measurement (the path) and the source tag.
+func queryFloatRows(ctx context.Context, in normalInflux, flux string) ([]normalMinuteRow, error) {
 	ctx, cancel := context.WithTimeout(ctx, normalMinutesTimeout)
 	defer cancel()
-	result, err := client.QueryAPI(org).Query(ctx, flux)
+	result, err := in.client.QueryAPI(in.org).Query(ctx, flux)
 	if err != nil {
 		return nil, err
 	}
