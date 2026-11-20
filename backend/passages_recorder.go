@@ -36,12 +36,11 @@ type trackSample struct {
 	// RollDeg, PitchDeg and HeaveM are the boat's attitude on this tick, signed.
 	// The recorder keeps the largest magnitude between kept points.
 	RollDeg, PitchDeg, HeaveM *float64
-	// HeadingDeg (true, 0 to 360), TWADeg (true wind angle, signed), STWKts and
-	// RPMMean (across the engines that are running) are kept as read on the
-	// tick that becomes a point, like SOG.
-	HeadingDeg, TWADeg, STWKts, RPMMean *float64
-	GenState                            *string
-	AnchorSetAt                         *time.Time
+	// The context readings are kept as read on the tick that becomes a point,
+	// like SOG.
+	trackContext
+	GenState    *string
+	AnchorSetAt *time.Time
 }
 
 type trackRecorder struct {
@@ -167,7 +166,7 @@ func (r *trackRecorder) keep(s trackSample) (bool, error) {
 		SoCPct: s.SoCPct, FuelLph: s.FuelLph, WaterL: s.WaterL,
 		GenState: s.GenState, AnchorSetAt: s.AnchorSetAt,
 		RollPeakDeg: r.peakRoll, PitchPeakDeg: r.peakPitch, HeavePeakM: r.peakHeave,
-		HeadingDeg: s.HeadingDeg, TWADeg: s.TWADeg, STWKts: s.STWKts, RPMMean: s.RPMMean,
+		trackContext: s.trackContext,
 	}
 	// The window is taken before the write, and the motion filter keeps its
 	// history either way. A failed write loses this window's figures where the

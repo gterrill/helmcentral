@@ -26,6 +26,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   how hard she pounded. Helmcentral opens a second connection to SignalK for
   the motion, so it can hear the attitude sensor every time it sends. Nothing
   shows on screen yet.
+- **Older passages get their sway back from InfluxDB.** If InfluxDB is set up,
+  Helmcentral goes through the positions logged before this release, as far back
+  as the InfluxDB history goes, and fills in how much the boat rolled and pitched
+  and how much she heaved, plus heading, wind angle, speed through the water and
+  engine speed where InfluxDB has them. It keeps going on each start until every
+  one of those positions has been tried, then stops. How fast she rolled, how
+  sharply the roll changed and pounding can't be recovered from history, because
+  InfluxDB keeps about one reading a second, so they stay empty on those
+  passages. Nothing recorded live is changed, and a gap after this release stays
+  empty. Without InfluxDB nothing happens.
 
 ### Changed
 

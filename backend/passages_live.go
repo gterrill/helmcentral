@@ -114,11 +114,46 @@ func trackMeanRPM(read alarmReader, revolutionPaths []string, now time.Time) *fl
 // A path that has stopped reporting stays in the list and nulls the fuel total
 // and the rpm mean: a dead engine feed must show.
 func revolutionPaths(t telemetryReader) []string {
-	return leafPathsUnder(t, "propulsion", func(path string) bool {
-		// Only propulsion.<id>.revolutions is an engine; a drive or shaft path
-		// deeper in the branch is not another one.
-		return strings.Count(path, ".") == 2 && isEngineRevolutionsPath(path)
-	})
+	return leafPathsUnder(t, "propulsion", isEngineRevolutionsLeaf)
+}
+
+// isEngineRevolutionsLeaf says whether path is an engine's revolutions. Only
+// propulsion.<id>.revolutions is an engine; a drive or shaft path deeper in the
+// branch is not another one. The InfluxDB backfill filters its rows by it too.
+func isEngineRevolutionsLeaf(path string) bool {
+	return strings.Count(path, ".") == 2 && isEngineRevolutionsPath(path)
+}
+
+// trackContext is what else the boat was doing at a point, for the fits that
+// relate comfort and speed to heading, wind angle and throttle. HeadingDeg is
+// true, 0 to 360. TWADeg is the true wind angle through the water, signed,
+// positive from starboard. RPMMean is the mean across the engines that are
+// running. Nil when not published or too old. It is embedded in trackSample and
+// recordedTrackPoint, so a new reading is added here once; the JSON stays flat.
+type trackContext struct {
+	HeadingDeg *float64 `json:"heading_deg"`
+	TWADeg     *float64 `json:"twa_deg"`
+	STWKts     *float64 `json:"stw_kts"`
+	RPMMean    *float64 `json:"rpm_mean"`
+}
+
+// readTrackContext reads heading, true wind angle, speed through the water and
+// mean rpm the one way a point has them, live and in the InfluxDB backfill, so a
+// rule change reaches both.
+func readTrackContext(read alarmReader, revolutionPaths []string, now time.Time) trackContext {
+	var c trackContext
+	if hdg := freshPtr(read, trackHeadingPath, now, 180/math.Pi); hdg != nil {
+		deg := normalizeDegrees(*hdg)
+		c.HeadingDeg = &deg
+	}
+	if twa := freshPtr(read, trackTWAPath, now, 180/math.Pi); twa != nil {
+		// To (-180, 180]: a source that sends 0 to 2 pi means the same angle.
+		deg := normalizeSignedDegrees(*twa)
+		c.TWADeg = &deg
+	}
+	c.STWKts = freshPtr(read, trackSTWPath, now, metersPerSecondToKnots)
+	c.RPMMean = trackMeanRPM(read, revolutionPaths, now)
+	return c
 }
 
 // fuelRatePaths finds every engine's burn path the same way, by
@@ -201,17 +236,7 @@ func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBan
 		deg := math.Mod(*cog+360, 360)
 		s.COGDeg = &deg
 	}
-	if hdg := freshPtr(read, trackHeadingPath, now, 180/math.Pi); hdg != nil {
-		deg := normalizeDegrees(*hdg)
-		s.HeadingDeg = &deg
-	}
-	if twa := freshPtr(read, trackTWAPath, now, 180/math.Pi); twa != nil {
-		// To (-180, 180]: a source that sends 0 to 2 pi means the same angle.
-		deg := normalizeSignedDegrees(*twa)
-		s.TWADeg = &deg
-	}
-	s.STWKts = freshPtr(read, trackSTWPath, now, metersPerSecondToKnots)
-	s.RPMMean = trackMeanRPM(read, revolutionPaths(telemetry), now)
+	s.trackContext = readTrackContext(read, revolutionPaths(telemetry), now)
 	s.RollDeg, s.PitchDeg = attitudeDegrees(telemetry, now)
 	s.HeaveM = freshPtr(read, trackHeavePath, now, 1)
 	if houseBankPath != "" {

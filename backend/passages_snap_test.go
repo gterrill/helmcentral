@@ -92,7 +92,7 @@ func TestSnapAndContextColumnsRoundTripThroughTheStore(t *testing.T) {
 	store := newTestPassageStore(t)
 	p := recordedTrackPoint{
 		At: passageEpoch, Lat: -20, Lon: 149, motionFigures: allMotionFigures(),
-		HeadingDeg: pfloat(12), TWADeg: pfloat(-130), STWKts: pfloat(8.2), RPMMean: pfloat(1795),
+		trackContext: trackContext{HeadingDeg: pfloat(12), TWADeg: pfloat(-130), STWKts: pfloat(8.2), RPMMean: pfloat(1795)},
 	}
 	if err := store.AppendTrackPoint(p); err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestMissingSnapColumnsReadBackNull(t *testing.T) {
 }
 
 func TestTrackPointJSONCarriesTheSnapFiguresByName(t *testing.T) {
-	p := recordedTrackPoint{At: passageEpoch, motionFigures: allMotionFigures(), HeadingDeg: pfloat(1), TWADeg: pfloat(2), STWKts: pfloat(3), RPMMean: pfloat(4)}
+	p := recordedTrackPoint{At: passageEpoch, motionFigures: allMotionFigures(), trackContext: trackContext{HeadingDeg: pfloat(1), TWADeg: pfloat(2), STWKts: pfloat(3), RPMMean: pfloat(4)}}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)

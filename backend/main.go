@@ -254,6 +254,12 @@ func main() {
 		log.Fatalf("failed to open passage store: %v", err)
 	}
 	motionAcc := newMotionAccumulator()
+	// The first start of the recorder is the cutoff of the motion backfill (ADR
+	// 0296). It is stored before the recorder starts, so no point it writes can
+	// fall before it, and it never moves after that.
+	if _, err := pas.EnsureMotionCaptureStart(time.Now().UTC()); err != nil {
+		log.Fatalf("passages: store the start of motion capture: %v", err)
+	}
 	if err := startPassageRecording(pas, motionAcc); err != nil {
 		log.Fatalf("failed to start track point recording: %v", err)
 	}
@@ -641,6 +647,9 @@ func main() {
 	// A second, separate stream of the attitude sensor alone, at the rate it
 	// sends (ADR 0295). The main stream's 1 Hz cap stays as it is.
 	go newSignalKMotionClient(motionAcc, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	// Fills the passages recorded before that stream from InfluxDB history,
+	// once (ADR 0296).
+	go startMotionBackfill(streamCtx, pas, settingsPath)
 	// The document indexer (above): started once at boot and woken
 	// immediately so any document left pending/extract or pending/enrich by
 	// a crash or restart resumes right away rather than waiting for the

@@ -126,6 +126,9 @@ type motionStep struct {
 
 // motionChannel resamples one signal onto the grid and filters it.
 type motionChannel struct {
+	// maxGap is the longest silence the channel bridges, set when the accumulator
+	// is built.
+	maxGap   time.Duration
 	have     bool
 	prevT    time.Time
 	prevV    float64
@@ -192,7 +195,7 @@ func (c *motionChannel) add(t time.Time, v float64, emit func(motionStep)) (outc
 		outcome = sampleRestarted
 		c.restart()
 	}
-	if !c.have || t.Sub(c.prevT) > motionMaxGap {
+	if !c.have || t.Sub(c.prevT) > c.maxGap {
 		c.restart()
 		c.have, c.prevT, c.prevV = true, t, v
 		c.push(v, 1, emit)
@@ -419,8 +422,19 @@ func newMotionAccumulator() *motionAccumulator {
 // newMotionAccumulatorClock takes the clock the window is bounded by, so tests
 // control it.
 func newMotionAccumulatorClock(now func() time.Time) *motionAccumulator {
+	return newMotionAccumulatorGap(now, motionMaxGap)
+}
+
+// newMotionAccumulatorGap also takes the longest silence the channels bridge. A
+// replay of a stream kept at about 1 Hz sets it wider than the live 0.45 s, so
+// that stream counts as one continuous run whose measured rate is then found
+// to be under the 8 Hz floor.
+func newMotionAccumulatorGap(now func() time.Time, maxGap time.Duration) *motionAccumulator {
 	start := now()
-	return &motionAccumulator{now: now, win: newMotionWindow(start), started: start}
+	return &motionAccumulator{
+		now: now, win: newMotionWindow(start), started: start,
+		roll: motionChannel{maxGap: maxGap}, pitch: motionChannel{maxGap: maxGap}, heave: motionChannel{maxGap: maxGap},
+	}
 }
 
 // silence is how long since a signal's last accepted sample, counted from the
