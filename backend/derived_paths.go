@@ -425,17 +425,9 @@ func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fu
 
 // isFuelRatePath is the one rule for an engine's burn path, shared by the
 // derived fuel figures (collectFuelPaths) and the passage log
-// (fuelRatePaths).
+// (fuelRatePaths in passages_live.go).
 func isFuelRatePath(path string) bool {
 	return strings.HasPrefix(path, "propulsion.") && strings.HasSuffix(path, ".fuel.rate")
-}
-
-// fuelRatePaths finds every engine's burn path in our own boat's telemetry,
-// so a boat with one engine or three needs no configuration here. It walks
-// only the propulsion branch, by the same rule collectFuelPaths applies to
-// the whole tree's path list.
-func fuelRatePaths(t telemetryReader) []string {
-	return leafPathsUnder(t, "propulsion", isFuelRatePath)
 }
 
 // leafPathsUnder lists, sorted, the leaves at or under prefix whose path keep

@@ -10,11 +10,27 @@ change to the boat showed up in the figures.
 
 Helmcentral keeps its own log of where the boat has been. It notes a position
 whenever the boat has moved about 25 m, and every ten minutes while she sits
-still. Along with each position it notes whatever it can read at that moment:
-speed and course, wind and gusts, house battery charge, fuel rate, whether the
-generator is running and how much fresh water is in the tanks. It also notes
-the biggest roll, pitch and heave the boat had since the last position, so a
-rough patch shows up even when it was over in a few seconds.
+still. Along with each position it notes whatever it can read at that moment.
+That covers speed and course, heading, speed through the water, wind and gusts,
+and the angle the true wind came from. It covers the average speed of the
+engines that are running, house battery charge and fuel rate. It covers whether
+the generator is running and how much fresh water is in the tanks. It also notes the biggest roll, pitch and
+heave the boat had since the last position, so a rough patch shows up even when
+it was over in a few seconds.
+
+Helmcentral also records how the boat moved between one position and the next:
+
+- Sway: how far she rolled and pitched, and how much she heaved up and down.
+- Rolling: how fast she rolled, and how sharply the roll changed.
+- Pounding: how hard she was pushed up and down, worked out from the heave.
+
+These come from the boat's attitude sensor, through a second connection to
+SignalK that listens to that sensor alone and takes every update the sensor
+sends. Sway is always recorded. The figures for how fast she rolled, how sharply
+the roll changed and how hard she pounded need the sensor to send at least 8
+times a second. Below that they're left empty rather than guessed. They're kept
+for scoring how comfortable a passage was, and the passage page doesn't show
+them yet.
 
 This runs on its own whether or not anyone has a screen open, and it starts when
 Helmcentral does. A position with no GPS fix is left out. So is one that jumps
@@ -24,7 +40,7 @@ A reading that was too old when the position was noted is left out of that
 point. It is never copied from an earlier one, so the page shows `--` rather
 than a figure that might be wrong.
 
-Roll, pitch and heave come from the boat's attitude sensor. They are only
+Motion, heading, wind angle, speed through the water and engine speed are only
 recorded from the release that added them. Earlier passages show **Motion not
 recorded for this passage**, and Helmcentral doesn't make a figure up for them.
 

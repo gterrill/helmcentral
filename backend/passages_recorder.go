@@ -36,8 +36,12 @@ type trackSample struct {
 	// RollDeg, PitchDeg and HeaveM are the boat's attitude on this tick, signed.
 	// The recorder keeps the largest magnitude between kept points.
 	RollDeg, PitchDeg, HeaveM *float64
-	GenState                  *string
-	AnchorSetAt               *time.Time
+	// HeadingDeg (true, 0 to 360), TWADeg (true wind angle, signed), STWKts and
+	// RPMMean (across the engines that are running) are kept as read on the
+	// tick that becomes a point, like SOG.
+	HeadingDeg, TWADeg, STWKts, RPMMean *float64
+	GenState                            *string
+	AnchorSetAt                         *time.Time
 }
 
 type trackRecorder struct {
@@ -51,6 +55,12 @@ type trackRecorder struct {
 
 	// Largest magnitudes of roll, pitch and heave since the last kept point.
 	peakRoll, peakPitch, peakHeave *float64
+
+	// motion is fed by the 10 Hz motion stream (signalk_motion_stream.go). Each
+	// kept point takes its window. Nil when no stream runs, as in most tests.
+	motion *motionAccumulator
+	// warnedNoAttitude and warnedNoHeave hold an episode of checkMotionStream.
+	warnedNoAttitude, warnedNoHeave bool
 
 	// rejected is the run of fixes thrown out as jumps that agree with one
 	// another. If it holds for trackJumpRecovery the kept reference was the
@@ -66,8 +76,10 @@ type rejectedRun struct {
 
 const trackJumpRecovery = 2 * time.Minute
 
-func newTrackRecorder(store *passageStore) (*trackRecorder, error) {
-	r := &trackRecorder{store: store}
+// newTrackRecorder opens the recorder over store. motion is the accumulator the
+// motion stream feeds; nil when no stream runs, as in most tests.
+func newTrackRecorder(store *passageStore, motion *motionAccumulator) (*trackRecorder, error) {
+	r := &trackRecorder{store: store, motion: motion}
 	last, err := store.LastTrackPoint()
 	if err != nil {
 		return nil, err
@@ -155,6 +167,16 @@ func (r *trackRecorder) keep(s trackSample) (bool, error) {
 		SoCPct: s.SoCPct, FuelLph: s.FuelLph, WaterL: s.WaterL,
 		GenState: s.GenState, AnchorSetAt: s.AnchorSetAt,
 		RollPeakDeg: r.peakRoll, PitchPeakDeg: r.peakPitch, HeavePeakM: r.peakHeave,
+		HeadingDeg: s.HeadingDeg, TWADeg: s.TWADeg, STWKts: s.STWKts, RPMMean: s.RPMMean,
+	}
+	// The window is taken before the write, and the motion filter keeps its
+	// history either way. A failed write loses this window's figures where the
+	// peaks above survive to the next point; the failure is logged by the
+	// caller, and the figures are statistics of the interval, not state.
+	if r.motion != nil {
+		figures, counts := r.motion.TakeWindow()
+		p.motionFigures = figures
+		r.checkMotionStream(s, counts)
 	}
 	if err := r.store.AppendTrackPoint(p); err != nil {
 		return false, fmt.Errorf("record track point: %w", err)
@@ -163,6 +185,32 @@ func (r *trackRecorder) keep(s trackSample) (bool, error) {
 	r.maxTWS = nil
 	r.peakRoll, r.peakPitch, r.peakHeave = nil, nil, nil
 	return true, nil
+}
+
+// motionHealthMinSilence is how long a signal must have gone without an
+// accepted sample, on Helmcentral's clock, before that counts as a fault: a
+// stream that has only just started has not had time to deliver. It is measured
+// across windows, because under way a window is only seconds long.
+const motionHealthMinSilence = time.Minute
+
+// checkMotionStream is the motion stream's health signal. A signal with no
+// accepted sample for motionHealthMinSilence (counted from startup when it has
+// had none) while the main snapshot has a fresh reading of it means the stream
+// is delivering nothing that SignalK has: a dead subscription, a refused login.
+// It says so once per episode, and again after samples have returned and
+// stopped.
+func (r *trackRecorder) checkMotionStream(s trackSample, counts motionWindowCounts) {
+	check := func(name string, got int, silence time.Duration, snapshotHas bool, warned *bool) {
+		switch {
+		case got > 0:
+			*warned = false
+		case snapshotHas && silence >= motionHealthMinSilence && !*warned:
+			*warned = true
+			log.Printf("passages: motion stream delivering no %s while SignalK has it", name)
+		}
+	}
+	check("attitude", counts.AttitudeSamples, counts.AttitudeSilence, s.RollDeg != nil, &r.warnedNoAttitude)
+	check("heave", counts.HeaveSamples, counts.HeaveSilence, s.HeaveM != nil, &r.warnedNoHeave)
 }
 
 // peakOf returns the larger of the running peak and |reading|. A missing
