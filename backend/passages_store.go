@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,22 @@ type recordedTrackPoint struct {
 	RollPeakDeg  *float64 `json:"roll_peak_deg"`
 	PitchPeakDeg *float64 `json:"pitch_peak_deg"`
 	HeavePeakM   *float64 `json:"heave_peak_m"`
+
+	// The snap and pounding figures worked out from the 10 Hz attitude stream
+	// over the same interval (ADR 0295). Nil when the stream gave too little
+	// to work them out, including below 8 Hz for every derivative, and for
+	// every point taken before this was recorded.
+	motionFigures
+
+	// What else the boat was doing, from the shared snapshot at this point,
+	// for the fits that relate comfort and speed to heading, wind angle and
+	// throttle. HeadingDeg is true, 0 to 360. TWADeg is the true wind angle
+	// through the water, signed, positive from starboard. RPMMean is the mean
+	// across the engines that are running. Nil when not published or too old.
+	HeadingDeg *float64 `json:"heading_deg"`
+	TWADeg     *float64 `json:"twa_deg"`
+	STWKts     *float64 `json:"stw_kts"`
+	RPMMean    *float64 `json:"rpm_mean"`
 
 	// AnchorSetAt is when the anchor watch in force at this moment was set.
 	// The detector ends a passage when it sees a value later than the
@@ -145,7 +162,24 @@ func createPassageSchema(db *sql.DB) error {
 			source TEXT NOT NULL DEFAULT 'recorded',
 			roll_peak_deg REAL,
 			pitch_peak_deg REAL,
-			heave_peak_m REAL
+			heave_peak_m REAL,
+			roll_rms_deg REAL,
+			roll_rate_peak_dps REAL,
+			roll_rate_rms_dps REAL,
+			roll_accel_peak_dps2 REAL,
+			roll_jerk_p95_dps3 REAL,
+			pitch_rms_deg REAL,
+			pitch_accel_peak_dps2 REAL,
+			pitch_jerk_p95_dps3 REAL,
+			heave_sd_m REAL,
+			vert_accel_p95_ms2 REAL,
+			vert_accel_peak_ms2 REAL,
+			motion_rate_hz REAL,
+			heave_rate_hz REAL,
+			heading_deg REAL,
+			twa_deg REAL,
+			stw_kts REAL,
+			rpm_mean REAL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_track_points_t ON track_points(t_ms)`,
 		`CREATE TABLE IF NOT EXISTS cruises (
@@ -228,7 +262,53 @@ func createPassageSchema(db *sql.DB) error {
 			return err
 		}
 	}
+	// Snap and pounding figures and the context readings (ADR 0295): older rows
+	// keep null, which reads as not recorded.
+	for _, c := range trackPointExtraColumns {
+		if err := ensureColumn(db, "track_points", c.name, "REAL"); err != nil {
+			return err
+		}
+	}
 	return addPassageNameAttemptColumn(db)
+}
+
+// trackPointExtraColumn pairs a track point column with the field it stores.
+// One slice serves the schema, the insert and the scan, so a column cannot
+// drift from its field.
+type trackPointExtraColumn struct {
+	name  string
+	field func(p *recordedTrackPoint) **float64
+}
+
+// trackPointExtraColumns are the track point columns added with the 10 Hz
+// motion stream (snap and pounding figures) and the context readings (heading,
+// true wind angle, speed through water, rpm).
+var trackPointExtraColumns = []trackPointExtraColumn{
+	{"roll_rms_deg", func(p *recordedTrackPoint) **float64 { return &p.RollRMSDeg }},
+	{"roll_rate_peak_dps", func(p *recordedTrackPoint) **float64 { return &p.RollRatePeakDps }},
+	{"roll_rate_rms_dps", func(p *recordedTrackPoint) **float64 { return &p.RollRateRMSDps }},
+	{"roll_accel_peak_dps2", func(p *recordedTrackPoint) **float64 { return &p.RollAccelPeakDps2 }},
+	{"roll_jerk_p95_dps3", func(p *recordedTrackPoint) **float64 { return &p.RollJerkP95Dps3 }},
+	{"pitch_rms_deg", func(p *recordedTrackPoint) **float64 { return &p.PitchRMSDeg }},
+	{"pitch_accel_peak_dps2", func(p *recordedTrackPoint) **float64 { return &p.PitchAccelPeakDps2 }},
+	{"pitch_jerk_p95_dps3", func(p *recordedTrackPoint) **float64 { return &p.PitchJerkP95Dps3 }},
+	{"heave_sd_m", func(p *recordedTrackPoint) **float64 { return &p.HeaveSDM }},
+	{"vert_accel_p95_ms2", func(p *recordedTrackPoint) **float64 { return &p.VertAccelP95Ms2 }},
+	{"vert_accel_peak_ms2", func(p *recordedTrackPoint) **float64 { return &p.VertAccelPeakMs2 }},
+	{"motion_rate_hz", func(p *recordedTrackPoint) **float64 { return &p.MotionRateHz }},
+	{"heave_rate_hz", func(p *recordedTrackPoint) **float64 { return &p.HeaveRateHz }},
+	{"heading_deg", func(p *recordedTrackPoint) **float64 { return &p.HeadingDeg }},
+	{"twa_deg", func(p *recordedTrackPoint) **float64 { return &p.TWADeg }},
+	{"stw_kts", func(p *recordedTrackPoint) **float64 { return &p.STWKts }},
+	{"rpm_mean", func(p *recordedTrackPoint) **float64 { return &p.RPMMean }},
+}
+
+func trackPointExtraColumnNames() string {
+	names := make([]string, len(trackPointExtraColumns))
+	for i, c := range trackPointExtraColumns {
+		names[i] = c.name
+	}
+	return strings.Join(names, ", ")
 }
 
 // addTrackPointSourceColumn upgrades a track_points table created before GPX
@@ -292,6 +372,20 @@ func (s *passageStore) AppendTrackPoint(p recordedTrackPoint) error {
 	return insertTrackPoint(s.db, p)
 }
 
+// trackPointBaseColumns are the columns insertTrackPoint writes before the
+// extra ones, in order. The placeholders, the select list and the scan all
+// count from this one list; insertTrackPoint and scanTrackPoint check their
+// argument lists against it.
+var trackPointBaseColumns = []string{
+	"t_ms", "segment", "lat", "lon", "sog_kts", "cog_deg", "tws_kts", "gust_kts",
+	"soc_pct", "fuel_lph", "water_l", "gen_state", "anchor_set_ms", "source",
+	"roll_peak_deg", "pitch_peak_deg", "heave_peak_m",
+}
+
+var insertTrackPointSQL = `INSERT INTO track_points
+	(` + strings.Join(trackPointBaseColumns, ", ") + `, ` + trackPointExtraColumnNames() + `)
+	VALUES (` + strings.TrimSuffix(strings.Repeat("?,", len(trackPointBaseColumns)+len(trackPointExtraColumns)), ",") + `)`
+
 func insertTrackPoint(db sqlExecer, p recordedTrackPoint) error {
 	var gen, anchor any
 	if p.GenState != nil {
@@ -304,20 +398,27 @@ func insertTrackPoint(db sqlExecer, p recordedTrackPoint) error {
 	if source == "" {
 		source = trackSourceRecorded
 	}
-	_, err := db.Exec(`INSERT INTO track_points
-		(t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source, roll_peak_deg, pitch_peak_deg, heave_peak_m)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	args := make([]any, 0, len(trackPointBaseColumns)+len(trackPointExtraColumns))
+	args = append(args,
 		p.At.UnixMilli(), p.Segment, p.Lat, p.Lon,
 		nullFloat(p.SOGKts), nullFloat(p.COGDeg), nullFloat(p.TWSKts), nullFloat(p.GustKts),
 		nullFloat(p.SoCPct), nullFloat(p.FuelLph), nullFloat(p.WaterL), gen, anchor, source,
-		nullFloat(p.RollPeakDeg), nullFloat(p.PitchPeakDeg), nullFloat(p.HeavePeakM))
+		nullFloat(p.RollPeakDeg), nullFloat(p.PitchPeakDeg), nullFloat(p.HeavePeakM),
+	)
+	for _, c := range trackPointExtraColumns {
+		args = append(args, nullFloat(*c.field(&p)))
+	}
+	if want := len(trackPointBaseColumns) + len(trackPointExtraColumns); len(args) != want {
+		return fmt.Errorf("append track point: %d values for %d columns", len(args), want)
+	}
+	_, err := db.Exec(insertTrackPointSQL, args...)
 	if err != nil {
 		return fmt.Errorf("append track point: %w", err)
 	}
 	return nil
 }
 
-const trackPointColumns = `id, t_ms, segment, lat, lon, sog_kts, cog_deg, tws_kts, gust_kts, soc_pct, fuel_lph, water_l, gen_state, anchor_set_ms, source, roll_peak_deg, pitch_peak_deg, heave_peak_m`
+var trackPointColumns = `id, ` + strings.Join(trackPointBaseColumns, ", ") + `, ` + trackPointExtraColumnNames()
 
 func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 	var p recordedTrackPoint
@@ -325,8 +426,20 @@ func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 	var sog, cog, tws, gust, soc, fuel, water, roll, pitch, heave sql.NullFloat64
 	var gen sql.NullString
 	var anchor sql.NullInt64
-	if err := r.Scan(&p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor, &p.Source, &roll, &pitch, &heave); err != nil {
+	snap := make([]sql.NullFloat64, len(trackPointExtraColumns))
+	dest := make([]any, 0, 1+len(trackPointBaseColumns)+len(snap))
+	dest = append(dest, &p.ID, &ms, &p.Segment, &p.Lat, &p.Lon, &sog, &cog, &tws, &gust, &soc, &fuel, &water, &gen, &anchor, &p.Source, &roll, &pitch, &heave)
+	if want := 1 + len(trackPointBaseColumns); len(dest) != want {
+		return p, fmt.Errorf("scan track point: %d destinations for %d base columns", len(dest), want)
+	}
+	for i := range snap {
+		dest = append(dest, &snap[i])
+	}
+	if err := r.Scan(dest...); err != nil {
 		return p, err
+	}
+	for i, c := range trackPointExtraColumns {
+		*c.field(&p) = nullToPtr(snap[i])
 	}
 	p.At = time.UnixMilli(ms).UTC()
 	p.SOGKts, p.COGDeg, p.TWSKts, p.GustKts = nullToPtr(sog), nullToPtr(cog), nullToPtr(tws), nullToPtr(gust)

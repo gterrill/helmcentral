@@ -51,10 +51,12 @@ const signalKStreamPath = "/signalk/v1/stream?subscribe=none&sendMeta=all"
 //     (210/s against 159/s); that cost is accepted for the correctness.
 const streamSubscribePeriodMS = 1000
 
+// Period is omitted when zero: the motion stream's instant policy carries none
+// (signalk_motion_stream.go). The main stream always sets it.
 type signalKSubscribeEntry struct {
 	Path   string `json:"path"`
 	Policy string `json:"policy"`
-	Period int    `json:"period"`
+	Period int    `json:"period,omitempty"`
 }
 
 type signalKSubscribeMessage struct {
@@ -97,6 +99,13 @@ const (
 )
 
 func buildSignalKStreamURL(address string, port int) string {
+	return signalKStreamURLFor(address, port, signalKStreamPath)
+}
+
+// signalKStreamURLFor maps the server's http(s) base to ws(s) and appends the
+// stream path and query. The main stream and the motion stream differ only in
+// the query.
+func signalKStreamURLFor(address string, port int, pathAndQuery string) string {
 	base := buildSignalKURL(address, port)
 
 	switch {
@@ -106,14 +115,26 @@ func buildSignalKStreamURL(address string, port int) string {
 		base = "ws://" + strings.TrimPrefix(base, "http://")
 	}
 
-	return base + signalKStreamPath
+	return base + pathAndQuery
 }
 
-// signalKStreamClient keeps a signalKSnapshot fed from the SignalK delta
-// stream, reconnecting for as long as its context lives.
+// signalKStreamClient keeps a consumer fed from a SignalK delta stream,
+// reconnecting for as long as its context lives. The main stream's consumer is
+// a signalKSnapshot; the motion stream's is a motionAccumulator
+// (signalk_motion_stream.go). Everything else is shared: URL and token
+// handling, the read limit, reconnect and backoff.
 type signalKStreamClient struct {
-	snapshot     *signalKSnapshot
 	settingsPath string
+
+	// name prefixes every log line, so two streams in one log can be told apart.
+	name string
+	// subscription is the message sent right after the handshake.
+	subscription func() signalKSubscribeMessage
+	// onOpen runs once the subscription is sent; the function it returns runs
+	// when the connection ends.
+	onOpen func() (onClose func())
+	// onDelta takes every frame that parses, the opening hello frame included.
+	onDelta func(delta signalKDelta)
 
 	minBackoff time.Duration
 	maxBackoff time.Duration
@@ -127,8 +148,36 @@ type signalKStreamClient struct {
 }
 
 func newSignalKStreamClient(snapshot *signalKSnapshot, settingsPath string) *signalKStreamClient {
+	c := newStreamClientBase(settingsPath, signalKStreamPath)
+	c.name = "signalk stream"
+	c.subscription = streamSubscription
+	c.onOpen = func() func() {
+		snapshot.setConnected(true)
+		snapshot.markStreamConnected(c.now())
+		return func() { snapshot.setConnected(false) }
+	}
+	c.onDelta = func(delta signalKDelta) {
+		// The server's opening frame is metadata (name, version, self, roles)
+		// with no updates at all. It is the only place the self context is
+		// named, so it must be captured before the no-updates skip.
+		if delta.Self != "" {
+			snapshot.setSelfContext(delta.Self)
+		}
+
+		if len(delta.Updates) == 0 {
+			return
+		}
+
+		snapshot.applyDelta(delta, c.now())
+	}
+	return c
+}
+
+// newStreamClientBase holds what every SignalK stream client shares: where the
+// server is, how to authenticate, and the reconnect timing. pathAndQuery is the
+// stream endpoint with its subscribe mode.
+func newStreamClientBase(settingsPath, pathAndQuery string) *signalKStreamClient {
 	return &signalKStreamClient{
-		snapshot:     snapshot,
 		settingsPath: settingsPath,
 		minBackoff:   defaultStreamMinBackoff,
 		maxBackoff:   defaultStreamMaxBackoff,
@@ -138,7 +187,7 @@ func newSignalKStreamClient(snapshot *signalKSnapshot, settingsPath string) *sig
 			if err != nil {
 				return "", "", fmt.Errorf("signalk settings unreadable: %w", err)
 			}
-			return buildSignalKStreamURL(address, port), buildSignalKURL(address, port), nil
+			return signalKStreamURLFor(address, port, pathAndQuery), buildSignalKURL(address, port), nil
 		},
 		acquireToken: func(httpBaseURL string) (string, error) {
 			username, password, err := loadSignalKCredentials(settingsPath)
@@ -167,7 +216,7 @@ func (c *signalKStreamClient) run(ctx context.Context) {
 			// No server was chosen, so none is dialled: the default host is
 			// not the boat's. The stream stays disconnected, which the
 			// dashboard shows, and the next attempt re-reads the settings.
-			log.Printf("signalk stream: not connecting, %v; retrying in %s", err, backoff)
+			log.Printf("%s: not connecting, %v; retrying in %s", c.name, err, backoff)
 		} else {
 			connectedAt := c.now()
 			err = c.connectOnce(ctx, streamURL, httpBaseURL)
@@ -179,7 +228,7 @@ func (c *signalKStreamClient) run(ctx context.Context) {
 				backoff = c.minBackoff
 			}
 
-			log.Printf("signalk stream: %s disconnected (%v); reconnecting in %s", streamURL, err, backoff)
+			log.Printf("%s: %s disconnected (%v); reconnecting in %s", c.name, streamURL, err, backoff)
 		}
 
 		select {
@@ -211,17 +260,16 @@ func (c *signalKStreamClient) connectOnce(ctx context.Context, streamURL, httpBa
 	// degraded one. Surface it rather than sitting silently on an idle socket
 	// — the signalk-stream watchdog would eventually fire, but the reason
 	// belongs in the log at the point it happened.
-	subscription, err := json.Marshal(streamSubscription())
+	subscription, err := json.Marshal(c.subscription())
 	if err != nil {
-		return fmt.Errorf("signalk stream: encoding subscription: %w", err)
+		return fmt.Errorf("%s: encoding subscription: %w", c.name, err)
 	}
 	if err := conn.Write(ctx, websocket.MessageText, subscription); err != nil {
-		return fmt.Errorf("signalk stream: sending subscription: %w", err)
+		return fmt.Errorf("%s: sending subscription: %w", c.name, err)
 	}
 
-	c.snapshot.setConnected(true)
-	c.snapshot.markStreamConnected(c.now())
-	defer c.snapshot.setConnected(false)
+	onClose := c.onOpen()
+	defer onClose()
 
 	for {
 		_, data, err := conn.Read(ctx)
@@ -233,29 +281,18 @@ func (c *signalKStreamClient) connectOnce(ctx context.Context, streamURL, httpBa
 		if err := json.Unmarshal(data, &delta); err != nil {
 			// Dropping the session over one corrupt frame would reset every
 			// path to unseen for the whole backoff; the next frame usually parses.
-			log.Printf("signalk stream: skipping unparseable frame: %v", err)
+			log.Printf("%s: skipping unparseable frame: %v", c.name, err)
 			continue
 		}
 
-		// The server's opening frame is metadata (name, version, self, roles)
-		// with no updates at all. It is the only place the self context is
-		// named, so it must be captured before the no-updates skip.
-		if delta.Self != "" {
-			c.snapshot.setSelfContext(delta.Self)
-		}
-
-		if len(delta.Updates) == 0 {
-			continue
-		}
-
-		c.snapshot.applyDelta(delta, c.now())
+		c.onDelta(delta)
 	}
 }
 
 func (c *signalKStreamClient) dial(ctx context.Context, streamURL, httpBaseURL string) (*websocket.Conn, error) {
 	token, err := c.acquireToken(httpBaseURL)
 	if err != nil {
-		log.Printf("signalk stream: token acquisition failed, dialling anonymously: %v", err)
+		log.Printf("%s: token acquisition failed, dialling anonymously: %v", c.name, err)
 	}
 
 	conn, response, err := dialSignalKStream(ctx, streamURL, token)

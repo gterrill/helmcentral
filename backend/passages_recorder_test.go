@@ -8,7 +8,7 @@ import (
 func newTestRecorder(t *testing.T) (*trackRecorder, *passageStore) {
 	t.Helper()
 	store := newTestPassageStore(t)
-	rec, err := newTrackRecorder(store)
+	rec, err := newTrackRecorder(store, nil)
 	if err != nil {
 		t.Fatalf("newTrackRecorder: %v", err)
 	}
@@ -208,10 +208,10 @@ func TestRecorderStoresAbsentReadingsAsNull(t *testing.T) {
 
 func TestRecorderResumesFromStoredLog(t *testing.T) {
 	store := newTestPassageStore(t)
-	rec, _ := newTrackRecorder(store)
+	rec, _ := newTrackRecorder(store, nil)
 	rec.Observe(fix(passageEpoch, -20, 149))
 	rec.Observe(fix(passageEpoch.Add(15*time.Minute), -20, 149)) // new segment
-	rec2, err := newTrackRecorder(store)
+	rec2, err := newTrackRecorder(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,6 +27,10 @@ const (
 	trackAttitudePath = "navigation.attitude"
 	trackHeavePath    = "navigation.attitude.heave"
 	trackDetectEvery  = time.Minute
+
+	trackHeadingPath = "navigation.headingTrue"
+	trackTWAPath     = "environment.wind.angleTrueWater"
+	trackSTWPath     = "navigation.speedThroughWater"
 )
 
 func freshReading(s alarmSample, now time.Time) (float64, bool) {
@@ -70,6 +74,57 @@ func trackFuelRateLph(read alarmReader, ratePaths []string, now time.Time) *floa
 		total += v * 3600000 // m3/s to L/h
 	}
 	return &total
+}
+
+// trackMeanRPM is the mean engine speed across the engines that are running,
+// found as every propulsion.<id>.revolutions the boat publishes, so a boat with
+// engines on numeric instances or on port and starboard needs no configuration.
+// An engine that is switched off, or reads zero, is not running and not in the
+// mean. An engine whose reading is merely old leaves the mean absent, as in
+// trackFuelRateLph: a mean over the engines that happened to be fresh would
+// be a wrong number. With no engine running there is no mean at all, which is
+// absent and not zero.
+func trackMeanRPM(read alarmReader, revolutionPaths []string, now time.Time) *float64 {
+	var total float64
+	running := 0
+	for _, path := range revolutionPaths {
+		sample := read(path)
+		if sample.EngineOff {
+			continue
+		}
+		hz, ok := freshReading(sample, now)
+		if !ok {
+			return nil
+		}
+		if hz <= 0 {
+			continue
+		}
+		total += hz * 60
+		running++
+	}
+	if running == 0 {
+		return nil
+	}
+	mean := total / float64(running)
+	return &mean
+}
+
+// revolutionPaths finds every engine's revolutions path in our own boat's
+// telemetry, walking only the propulsion branch.
+// A path that has stopped reporting stays in the list and nulls the fuel total
+// and the rpm mean: a dead engine feed must show.
+func revolutionPaths(t telemetryReader) []string {
+	return leafPathsUnder(t, "propulsion", func(path string) bool {
+		// Only propulsion.<id>.revolutions is an engine; a drive or shaft path
+		// deeper in the branch is not another one.
+		return strings.Count(path, ".") == 2 && isEngineRevolutionsPath(path)
+	})
+}
+
+// fuelRatePaths finds every engine's burn path the same way, by
+// isFuelRatePath.
+func fuelRatePaths(t telemetryReader) []string {
+	return leafPathsUnder(t, "propulsion", isFuelRatePath)
 }
 
 // trackFreshWaterLitres sums level x capacity over every freshWater tank. One
@@ -146,6 +201,17 @@ func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBan
 		deg := math.Mod(*cog+360, 360)
 		s.COGDeg = &deg
 	}
+	if hdg := freshPtr(read, trackHeadingPath, now, 180/math.Pi); hdg != nil {
+		deg := normalizeDegrees(*hdg)
+		s.HeadingDeg = &deg
+	}
+	if twa := freshPtr(read, trackTWAPath, now, 180/math.Pi); twa != nil {
+		// To (-180, 180]: a source that sends 0 to 2 pi means the same angle.
+		deg := normalizeSignedDegrees(*twa)
+		s.TWADeg = &deg
+	}
+	s.STWKts = freshPtr(read, trackSTWPath, now, metersPerSecondToKnots)
+	s.RPMMean = trackMeanRPM(read, revolutionPaths(telemetry), now)
 	s.RollDeg, s.PitchDeg = attitudeDegrees(telemetry, now)
 	s.HeaveM = freshPtr(read, trackHeavePath, now, 1)
 	if houseBankPath != "" {
@@ -210,9 +276,10 @@ func observeLiveTrack(snapshot *signalKSnapshot, state vesselStateData, settings
 }
 
 // startPassageRecording opens the recorder over store and installs it for the
-// poll tick.
-func startPassageRecording(store *passageStore) error {
-	rec, err := newTrackRecorder(store)
+// poll tick. motion is the accumulator the motion stream feeds and the recorder
+// drains at each kept point.
+func startPassageRecording(store *passageStore, motion *motionAccumulator) error {
+	rec, err := newTrackRecorder(store, motion)
 	if err != nil {
 		return err
 	}

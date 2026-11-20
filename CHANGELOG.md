@@ -20,6 +20,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   button that jumps the replay to the moment it happened. Motion is only
   recorded from this version on, so earlier passages say "Motion not recorded
   for this passage".
+- **Passages now record more about how the boat was running.** Each position
+  also notes heading, true wind angle, speed through the water, the average
+  engine speed and how the boat moved, including how sharply she rolled and
+  how hard she pounded. Helmcentral opens a second connection to SignalK for
+  the motion, so it can hear the attitude sensor every time it sends. Nothing
+  shows on screen yet.
 
 ### Changed
 

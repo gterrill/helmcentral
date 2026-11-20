@@ -253,7 +253,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open passage store: %v", err)
 	}
-	if err := startPassageRecording(pas); err != nil {
+	motionAcc := newMotionAccumulator()
+	if err := startPassageRecording(pas, motionAcc); err != nil {
 		log.Fatalf("failed to start track point recording: %v", err)
 	}
 
@@ -637,6 +638,9 @@ func main() {
 	globalSourceRegistry = newSourceRegistry(sourceStore, influxTelemetryConfigured, queryInfluxSourceHistory)
 	go globalSourceRegistry.run(streamCtx, globalSignalKSnapshot)
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	// A second, separate stream of the attitude sensor alone, at the rate it
+	// sends (ADR 0295). The main stream's 1 Hz cap stays as it is.
+	go newSignalKMotionClient(motionAcc, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// The document indexer (above): started once at boot and woken
 	// immediately so any document left pending/extract or pending/enrich by
 	// a crash or restart resumes right away rather than waiting for the
