@@ -9,6 +9,7 @@ import {
 } from 'react'
 
 import {
+  helmHeightProblem,
   ParticularsSaveError,
   saveVesselParticulars,
   useVesselParticulars,
@@ -81,6 +82,11 @@ export function VesselParticularsProvider({ children }: { children: ReactNode })
   const persist = useCallback(async () => {
     if (!dirty || draft === null) return
     setFieldError(null)
+    const helmProblem = helmHeightProblem(draft.helm_height_m)
+    if (helmProblem !== null) {
+      setFieldError({ field: 'helm_height_m', message: helmProblem })
+      throw new ParticularsSaveError(helmProblem, 'helm_height_m')
+    }
     try {
       const saved = await saveVesselParticulars(draft)
       setSavedSnapshot({ ...draft, updated_at: saved.updated_at })

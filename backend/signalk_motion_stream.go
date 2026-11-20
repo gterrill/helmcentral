@@ -64,7 +64,8 @@ func newSignalKMotionClient(acc *motionAccumulator, settingsPath string) *signal
 	// A new connection starts the log and the source choice afresh.
 	c.onOpen = func() func() {
 		feed.reset()
-		return func() {}
+		acc.SetStreamConnected(true)
+		return func() { acc.SetStreamConnected(false) }
 	}
 	c.onDelta = feed.handle
 	return c

@@ -48,6 +48,7 @@ func vesselParticularsRecordType() *recordType {
 			str("storm_delegate", "the person who prepares the boat when the owner is away, with how to reach them"),
 			{Name: "loa_m", Kind: kindNumber, Writable: true, Nullable: true, Description: "length overall in metres; null clears it"},
 			{Name: "beam_m", Kind: kindNumber, Writable: true, Nullable: true, Description: "beam in metres; null clears it"},
+			{Name: "helm_height_m", Kind: kindNumber, Writable: true, Nullable: true, Description: "height of the helm above the waterline in metres, up to 30; null clears it"},
 			str("builder", "the builder"),
 			str("model", "the model"),
 			{Name: "year", Kind: kindInteger, Writable: true, Nullable: true, Description: "year built; null clears it"},
@@ -92,6 +93,7 @@ func vesselParticularsSnapshot(v vesselParticulars) recordSnapshot {
 			"storm_delegate":  v.StormDelegate,
 			"loa_m":           nilFloat(v.LOAM),
 			"beam_m":          nilFloat(v.BeamM),
+			"helm_height_m":   nilFloat(v.HelmHeightM),
 			"builder":         v.Builder,
 			"model":           v.Model,
 			"year":            nilInt(v.Year),
@@ -152,6 +154,9 @@ func applyParticularsFields(v vesselParticulars, given fieldSet) vesselParticula
 	}
 	if val, ok := given["beam_m"]; ok {
 		v.BeamM = floatPtrOf(val)
+	}
+	if val, ok := given["helm_height_m"]; ok {
+		v.HelmHeightM = floatPtrOf(val)
 	}
 	if val, ok := given["displacement_kg"]; ok {
 		v.DisplacementKG = floatPtrOf(val)

@@ -1824,9 +1824,12 @@ func matchesExcludedName(candidate string, excludedNames []string) bool {
 
 // signalkRoutes returns the /api routes for SignalK server settings, discovery and path browsing.
 // Each row carries its own auth tier (docs/adr/0177).
-func signalkRoutes() []apiRoute {
+func signalkRoutes(motion *motionAccumulator) []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/signalk/paths", tierRead, signalKPathsHandler},
+		// How fast the attitude sensor's samples are reaching the recorder, and
+		// whether its stream is open (ADR 0297).
+		{http.MethodGet, "/api/signalk/motion-feed", tierRead, motionFeedHandler(motion)},
 		{http.MethodGet, "/api/settings/signalk", tierAdmin, getSignalKSettingsHandler},
 
 		// Probe only — persisting the address is POST /api/settings' job

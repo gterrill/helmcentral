@@ -174,7 +174,7 @@ func TestGetSettings_FreshInstallReportsEmptyRoles(t *testing.T) {
 }
 
 func TestPostVesselRouteIsRetired(t *testing.T) {
-	for _, route := range buildAPIRoutes(newTestSessionStore(t), newWorldImageryHTTPClient()) {
+	for _, route := range buildAPIRoutes(newTestSessionStore(t), newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		if route.Path == "/api/vessel" || route.Path == "/api/vessel/candidates" {
 			t.Fatalf("%s %s should be gone; vessel discovery is /api/vessel/discovery and roles save through /api/settings", route.Method, route.Path)
 		}

@@ -25,6 +25,9 @@ export interface VesselParticulars {
    * instrument data supplies the length too when the boat publishes it. */
   loa_m: number | null
   beam_m: number | null
+  /** Height of the helm above the waterline in metres, entered by the operator.
+   * Blank means not set; there is no default. Sideways g at the helm needs it. */
+  helm_height_m: number | null
   /** Owner and insurance: what every insurer declaration and berth
    * application asks again. */
   owner_name: string
@@ -51,6 +54,20 @@ export class ParticularsSaveError extends Error {
 }
 
 const PATH = '/api/vessel/particulars'
+
+/** The tallest helm height the server accepts, in metres (backend helmHeightMaxM). */
+const HELM_HEIGHT_MAX_M = 30
+
+/**
+ * The server's own refusal for a helm height outside 0 to 30 m, found before
+ * Save so the operator is not sent away to learn it. Blank is allowed (not
+ * set); any precision above 0 is.
+ */
+export function helmHeightProblem(heightM: number | null): string | null {
+  if (heightM === null) return null
+  if (heightM > 0 && heightM <= HELM_HEIGHT_MAX_M) return null
+  return `helm height must be above 0 and at most ${HELM_HEIGHT_MAX_M} metres`
+}
 
 /** Mate's Apply wrote the vessel details. */
 export function vesselParticularsRecordApplied(): void {

@@ -757,7 +757,7 @@ func TestPatchDisplay_KeepsMeasuredViewport(t *testing.T) {
 
 func TestBuildAPIRoutes_DisplayViewportRouteIsReadTier(t *testing.T) {
 	sessions := newTestSessionStore(t)
-	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		if route.Method == http.MethodPut && route.Path == "/api/displays/:id/viewport" {
 			if route.Tier != tierRead {
 				t.Fatalf("tier = %v, want tierRead", route.Tier)

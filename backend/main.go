@@ -531,7 +531,7 @@ func main() {
 	// Every /api route, tiered per docs/adr/0040 §3 and registered through
 	// registerAPIRoutes — the one place a route reaches Echo at all. See
 	// buildAPIRoutes below for the full table and its tier assignments.
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, tileFetchClient))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, tileFetchClient, motionAcc))
 
 	// The MCP endpoint (ADR 0231). Not an /api route: its only credential is a
 	// per-client bearer token, never a user session.
@@ -758,7 +758,10 @@ func main() {
 // globalNearbyContactStore, which the handlers read directly at request
 // time). It backs the map routes (Esri World Imagery and the Carto
 // basemap, ADR 0067): one shared upstream-fetch client.
-func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiRoute {
+func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client, motion *motionAccumulator) []apiRoute {
+	if motion == nil {
+		panic("buildAPIRoutes: the motion accumulator is required; GET /api/signalk/motion-feed reads it")
+	}
 	var routes []apiRoute
 	routes = append(routes, healthRoutes()...)
 	routes = append(routes, authRoutes(sessions)...)
@@ -771,7 +774,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, telemetryStreamRoutes()...)
 	routes = append(routes, telemetryHistoryRoutes()...)
 	routes = append(routes, telemetrySeriesRoutes()...)
-	routes = append(routes, signalkRoutes()...)
+	routes = append(routes, signalkRoutes(motion)...)
 	routes = append(routes, settingsRoutes()...)
 	routes = append(routes, secretsRoutes()...)
 	routes = append(routes, pluginRoutes()...)

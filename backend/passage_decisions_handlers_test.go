@@ -118,7 +118,7 @@ func TestPassageDecisionRoutes_AreWriteTier(t *testing.T) {
 	if !found {
 		t.Fatal("PUT /api/passage-decisions/:id is not routed")
 	}
-	for _, r := range buildAPIRoutes(newTestSessionStore(t), newWorldImageryHTTPClient()) {
+	for _, r := range buildAPIRoutes(newTestSessionStore(t), newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		if r.Path == "/api/passage-decisions/:id" {
 			return
 		}

@@ -106,6 +106,9 @@ type passageDetail struct {
 	// speed line kept so stops show. The display line above stays distance-simplified.
 	ReplayTrack [][][2]float64 `json:"replay_track"`
 	ReplayTimes [][]int64      `json:"replay_times"`
+	// SidewaysG is the largest sideways acceleration at the helm, in g, from the
+	// current helm height. Worked out on every read; never part of the stored stats.
+	SidewaysG passageSidewaysG `json:"sideways_g"`
 	// PlannedWithMate lists the Mate plans this passage was sailed from.
 	// A nil list with PlannedWithMateError set means the plans could not be
 	// read; the page shows that rather than "never planned".
@@ -154,6 +157,9 @@ func getPassageHandler(c echo.Context) error {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage track"})
 	}
+	// Worked out on every read from the current helm height and never stored, so
+	// a change of height changes every passage (ADR 0297).
+	sideways := passageSidewaysGFor(rec.ID, pts)
 	figures, err := store.PassageFiguresFor(rec)
 	if err != nil {
 		log.Printf("passages: %v", err)
@@ -183,7 +189,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

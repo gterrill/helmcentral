@@ -17,7 +17,7 @@ const stored = {
   hull_type: 'Catamaran', hull_material: 'Fiberglass', displacement_kg: 24500,
   shore_power: 'Dual x 125/250 volt | 30/50 amp', system_voltage: '24v',
   registration: '', imo: '', epirb_id: '', date_acquired: '2025-01-27',
-  loa_m: null, beam_m: null, owner_name: 'Sam Example', owner_phone: '', owner_email: '', insurer: 'Example Marine', policy_number: '', home_marina: '', berth: '', storm_delegate: '',
+  loa_m: null, beam_m: null, helm_height_m: null, owner_name: 'Sam Example', owner_phone: '', owner_email: '', insurer: 'Example Marine', policy_number: '', home_marina: '', berth: '', storm_delegate: '',
   updated_at: '2026-10-01T05:00:00Z',
 }
 
@@ -53,6 +53,27 @@ describe('VesselParticularsForm', () => {
     for (const label of ['Owner phone', 'Owner email', 'Policy number', 'Home marina', 'Berth', 'Storm delegate', 'Length overall (m)', 'Beam (m)']) {
       expect(screen.getByLabelText(label)).toHaveValue(label.endsWith('(m)') ? null : '')
     }
+  })
+
+  it('asks for the helm height with no default and says what it is for', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => stored })
+    renderForm()
+
+    const input = await screen.findByLabelText('Helm height above the waterline (m)')
+    expect(input).toHaveValue(null)
+    // The server takes anything above 0 up to 30: no step to round to, no browser minimum
+    // that refuses a value the server accepts.
+    expect(input).toHaveAttribute('step', 'any')
+    expect(input).not.toHaveAttribute('min')
+    expect(input).toHaveAttribute('max', '30')
+    expect(screen.getByText(/sideways push felt at the helm/i)).toBeInTheDocument()
+  })
+
+  it('shows a stored helm height', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ...stored, helm_height_m: 3.4 }) })
+    renderForm()
+
+    expect(await screen.findByLabelText('Helm height above the waterline (m)')).toHaveValue(3.4)
   })
 
   it('has no Save button of its own: the page Save bar owns it', async () => {

@@ -2074,7 +2074,7 @@ func TestBuildAPIRoutes_AssistantRoutesHaveExpectedTiers(t *testing.T) {
 	}
 
 	got := map[string]apiTier{}
-	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient()) {
+	for _, route := range buildAPIRoutes(sessions, newWorldImageryHTTPClient(), newTestMotionAccumulator()) {
 		got[route.Method+" "+route.Path] = route.Tier
 	}
 

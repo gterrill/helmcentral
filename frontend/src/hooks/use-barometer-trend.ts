@@ -1,4 +1,5 @@
 import { declareQuery, useApiQuery } from '@/lib/api-query'
+import { finiteOrNull } from '@/lib/finite-or-null'
 
 export interface BarometerTrendPoint {
   time: string
@@ -29,8 +30,6 @@ interface BarometerTrendApiResponse {
 
 const NO_BAROMETER: BarometerTrendData = { points: [], currentPa: null, changePa: null, changeSpanS: null, failed: false }
 const FAILED: BarometerTrendData = { ...NO_BAROMETER, failed: true }
-
-const finiteOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 function toTrend(data: BarometerTrendApiResponse): BarometerTrendData {
   // The server always sends a list, empty for a boat with no barometer, so

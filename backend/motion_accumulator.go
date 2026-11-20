@@ -413,6 +413,10 @@ type motionAccumulator struct {
 	// each signal last had a sample accepted (zero for none yet), all on
 	// Helmcentral's clock.
 	started, lastAttitude, lastHeave time.Time
+
+	// feed is what the Settings page shows of the stream: whether it is open
+	// and the rates of the last window the recorder took (motion_feed_status.go).
+	feed motionFeedState
 }
 
 func newMotionAccumulator() *motionAccumulator {
@@ -560,6 +564,14 @@ func (m *motionAccumulator) TakeWindow() (motionFigures, motionWindowCounts) {
 	m.mu.Unlock()
 
 	var f motionFigures
+	defer func() {
+		// The rates just stored are what the Settings line shows, taken under the
+		// lock again so a reader never sees one without the other.
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.feed.attitude.remember(w.att.samples, f.MotionRateHz, now)
+		m.feed.heave.remember(w.heave.samples, f.HeaveRateHz, now)
+	}()
 
 	if rate, ok := w.att.rate(); ok {
 		f.MotionRateHz = &rate

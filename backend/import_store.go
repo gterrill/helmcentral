@@ -40,6 +40,7 @@ var importSchema = []string{
 		date_acquired   TEXT NOT NULL DEFAULT '',
 		loa_m           REAL CHECK (loa_m IS NULL OR loa_m >= 0),
 		beam_m          REAL CHECK (beam_m IS NULL OR beam_m >= 0),
+		helm_height_m   REAL CHECK (helm_height_m IS NULL OR (helm_height_m > 0 AND helm_height_m <= 30)),
 		owner_name      TEXT NOT NULL DEFAULT '',
 		owner_phone     TEXT NOT NULL DEFAULT '',
 		owner_email     TEXT NOT NULL DEFAULT '',
@@ -111,6 +112,7 @@ func createImportSchema(db *sql.DB) error {
 var vesselParticularsAddedColumns = []string{
 	`ALTER TABLE vessel_particulars ADD COLUMN loa_m REAL CHECK (loa_m IS NULL OR loa_m >= 0)`,
 	`ALTER TABLE vessel_particulars ADD COLUMN beam_m REAL CHECK (beam_m IS NULL OR beam_m >= 0)`,
+	`ALTER TABLE vessel_particulars ADD COLUMN helm_height_m REAL CHECK (helm_height_m IS NULL OR (helm_height_m > 0 AND helm_height_m <= 30))`,
 	`ALTER TABLE vessel_particulars ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE vessel_particulars ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE vessel_particulars ADD COLUMN owner_email TEXT NOT NULL DEFAULT ''`,

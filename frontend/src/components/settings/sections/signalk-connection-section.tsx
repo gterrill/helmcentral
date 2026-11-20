@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { FormSection, SettingsLayout } from '@/components/patterns'
+import { FormSection, LoadError, SettingsLayout, WarningNote } from '@/components/patterns'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -10,10 +10,59 @@ import { SignalKDiscoverySection } from '@/components/settings/sections/signalk-
 import { SignalKRolesSection } from '@/components/settings/sections/signalk-roles-section'
 import { SignalKSetupSection } from '@/components/settings/sections/signalk-setup-section'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { useMotionFeed } from '@/hooks/use-motion-feed'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
 import { apiRequest } from '@/lib/api-query'
 import { identifierInputProps } from '@/lib/identifier-input'
+import { formatDataAge } from '@/lib/staleness'
 import { useSetupFocus } from '@/hooks/use-setup-focus'
+
+const ago = (seconds: number) => `${formatDataAge(seconds)} ago`
+
+/**
+ * One signal: the rate the recorder stored (as the server sent it, already
+ * rounded once) and how long ago, or why there is none, then how long since a
+ * sample last arrived.
+ */
+function signalSegment(name: string, hz: number | null, recordedAgoS: number | null, lastSampleS: number | null): string {
+  let rate: string
+  if (hz !== null) rate = `${name} ${hz} Hz${recordedAgoS === null ? '' : `, recorded ${ago(recordedAgoS)}`}`
+  else if (recordedAgoS !== null) rate = `${name}: no rate could be measured, window taken ${ago(recordedAgoS)}`
+  else rate = `${name}: no position recorded yet`
+  return `${rate}, ${lastSampleS === null ? 'no sample yet' : `last sample ${ago(lastSampleS)}`}`
+}
+
+/**
+ * The rates the recorder stored on its last finished window and how long ago
+ * that was, and whether the motion stream is open (ADR 0297). The server judges
+ * each rate against the floor and gives a reason per signal, so a slow or
+ * silent feed is said plainly here, before the passage that would have wanted
+ * it.
+ */
+function MotionFeedLine() {
+  const { feed, error } = useMotionFeed()
+  if (error !== null) return <LoadError reason={`Motion feed: could not be read. ${error}`} hasRows={false} className="md:col-span-3" />
+  let line: string
+  const warnings: string[] = []
+  if (feed === null) {
+    line = 'Motion feed: reading'
+  } else if (!feed.connected) {
+    line = `Motion feed: not connected.${feed.reason ? ` ${feed.reason}` : ''}`
+  } else {
+    line = `Motion feed: ${signalSegment('attitude', feed.attitude_hz, feed.attitude_recorded_ago_s, feed.attitude_last_sample_s)}; ${signalSegment('heave', feed.heave_hz, feed.heave_recorded_ago_s, feed.heave_last_sample_s)}`
+    for (const reason of [feed.attitude_reason, feed.heave_reason]) {
+      if (reason) warnings.push(reason)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1 text-sm md:col-span-3" data-testid="motion-feed">
+      <p className="text-muted-foreground">{line}</p>
+      {warnings.map((w) => (
+        <WarningNote key={w}>{w}</WarningNote>
+      ))}
+    </div>
+  )
+}
 
 interface SignalKConnectionSectionProps {
   draft: RegularSettingsDraft
@@ -189,6 +238,8 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
               ))}
             </div>
           )}
+
+          <MotionFeedLine />
         </div>
       </FormSection>
 
