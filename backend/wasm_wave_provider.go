@@ -414,6 +414,137 @@ func (p *wasmWaveProvider) fetchCurrentsFromPlugin(points []currentsPoint, days 
 		})
 }
 
+// wasmFetchWaveHindcastInput mirrors the guest's fetch_wave_hindcast input.
+type wasmFetchWaveHindcastInput struct {
+	Points []currentsPoint `json:"points"`
+	Start  string          `json:"start"`
+	End    string          `json:"end"`
+}
+
+// wasmHindcastHourOutput is one hour of a hindcast answer: a fetch_waves hour
+// and, when the model has no value for it, the plugin's sentence saying so.
+type wasmHindcastHourOutput struct {
+	wasmWaveHourOutput
+	MissingReason string `json:"missing_reason"`
+}
+
+// wasmHindcastPointOutput is one position's answer: the model and its label, and
+// the hours.
+type wasmHindcastPointOutput struct {
+	Model      string                   `json:"model"`
+	ModelLabel string                   `json:"model_label"`
+	Hourly     []wasmHindcastHourOutput `json:"hourly"`
+}
+
+// wasmFetchWaveHindcastOutput mirrors the guest's fetch_wave_hindcast output.
+type wasmFetchWaveHindcastOutput struct {
+	Points []wasmHindcastPointOutput `json:"points"`
+	// Refused is the plugin's sentence when the data source gave a definite no
+	// to the request; Points is then empty.
+	Refused string `json:"refused"`
+}
+
+// errNoWaveHindcastExport is what a wave plugin without fetch_wave_hindcast
+// answers with. noWaveHindcastHint wraps it with the plugin id and what to do.
+var errNoWaveHindcastExport = errors.New("has no fetch_wave_hindcast export, so no past sea state")
+
+// noWaveHindcastHint is the error that says a plugin cannot give a past sea
+// state and which plugin to install. It is the one place that says it.
+func noWaveHindcastHint(pluginID string) error {
+	return fmt.Errorf("plugin %q %w; install the updated %s plugin", pluginID, errNoWaveHindcastExport, pluginID)
+}
+
+// errWaveHindcastRateLimited is a hindcast request Open-Meteo rate limited (429).
+// A transient error: nothing is stored, and the sweep stops and resumes at the
+// next one.
+var errWaveHindcastRateLimited = errors.New("rate limited")
+
+// markRateLimited makes an error the plugin worded as rate limited (a 429) match
+// errWaveHindcastRateLimited, keeping the plugin's own text. Any other error, and
+// nil, come back as they were.
+func markRateLimited(err error) error {
+	if err == nil || !strings.Contains(err.Error(), errWaveHindcastRateLimited.Error()) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", errWaveHindcastRateLimited, err)
+}
+
+// SupportsWaveHindcast is true when the plugin exports fetch_wave_hindcast.
+func (p *wasmWaveProvider) SupportsWaveHindcast() bool { return p.supportsWaveHindcast }
+
+// mapWasmWaveHindcastOutput types a hindcast answer for want points with the
+// forecast's rules for absent figures. Each point must name its model and its
+// label, and the answer must hold one point for each one asked about.
+func mapWasmWaveHindcastOutput(pluginID string, out wasmFetchWaveHindcastOutput, want int) (waveHindcastBundle, error) {
+	if refused := strings.TrimSpace(out.Refused); refused != "" {
+		if len(out.Points) != 0 {
+			return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast answered both refused and %d positions", pluginID, len(out.Points))
+		}
+		return waveHindcastBundle{Refused: refused}, nil
+	}
+	if len(out.Points) != want {
+		return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast answered %d positions, asked for %d", pluginID, len(out.Points), want)
+	}
+	bundle := waveHindcastBundle{Points: make([]waveHindcastSeries, 0, want)}
+	for i, pt := range out.Points {
+		if strings.TrimSpace(pt.Model) == "" || strings.TrimSpace(pt.ModelLabel) == "" {
+			return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast points[%d] did not name its model and model_label", pluginID, i)
+		}
+		hours := make([]wasmWaveHourOutput, len(pt.Hourly))
+		for j, h := range pt.Hourly {
+			hours[j] = h.wasmWaveHourOutput
+		}
+		mapped, err := mapWasmFetchWavesOutput(wasmFetchWavesOutput{Hourly: hours})
+		if err != nil {
+			return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast points[%d]: %w", pluginID, i, err)
+		}
+		series := waveHindcastSeries{Model: pt.Model, ModelLabel: pt.ModelLabel, Hourly: make([]waveHindcastHour, len(mapped.Hourly))}
+		for j, h := range mapped.Hourly {
+			series.Hourly[j] = waveHindcastHour{waveHourPoint: h, MissingReason: strings.TrimSpace(pt.Hourly[j].MissingReason)}
+		}
+		bundle.Points = append(bundle.Points, series)
+	}
+	return bundle, nil
+}
+
+// FetchWaveHindcast answers from the plugin's fetch_wave_hindcast for the hours
+// start to end inclusive at every point, in one call. It carries at most
+// maxHindcastPoints points. It is not cached: the caller keeps what it needs. A
+// plugin without the export answers with an error wrapping errNoWaveHindcastExport
+// that names the plugin to install, and a failed call is the error; there is no
+// fallback to the forecast. ctx is checked before and after the call, which
+// itself cannot be cancelled.
+func (p *wasmWaveProvider) FetchWaveHindcast(ctx context.Context, points []currentsPoint, start, end time.Time) (waveHindcastBundle, error) {
+	if err := ctx.Err(); err != nil {
+		return waveHindcastBundle{}, err
+	}
+	if len(points) == 0 {
+		return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast needs at least one point", p.id)
+	}
+	if len(points) > maxHindcastPoints {
+		return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast carries at most %d points, got %d", p.id, maxHindcastPoints, len(points))
+	}
+	bundle, err := callOptionalExport(p.wasmPluginBase, "fetch_wave_hindcast", p.supportsWaveHindcast, errNoWaveHindcastExport,
+		wasmFetchWaveHindcastInput{Points: points, Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339)},
+		func(pluginID string, raw []byte) (waveHindcastBundle, error) {
+			var parsed wasmFetchWaveHindcastOutput
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				return waveHindcastBundle{}, fmt.Errorf("plugin %q: unparseable fetch_wave_hindcast JSON: %w", pluginID, err)
+			}
+			return mapWasmWaveHindcastOutput(pluginID, parsed, len(points))
+		})
+	if errors.Is(err, errNoWaveHindcastExport) {
+		return waveHindcastBundle{}, noWaveHindcastHint(p.id)
+	}
+	if err != nil {
+		return waveHindcastBundle{}, markRateLimited(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return waveHindcastBundle{}, err
+	}
+	return bundle, nil
+}
+
 const (
 	currentsCacheTTL     = 30 * time.Minute
 	currentsCacheEntries = 16

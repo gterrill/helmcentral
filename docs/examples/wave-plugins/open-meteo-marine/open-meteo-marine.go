@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,7 +22,11 @@ const (
 	// direction line up with other WaveWatch III-based swell forecasts for a
 	// given coastline; Open-Meteo's default "best_match" model blend runs
 	// noticeably lower/different here.
-	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=%d"
+	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=" + waveHourlyVariables + "&timezone=auto&forecast_days=%d"
+
+	// waveHourlyVariables are the nine wave variables the forecast and the
+	// hindcast both ask for, so the two read the same figures.
+	waveHourlyVariables = "wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period"
 
 	// Ocean current endpoint, for fetch_currents. Deliberately does not pin a
 	// models= param: the GFS-Wave model the wave fetch is pinned to carries no
@@ -33,6 +38,30 @@ const (
 	// today is bracketed. Velocity comes back in km/h, and the direction is where the water
 	// flows toward.
 	marineCurrentsURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%s&longitude=%s&hourly=ocean_current_velocity,ocean_current_direction&timezone=GMT&past_days=1&forecast_days=%d"
+
+	// Past-hours endpoint, for fetch_wave_hindcast. The same variables and the
+	// same GFS-Wave pin as the forecast, so a hindcast hour and a forecast hour
+	// come from one model. It asks for named hours (start_hour, end_hour) in GMT,
+	// for every point in one request (comma-separated latitude and longitude
+	// lists, which Open-Meteo documents without a limit).
+	marineHindcastURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%s&longitude=%s&hourly=" + waveHourlyVariables + "&timezone=GMT&start_hour=%s&end_hour=%s"
+
+	// hindcastHourLayout is how Open-Meteo reads start_hour and end_hour.
+	hindcastHourLayout = "2006-01-02T15:04"
+
+	// maxHindcastHours is the most hours one fetch_wave_hindcast call carries,
+	// 31 days. The host asks in shorter windows and errors above this.
+	maxHindcastHours = 31 * 24
+
+	// maxHindcastPoints is the most points one fetch_wave_hindcast call carries.
+	// The two lists cost about 20 characters a point, so 100 keeps the URL near
+	// 2 KB, as for fetch_currents. The host asks for more points in several calls.
+	maxHindcastPoints = 100
+
+	// How the plugin words each model for the operator. A sentence that starts
+	// with one reads as a sentence.
+	labelGFSWave = "GFS-Wave"
+	labelBlend   = "The Open-Meteo best-match blend"
 
 	// maxCurrentsPoints is the most points one fetch_currents call carries. The
 	// two lists cost about 20 characters a point, so 100 keeps the URL near 2 KB,
@@ -73,6 +102,65 @@ func waveURL(lat, lon float64, days int, fallback bool) string {
 	return u
 }
 
+// coordinateLists joins the points' latitudes and longitudes into the two
+// comma-separated lists Open-Meteo reads, in order.
+func coordinateLists(points []currentsPoint) (lats, lons string) {
+	la := make([]string, len(points))
+	lo := make([]string, len(points))
+	for i, p := range points {
+		la[i] = fmt.Sprintf("%.4f", p.Lat)
+		lo[i] = fmt.Sprintf("%.4f", p.Lon)
+	}
+	return strings.Join(la, ","), strings.Join(lo, ",")
+}
+
+// hindcastURL builds the one request for the past hours start to end inclusive at
+// every point, in GMT so the times are UTC. It names its hours with start_hour
+// and end_hour in place of forecast_days. fallback leaves out models=, as waveURL
+// does.
+func hindcastURL(points []currentsPoint, start, end time.Time, fallback bool) string {
+	lats, lons := coordinateLists(points)
+	u := fmt.Sprintf(marineHindcastURLFmt, lats, lons, start.UTC().Format(hindcastHourLayout), end.UTC().Format(hindcastHourLayout))
+	if !fallback {
+		u += "&models=" + modelGFSWave
+	}
+	return u
+}
+
+// validateHindcastInput reads what a fetch_wave_hindcast call asks for: at least
+// one and at most maxHindcastPoints points, each a real position, and an RFC3339
+// start and end, the end not before the start, no longer than maxHindcastHours.
+// Both ends are cut down to the hour.
+func validateHindcastInput(points []currentsPoint, startRaw, endRaw string) (start, end time.Time, err error) {
+	if len(points) == 0 {
+		return start, end, fmt.Errorf("fetch_wave_hindcast needs at least one point")
+	}
+	if len(points) > maxHindcastPoints {
+		return start, end, fmt.Errorf("fetch_wave_hindcast carries at most %d points, got %d", maxHindcastPoints, len(points))
+	}
+	for i, p := range points {
+		if p.Lat < -90 || p.Lat > 90 || p.Lon < -180 || p.Lon > 180 {
+			return start, end, fmt.Errorf("fetch_wave_hindcast point %d (%g, %g) is not a valid position", i, p.Lat, p.Lon)
+		}
+	}
+	start, err = time.Parse(time.RFC3339, startRaw)
+	if err != nil {
+		return start, end, fmt.Errorf("fetch_wave_hindcast start %q is not RFC3339: %w", startRaw, err)
+	}
+	end, err = time.Parse(time.RFC3339, endRaw)
+	if err != nil {
+		return start, end, fmt.Errorf("fetch_wave_hindcast end %q is not RFC3339: %w", endRaw, err)
+	}
+	start, end = start.UTC().Truncate(time.Hour), end.UTC().Truncate(time.Hour)
+	if end.Before(start) {
+		return start, end, fmt.Errorf("fetch_wave_hindcast end %s is before its start %s", endRaw, startRaw)
+	}
+	if hours := int(end.Sub(start)/time.Hour) + 1; hours > maxHindcastHours {
+		return start, end, fmt.Errorf("fetch_wave_hindcast carries at most %d hours, got %d", maxHindcastHours, hours)
+	}
+	return start, end, nil
+}
+
 // currentsPoint is one position a fetch_currents call asks about.
 type currentsPoint struct {
 	Lat float64 `json:"lat"`
@@ -98,13 +186,8 @@ func validateCurrentsInput(points []currentsPoint) error {
 
 // currentsURL builds the one ocean-current request for every point.
 func currentsURL(points []currentsPoint, days int) string {
-	lats := make([]string, len(points))
-	lons := make([]string, len(points))
-	for i, p := range points {
-		lats[i] = fmt.Sprintf("%.4f", p.Lat)
-		lons[i] = fmt.Sprintf("%.4f", p.Lon)
-	}
-	return fmt.Sprintf(marineCurrentsURLFmt, strings.Join(lats, ","), strings.Join(lons, ","), days)
+	lats, lons := coordinateLists(points)
+	return fmt.Sprintf(marineCurrentsURLFmt, lats, lons, days)
 }
 
 // currentHourOutput is one hour of fetch_currents output: the modelled
@@ -255,6 +338,204 @@ func parseWaveBody(body []byte) ([]waveHourOutput, error) {
 		offset = int(o)
 	}
 	return parseOpenMeteoWaveResponse(body, offset)
+}
+
+// parseWaveBodies reads Open-Meteo's answer for want positions: a JSON list with
+// one object per location in request order, or a single object when one location
+// was asked for. It returns one hourly series per position. A wrong location
+// count is an error, not something to line up by guesswork.
+func parseWaveBodies(body []byte, want int) ([][]waveHourOutput, error) {
+	var locations []json.RawMessage
+	if err := json.Unmarshal(body, &locations); err != nil {
+		locations = []json.RawMessage{body}
+	}
+	if len(locations) != want {
+		return nil, fmt.Errorf("wave response has %d locations, asked for %d", len(locations), want)
+	}
+	out := make([][]waveHourOutput, len(locations))
+	for i, loc := range locations {
+		hours, err := parseWaveBody(loc)
+		if err != nil {
+			return nil, fmt.Errorf("location %d: %w", i, err)
+		}
+		out[i] = hours
+	}
+	return out, nil
+}
+
+// refusedError is Open-Meteo's definite no to a hindcast request: an HTTP 400
+// saying a date is outside its archive. Asking again gives the same answer, so
+// fetch_wave_hindcast reports it as a refusal the host settles with the sentence,
+// not as an error the host retries.
+type refusedError struct {
+	Status int
+	Reason string
+}
+
+func (e *refusedError) Error() string {
+	return fmt.Sprintf("open-meteo marine hindcast API refused the request (%d): %s", e.Status, e.Reason)
+}
+
+// Sentence is how the refusal reads in the logbook, in place of a sea state.
+func (e *refusedError) Sentence() string {
+	why := strings.TrimSpace(e.Reason)
+	if why == "" {
+		why = fmt.Sprintf("it answered %d", e.Status)
+	}
+	if !strings.HasSuffix(why, ".") {
+		why += "."
+	}
+	return "Open-Meteo wouldn't give the sea for this hour: " + why
+}
+
+// isTimeOutOfRange says an Open-Meteo reason is about the requested time or date
+// being outside what it holds, such as "Parameter 'start_hour' is out of allowed
+// range from 2022-01-01 to 2026-11-30".
+func isTimeOutOfRange(reason string) bool {
+	r := strings.ToLower(reason)
+	if !strings.Contains(r, "range") && !strings.Contains(r, "allowed") {
+		return false
+	}
+	for _, param := range []string{"start_hour", "end_hour", "start_date", "end_date"} {
+		if strings.Contains(r, param) {
+			return true
+		}
+	}
+	return false
+}
+
+// hindcastStatusError is nil for a 2xx. Only an HTTP 400 whose JSON reason says
+// the requested time is out of range is a refusal (*refusedError): asking again
+// gives the same answer. A 429 says it was rate limited, and every other status
+// (auth, WAF, quota, URL length, a bad position, a timeout, a 5xx) is transient.
+// Those stay plain errors, which the host does not settle: it asks again at its
+// next hourly sweep (and stops the sweep at a rate limit).
+func hindcastStatusError(status int, body []byte) error {
+	if status >= 200 && status < 300 {
+		return nil
+	}
+	if status == 400 {
+		var parsed struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(body, &parsed)
+		if isTimeOutOfRange(parsed.Reason) {
+			return &refusedError{Status: status, Reason: parsed.Reason}
+		}
+	}
+	if status == 429 {
+		return fmt.Errorf("open-meteo marine hindcast API rate limited the request (429)")
+	}
+	return fmt.Errorf("open-meteo marine hindcast API returned %d", status)
+}
+
+// hindcastHourOutput is one hour of fetch_wave_hindcast output: a fetch_waves hour
+// and, when the model has no value for it, the sentence the host shows in place
+// of a sea state.
+type hindcastHourOutput struct {
+	waveHourOutput
+	MissingReason string `json:"missing_reason,omitempty"`
+}
+
+// hindcastPointOutput is one requested point's answer, in request order: the
+// model that gave it (its id, and how the logbook words it) and its hours.
+type hindcastPointOutput struct {
+	Model      string               `json:"model"`
+	ModelLabel string               `json:"model_label"`
+	Hourly     []hindcastHourOutput `json:"hourly"`
+}
+
+// fetchHindcastOutput mirrors the host's wasmFetchWaveHindcastOutput contract
+// (backend/wasm_wave_provider.go).
+type fetchHindcastOutput struct {
+	Points []hindcastPointOutput `json:"points"`
+	// Refused is the sentence for a request Open-Meteo definitely refused; Points
+	// is then empty and the host settles every hour it asked for with it.
+	Refused string `json:"refused,omitempty"`
+}
+
+// hindcastHours words each hour's gap. An hour with no combined figures and no
+// swell or wind wave is one the model has no value for, and an hour with a
+// combined sea but no split into swell and wind wave is one it could not split.
+// Both carry the model's label in the sentence. Every other hour carries none,
+// and a swell or wind wave with no period in it is a system the model says is
+// not there.
+func hindcastHours(hours []waveHourOutput, label string) []hindcastHourOutput {
+	out := make([]hindcastHourOutput, len(hours))
+	for i, h := range hours {
+		out[i] = hindcastHourOutput{waveHourOutput: h}
+		if h.SwellWavePeriodS > 0 || h.WindWavePeriodS > 0 {
+			continue
+		}
+		if h.WavePeriodS == nil {
+			out[i].MissingReason = label + " has no value at this cell."
+		} else {
+			out[i].MissingReason = label + " gave no swell and wind-wave split at this cell."
+		}
+	}
+	return out
+}
+
+// refusedHours is a point's hours, each with no figures and the sentence for why.
+func refusedHours(hours []waveHourOutput, sentence string) []hindcastHourOutput {
+	out := make([]hindcastHourOutput, len(hours))
+	for i, h := range hours {
+		out[i] = hindcastHourOutput{waveHourOutput: waveHourOutput{Time: h.Time}, MissingReason: sentence}
+	}
+	return out
+}
+
+// chooseHindcast builds the answer for points. fetch asks Open-Meteo once for
+// the points it is given, with the GFS-Wave pin when its second argument is false
+// and without it (the blend) when true, and returns one series per point it was
+// given. The GFS-Wave series stands for every point unless the operator turned
+// the fallback on and a point's series holds no waves (a land-masked cell); those
+// points, and only those, are asked again in ONE blend request. A failed blend
+// request is an error: it does not drop back to the land cell as though the model
+// had answered. A request Open-Meteo definitely refused (*refusedError) is the
+// answer: when it is the first request, as Refused with no points; when it is the
+// blend request, the open-water answers stand and the land points carry the
+// sentence on every hour, as their missing reason. Any other failure is an error.
+func chooseHindcast(points []currentsPoint, fallback bool, fetch func([]currentsPoint, bool) ([][]waveHourOutput, error)) (fetchHindcastOutput, error) {
+	var refused *refusedError
+	primary, err := fetch(points, false)
+	if errors.As(err, &refused) {
+		return fetchHindcastOutput{Refused: refused.Sentence()}, nil
+	}
+	if err != nil {
+		return fetchHindcastOutput{}, err
+	}
+	out := fetchHindcastOutput{Points: make([]hindcastPointOutput, len(points))}
+	var landIdx []int
+	var landPoints []currentsPoint
+	for i, hours := range primary {
+		out.Points[i] = hindcastPointOutput{Model: modelGFSWave, ModelLabel: labelGFSWave, Hourly: hindcastHours(hours, labelGFSWave)}
+		if fallback && hoursHaveNoWaves(hours) {
+			landIdx = append(landIdx, i)
+			landPoints = append(landPoints, points[i])
+		}
+	}
+	if len(landPoints) == 0 {
+		return out, nil
+	}
+	blend, err := fetch(landPoints, true)
+	if errors.As(err, &refused) {
+		// Open-Meteo's no to the blend covers only the land points. The GFS-Wave
+		// answers already in hand for the open-water points stand; each land
+		// point keeps its hours, every one carrying the refusal sentence as its
+		// missing reason, so the host settles them and shows no sea.
+		for _, i := range landIdx {
+			out.Points[i] = hindcastPointOutput{Model: modelGFSWave, ModelLabel: labelGFSWave, Hourly: refusedHours(primary[i], refused.Sentence())}
+		}
+		return out, nil
+	}
+	if err != nil {
+		return fetchHindcastOutput{}, fmt.Errorf("GFS-Wave has no data here and the blend fallback failed: %w", err)
+	}
+	for j, i := range landIdx {
+		out.Points[i] = hindcastPointOutput{Model: modelBlend, ModelLabel: labelBlend, Hourly: hindcastHours(blend[j], labelBlend)}
+	}
+	return out, nil
 }
 
 // hoursHaveNoWaves reports a series with no real wave reading: every hour's

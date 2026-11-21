@@ -37,8 +37,10 @@ type passageFigures struct {
 
 // passageFiguresVersion 2 added the time of each maximum and the motion maxima;
 // 3 added the felt figure, its spells, and the snap and pounding maxima; 4 gave
-// snap and pounding a reason of their own in place of one shared code.
-const passageFiguresVersion = 4
+// snap and pounding a reason of their own in place of one shared code; 5 gave
+// each spell its middle position, mean heading, roll and pitch RMS apart, and
+// snap and pounding peaks (ADR 0299).
+const passageFiguresVersion = 5
 
 // parseFigures reads a row's stats_json. ok is false for a missing or unreadable
 // value.
@@ -131,6 +133,16 @@ const (
 	sidewaysReasonUnreadable = "The helm height couldn't be read, so sideways g isn't shown."
 )
 
+// sidewaysGAt is the sideways g at a helm helmHeightM metres above the roll axis
+// when the boat's roll acceleration is rollAccelDps2 degrees per second squared:
+// the height times the acceleration in radians, over g. Today only the passage's
+// peak (passageSidewaysGFor) uses it; spells keep their roll acceleration, not a
+// sideways g, so any later use for a spell works it out here from the same
+// height.
+func sidewaysGAt(helmHeightM, rollAccelDps2 float64) float64 {
+	return helmHeightM * (rollAccelDps2 * math.Pi / 180) / gravityMPerS2
+}
+
 // passageSidewaysGFor works the figures out for a passage's points from the
 // helm height now on record: helm height in metres times roll acceleration in
 // radians per second squared, over g. As in the stored stats, the first point's
@@ -153,7 +165,7 @@ func passageSidewaysGFor(id string, pts []recordedTrackPoint) passageSidewaysG {
 		if i == 0 || p.RollAccelPeakDps2 == nil {
 			continue
 		}
-		g := *helmHeightM * (*p.RollAccelPeakDps2 * math.Pi / 180) / gravityMPerS2
+		g := sidewaysGAt(*helmHeightM, *p.RollAccelPeakDps2)
 		raiseMax(&out.PeakG, &out.PeakAt, &g, p.At)
 	}
 	if out.PeakG == nil {
@@ -322,12 +334,26 @@ func recomputeStalePassages(ctx context.Context, store *passageStore, work func(
 // fills; only then does the pass work out every passage whose figures are
 // missing or old, so none is worked out before it has been filled. main runs it
 // in its own goroutine with the streams' context.
+//
+// The sea sweep (ADR 0299) follows, so its first pass finds every passage's
+// figures already worked out. It then runs every hour until ctx ends, so this
+// function returns only at shutdown.
 func startPassageFigures(ctx context.Context, store *passageStore, settingsPath string) {
+	startPassageFiguresWith(ctx, store, settingsPath, waveProviderResolver(settingsPath), seaSweepEvery, time.Now)
+}
+
+// startPassageFiguresWith is startPassageFigures with the sweep's wave plugin,
+// interval and clock given, for tests.
+func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsPath string, resolve func() (waveProvider, string, error), every time.Duration, clock func() time.Time) {
 	runMotionBackfillOnce(ctx, store, settingsPath, time.Now().UTC())
 	if ctx.Err() != nil {
 		return
 	}
 	recomputeStalePassages(ctx, store, store.PassageFiguresFor)
+	if ctx.Err() != nil {
+		return
+	}
+	runSeaSweeps(ctx, store, resolve, every, clock)
 }
 
 // bandsReasonUnreadable is the reason a page carries when the bands could not be

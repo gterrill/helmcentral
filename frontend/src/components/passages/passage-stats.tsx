@@ -15,6 +15,7 @@ import {
   formatLocalDate,
   formatLocalDateTime,
   feltHeadline,
+  joinSeaParts,
   type CruiseStats,
   type PassageFelt,
   type PassageStats,
@@ -94,7 +95,7 @@ function snapText(snap: PassageFelt['snap']): string | null {
 /** How the passage felt: the band word beside the operator's own rating, the
  * felt figure, and the snap and pounding peaks, each a button to its moment.
  * A figure that was not recorded says why. The rating is never changed here. */
-export function PassageFeltRow({ felt, rating, onSeek }: { felt: PassageFelt | undefined; rating: PassageRating; onSeek?: (at: number) => void }) {
+export function PassageFeltRow({ felt, rating, onSeek, timeZone = null }: { felt: PassageFelt | undefined; rating: PassageRating; onSeek?: (at: number) => void; timeZone?: string | null }) {
   if (!felt) return null
   const snap = snapText(felt.snap)
   const pounding = felt.pounding.value_g !== null && Number.isFinite(felt.pounding.value_g) ? `${felt.pounding.value_g.toFixed(2)} g` : null
@@ -142,9 +143,22 @@ export function PassageFeltRow({ felt, rating, onSeek }: { felt: PassageFelt | u
       {!snap && <p className="text-xs text-muted-foreground">Snap: {felt.snap.reason}</p>}
       {!pounding && <p className="text-xs text-muted-foreground">Pounding: {felt.pounding.reason}</p>}
       {snap && felt.snap.note && <p className="text-xs text-muted-foreground">{felt.snap.note}</p>}
+      {felt.sea && <p data-testid="felt-sea" className="text-xs text-muted-foreground">Sea: {seaSummaryText(felt.sea, timeZone)}</p>}
       {felt.deg !== null && <p className="text-xs text-muted-foreground">{felt.bands.summary ?? felt.bands.reason}</p>}
     </div>
   )
+}
+
+/** One line on the sea over the passage: the largest swell and wind wave and
+ * when each was, a flat sea in words, or the server's reason there is no sea state. */
+function seaSummaryText(sea: NonNullable<PassageFelt['sea']>, timeZone: string | null): string {
+  if (sea.reason) return sea.reason
+  const peak = (kind: string, p: NonNullable<NonNullable<PassageFelt['sea']>['swell']>) => {
+    const when = formatLocalDateTime(p.at, timeZone)
+    return `largest ${kind} ${p.height_m.toFixed(1)} m ${Math.round(p.period_s)} s${when === ABSENT ? '' : `, ${when}`}`
+  }
+  const text = joinSeaParts([sea.swell && peak('swell', sea.swell), sea.wind_wave && peak('wind wave', sea.wind_wave)], '; ')
+  return sea.partial ? `${text} (${sea.partial})` : text
 }
 
 /** A bank that stayed within five points, down or up, is not worth a tile.
