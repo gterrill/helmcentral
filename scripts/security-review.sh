@@ -60,4 +60,14 @@ command -v claude >/dev/null || { echo "security-review: the claude CLI is requi
 
 echo "security-review: reviewing $branch ($ahead commit(s) ahead of $base) in $wt"
 cd "$wt"
-claude -p "/security-review"
+# /security-review truncates the diff it pastes, and a headless session cannot
+# get git commands approved, so this hands it the whole diff as a file.
+rel=backend/tmp/security-review.diff
+mkdir -p "$wt/backend/tmp"
+trap 'rm -f "$wt/$rel"' EXIT
+{
+  git -C "$wt" log --oneline "$base"..HEAD
+  echo
+  git -C "$wt" diff "$base"...HEAD
+} >"$wt/$rel"
+claude -p "/security-review" --append-system-prompt "The diff pasted into the prompt may be cut short. The full branch diff against $base is in $wt/$rel. Read all of it with the Read tool before analysing, in parts with offset and limit when it is too long for one read."
