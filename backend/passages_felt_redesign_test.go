@@ -96,7 +96,7 @@ func TestStartUpPassRunsAfterTheBackfillSoNothingIsRecomputedBeforeItIsFilled(t 
 	t.Cleanup(func() { openNormalInflux = old })
 	openNormalInflux = func(string) (normalInflux, error) { return testInflux, nil }
 
-	startPassageFigures(context.Background(), s, "settings.yaml")
+	startUpOnce(s, "settings.yaml")
 
 	raw, felt := storedFigures(t, s, rec.ID)
 	if !raw.Valid || !felt.Valid || felt.Float64 <= 0 {
@@ -363,7 +363,7 @@ func TestEachFigureSaysWhyItIsMissingFromItsOwnInputs(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			st := computePassageStats(c.pts)
-			f := buildPassageFelt(st, passageSidewaysG{}, comfortBands{})
+			f := buildPassageFelt(st, passageSidewaysG{}, comfortBands{}, nil)
 			if c.felt == "" {
 				if st.FeltDeg == nil {
 					t.Errorf("felt: want a figure, got reason %q", st.FeltReason)
@@ -391,7 +391,7 @@ func TestEachFigureSaysWhyItIsMissingFromItsOwnInputs(t *testing.T) {
 
 func TestASlowAttitudeFeedDoesNotExplainAMissingHeave(t *testing.T) {
 	pts := withPoints(func(p *recordedTrackPoint, _ int) { p.MotionRateHz = pfloat(4) })
-	f := buildPassageFelt(computePassageStats(pts), passageSidewaysG{}, comfortBands{})
+	f := buildPassageFelt(computePassageStats(pts), passageSidewaysG{}, comfortBands{}, nil)
 	if strings.Contains(f.Pounding.Reason, "8 Hz") {
 		t.Errorf("pounding reason %q blames a feed it does not use", f.Pounding.Reason)
 	}

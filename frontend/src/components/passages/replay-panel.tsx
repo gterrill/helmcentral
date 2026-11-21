@@ -9,7 +9,7 @@ import type { DocumentLinkPickerResult } from '@/components/inventory/document-l
 import { InsetMap, PassageMap, type CameraDriver, type PassageMapHandle } from '@/components/passages/passage-map'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
-import type { MotionSpellTick } from '@/components/passages/motion-strip'
+import { spellLabel, type MotionSpellTick } from '@/components/passages/motion-strip'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { PhotoMoment } from '@/components/passages/photo-moment'
 import { MapLabel } from '@/components/passages/map-label'
@@ -47,7 +47,6 @@ import {
   buildTimeline,
   clockFor,
   spellClocks,
-  FELT_BAND_WORDS,
   isMultiPassage,
   formatBoatDateTime, formatLocalDateTime, localDateTimeParts,
   segmentBounds,
@@ -519,8 +518,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
       const range = spellClocks(timeline, p.id, s.start, s.end)
       if (!range) return []
       const { from, to } = range
-      const word = s.band ? `${FELT_BAND_WORDS[s.band]} spell` : 'Spell'
-      const label = `${word}, ${s.sway_deg.toFixed(1)}° sway, from ${formatLocalDateTime(s.start, timeZone)}${s.band ? '' : ', band not learned yet'}`
+      const label = spellLabel(s, timeZone)
       return [{ id: `${p.id}:${i}`, from: from / timeline.total, to: to / timeline.total, clock: from, band: s.band, label }]
     }))
   }, [passages, timeline, timeZone])

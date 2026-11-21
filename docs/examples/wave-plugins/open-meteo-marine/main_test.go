@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -586,5 +587,331 @@ func TestWaveHoursCarryNoCurrentFields(t *testing.T) {
 	}
 	if strings.Contains(marineWaveURLFmt, "ocean_current") {
 		t.Errorf("the wave request must not ask for currents: %s", marineWaveURLFmt)
+	}
+}
+
+// hindcast_six_hours.json is a real Open-Meteo response (models=ncep_gfswave025,
+// timezone=GMT, start_hour=2026-11-10T00:00, end_hour=2026-11-10T05:00) at a
+// Hervey Bay position. hindcast_land_cell.json is the same request over a
+// land-masked cell, where every field comes back as 0.
+func readHindcastFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+var hindcastPoints = []currentsPoint{{Lat: -24.75, Lon: 152.5}, {Lat: -20.25, Lon: 148.75}}
+
+func TestHindcastURL_AsksForThePastHoursOfEveryPointInGMT(t *testing.T) {
+	start := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 11, 10, 5, 0, 0, 0, time.UTC)
+	u := hindcastURL(hindcastPoints, start, end, false)
+	for _, want := range []string{
+		"latitude=-24.7500,-20.2500", "longitude=152.5000,148.7500", "timezone=GMT",
+		"start_hour=2026-11-10T00:00", "end_hour=2026-11-10T05:00",
+		"models=ncep_gfswave025", "swell_wave_period",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("hindcast request must contain %q: %s", want, u)
+		}
+	}
+	if strings.Contains(u, "forecast_days") || strings.Contains(u, "timezone=auto") {
+		t.Errorf("a hindcast names its hours, not a forecast window: %s", u)
+	}
+	if strings.Contains(hindcastURL(hindcastPoints, start, end, true), "models=") {
+		t.Errorf("the blend fallback leaves out models=")
+	}
+}
+
+// The forecast and the hindcast ask for the same nine variables.
+func TestHindcastAndForecastAskForTheSameVariables(t *testing.T) {
+	for name, u := range map[string]string{
+		"forecast": waveURL(-24.8, 152.4, 3, false),
+		"hindcast": hindcastURL(hindcastPoints, time.Now(), time.Now(), false),
+	} {
+		if !strings.Contains(u, "hourly="+waveHourlyVariables+"&") {
+			t.Errorf("%s request lacks the shared variable list: %s", name, u)
+		}
+	}
+}
+
+func TestValidateHindcastInput(t *testing.T) {
+	one := []currentsPoint{{Lat: -24.8, Lon: 152.4}}
+	good := func(s, e string) error {
+		_, _, err := validateHindcastInput(one, s, e)
+		return err
+	}
+	if err := good("2026-11-10T00:00:00Z", "2026-11-10T05:00:00Z"); err != nil {
+		t.Errorf("a clean window is fine: %v", err)
+	}
+	if err := good("2026-11-10T00:00:00Z", "2026-11-10T00:00:00Z"); err != nil {
+		t.Errorf("one hour is fine: %v", err)
+	}
+	cases := map[string][2]string{
+		"unparseable start": {"yesterday", "2026-11-10T05:00:00Z"},
+		"unparseable end":   {"2026-11-10T00:00:00Z", "later"},
+		"end before start":  {"2026-11-10T05:00:00Z", "2026-11-10T00:00:00Z"},
+		"over the cap":      {"2026-10-01T00:00:00Z", "2026-11-10T00:00:00Z"},
+	}
+	for name, c := range cases {
+		if err := good(c[0], c[1]); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	if _, _, err := validateHindcastInput([]currentsPoint{{Lat: 95, Lon: 152}}, "2026-11-10T00:00:00Z", "2026-11-10T05:00:00Z"); err == nil {
+		t.Errorf("a latitude of 95 is not a position")
+	}
+	if _, _, err := validateHindcastInput(nil, "2026-11-10T00:00:00Z", "2026-11-10T05:00:00Z"); err == nil {
+		t.Errorf("no points is an error")
+	}
+	many := make([]currentsPoint, maxHindcastPoints+1)
+	if _, _, err := validateHindcastInput(many, "2026-11-10T00:00:00Z", "2026-11-10T05:00:00Z"); err == nil {
+		t.Errorf("more than %d points is an error", maxHindcastPoints)
+	}
+}
+
+func TestParseWaveBody_RealHindcastFixture(t *testing.T) {
+	hours, err := parseWaveBody(readHindcastFixture(t, "hindcast_six_hours.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hours) != 6 {
+		t.Fatalf("hours %d, want 6", len(hours))
+	}
+	if hours[0].Time != "2026-11-10T00:00:00Z" {
+		t.Errorf("first hour %q, want 2026-11-10T00:00:00Z", hours[0].Time)
+	}
+	// 00:00 is a wind-free hour: a swell and no wind wave (three zeros).
+	if hours[0].WindWavePeriodS != 0 || hours[0].SwellWavePeriodS != 4.9 || hours[0].SwellWaveHeightM != 0.58 {
+		t.Errorf("hour 0 components: %+v", hours[0])
+	}
+	// 03:00 has both systems.
+	if hours[3].WindWaveHeightM != 0.54 || hours[3].SwellWavePeriodS != 10.9 || hours[3].SwellWaveDirectionDeg != 68 {
+		t.Errorf("hour 3 components: %+v", hours[3])
+	}
+}
+
+func TestParseWaveBody_HindcastLandCellHasNoWaves(t *testing.T) {
+	hours, err := parseWaveBody(readHindcastFixture(t, "hindcast_land_cell.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hours) != 3 || !hoursHaveNoWaves(hours) {
+		t.Errorf("a land cell is three hours with no waves, got %+v", hours)
+	}
+}
+
+// hindcast_two_points.json is a real Open-Meteo multi-location response
+// (models=ncep_gfswave025, timezone=GMT, start_hour=2026-11-10T00:00,
+// end_hour=2026-11-10T02:00, latitude=-24.75,-20.25, longitude=152.5,148.75):
+// a list with one object per point in request order, an open-water point first
+// and a land-masked cell second.
+func TestParseWaveBodies_RealMultiLocationFixture(t *testing.T) {
+	series, err := parseWaveBodies(readHindcastFixture(t, "hindcast_two_points.json"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series) != 2 || len(series[0]) != 3 || len(series[1]) != 3 {
+		t.Fatalf("want 2 points of 3 hours, got %+v", series)
+	}
+	if series[0][0].SwellWaveHeightM != 0.58 || series[0][0].SwellWavePeriodS != 4.9 {
+		t.Errorf("the first location is the open-water point: %+v", series[0][0])
+	}
+	if !hoursHaveNoWaves(series[1]) {
+		t.Errorf("the second location is the land cell: %+v", series[1])
+	}
+	if _, err := parseWaveBodies(readHindcastFixture(t, "hindcast_two_points.json"), 3); err == nil {
+		t.Errorf("a location count that is not the one asked for is an error")
+	}
+}
+
+// One location is one object, not a list of one.
+func TestParseWaveBodies_OneLocationIsAnObject(t *testing.T) {
+	series, err := parseWaveBodies(readHindcastFixture(t, "hindcast_six_hours.json"), 1)
+	if err != nil || len(series) != 1 || len(series[0]) != 6 {
+		t.Fatalf("got %+v, %v", series, err)
+	}
+	if _, err := parseWaveBodies([]byte(`not json`), 1); err == nil {
+		t.Errorf("garbage is an error")
+	}
+}
+
+// fixtureFetch answers from the two-point fixture, one call at a time, and
+// records what it was asked.
+type fixtureFetch struct {
+	t     *testing.T
+	calls []fetchCall
+}
+
+type fetchCall struct {
+	points   []currentsPoint
+	fallback bool
+}
+
+func (f *fixtureFetch) fetch(points []currentsPoint, fallback bool) ([][]waveHourOutput, error) {
+	f.calls = append(f.calls, fetchCall{points, fallback})
+	if fallback {
+		// The blend has a sea over the land cell.
+		hours := make([][]waveHourOutput, len(points))
+		for i := range points {
+			p := 3.0
+			hours[i] = []waveHourOutput{{Time: "2026-11-10T00:00:00Z", WavePeriodS: &p, SwellWavePeriodS: 3, SwellWaveHeightM: 0.3}}
+		}
+		return hours, nil
+	}
+	return parseWaveBodies(readHindcastFixture(f.t, "hindcast_two_points.json"), len(points))
+}
+
+func TestChooseHindcast_OneRequestForEveryPointAndNoFallbackByDefault(t *testing.T) {
+	f := &fixtureFetch{t: t}
+	out, err := chooseHindcast(hindcastPoints, false, f.fetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 1 || len(f.calls[0].points) != 2 || f.calls[0].fallback {
+		t.Fatalf("want ONE GFS-Wave request for both points, got %+v", f.calls)
+	}
+	if len(out.Points) != 2 {
+		t.Fatalf("points %d", len(out.Points))
+	}
+	open, land := out.Points[0], out.Points[1]
+	if open.Model != "ncep_gfswave025" || open.ModelLabel != "GFS-Wave" || open.Hourly[0].MissingReason != "" {
+		t.Errorf("open water: %+v", open)
+	}
+	if land.Model != "ncep_gfswave025" || land.Hourly[0].MissingReason != "GFS-Wave has no value at this cell." {
+		t.Errorf("a land cell is a settled gap with the plugin's own words: %+v", land.Hourly[0])
+	}
+}
+
+func TestChooseHindcast_FallbackAsksOnlyTheLandPointsAndInOneRequest(t *testing.T) {
+	f := &fixtureFetch{t: t}
+	out, err := chooseHindcast(hindcastPoints, true, f.fetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 2 || !f.calls[1].fallback || len(f.calls[1].points) != 1 || f.calls[1].points[0] != hindcastPoints[1] {
+		t.Fatalf("want the GFS-Wave request, then one blend request for the land point alone: %+v", f.calls)
+	}
+	if out.Points[0].Model != "ncep_gfswave025" {
+		t.Errorf("the open-water point keeps GFS-Wave: %+v", out.Points[0])
+	}
+	if out.Points[1].Model != "best_match" || out.Points[1].ModelLabel != "The Open-Meteo best-match blend" || out.Points[1].Hourly[0].MissingReason != "" {
+		t.Errorf("the land point comes from the blend: %+v", out.Points[1])
+	}
+}
+
+func TestChooseHindcast_AFailedBlendIsAnError(t *testing.T) {
+	_, err := chooseHindcast(hindcastPoints, true, func(points []currentsPoint, fallback bool) ([][]waveHourOutput, error) {
+		if fallback {
+			return nil, fmt.Errorf("503")
+		}
+		return parseWaveBodies(readHindcastFixture(t, "hindcast_two_points.json"), len(points))
+	})
+	if err == nil || !strings.Contains(err.Error(), "blend fallback failed") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestHindcastHours_WordTheGapsAndLeaveARealSeaAlone(t *testing.T) {
+	p := 6.0
+	hours := hindcastHours([]waveHourOutput{
+		{Time: "a"},
+		{Time: "b", WavePeriodS: &p},
+		{Time: "c", WavePeriodS: &p, SwellWavePeriodS: 9},
+		{Time: "d", WindWavePeriodS: 4},
+	}, "GFS-Wave")
+	want := []string{"GFS-Wave has no value at this cell.", "GFS-Wave gave no swell and wind-wave split at this cell.", "", ""}
+	for i, h := range hours {
+		if h.MissingReason != want[i] {
+			t.Errorf("hour %d: %q, want %q", i, h.MissingReason, want[i])
+		}
+	}
+}
+
+// Only an HTTP 400 whose reason says the requested time is out of range is
+// Open-Meteo's definite no, which the plugin reports as a refusal the host
+// settles. Every other failure (auth, WAF, quota, URL length, a bad position, a
+// timeout, a rate limit, a 5xx) is transient and stays a plain error.
+func TestHindcastStatusError_OnlyADateOutOfRangeIsARefusalAndTheRestAreTransient(t *testing.T) {
+	body := []byte(`{"error":true,"reason":"Parameter 'start_hour' is out of allowed range from 2022-01-01 to 2026-11-30"}`)
+	var refused *refusedError
+	err := hindcastStatusError(400, body)
+	if !errors.As(err, &refused) {
+		t.Fatalf("a 400 out of the date range is a refusal, got %v", err)
+	}
+	want := "Open-Meteo wouldn't give the sea for this hour: Parameter 'start_hour' is out of allowed range from 2022-01-01 to 2026-11-30."
+	if refused.Sentence() != want {
+		t.Errorf("sentence %q, want %q", refused.Sentence(), want)
+	}
+	endBody := []byte(`{"error":true,"reason":"Parameter 'end_hour' is out of allowed range from 2022-01-01 to 2026-11-30"}`)
+	if err := hindcastStatusError(400, endBody); !errors.As(err, &refused) {
+		t.Errorf("an end_hour out of range is a refusal too: %v", err)
+	}
+	for name, status := range map[string]int{"a 400 about a position": 400, "a 400 with no JSON": 400} {
+		b := []byte(`{"error":true,"reason":"Latitude must be in range of -90 to 90°. Given: 123.0."}`)
+		if name == "a 400 with no JSON" {
+			b = []byte("<html>")
+		}
+		err := hindcastStatusError(status, b)
+		if err == nil || errors.As(err, &refused) {
+			t.Errorf("%s is transient, got %v", name, err)
+		}
+	}
+	for _, status := range []int{401, 403, 404, 408, 414, 500, 502, 503, 504} {
+		err := hindcastStatusError(status, body)
+		if errors.As(err, &refused) {
+			t.Errorf("%d is transient, got a refusal", status)
+		}
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprint(status)) {
+			t.Errorf("%d: %v", status, err)
+		}
+	}
+	err = hindcastStatusError(429, body)
+	if err == nil || errors.As(err, &refused) || !strings.Contains(err.Error(), "rate limited") || !strings.Contains(err.Error(), "429") {
+		t.Errorf("a 429 is a transient rate-limited error: %v", err)
+	}
+	if err := hindcastStatusError(200, body); err != nil {
+		t.Errorf("a 200 is no error: %v", err)
+	}
+}
+
+func TestChooseHindcast_ARefusalIsAnAnswerAndAnyOtherFailureIsAnError(t *testing.T) {
+	refusal := &refusedError{Status: 400, Reason: "out of range"}
+	out, err := chooseHindcast(hindcastPoints, false, func([]currentsPoint, bool) ([][]waveHourOutput, error) { return nil, refusal })
+	if err != nil || out.Refused != refusal.Sentence() || len(out.Points) != 0 {
+		t.Errorf("a refusal travels as the answer: %+v, %v", out, err)
+	}
+	// The blend request refused after a land cell: the open-water point's GFS-Wave
+	// answer, already in hand, is kept; only the land point carries the refusal
+	// sentence, on every hour, and is never passed off as the model's.
+	f := &fixtureFetch{t: t}
+	out, err = chooseHindcast(hindcastPoints, true, func(points []currentsPoint, fallback bool) ([][]waveHourOutput, error) {
+		if fallback {
+			return nil, refusal
+		}
+		return f.fetch(points, false)
+	})
+	if err != nil || out.Refused != "" || len(out.Points) != 2 {
+		t.Fatalf("a refused blend must keep the open-water answer: %+v, %v", out, err)
+	}
+	open, land := out.Points[0], out.Points[1]
+	if open.Model != "ncep_gfswave025" || len(open.Hourly) == 0 || open.Hourly[0].MissingReason != "" {
+		t.Errorf("the open-water point is unchanged: %+v", open)
+	}
+	if len(land.Hourly) == 0 {
+		t.Fatalf("the land point keeps its hours: %+v", land)
+	}
+	for i, h := range land.Hourly {
+		if h.MissingReason != refusal.Sentence() || h.WavePeriodS != nil || h.SwellWavePeriodS != 0 {
+			t.Errorf("land hour %d: %+v, want the refusal sentence and no sea", i, h)
+		}
+	}
+	if _, err := chooseHindcast(hindcastPoints, false, func([]currentsPoint, bool) ([][]waveHourOutput, error) {
+		return nil, fmt.Errorf("open-meteo marine hindcast API returned 503")
+	}); err == nil {
+		t.Error("a 503 is an error the host retries")
 	}
 }

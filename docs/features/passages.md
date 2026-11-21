@@ -187,6 +187,52 @@ verdict. It sits beside your own rating and doesn't change it.
   for snap. The pounding looks at the heave alone, and says when the boat sent
   no heave, when the heave came in under 8 times a second, or when it was
   filled in from history.
+- The sea: for each 15-minute spell, Helmcentral keeps what the Open-Meteo wave
+  model said the swell and the wind wave were at that hour and place. The replay
+  strip's label for a spell names them, such as "Sea: swell 0.8 m 9 s on the port
+  beam, wind wave 0.6 m 4 s on the port bow". Each wave gives its height, its
+  period and where it came from, measured from the way the boat was heading. The
+  words match the ones Mate uses: **ahead** for anything within 45 degrees of
+  the bow, then **on the port bow** or **on the starboard bow** out to 80
+  degrees, **on the port beam** or **on the starboard beam** out to 100,
+  **on the port quarter** or **on the starboard quarter** out to 135, and
+  **astern** beyond that. The
+  Felt line adds the largest swell and wind wave of the passage and when each
+  was. When only some of the passage's spells have a sea, the line says how many
+  don't, such as "(no sea for 3 of 12 spells)", so you know the largest waves
+  come from the rest. The model's figure is for a patch of sea about 28 km
+  across, so in a river or a sheltered bay it reads high. Each figure is the
+  model's value at the top of the hour nearest the middle of the spell, not an
+  average over the hour, so a spell that ran from 10:40 to 10:54 gets the 11:00
+  figure.
+- No sea shown: a spell says why it has no sea instead of showing a number. The
+  hour may not have been fetched yet. Helmcentral waits until an hour is 12 hours
+  old before it asks, because the model keeps adjusting its figures for about
+  that long. Once an hour, Helmcentral looks over every passage, hidden ones
+  included, and fetches the hours that are old enough and still have no sea. So a
+  passage's sea shows up about 12 hours after the hour it covers, at the next
+  hourly look, and the same goes for a passage you've just split, merged,
+  trimmed or imported. It also does this once when it starts. The model may have
+  no value for that patch of water, which is common near shore. Open-Meteo may
+  refuse a date, for example one older than its archive, and then the spell says
+  so. A spell recorded without a position has nowhere to look up, and says that.
+  Or your wave plugin is missing, or your open-meteo-marine plugin is too old to
+  give past hours: every spell then says "The sea state can't be fetched" and
+  names the plugin to install, until the next hourly look finds one that works.
+  Helmcentral never fills a gap from the forecast. When
+  the reason is that Open-Meteo couldn't be reached, or answered with an error,
+  Helmcentral asks again at the next hourly look. When it was a definite no, it
+  doesn't ask again. Open-Meteo only refuses a date that is outside its archive.
+  Any other error, such as a refused login or a busy server, is tried again. A
+  first look at a long history is spread over several hours, so the oldest
+  passages fill first and the rest follow, and a look stops early if Open-Meteo
+  says it is being asked too often. If you've turned on the blend fallback in the plugin and
+  Open-Meteo refuses the blend for a spell over land, only that spell says so.
+  The spells over open water keep their sea. When no spell has a sea, the Felt
+  line gives the reason for the whole passage: that the sea hasn't been fetched,
+  that Open-Meteo wouldn't give the sea for the passage's hours, or which plugin
+  to install. When the spells have different reasons, it says so and each spell
+  says why.
 - When the figures are worked out: Helmcentral works out the figures of every
   earlier passage once when it starts, after it has filled in motion from
   InfluxDB history. A passage you open before that finishes is worked out as you

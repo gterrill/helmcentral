@@ -7,7 +7,8 @@ it needs no API key or config.json.
 The plugin fetches hourly wave forecasts (wave height, period, direction, wind
 swell, and swell components), and optionally sea surface temperature, converted
 to SI units and RFC3339 timestamps per the plugin contract. A separate,
-optional `fetch_currents` export gives the hourly modelled ocean current.
+optional `fetch_currents` export gives the hourly modelled ocean current, and an
+optional `fetch_wave_hindcast` export gives the sea state for named past hours.
 
 Written in TinyGo. The Extism plugin contract isn't TinyGo-specific: Rust, Zig, C,
 AssemblyScript, C++, and Haskell PDKs all implement the same contract
@@ -81,6 +82,52 @@ non-2xx status. Nothing is dropped or swallowed. A host or plugin
 built before currents existed lacks the export, and the host says to install the
 updated plugin. The model's grid is about 9 km, so it does not resolve river
 entrances, narrow straits or shoals, and rates there are likely understated.
+
+## Past hours
+
+`fetch_wave_hindcast({points: [{lat, lon}, ...], start, end})` returns the hourly
+sea state for named past hours at every point, in `fetch_waves`' shape, one entry
+for each point in request order:
+`{"points":[{"model": "...", "model_label": "...", "hourly":[{time, wave_height_m?, ..., swell_wave_period_s, missing_reason?}]}]}`.
+`start` and `end` are RFC3339 UTC instants, the first and last hour wanted, both
+inclusive, the same for every point. The plugin cuts them down to the hour and
+makes ONE request for all the points: comma-separated `latitude` and `longitude`
+lists with `start_hour` and `end_hour` in `timezone=GMT`, with the same variables
+(`waveHourlyVariables`) and the same `models=ncep_gfswave025` pin as `fetch_waves`,
+so a hindcast hour and a forecast hour come from one model. A call carries at most
+100 points (`maxHindcastPoints`) and 31 days (`maxHindcastHours`). Open-Meteo
+documents comma-separated coordinates without a limit; 100 is what keeps the URL
+near 2 KB, as `fetch_currents` does, and the host asks for more points in several
+calls.
+
+The host calls it to keep the sea behind each recorded 15-minute spell of a
+passage, once for all the cells of a window of up to seven days. The answer follows
+every rule of `fetch_waves`: a combined period of `0` leaves out the combined
+figures, a component with period `0` is no train, and the `use_blend_fallback`
+setting applies the same way, to the points over land only: they are asked again
+together in one request without the pin, and their entry then says
+`"model": "best_match"`. `model` and `model_label` are always present: the host
+compares the hindcast's model with the forecast's, and `model_label` is how the
+plugin words the model for the operator ("GFS-Wave"). An hour the model has no
+value for carries `missing_reason`, the sentence the logbook shows for it ("GFS-Wave
+has no value at this cell."); the host keeps it as given and words nothing itself,
+so end it with a full stop. A request Open-Meteo definitely refuses, which is an
+HTTP 400 whose reason says a date is out of range (one outside its archive), answers
+`{"refused": "Open-Meteo wouldn't give the sea for this hour: <its reason>."}` with
+no points, and the host stores every hour of that request with the sentence and
+never asks again. When only the blend request for the land points is refused, the
+open-water points keep their GFS-Wave answers and each land point's hours carry
+the sentence as their `missing_reason`. A bad window or point list, any other non-2xx status (a rate
+limit, a timeout, a 5xx) or an unparseable response is an error returned to the
+host, which asks again at its next hourly sweep; nothing is swallowed.
+
+The test fixtures are real responses (models=ncep_gfswave025, GMT, 2026-11-10):
+`testdata/hindcast_six_hours.json`, an open-water point with a swell and a wind
+sea coming and going, `testdata/hindcast_land_cell.json`, a land-masked cell where
+every field is `0`, and `testdata/hindcast_two_points.json`, a multi-location
+response (a list with one object per point, an open-water point and then a land
+cell). A host or plugin built before this export lacks it, and the host says to
+install the updated plugin. The host never answers a hindcast from the forecast.
 
 ## Land cells and the blend fallback
 
@@ -213,6 +260,12 @@ cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... &
 
    One request for every point. No `models=` param. Velocity is in km/h, direction in degrees toward which the
    current flows, and both can be null.
+
+4. Past hours (`fetch_wave_hindcast` only): `GET https://marine-api.open-meteo.com/v1/marine?latitude=<lat>,<lat>&longitude=<lon>,<lon>&hourly=<the same nine wave variables>&timezone=GMT&start_hour=<yyyy-mm-ddThh:mm>&end_hour=<yyyy-mm-ddThh:mm>&models=ncep_gfswave025`
+
+   One request for the window and every point (a JSON list with one object per
+   point, or one object when there is one point). With the blend fallback on, the
+   points over land are asked again together in one request without `&models=`.
 
 See Open-Meteo's [Marine Weather API
 docs](https://open-meteo.com/en/docs/marine-weather-api) for full endpoint

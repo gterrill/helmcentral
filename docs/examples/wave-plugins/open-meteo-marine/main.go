@@ -47,6 +47,11 @@
 // currents. fetch_waves does not
 // call it, so waves cost no extra request.
 //
+// A third, fetch_wave_hindcast, returns the hourly sea state for named past hours
+// at a list of positions, from one request for all of them, in fetch_waves'
+// shape, for the host to keep with a recorded passage. It names the model that
+// answered each position and words any hour the model has no value for.
+//
 // Like every WASM wave plugin, this returns only raw SI-unit, RFC3339-timestamped
 // wave and sea-temperature data; it does NOT bucket by day or interpolate
 // current conditions - the host (backend/wasm_wave_provider.go) already does
@@ -72,6 +77,15 @@ type wasmFetchWavesInput struct {
 type wasmFetchCurrentsInput struct {
 	Points []currentsPoint `json:"points"`
 	Days   int             `json:"days"`
+}
+
+// wasmFetchWaveHindcastInput mirrors the host's fetch_wave_hindcast input
+// contract: the positions, and the first and last hour wanted for all of them,
+// RFC3339 in UTC.
+type wasmFetchWaveHindcastInput struct {
+	Points []currentsPoint `json:"points"`
+	Start  string          `json:"start"`
+	End    string          `json:"end"`
 }
 
 //go:wasmexport id
@@ -197,6 +211,51 @@ func fetchCurrents() int32 {
 		points[i] = currentPointOutput{Hourly: h}
 	}
 	if err := pdk.OutputJSON(fetchCurrentsOutput{Points: points}); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+// fetch_wave_hindcast is a separate, optional export: the hourly sea state for
+// named PAST hours at a list of positions, in the shape fetch_waves answers with,
+// from ONE request for all of them. The host calls it to keep the sea behind each
+// recorded spell of a passage. It uses the same GFS-Wave pin as fetch_waves, and
+// the same use_blend_fallback setting, so a hindcast hour and a forecast hour come
+// from one model. Each point's answer names the model that gave it and words any
+// hour the model has no value for. A request Open-Meteo definitely refuses (an
+// HTTP 400 whose reason says a date is out of its range) answers
+// {"refused": "<sentence>"} with no points, so the host settles every hour of it.
+// Any other failure, a network error, a timeout, a 401, 403, 404 or 414, a 5xx or
+// a 429 (worded "rate limited", which makes the host stop its sweep), is an
+// error returned to the host, which asks again later; nothing is swallowed.
+//
+//go:wasmexport fetch_wave_hindcast
+func fetchWaveHindcast() int32 {
+	var input wasmFetchWaveHindcastInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	start, end, err := validateHindcastInput(input.Points, input.Start, input.End)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	fetch := func(points []currentsPoint, fallback bool) ([][]waveHourOutput, error) {
+		res := pdk.NewHTTPRequest(pdk.MethodGet, hindcastURL(points, start, end, fallback)).Send()
+		if err := hindcastStatusError(int(res.Status()), res.Body()); err != nil {
+			return nil, err
+		}
+		return parseWaveBodies(res.Body(), len(points))
+	}
+	blendSetting, _ := pdk.GetConfig("use_blend_fallback")
+	out, err := chooseHindcast(input.Points, fallbackEnabled(blendSetting), fetch)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	if err := pdk.OutputJSON(out); err != nil {
 		pdk.SetError(err)
 		return -1
 	}

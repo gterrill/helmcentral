@@ -649,7 +649,8 @@ func main() {
 	go newSignalKMotionClient(motionAcc, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// Fills the passages recorded before that stream from InfluxDB history,
 	// once (ADR 0296), and only then works out every passage whose figures are
-	// missing or old (ADR 0298).
+	// missing or old (ADR 0298). It then keeps the sea state behind every
+	// recorded spell filled, once an hour until shutdown (ADR 0299).
 	go startPassageFigures(streamCtx, pas, settingsPath)
 	// The document indexer (above): started once at boot and woken
 	// immediately so any document left pending/extract or pending/enrich by

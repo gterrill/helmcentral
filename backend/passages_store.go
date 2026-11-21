@@ -119,6 +119,11 @@ type passageStore struct {
 	marinaMu   sync.Mutex
 	marinaSeen map[string]string // cruise id -> fingerprint last looked at
 
+	// seaProblem is why the last sea sweep could not ask for a sea at all (no
+	// wave plugin, or one without the hindcast export), "" when it could. Kept in
+	// memory only; see setSeaProblem.
+	seaMu      sync.Mutex
+	seaProblem string
 }
 
 func newPassageStore(dbPath string) (*passageStore, error) {
@@ -233,6 +238,9 @@ func createPassageSchema(db *sql.DB) error {
 		if _, err := db.Exec(q); err != nil {
 			return fmt.Errorf("create passage schema: %w", err)
 		}
+	}
+	if err := createSeaHindcastSchema(db); err != nil {
+		return err
 	}
 	if err := createAnchorTrailSchema(db); err != nil {
 		return err
@@ -662,7 +670,26 @@ func (s *passageStore) LastPassageEndMs() (int64, error) {
 
 // ListPassages returns the visible (not hidden) passages, newest first.
 func (s *passageStore) ListPassages() ([]passageRecord, error) {
-	rows, err := s.db.Query(`SELECT ` + passageColumns + ` FROM passages WHERE hidden = 0 ORDER BY start_ms DESC`)
+	return s.queryPassages(false, true)
+}
+
+// allPassageRecords is every passage, hidden ones too, oldest first.
+func (s *passageStore) allPassageRecords() ([]passageRecord, error) {
+	return s.queryPassages(true, false)
+}
+
+// queryPassages reads the passages by start time, newest first when newestFirst,
+// and the hidden ones too when includeHidden.
+func (s *passageStore) queryPassages(includeHidden, newestFirst bool) ([]passageRecord, error) {
+	query := `SELECT ` + passageColumns + ` FROM passages`
+	if !includeHidden {
+		query += ` WHERE hidden = 0`
+	}
+	query += ` ORDER BY start_ms`
+	if newestFirst {
+		query += ` DESC`
+	}
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("list passages: %w", err)
 	}
