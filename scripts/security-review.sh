@@ -63,10 +63,22 @@ cd "$wt"
 # /security-review truncates the diff it pastes, and a headless session cannot
 # get git commands approved, so this hands it the whole diff as a file.
 mkdir -p "$wt/backend/tmp"
-diff_file=$(mktemp "$wt/backend/tmp/security-review.XXXXXX")
+# Each file is named for the review that wrote it. A review killed outright
+# skips the trap and leaves its file, so remove any whose review has exited.
+prefix="$wt/backend/tmp/security-review."
+for f in "$prefix"*; do
+  [ -f "$f" ] || continue
+  pid=${f#"$prefix"}
+  pid=${pid%%.*}
+  case $pid in '' | *[!0-9]*) continue ;; esac
+  kill -0 "$pid" 2>/dev/null && continue
+  rm -f "$f" || echo "security-review: could not remove the leftover $f" >&2
+done
+diff_file=$(mktemp "$prefix$$.XXXXXX")
 trap 'rm -f "$diff_file"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 {
   git -C "$wt" log --oneline "$base"..HEAD
   echo
