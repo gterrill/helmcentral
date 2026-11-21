@@ -751,6 +751,7 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"to_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"stats_json", "TEXT"},
+		{"felt_deg", "REAL"},
 		{"rating", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {

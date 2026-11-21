@@ -27,6 +27,16 @@ type passageSummary struct {
 	// passage has no zone, and TimezoneError then says why.
 	Timezone      *string `json:"timezone"`
 	TimezoneError string  `json:"timezone_error,omitempty"`
+	// FeltBand is the band word for how the passage felt (comfortable, lively or
+	// rough), nil when it has no felt figure or the bands are not learned yet.
+	// FeltBandNote is set only when the band edge on the figure's side is missing
+	// (no Lively edge for a figure below every rated passage, no Rough edge for
+	// one above) and the figure lies beyond the rated range there.
+	FeltBand     *string `json:"felt_band"`
+	FeltBandNote string  `json:"felt_band_note,omitempty"`
+	// FeltHint is the hover text for the felt column: what the figure means, or
+	// why there is none, or why the bands are not learned yet.
+	FeltHint string `json:"felt_hint,omitempty"`
 }
 
 func startLon(pts []recordedTrackPoint) *float64 {
@@ -109,6 +119,9 @@ type passageDetail struct {
 	// SidewaysG is the largest sideways acceleration at the helm, in g, from the
 	// current helm height. Worked out on every read; never part of the stored stats.
 	SidewaysG passageSidewaysG `json:"sideways_g"`
+	// Felt is how the passage felt: the figure, its band from the operator's
+	// ratings, the 15-minute spells, snap and pounding (ADR 0298).
+	Felt passageFelt `json:"felt"`
 	// PlannedWithMate lists the Mate plans this passage was sailed from.
 	// A nil list with PlannedWithMateError set means the plans could not be
 	// read; the page shows that rather than "never planned".
@@ -165,6 +178,7 @@ func getPassageHandler(c echo.Context) error {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage"})
 	}
+	bands := store.comfortBandsForPage()
 	tz, tzReason := figures.startTimezone(rec.ID)
 	// Plans that cannot be read must not hide the passage, and must not look
 	// like "never planned": the error travels with the passage.
@@ -189,7 +203,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: buildPassageFelt(figures.Stats, sideways, bands), PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

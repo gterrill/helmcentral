@@ -689,9 +689,25 @@ func backfillMotionSpan(ctx context.Context, store *passageStore, in normalInflu
 		return spanResult{}, fmt.Errorf("prepare: %w", err)
 	}
 	defer stmt.Close()
+	var filledFrom, filledTo time.Time
 	for _, pt := range span {
 		if err := fillMotionColumns(stmt, pt.ID, fills[pt.ID], now); err != nil {
 			return spanResult{}, err
+		}
+		if _, filled := fills[pt.ID]; filled {
+			if filledFrom.IsZero() {
+				filledFrom = pt.At
+			}
+			filledTo = pt.At
+		}
+	}
+	// A passage that holds a filled point has figures worked out without them. They
+	// go in the same transaction, so the felt figure is worked out again from the
+	// new sway the next time it is read, or in the start-up pass that follows.
+	if !filledFrom.IsZero() {
+		if _, err := tx.Exec(`UPDATE passages SET stats_json = NULL, felt_deg = NULL WHERE start_ms <= ? AND end_ms >= ?`,
+			filledTo.UnixMilli(), filledFrom.UnixMilli()); err != nil {
+			return spanResult{}, fmt.Errorf("clear passage figures: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -739,10 +755,4 @@ func runMotionBackfillOnce(ctx context.Context, store *passageStore, settingsPat
 	log.Printf("passages: motion backfill: %d points with sway figures, %d with context readings only, %d of %d spans with nothing in InfluxDB, %d spans failed%s",
 		sum.PointsWithSway, sum.PointsContextOnly, sum.SpansNoData, sum.Spans, sum.SpansFailed, tail)
 	return sum
-}
-
-// startMotionBackfill runs the backfill once. main starts it in its own
-// goroutine with the streams' context, so it stops at shutdown.
-func startMotionBackfill(ctx context.Context, store *passageStore, settingsPath string) {
-	runMotionBackfillOnce(ctx, store, settingsPath, time.Now().UTC())
 }

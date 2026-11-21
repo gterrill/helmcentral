@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { DistanceUnits } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
+import { PASSAGE_RATING_LABELS, type PassageRating } from '@/lib/passage-plans'
 import {
   ABSENT,
   fmtDuration,
@@ -13,7 +14,9 @@ import {
   fmtPct,
   formatLocalDate,
   formatLocalDateTime,
+  feltHeadline,
   type CruiseStats,
+  type PassageFelt,
   type PassageStats,
   type WaterRise,
   type WaterRiseLabel,
@@ -80,6 +83,67 @@ export function PassageMotion({ stats, onSeek }: { stats: PassageStats; onSeek?:
         </span>
       ))}
     </p>
+  )
+}
+
+function snapText(snap: PassageFelt['snap']): string | null {
+  if (snap.value === null || !Number.isFinite(snap.value)) return null
+  return snap.kind === 'sideways_g' ? `${snap.value.toFixed(2)} g at the helm` : `${Math.round(snap.value)}°/s² roll acceleration`
+}
+
+/** How the passage felt: the band word beside the operator's own rating, the
+ * felt figure, and the snap and pounding peaks, each a button to its moment.
+ * A figure that was not recorded says why. The rating is never changed here. */
+export function PassageFeltRow({ felt, rating, onSeek }: { felt: PassageFelt | undefined; rating: PassageRating; onSeek?: (at: number) => void }) {
+  if (!felt) return null
+  const snap = snapText(felt.snap)
+  const pounding = felt.pounding.value_g !== null && Number.isFinite(felt.pounding.value_g) ? `${felt.pounding.value_g.toFixed(2)} g` : null
+  // With no band word the headline already shows the degrees; the line below
+  // leaves its own "felt" figure out rather than say the same number twice.
+  const showDeg = felt.deg !== null && felt.band !== null
+  return (
+    <div data-testid="passage-felt" className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Felt</span>
+        <span data-testid="felt-band" className="font-display text-base font-bold text-foreground">
+          {feltHeadline(felt.band, felt.deg)}
+        </span>
+        {felt.band_note && <span className="text-xs text-muted-foreground">{felt.band_note}</span>}
+        <span data-testid="felt-rating" className="text-xs text-muted-foreground">
+          {rating ? `You rated it ${PASSAGE_RATING_LABELS[rating]}` : 'Not rated'}
+        </span>
+      </div>
+      {felt.deg === null && <p className="text-xs text-muted-foreground">{felt.reason}</p>}
+      {(showDeg || snap || pounding) && (
+        <p className="text-sm tabular-nums text-foreground">
+          {showDeg && `${felt.deg!.toFixed(1)}° felt`}
+          {snap && (
+            <>
+              {showDeg && ' · '}
+              {felt.snap.at !== null ? (
+                <MaxButton label={`Snap ${snap}`} shown={snap} what="snap" at={felt.snap.at} onSeek={onSeek} />
+              ) : (
+                `Snap ${snap}`
+              )}
+            </>
+          )}
+          {pounding && (
+            <>
+              {(showDeg || snap) && ' · '}
+              {felt.pounding.at !== null ? (
+                <MaxButton label={`Pounding ${pounding}`} shown={pounding} what="pounding" at={felt.pounding.at} onSeek={onSeek} />
+              ) : (
+                `Pounding ${pounding}`
+              )}
+            </>
+          )}
+        </p>
+      )}
+      {!snap && <p className="text-xs text-muted-foreground">Snap: {felt.snap.reason}</p>}
+      {!pounding && <p className="text-xs text-muted-foreground">Pounding: {felt.pounding.reason}</p>}
+      {snap && felt.snap.note && <p className="text-xs text-muted-foreground">{felt.snap.note}</p>}
+      {felt.deg !== null && <p className="text-xs text-muted-foreground">{felt.bands.summary ?? felt.bands.reason}</p>}
+    </div>
   )
 }
 

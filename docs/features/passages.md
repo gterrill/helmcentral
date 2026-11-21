@@ -25,8 +25,9 @@ Helmcentral also records how the boat moved between one position and the next:
 - Pounding: how hard she was pushed up and down, worked out from the heave.
 - Sideways g: the sideways push felt at the helm, in g, which is how hard the
   roll throws someone standing there. Helmcentral works this out from how sharply she rolled and the
-  helm height you've entered, ready for the passage page to come. No screen
-  shows it yet. Leave the height blank and there's no figure. Change it and
+  helm height you've entered, and shows it on the passage page as the snap
+  (see [How a passage felt](#how-a-passage-felt)). Leave the height blank and
+  the page shows the roll acceleration instead. Change the height and
   every passage, old ones too, uses the new height. It takes the waterline as
   the point she rolls about, so use it to compare one passage with another, not
   as a measure of the load on a person.
@@ -40,8 +41,8 @@ fast the sensor was sending, look at the **Motion feed** line under **Settings �
 SignalK**. It gives the rates from the last position Helmcentral recorded and
 how long ago that was, so it shows what the recording got. If the feed has gone
 quiet, never connected, or sends timestamps Helmcentral can't use, the line says
-so under the rates. They're kept for scoring how comfortable a passage was, and
-the passage page doesn't show them yet.
+so under the rates. They're what the passage page uses to say how the passage
+felt.
 
 This runs on its own whether or not anyone has a screen open, and it starts when
 Helmcentral does. A position with no GPS fix is left out. So is one that jumps
@@ -121,8 +122,11 @@ every passage not yet in a cruise. Tap the arrow at the top of that pane
 the strip (**Show cruises**) to bring it back. Helmcentral remembers which you chose on that
 device. On a phone the pane isn't on the page. Tap **Cruises** to open it. The
 list shows the newest first, with the
-date, where the passage went from and to, the distance, the time under way and
-its cruise. Dates and times on this page are the boat's own local time, taken
+date, where the passage went from and to, the distance, the time under way, how
+it felt and its cruise. The **Felt** column shows the word for how the passage
+felt, **Comfortable**, **Lively** or **Rough**, once Helmcentral has learned the
+words from your ratings. Until then it shows the figure in degrees, and `--` for
+a passage with no motion recorded. Dates and times on this page are the boat's own local time, taken
 from where the passage began, with daylight saving where the place has it. A time
 that appears with a zone label such as UTC+10 or UTC+9:30 is in that zone.
 
@@ -144,14 +148,77 @@ Under the passage's name is the day and the time it ran, such as "Tue 17 Nov,
 5.05 AM to 11.44 AM", in the boat's own time. If the passage crossed midnight,
 the end gets its day too.
 
-In the edit panel, **How it went** first shows the largest roll, pitch and heave
-the boat had, such as "Max roll 14°, pitch 6°, heave 0.8 m", so you can judge
-the passage before you rate it. Each of those figures is a button that moves the
-replay to the moment it happened. Then it lets you rate the passage as **Comfortable**,
+In the edit panel, **How it went** first shows how the passage felt (see
+[How a passage felt](#how-a-passage-felt)). Under that it shows the largest roll,
+pitch and heave the boat had, such as "Max roll 14°, pitch 6°, heave 0.8 m", so
+you can judge the passage before you rate it. Each of those figures is a button
+that moves the replay to the moment it happened. Then it lets you rate the passage as **Comfortable**,
 **Lively** or **Shouldn't have gone**. The rating is yours alone. Helmcentral
 never fills it in. Mate reads it, along with your notes, when you ask about your
 season or your passages. When you merge passages, the
 rating that stays is the more cautious one.
+
+### How a passage felt
+
+The passage page says how the passage felt from the motion the boat recorded,
+and learns what the words mean from the ratings you give. Comfort is not a safety
+verdict. It sits beside your own rating and doesn't change it.
+
+- Felt: Helmcentral cuts the time under way into 15-minute spells and works out
+  how far she swayed in each, from her rolling and pitching. The felt figure, in
+  degrees, is the rougher end of those spells: three quarters of the spells were
+  gentler than it. A spell shorter than five minutes is left out, and so is time
+  at rest.
+- Snap: the sharpest roll. With your helm height entered it's the sideways push
+  at the helm, in g. Without it, it's the roll acceleration in degrees per second
+  squared, and the page says that the helm height would turn it into g.
+- Pounding: the hardest push up and down, in g, worked out from the heave.
+- Jumping to a moment: snap and pounding are buttons. Each moves the replay to
+  the moment it happened, the same as the largest speed and gust do.
+- Missing figures: the felt figure, the snap and the pounding each say in plain
+  words why they're missing, and show no number. Each reason comes from the
+  readings that figure uses, so one figure can have a number while another
+  says why it can't. The felt figure looks at roll and pitch, and says when the
+  passage was imported, was recorded before sway was kept, had no motion at all,
+  had only roll or only pitch, or had under five minutes of motion at a time
+  under way. The snap looks at the attitude feed, and says when it came in under
+  8 times a second, when the passage was recorded before the fast feed, or when
+  its roll and pitch were filled in from InfluxDB history, which is too coarse
+  for snap. The pounding looks at the heave alone, and says when the boat sent
+  no heave, when the heave came in under 8 times a second, or when it was
+  filled in from history.
+- When the figures are worked out: Helmcentral works out the figures of every
+  earlier passage once when it starts, after it has filled in motion from
+  InfluxDB history. A passage you open before that finishes is worked out as you
+  open it. A passage that can't be worked out is logged and left, and
+  the others carry on.
+
+The word beside your rating is **Comfortable**, **Lively** or **Rough**. They
+come from your own ratings on this boat:
+
+- Learning: Helmcentral uses only the passages you've rated that have a felt
+  figure. It needs at least three of them, and at least two neighbouring ratings,
+  such as **Comfortable** and **Lively**. Until then the page says "Not learned
+  yet" and tells you how many rated passages it has. If Helmcentral can't read
+  your ratings, the page says so in the same place and still shows the figure.
+- The edges: the line between two ratings sits halfway between the roughest
+  passage you called the gentler rating and the gentlest you called the rougher
+  one. If the two overlap, it sits halfway between the middle passage of each.
+  The page shows where the edges are and how many rated passages they came from.
+  If your ratings overlap so much that the edges would cross, the page draws
+  neither and says the ratings overlap too much.
+- No Rough yet: **Rough** only appears once a passage is rated **Shouldn't have
+  gone**. Until then a passage above the top edge reads **Lively**, and if it's
+  rougher than every rated passage the page says so.
+- Your rating: the words move as you rate more passages. Your own rating is never
+  changed.
+
+Along the replay's slider is a thin strip with one stretch for each 15-minute
+spell, coloured green for Comfortable, amber for Lively and red for Rough. It's
+grey until the words are learned. Tap a stretch to move the replay to the start
+of that spell. On a long passage the stretches are narrow, so a tap that lands
+between two moves the replay to the nearest one. Each stretch also carries its
+word and sway in its label, so the colour isn't the only clue.
 
 The two arrows at the right of the passage's title take you to the next
 passage and the one before it. **Next** goes to the passage that started later

@@ -21,6 +21,7 @@ import type { PassagesFilter } from '@/lib/app-location'
 import { passagesInFilter } from '@/lib/passage-neighbours'
 import { passagesApi } from '@/lib/passages-api'
 import {
+  feltHeadline,
   fmtDuration,
   fmtNM,
   formatLocalDate,
@@ -133,6 +134,17 @@ export function PassagesPanel({
       header: 'Underway',
       accessorFn: (p) => p.stats.underway_seconds,
       cell: ({ row }) => <span className="tabular-nums">{fmtDuration(row.original.stats.underway_seconds)}</span>,
+    },
+    {
+      id: 'felt',
+      header: 'Felt',
+      accessorFn: (p) => p.stats.felt_deg ?? -1,
+      cell: ({ row }) => {
+        const p = row.original
+        // The band word once the bands are learned; the figure until then. The
+        // hover text is the server's.
+        return <span className={p.felt_band ? 'text-foreground' : 'text-muted-foreground'} title={p.felt_hint}>{feltHeadline(p.felt_band, p.stats.felt_deg)}</span>
+      },
     },
     {
       id: 'cruise',

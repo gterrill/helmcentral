@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { toast } from 'sonner'
 
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
-import { PassageMotion } from '@/components/passages/passage-stats'
+import { PassageFeltRow, PassageMotion } from '@/components/passages/passage-stats'
 import type { ReplayCursor } from '@/components/passages/replay-panel'
 import { ConfirmDelete, FormSection } from '@/components/patterns'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
@@ -12,16 +12,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { PassageRating } from '@/lib/passage-plans'
+import { PASSAGE_RATING_LABELS, PASSAGE_RATINGS, type PassageRating } from '@/lib/passage-plans'
 import { passagesApi } from '@/lib/passages-api'
 import { passageHeading, type CruiseRecord, type PassageRecord, type PassageView } from '@/lib/passages'
 import { errorMessage } from '@/lib/errors'
 
-const RATINGS: { value: Exclude<PassageRating, ''>; label: string }[] = [
-  { value: 'comfortable', label: 'Comfortable' },
-  { value: 'lively', label: 'Lively' },
-  { value: 'shouldnt_have_gone', label: "Shouldn't have gone" },
-]
+const RATINGS = PASSAGE_RATINGS.map((value) => ({ value, label: PASSAGE_RATING_LABELS[value] }))
 
 function failure(action: string, err: unknown) {
   toast.error(`Could not ${action}`, { description: errorMessage(err) })
@@ -174,6 +170,7 @@ export function PassageEditPanel({
       </FormSection>
 
       <FormSection title="How it went">
+        <PassageFeltRow felt={passage.felt} rating={passage.rating} onSeek={onSeek} />
         <PassageMotion stats={passage.stats} onSeek={onSeek} />
         <div role="group" aria-label="How it went" className="flex flex-wrap gap-2">
           {RATINGS.map((r) => (

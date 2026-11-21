@@ -115,14 +115,19 @@ func residualQuantity(ownValue float64, peerValues []float64, learnedOffset floa
 func median(values []float64) float64 {
 	sorted := append([]float64(nil), values...)
 	sort.Float64s(sorted)
-	n := len(sorted)
-	if n == 0 {
+	return quantileSorted(sorted, 0.5)
+}
+
+// quantileSorted is the q quantile (0..1) of ascending values, interpolating
+// linearly between the two nearest. It is 0 for no values.
+func quantileSorted(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
 		return 0
 	}
-	if n%2 == 1 {
-		return sorted[n/2]
-	}
-	return (sorted[n/2-1] + sorted[n/2]) / 2
+	pos := q * float64(len(sorted)-1)
+	lo, hi := int(math.Floor(pos)), int(math.Ceil(pos))
+	frac := pos - float64(lo)
+	return sorted[lo]*(1-frac) + sorted[hi]*frac
 }
 
 func medianAbsoluteDeviation(values []float64, center float64) float64 {

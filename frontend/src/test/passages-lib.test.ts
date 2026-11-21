@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTimeline,
   clockFor,
+  spellClocks,
   fmtDuration,
   fmtFigure,
   fmtHours,
@@ -187,6 +188,20 @@ describe('replay timeline', () => {
     expect(clockFor(tl, 'b', 100200)).toBe(1200)
     expect(clockFor(tl, 'a', 0)).toBe(0)
     expect(clockFor(tl, 'zzz', 0)).toBeNull()
+  })
+
+  it('places a spell on the clock: clipped to its passage, dropped when wholly outside it', () => {
+    const tl = buildTimeline([a, b])
+    expect(spellClocks(tl, 'b', 100100, 100200)).toEqual({ from: 1100, to: 1200 })
+    // starts before the passage: clipped to its start
+    expect(spellClocks(tl, 'b', 99900, 100100)).toEqual({ from: 1000, to: 1100 })
+    // runs past the end: clipped to its end
+    expect(spellClocks(tl, 'b', 100400, 100900)).toEqual({ from: 1400, to: 1500 })
+    // wholly before or after (a trimmed-out stretch), or touching only at an edge
+    expect(spellClocks(tl, 'b', 99000, 99900)).toBeNull()
+    expect(spellClocks(tl, 'b', 100600, 101000)).toBeNull()
+    expect(spellClocks(tl, 'b', 99900, 100000)).toBeNull()
+    expect(spellClocks(tl, 'zzz', 0, 1)).toBeNull()
   })
 })
 

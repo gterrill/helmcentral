@@ -237,7 +237,7 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 
 	if sum.PointsAdded > 0 {
 		// new points inside a stored passage change what its figures are
-		if _, err := s.db.Exec(`UPDATE passages SET stats_json = NULL WHERE start_ms <= ? AND end_ms >= ?`, to.UnixMilli(), from.UnixMilli()); err != nil {
+		if _, err := s.db.Exec(`UPDATE passages SET stats_json = NULL, felt_deg = NULL WHERE start_ms <= ? AND end_ms >= ?`, to.UnixMilli(), from.UnixMilli()); err != nil {
 			return sum, err
 		}
 	}

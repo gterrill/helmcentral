@@ -9,6 +9,7 @@ import type { DocumentLinkPickerResult } from '@/components/inventory/document-l
 import { InsetMap, PassageMap, type CameraDriver, type PassageMapHandle } from '@/components/passages/passage-map'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
+import type { MotionSpellTick } from '@/components/passages/motion-strip'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { PhotoMoment } from '@/components/passages/photo-moment'
 import { MapLabel } from '@/components/passages/map-label'
@@ -45,6 +46,8 @@ import { replaySeconds, type ReplayLength, type ReplaySpeedId } from '@/lib/repl
 import {
   buildTimeline,
   clockFor,
+  spellClocks,
+  FELT_BAND_WORDS,
   isMultiPassage,
   formatBoatDateTime, formatLocalDateTime, localDateTimeParts,
   segmentBounds,
@@ -507,6 +510,26 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     selected: r.sign.id === selectedSign?.id,
   }))
 
+  // The motion strip: each 15-minute spell the server worked out, placed on the
+  // replay clock and coloured by the band it named. A spell outside the replay
+  // (a trimmed-out stretch) is not drawn.
+  const motionSpells = useMemo<MotionSpellTick[]>(() => {
+    if (timeline.total <= 0) return []
+    return passages.flatMap((p) => (p.felt?.spells ?? []).flatMap((s, i) => {
+      const range = spellClocks(timeline, p.id, s.start, s.end)
+      if (!range) return []
+      const { from, to } = range
+      const word = s.band ? `${FELT_BAND_WORDS[s.band]} spell` : 'Spell'
+      const label = `${word}, ${s.sway_deg.toFixed(1)}° sway, from ${formatLocalDateTime(s.start, timeZone)}${s.band ? '' : ', band not learned yet'}`
+      return [{ id: `${p.id}:${i}`, from: from / timeline.total, to: to / timeline.total, clock: from, band: s.band, label }]
+    }))
+  }, [passages, timeline, timeZone])
+  // The strip is memoised, so it is handed one function for good that reaches
+  // the current seekClock.
+  const seekClockRef = useRef(seekClock)
+  useEffect(() => { seekClockRef.current = seekClock })
+  const seekMotion = useCallback((clock: number) => seekClockRef.current(clock), [])
+
   // The chips show the time alone, with the date only when the signs span days;
   // the full date, time and zone stay in each chip's label.
   const selectedSignId2 = selectedSign?.id
@@ -746,6 +769,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
         onTickClick={pickShot}
         signTicks={signTicks}
         signsOpen={signsOpen}
+        motionStrip={motionSpells}
+        onMotionSeek={seekMotion}
         onSignsToggle={() => setSignsOpen((o) => !o)}
         onSignTickClick={previewSign}
         signsEditor={

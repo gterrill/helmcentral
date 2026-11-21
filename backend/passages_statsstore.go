@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,8 +35,26 @@ type passageFigures struct {
 	Timezone string `json:"timezone,omitempty"`
 }
 
-// passageFiguresVersion 2 added the time of each maximum and the motion maxima.
-const passageFiguresVersion = 2
+// passageFiguresVersion 2 added the time of each maximum and the motion maxima;
+// 3 added the felt figure, its spells, and the snap and pounding maxima; 4 gave
+// snap and pounding a reason of their own in place of one shared code.
+const passageFiguresVersion = 4
+
+// parseFigures reads a row's stats_json. ok is false for a missing or unreadable
+// value.
+func parseFigures(raw sql.NullString) (f passageFigures, ok bool) {
+	if !raw.Valid || json.Unmarshal([]byte(raw.String), &f) != nil {
+		return passageFigures{}, false
+	}
+	return f, true
+}
+
+// current says the figures are in the shape this build works out. Rows stored
+// before the start latitude was kept have a longitude and no latitude, and are
+// worked out again. One rule, for a read and for the start-up pass.
+func (f passageFigures) current() bool {
+	return f.Version >= passageFiguresVersion && (f.StartLat != nil || f.StartLon == nil)
+}
 
 // PassageStatsFor is the stored stats alone.
 func (s *passageStore) PassageStatsFor(rec passageRecord) (passageStats, error) {
@@ -50,31 +70,37 @@ func (s *passageStore) PassageFiguresFor(rec passageRecord) (passageFigures, err
 	if err := s.db.QueryRow(`SELECT stats_json FROM passages WHERE id = ?`, rec.ID).Scan(&raw); err != nil {
 		return passageFigures{}, fmt.Errorf("read passage stats: %w", err)
 	}
-	if raw.Valid {
-		var f passageFigures
-		if err := json.Unmarshal([]byte(raw.String), &f); err == nil {
-			// Rows stored before the start latitude was kept have a longitude
-			// and no latitude; they are worked out again below.
-			if f.Version >= passageFiguresVersion && (f.StartLat != nil || f.StartLon == nil) {
-				if f.Timezone == "" && f.StartLat != nil && f.StartLon != nil {
-					// Stored before the zone was kept: look it up this once
-					// and keep it.
-					if name, _ := f.lookupStartZone(rec.ID); name != "" {
-						f.Timezone = name
-						s.storeFigures(rec, f)
-					}
+	if f, ok := parseFigures(raw); ok {
+		if f.current() {
+			if f.Timezone == "" && f.StartLat != nil && f.StartLon != nil {
+				// Stored before the zone was kept: look it up this once
+				// and keep it.
+				if name, _ := f.lookupStartZone(rec.ID); name != "" {
+					f.Timezone = name
+					s.storeFigures(rec, f)
 				}
-				return f, nil
 			}
-			cached = &f
+			return f, nil
 		}
+		cached = &f
 	}
 	pts, err := s.TrackPointsBetween(rec.Start, rec.End)
 	if err != nil {
 		return passageFigures{}, err
 	}
 	if cached != nil && len(pts) == 0 {
-		// Nothing to work it out from; the stored figures stand.
+		// Nothing to work it out from; the stored figures stand. Keep them at the
+		// current version, or every read would look here again. A longitude kept
+		// without its latitude is no use alone, so it goes. Only this passage's
+		// stats row changes; no track point is touched.
+		cached.Version = passageFiguresVersion
+		if cached.StartLat == nil {
+			cached.StartLon = nil
+		}
+		cached.Stats.setNoPointsReasons()
+		if err := s.storeFigures(rec, *cached); err != nil {
+			return *cached, err
+		}
 		return *cached, nil
 	}
 	st := passageFigures{Version: passageFiguresVersion, Stats: computePassageStats(pts), StartLon: startLon(pts), StartLat: startLat(pts)}
@@ -101,13 +127,8 @@ type passageSidewaysG struct {
 }
 
 const (
-	sidewaysReasonNoHeight      = "Helm height isn't set. Enter it under Settings, Vessel."
-	sidewaysReasonUnreadable    = "The helm height couldn't be read, so sideways g isn't shown."
-	sidewaysReasonNoMotion      = "No motion was recorded on this passage: the boat had no attitude sensor, or its motion feed wasn't reaching Helmcentral."
-	sidewaysReasonSlowFeed      = "The attitude feed was below 8 Hz on this passage, too slow to work out sideways g."
-	sidewaysReasonImported      = "This passage was imported, so it has no motion figures."
-	sidewaysReasonBeforeCapture = "This passage was recorded before 10 Hz capture, so it has roll peaks but no sideways g."
-	sidewaysReasonNoAccel       = "No point on this passage has a roll acceleration, though motion was recorded."
+	sidewaysReasonNoHeight   = "Helm height isn't set. Enter it under Settings, Vessel."
+	sidewaysReasonUnreadable = "The helm height couldn't be read, so sideways g isn't shown."
 )
 
 // passageSidewaysGFor works the figures out for a passage's points from the
@@ -136,46 +157,9 @@ func passageSidewaysGFor(id string, pts []recordedTrackPoint) passageSidewaysG {
 		raiseMax(&out.PeakG, &out.PeakAt, &g, p.At)
 	}
 	if out.PeakG == nil {
-		out.Reason = noSidewaysReason(pts)
+		out.Reason = snapMissingReason(pts, figureSidewaysG)
 	}
 	return out
-}
-
-// noSidewaysReason says why no point has a roll acceleration, from what the
-// points kept, leaving out the first as the peak loop does: imported points
-// carry no motion at all; stored attitude rates mostly under the floor mean the
-// feed was too slow; roll peaks without a rate were recorded before 10 Hz capture; nothing
-// at all means no attitude sensor or motion feed while it was recorded.
-func noSidewaysReason(pts []recordedTrackPoint) string {
-	if len(pts) > 0 {
-		pts = pts[1:] // the first window is before the passage, as in the peak loop
-	}
-	var rated, slow int
-	var peaks, imported bool
-	for _, p := range pts {
-		if p.Source == trackSourceImported {
-			imported = true
-		}
-		if p.MotionRateHz != nil {
-			rated++
-			if *p.MotionRateHz < motionMinRateHz {
-				slow++
-			}
-		}
-		peaks = peaks || p.RollPeakDeg != nil
-	}
-	switch {
-	case imported:
-		return sidewaysReasonImported
-	case rated > 0 && slow*2 > rated:
-		return sidewaysReasonSlowFeed
-	case rated > 0:
-		return sidewaysReasonNoAccel
-	case peaks:
-		return sidewaysReasonBeforeCapture
-	default:
-		return sidewaysReasonNoMotion
-	}
 }
 
 // helmHeightLog lets a failure to read the helm height reach the log once an
@@ -224,15 +208,20 @@ func (s *passageStore) storeFigures(rec passageRecord, f passageFigures) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ? AND start_ms = ? AND end_ms = ?`,
-		string(buf), rec.ID, rec.Start.UnixMilli(), rec.End.UnixMilli()); err != nil {
+	// felt_deg is kept in a column of its own so the comfort bands can be learned
+	// from every rated passage without reading each one's stats.
+	if _, err := s.db.Exec(`UPDATE passages SET stats_json = ?, felt_deg = ? WHERE id = ? AND start_ms = ? AND end_ms = ?`,
+		string(buf), f.Stats.FeltDeg, rec.ID, rec.Start.UnixMilli(), rec.End.UnixMilli()); err != nil {
 		return fmt.Errorf("store passage stats: %w", err)
 	}
 	return nil
 }
 
 // ListPassageSummaries is the visible passages, newest first, with their
-// stored figures.
+// stored figures and the band word beside each felt figure. The bands come from
+// ComfortBands, the one place the rated-passage rule lives. Each row is brought
+// up to date by PassageFiguresFor inside this function, on the request path, so
+// its felt column is filled before the bands are learned.
 func (s *passageStore) ListPassageSummaries() ([]passageSummary, error) {
 	records, err := s.ListPassages()
 	if err != nil {
@@ -245,7 +234,139 @@ func (s *passageStore) ListPassageSummaries() ([]passageSummary, error) {
 			return nil, err
 		}
 		tz, reason := f.startTimezone(r.ID)
-		out = append(out, passageSummary{passageRecord: r, Stats: f.Stats, Timezone: tz, TimezoneError: reason})
+		out = append(out, passageSummary{passageRecord: r, Stats: f.Stats.forWire(), Timezone: tz, TimezoneError: reason})
+	}
+	bands := s.comfortBandsForPage()
+	for i := range out {
+		out[i].setFelt(bands)
 	}
 	return out, nil
+}
+
+// staleFigureIDs are the passages, hidden or not, whose stored stats are
+// missing, unreadable or not in the current shape. The stats are read and
+// judged here, not in SQL, so one unreadable row cannot stop the scan.
+func (s *passageStore) staleFigureIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id, stats_json FROM passages ORDER BY start_ms`)
+	if err != nil {
+		return nil, fmt.Errorf("read passage stats: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		var raw sql.NullString
+		if err := rows.Scan(&id, &raw); err != nil {
+			return nil, fmt.Errorf("read passage stats: %w", err)
+		}
+		if f, ok := parseFigures(raw); !ok || !f.current() {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read passage stats: %w", err)
+	}
+	return ids, nil
+}
+
+// recomputeStalePassages brings every passage whose stats are missing or older
+// than passageFiguresVersion to the current version in one pass, with work, and
+// logs one line: how many it recomputed and how many failed, with the first few
+// errors. A failure on one passage leaves the others alone. When ctx ends the
+// loop stops and the line says how many passages were left.
+func recomputeStalePassages(ctx context.Context, store *passageStore, work func(passageRecord) (passageFigures, error)) (recomputed, failed int) {
+	ids, err := store.staleFigureIDs()
+	if err != nil {
+		log.Printf("passages: start-up recompute: could not find the passages to work out: %v", err)
+		return 0, 0
+	}
+	const maxListedFailures = 5
+	var failures []string
+	left := 0
+	for i, id := range ids {
+		if ctx.Err() != nil {
+			left = len(ids) - i
+			break
+		}
+		rec, err := store.GetPassage(id)
+		if err == nil {
+			_, err = work(rec)
+		}
+		if err != nil {
+			failed++
+			if len(failures) < maxListedFailures {
+				failures = append(failures, fmt.Sprintf("%s: %v", id, err))
+			}
+			continue
+		}
+		recomputed++
+	}
+	line := fmt.Sprintf("passages: start-up recompute: recomputed %d, %d failed", recomputed, failed)
+	if left > 0 {
+		line += fmt.Sprintf(", stopped early with %d left", left)
+	}
+	if failed > 0 {
+		line += " (" + strings.Join(failures, "; ")
+		if failed > len(failures) {
+			line += fmt.Sprintf("; and %d more", failed-len(failures))
+		}
+		line += ")"
+	}
+	log.Print(line)
+	return recomputed, failed
+}
+
+// startPassageFigures is the start-up work on the passage log's motion figures.
+// The order matters: the backfill (ADR 0296) fills motion into points recorded
+// before the live recorder, and clears the stored figures of each passage it
+// fills; only then does the pass work out every passage whose figures are
+// missing or old, so none is worked out before it has been filled. main runs it
+// in its own goroutine with the streams' context.
+func startPassageFigures(ctx context.Context, store *passageStore, settingsPath string) {
+	runMotionBackfillOnce(ctx, store, settingsPath, time.Now().UTC())
+	if ctx.Err() != nil {
+		return
+	}
+	recomputeStalePassages(ctx, store, store.PassageFiguresFor)
+}
+
+// bandsReasonUnreadable is the reason a page carries when the bands could not be
+// learned because reading the ratings failed.
+const bandsReasonUnreadable = "The comfort bands couldn't be worked out from your ratings, so no band word is shown."
+
+// comfortBandsForPage is ComfortBands for a list or a passage page: a failure is
+// logged and travels as the bands' reason, with the bands not learned, so the
+// page still returns its figures.
+func (s *passageStore) comfortBandsForPage() comfortBands {
+	bands, err := s.ComfortBands()
+	if err != nil {
+		log.Printf("passages: comfort bands: %v", err)
+		return comfortBands{Reason: bandsReasonUnreadable}
+	}
+	return bands
+}
+
+// ComfortBands learns the bands from every visible rated passage. It reads only
+// each passage's rating and felt_deg column and runs nothing else, so a request
+// never scans the table. A passage whose figures have not been worked out yet
+// has no felt_deg and joins the bands once the start-up pass, or a read of it,
+// has stored them.
+func (s *passageStore) ComfortBands() (comfortBands, error) {
+	rows, err := s.db.Query(`SELECT rating, felt_deg FROM passages WHERE hidden = 0 AND rating != '' AND felt_deg IS NOT NULL`)
+	if err != nil {
+		return comfortBands{}, fmt.Errorf("read rated passages: %w", err)
+	}
+	defer rows.Close()
+	var rated []ratedFelt
+	for rows.Next() {
+		var r ratedFelt
+		if err := rows.Scan(&r.Rating, &r.FeltDeg); err != nil {
+			return comfortBands{}, fmt.Errorf("read rated passages: %w", err)
+		}
+		rated = append(rated, r)
+	}
+	if err := rows.Err(); err != nil {
+		return comfortBands{}, fmt.Errorf("read rated passages: %w", err)
+	}
+	return learnComfortBands(rated), nil
 }
