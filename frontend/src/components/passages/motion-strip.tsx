@@ -1,7 +1,15 @@
 import { memo, type PointerEvent } from 'react'
 
-import type { FeltBand } from '@/lib/passages'
+import { FELT_BAND_WORDS, formatLocalDateTime, seaText, type FeltBand, type FeltSpell } from '@/lib/passages'
 import { severityFill } from '@/lib/severity'
+
+/** The label and hover text of a spell: its band and sway, when it began, and the
+ * sea behind it (ADR 0299), or the reason there is none. */
+export function spellLabel(s: FeltSpell, timeZone: string | null): string {
+  const word = s.band ? `${FELT_BAND_WORDS[s.band]} spell` : 'Spell'
+  const base = `${word}, ${s.sway_deg.toFixed(1)}° sway, from ${formatLocalDateTime(s.start, timeZone)}${s.band ? '' : ', band not learned yet'}`
+  return s.sea ? `${base}. Sea: ${seaText(s.sea)}` : base
+}
 
 /** A 15-minute spell of motion, drawn as a stretch of the thin strip under the scrubber. */
 export interface MotionSpellTick {

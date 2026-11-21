@@ -11,7 +11,41 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Replace your Open-Meteo Marine plugin if you placed it by hand, so each
+  passage can show the sea it was in.** Helmcentral now asks the plugin for the
+  swell and wind waves of the past hours your passages ran through. What to do:
+  - If you installed Helmcentral with the installer, nothing. It replaces the
+    plugin.
+  - If you placed `open-meteo-marine.wasm` by hand, copy the one from this
+    release's plugin bundle over it. With the old plugin no passage shows a sea,
+    and the log says to install the updated plugin.
+  - Helmcentral never fills a past hour from the forecast. An hour it can't fetch
+    stays empty, with the reason, and it tries again at the next hourly look.
+
 ### Added
+
+- **Each spell of a passage now shows the sea it was in.** The replay strip's
+  label for a spell names the swell and the wind wave with their height, period
+  and which way they came from relative to your heading, such as "Sea: swell
+  0.8 m 9 s on the port beam, wind wave 0.6 m 4 s on the port bow". The Felt
+  line adds one line for the whole passage: the largest swell and wind wave and
+  when each was. Directions use the same words Mate does, such as "ahead",
+  "on the starboard bow" and "astern". When there's no sea for a spell, it says
+  why, such as "GFS-Wave has no value at this cell.", that Open-Meteo wouldn't
+  give that date, or that the hour hasn't been fetched yet. Helmcentral waits
+  until an hour is 12 hours old, because the model keeps adjusting its figures
+  for about that long. It then looks over every passage once an hour, and when it
+  starts, and fetches the sea for the hours that have none. So a passage's sea
+  shows up about 12 hours after the hour it covers, within the next hourly look,
+  and that includes a passage you split, merge, trim or import. Each spell takes
+  the model's figure for the hour nearest its middle. Helmcentral keeps the sea
+  so it can learn from it later without asking Open-Meteo for old data again.
+  When only some spells have a sea, the Felt line says how many don't, such as
+  "(no sea for 3 of 12 spells)". A date Open-Meteo refuses is not asked again.
+  One it couldn't answer is tried at the next hourly look. Nothing is rated or
+  ranked from it yet.
 
 - **A passage now records how much the boat rolled, pitched and heaved.** Under
   "How it went" the passage page shows the biggest roll, pitch and heave, such

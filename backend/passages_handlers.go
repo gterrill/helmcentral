@@ -203,7 +203,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: buildPassageFelt(figures.Stats, sideways, bands), PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: buildPassageFelt(figures.Stats, sideways, bands, store.seaLookupFor(figures.Stats.FeltSpells)), PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

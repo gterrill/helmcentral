@@ -78,12 +78,69 @@ export interface ComfortBands {
   rough_from_deg: number | null
 }
 
+/** One wave system: height in metres (as the forecast shows them), period, and the
+ * direction it comes from, degrees true. */
+export interface SeaTrainFigures {
+  height_m: number
+  period_s: number
+  from_deg: number
+}
+
+/** One wave system behind a spell. */
+export interface SeaTrain extends SeaTrainFigures {
+  /** Where it comes from relative to the heading, in the server's words ("on the port beam"). */
+  direction: string
+}
+
+/** The sea behind one spell (ADR 0299): its swell and wind wave, or the reason
+ * there is no sea state for the hour. A sea state with neither is a flat sea. */
+export interface SpellSea {
+  swell: SeaTrain | null
+  wind_wave: SeaTrain | null
+  reason?: string
+}
+
+/** The largest of one kind of wave over a passage, and when (Unix seconds). */
+export interface SeaPeak extends SeaTrainFigures {
+  at: number
+}
+
+export interface PassageSea {
+  swell: SeaPeak | null
+  wind_wave: SeaPeak | null
+  reason?: string
+  /** Set when only some spells have a sea: the peaks leave the rest out ("no sea for 3 of 12 spells"). */
+  partial?: string
+}
+
 export interface FeltSpell {
   /** Unix seconds. */
   start: number
   end: number
   sway_deg: number
   band: FeltBand | null
+  /** Absent from a server that predates the stored sea state. */
+  sea?: SpellSea
+}
+
+const seaTrainText = (kind: string, t: SeaTrain): string =>
+  `${kind} ${t.height_m.toFixed(1)} m ${Math.round(t.period_s)} s ${t.direction}`
+
+/** What a sea with neither swell nor wind wave is called. */
+export const NO_SWELL_OR_WIND_WAVE = 'no swell or wind wave'
+
+/** The parts of a sea joined, or the flat-sea words when there are none. Absent
+ * parts are left out. */
+export function joinSeaParts(parts: (string | null | undefined)[], separator = ', '): string {
+  const present = parts.filter((p): p is string => !!p)
+  return present.length > 0 ? present.join(separator) : NO_SWELL_OR_WIND_WAVE
+}
+
+/** What the sea was for one spell, for a label: `swell 0.8 m 9 s on the port beam,
+ * wind wave 0.6 m 4 s on the port bow`, a flat sea in words, or the server's reason. */
+export function seaText(sea: SpellSea): string {
+  if (sea.reason) return sea.reason
+  return joinSeaParts([sea.swell && seaTrainText('swell', sea.swell), sea.wind_wave && seaTrainText('wind wave', sea.wind_wave)])
 }
 
 export interface FeltSnap {
@@ -111,6 +168,8 @@ export interface PassageFelt {
   spells: FeltSpell[]
   snap: FeltSnap
   pounding: FeltPounding
+  /** The sea over the passage, or why there is no sea state. Absent when the passage has no spells. */
+  sea?: PassageSea
 }
 
 export interface PassageSummary extends PassageRecord {

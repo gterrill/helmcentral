@@ -52,6 +52,34 @@
 // carries no currents. Currents are the TOTAL current the model gives (tide plus
 // ocean currents), not a tide alone.
 //
+// The sea state for past hours is a third optional export (ADR 0299):
+//
+//	fetch_wave_hindcast({"points": [{"lat": float64, "lon": float64}, ...], "start": RFC3339, "end": RFC3339}) -> {
+//	  "points": [{
+//	    "model": string,
+//	    "model_label": string,
+//	    "hourly": [...as fetch_waves, each hour with an optional "missing_reason": string...]
+//	  }, ...]
+//	}
+//
+// points carries at most maxHindcastPoints positions, all asked about the same
+// window, from one upstream request. start and end are the first and last hour
+// wanted, in UTC, both inclusive. The answer has one entry per point, in request
+// order. Each entry's hourly shape is fetch_waves', with the same absent-figure
+// rules. model (required) names the model that answered that point, so a fit can
+// tell a hindcast made with the forecast's model from one made with another, and
+// model_label (required) is how the plugin words that model for the operator. An
+// hour the model has no value for carries missing_reason, the sentence the
+// logbook shows for it (end it with a full stop); the host stores it as given and
+// never words it itself. When the data source definitely refuses the whole
+// request (an HTTP 4xx other than 408 and 429, such as a date outside its
+// archive), the plugin answers {"refused": "<sentence>"} with no points, and the
+// host stores every hour of that request with the sentence. Any other failure
+// (a network error, a timeout, a rate limit, a 5xx) is returned as an error, and
+// the host asks again at its next hourly sweep. A plugin without the export is still a
+// valid wave plugin; the host says to install the updated plugin and never
+// answers from the forecast.
+//
 // The per-component direction and period fields are OPTIONAL in the sense
 // that a model without them may omit them; they then read as 0, and a
 // component with a zero period is treated as absent rather than as a wave
@@ -166,6 +194,50 @@ type currentsBundle struct {
 // never serves a stale answer for a failed fetch.
 type currentsProvider interface {
 	FetchCurrents(ctx context.Context, points []currentsPoint, days int) (currentsBundle, error)
+}
+
+// maxHindcastPoints is the most positions one fetch_wave_hindcast call carries.
+// It follows maxCurrentsPoints: Open-Meteo documents no limit on comma-separated
+// coordinates, so the cap is what keeps the request URL near 2 KB. The host
+// asks for more positions in several calls.
+const maxHindcastPoints = 100
+
+// waveHindcastHour is one hour of a hindcast: the figures as a forecast hour
+// gives them, and MissingReason, the plugin's own sentence, when the model has no
+// value for the hour.
+type waveHindcastHour struct {
+	waveHourPoint
+	MissingReason string
+}
+
+// waveHindcastSeries is the hours the plugin gives for one position. Model is the
+// model's id and ModelLabel the plugin's wording of it. Neither is ever empty.
+type waveHindcastSeries struct {
+	Model      string
+	ModelLabel string
+	Hourly     []waveHindcastHour
+}
+
+// waveHindcastBundle is the sea state a plugin gives for named past hours at
+// several positions: one series for each, in request order.
+type waveHindcastBundle struct {
+	Points []waveHindcastSeries
+	// Refused is the plugin's sentence when the data source gave a definite no to
+	// the whole request (an HTTP 4xx other than a rate limit or a timeout): every
+	// hour asked for is then settled with this as its reason. Empty otherwise, and
+	// Points holds the answer.
+	Refused string
+}
+
+// waveHindcastProvider is the optional capability of a wave provider that can
+// give the sea state for past hours (ADR 0299). SupportsWaveHindcast says
+// whether it can. A provider that cannot answers FetchWaveHindcast with an error
+// wrapping errNoWaveHindcastExport; it never answers from the forecast. start and
+// end are the first and last hour wanted, inclusive, for every point. It returns
+// ctx.Err() once ctx is done.
+type waveHindcastProvider interface {
+	SupportsWaveHindcast() bool
+	FetchWaveHindcast(ctx context.Context, points []currentsPoint, start, end time.Time) (waveHindcastBundle, error)
 }
 
 // waveProvider is the interface implemented by each pluggable wave data

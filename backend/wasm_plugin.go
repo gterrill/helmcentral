@@ -137,6 +137,10 @@ type wasmPluginBase struct {
 	// (ADR 0278). An older plugin lacks it, which is not a load failure: the
 	// tool reports that the installed plugin has no currents.
 	supportsCurrents bool
+	// supportsWaveHindcast is true when a wave plugin exports fetch_wave_hindcast,
+	// the optional export behind the sea state kept with each recorded spell
+	// (ADR 0299). An older plugin lacks it, which is not a load failure.
+	supportsWaveHindcast bool
 	// positionBased is true when a tide plugin exports position_based returning
 	// "true" (ADR 0273): it has no station catalog and takes the position as
 	// "<lat>,<lon>" in place of a station id. Absent means station-based, so
@@ -795,6 +799,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 
 		supportsAnchorageFeatures: instance.FunctionExists("anchorage_features"),
 		supportsCurrents:          instance.FunctionExists("fetch_currents"),
+		supportsWaveHindcast:      instance.FunctionExists("fetch_wave_hindcast"),
 		positionBased:             positionBasedOut == "true",
 		heightDatum:               heightDatum,
 	}, nil
