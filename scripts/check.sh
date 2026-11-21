@@ -134,6 +134,7 @@ all)
 	step hook-tests . sh scripts/hooks/refuse-piped-checks-test.sh
 	step hook-tests-stash . sh scripts/hooks/refuse-git-stash-test.sh
 	step lock-tests . sh scripts/check-lock-test.sh
+	step await-check-tests . sh scripts/await-check-test.sh
 	;;
 esac
 

@@ -27,7 +27,7 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty') || exit 0
 # their `&` is not read as a separator, then look for a `|` after a check
 # target within the same command (before any `;` or `&`).
 if printf '%s\n' "$cmd" | sed 's/||/ /g; s/[0-9]*>&[0-9-]*/ /g' |
-	grep -Eq '(make( +[^ |;&]+)* +(check[a-z-]*|docs-lint-changed)|security-review\.sh)([^|;&]*)\|'; then
+	grep -Eq '(make( +[^ |;&]+)* +(check[a-z-]*|docs-lint-changed)|security-review\.sh|await-check\.sh)([^|;&]*)\|'; then
 	echo "Run check targets unpiped: they print their own pass counts, FAIL lines and log paths." >&2
 	exit 2
 fi
