@@ -73,6 +73,10 @@
 - Prefer test-first development (TDD) for behavior changes and bug fixes.
 - Write or update a failing test that reproduces the expected behavior before implementing the fix.
 - Implement the minimal change required to make the test pass.
+- Before building new logic that keeps state over time (windows, clocks,
+  backfill, caches, recompute), run a `Plan` subagent on the design. Its edge
+  cases become the first tests; any that would change an agreed design go to
+  the operator first.
 - Run relevant tests after the change and include the test result summary in your response.
 - **Apply TDD only to functional code and business logic** (new features, bug fixes, algorithmic changes).
 - **Do NOT use TDD for:**
