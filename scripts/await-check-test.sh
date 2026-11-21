@@ -1,7 +1,7 @@
 #!/bin/sh
 # Cases for await-check.sh: `sh scripts/await-check-test.sh`. Builds fake task
 # output files under a private root, shaped like check.sh's real output, and
-# never waits (AWAIT_CHECK_LIMIT=0).
+# waits only in the two poll-loop cases (AWAIT_CHECK_LIMIT=0 elsewhere).
 set -u
 script=$(cd "$(dirname "$0")" && pwd)/await-check.sh
 root=$(mktemp -d)
@@ -95,7 +95,8 @@ expect 1 early "make: *** [check] Error 2"
 cat >"$tasks/early1.output" <<'EOF'
 make[1]: *** [check-backend] Error 2
 EOF
-expect 1 early1 "stopped before its summary"
+# A nested make's error is not the outermost run stopping.
+expect 3 early1 "still running"
 
 cat >"$tasks/running.output" <<'EOF'
 == backend: sh scripts/check.sh backend
@@ -117,6 +118,51 @@ EOF
 touch -t 202601010000 "$other/twosess.output"
 touch -t 202601020000 "$tasks/twosess.output"
 expect 0 twosess "check-all: all steps passed"
+
+# A make error that is not the last line: the run carried on, so it is still
+# running, not stopped early.
+cat >"$tasks/midmake.output" <<'EOF'
+== backend: sh scripts/check.sh backend
+make[1]: *** [check-backend] Error 2
+== frontend: sh scripts/check.sh frontend
+   ok
+EOF
+expect 3 midmake "still running"
+
+# The poll loop: a file that gains its final line about 3 s in.
+cat >"$tasks/late.output" <<'EOF'
+== backend: sh scripts/check.sh backend
+EOF
+( sleep 3; printf 'check-all: all steps passed\n' >>"$tasks/late.output" ) &
+bg=$!
+out=$(AWAIT_CHECK_ROOT=$root AWAIT_CHECK_LIMIT=20 sh "$script" late 2>&1)
+got=$?
+wait "$bg"
+if [ "$got" -ne 0 ]; then
+	echo "FAIL: late: want exit 0, got $got"
+	fail=1
+fi
+if ! printf '%s\n' "$out" | grep -qF -- "check-all: all steps passed"; then
+	echo "FAIL: late: output lacks the final line"
+	fail=1
+fi
+
+# A file that never finishes: exit 3, and only after the whole limit.
+cat >"$tasks/never.output" <<'EOF'
+== backend: sh scripts/check.sh backend
+EOF
+t0=$(date +%s)
+AWAIT_CHECK_ROOT=$root AWAIT_CHECK_LIMIT=5 sh "$script" never >/dev/null 2>&1
+got=$?
+t1=$(date +%s)
+if [ "$got" -ne 3 ]; then
+	echo "FAIL: never: want exit 3, got $got"
+	fail=1
+fi
+if [ $((t1 - t0)) -lt 5 ]; then
+	echo "FAIL: never: returned after $((t1 - t0)) s, want at least 5"
+	fail=1
+fi
 
 expect 2 nosuchtask ""
 expect 2 'bad/id' ""

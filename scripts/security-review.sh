@@ -62,12 +62,14 @@ echo "security-review: reviewing $branch ($ahead commit(s) ahead of $base) in $w
 cd "$wt"
 # /security-review truncates the diff it pastes, and a headless session cannot
 # get git commands approved, so this hands it the whole diff as a file.
-rel=backend/tmp/security-review.diff
 mkdir -p "$wt/backend/tmp"
-trap 'rm -f "$wt/$rel"' EXIT
+diff_file=$(mktemp "$wt/backend/tmp/security-review.XXXXXX")
+trap 'rm -f "$diff_file"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 {
   git -C "$wt" log --oneline "$base"..HEAD
   echo
   git -C "$wt" diff "$base"...HEAD
-} >"$wt/$rel"
-claude -p "/security-review" --append-system-prompt "The diff pasted into the prompt may be cut short. The full branch diff against $base is in $wt/$rel. Read all of it with the Read tool before analysing, in parts with offset and limit when it is too long for one read."
+} >"$diff_file"
+claude -p "/security-review" --append-system-prompt "The diff pasted into the prompt may be cut short. The full branch diff against $base is in $diff_file. Read all of it with the Read tool before analysing, in parts with offset and limit when it is too long for one read."
