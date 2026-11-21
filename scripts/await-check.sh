@@ -16,12 +16,13 @@
 # 20 lines when there is none.
 #
 # check.sh can also exit before any summary (a load sample failure, a lock
-# error). make then prints a `make: *** ... Error N` line; this prints the last
-# 20 lines and exits 1.
+# error). The outermost make then prints `make: *** ... Error N`; this prints
+# the last 20 lines and exits 1. Nested makes say `make[N]:`, and check.sh
+# sends their output to the step logs, so those lines are not read as a stop.
 #
 # Exit 0: the run passed. 1: a step failed, or the run stopped early. 2: bad
-# arguments or unknown task. 3: still running after the wait (150 s, well under the
-# tool's 180 s); run this again.
+# arguments or unknown task. 3: still running after the wait (150 s, well under
+# the tool's 180 s); run this again.
 #
 # AWAIT_CHECK_ROOT (default /private/tmp) and AWAIT_CHECK_LIMIT (default 150)
 # are for scripts/await-check-test.sh.
@@ -69,7 +70,7 @@ while :; do
     *) exit 1 ;;
     esac
   fi
-  if grep -Eq '^make(\[[0-9]+\])?: \*\*\* ' "$file"; then
+  if grep -q '^make: \*\*\* ' "$file"; then
     tail -n 20 "$file"
     echo "await-check: $id stopped before its summary"
     exit 1
