@@ -40,14 +40,35 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   **Settings → Vessel → Particulars**, **Helm height above the waterline (m)**
   turns how sharply the boat rolled into the sideways push at the helm, in g.
   It's blank until you fill it in, and with it blank there's no figure. Change
-  it and every passage, old ones too, uses the new height. No screen shows the
-  figure yet.
+  it and every passage, old ones too, uses the new height. The passage page
+  shows it as the snap on the Felt line.
 - **Settings → SignalK shows how fast the attitude sensor was sending.** The new
   **Motion feed** line gives the attitude and heave rates from the last position
   Helmcentral recorded and how long ago that was, like "attitude 10 Hz (12 s
   ago)". Below 8 times a second it says that roll sharpness and pounding aren't
   being recorded. If the feed has never connected, has gone quiet, or sends
   timestamps Helmcentral can't use, it says why.
+
+- **A passage now says how it felt.** Under **How it went**, a new **Felt**
+  line gives the passage a word, **Comfortable**, **Lively** or **Rough**,
+  beside your own rating, with the figure in degrees, the snap and the pounding.
+  Snap is the sideways push at the helm, or the roll acceleration until you
+  enter your helm height. Snap and pounding are buttons that jump the replay to
+  the moment they happened. Helmcentral learns the words from the passages you've
+  rated on this boat. Until three are rated, in two neighbouring ratings, the
+  line says "Not learned yet". **Rough** only appears once you've rated a
+  passage **Shouldn't have gone**. Your rating is never changed. A passage with no
+  motion, or recorded before the fast motion feed, says why instead of showing a
+  number, and each of the felt figure, the snap and the pounding gives its own
+  reason. Earlier passages are worked out again when Helmcentral starts, after it
+  has filled in motion from InfluxDB history.
+- **The replay has a thin strip showing how each stretch felt.** It runs along the
+  slider, one stretch for every 15 minutes under way, coloured green, amber or
+  red for Comfortable, Lively or Rough, and grey until the words are learned. Tap
+  a stretch to jump the replay to it. On a phone a tap between two narrow
+  stretches jumps to the nearest.
+- **The passages list has a Felt column.** It shows the word for how each passage
+  felt, or the figure in degrees until the words are learned.
 
 ### Changed
 

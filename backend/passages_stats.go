@@ -36,6 +36,55 @@ type passageStats struct {
 	MaxPitchAt  *int64   `json:"max_pitch_at"`
 	MaxHeaveM   *float64 `json:"max_heave_m"`
 	MaxHeaveAt  *int64   `json:"max_heave_at"`
+
+	// How the passage felt (ADR 0298). FeltDeg is the third quartile of the
+	// 15-minute spells' sway under way. With no figure FeltReason says why. The
+	// band word is not here: it depends on the operator's ratings and is worked
+	// out on each read.
+	FeltDeg    *float64 `json:"felt_deg"`
+	FeltReason string   `json:"felt_reason,omitempty"`
+
+	// What the passage page shows under "felt" and the list does not. They are
+	// stored with the stats and left off the wire by forWire, so each travels in
+	// one place: the spells for the replay strip, the sharpest roll acceleration
+	// (degrees per second squared) and the hardest pounding (vertical
+	// acceleration from heave, in g) each with its time, and the reason each of
+	// snap and pounding is missing. Each figure's reason comes from its own
+	// inputs (FeltReason above is the felt figure's).
+	FeltSpells       []feltSpell `json:"felt_spells,omitempty"`
+	MaxRollAccelDps2 *float64    `json:"max_roll_accel_dps2,omitempty"`
+	MaxRollAccelAt   *int64      `json:"max_roll_accel_at,omitempty"`
+	MaxPoundingG     *float64    `json:"max_pounding_g,omitempty"`
+	MaxPoundingAt    *int64      `json:"max_pounding_at,omitempty"`
+	SnapReason       string      `json:"snap_reason,omitempty"`
+	PoundingReason   string      `json:"pounding_reason,omitempty"`
+}
+
+// forWire is the stats as a list row or a passage page carries them: without
+// the figures the "felt" block of a passage page holds.
+func (s passageStats) forWire() passageStats {
+	s.FeltSpells, s.MaxRollAccelDps2, s.MaxRollAccelAt = nil, nil, nil
+	s.MaxPoundingG, s.MaxPoundingAt = nil, nil
+	s.SnapReason, s.PoundingReason = "", ""
+	return s
+}
+
+// setNoPointsReasons gives every missing figure a true reason when the passage
+// has no track points to work them out from. A figure or a reason already there
+// stands, so stats kept from an older shape keep what they hold.
+func (s *passageStats) setNoPointsReasons() {
+	if s.FeltSpells == nil {
+		s.FeltSpells = []feltSpell{}
+	}
+	if s.FeltDeg == nil && s.FeltReason == "" {
+		s.FeltReason = feltReasonNoPoints
+	}
+	if s.MaxRollAccelDps2 == nil && s.SnapReason == "" {
+		s.SnapReason = snapReasonNoPoints
+	}
+	if s.MaxPoundingG == nil && s.PoundingReason == "" {
+		s.PoundingReason = poundingReasonNoPoints
+	}
 }
 
 // raiseMax keeps the larger reading and the time it was taken. The first
@@ -64,9 +113,17 @@ func legBetween(a, b recordedTrackPoint) bool {
 	return b.At.Sub(a.At) <= trackSegmentGap
 }
 
+// underwayLeg is the one under-way rule: a leg counts when it was covered at one
+// knot or better, judged from position, which every point has. Both the
+// under-way time and the felt spells use it.
+func underwayLeg(meters, dt float64) bool {
+	return meters/dt >= passageRestSOGKts*trackMetersPerKnot
+}
+
 func computePassageStats(pts []recordedTrackPoint) passageStats {
 	var s passageStats
 	if len(pts) == 0 {
+		s.setNoPointsReasons()
 		return s
 	}
 
@@ -87,6 +144,11 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 			raiseMax(&s.MaxRollDeg, &s.MaxRollAt, p.RollPeakDeg, p.At)
 			raiseMax(&s.MaxPitchDeg, &s.MaxPitchAt, p.PitchPeakDeg, p.At)
 			raiseMax(&s.MaxHeaveM, &s.MaxHeaveAt, p.HeavePeakM, p.At)
+			raiseMax(&s.MaxRollAccelDps2, &s.MaxRollAccelAt, p.RollAccelPeakDps2, p.At)
+			if p.VertAccelPeakMs2 != nil {
+				g := *p.VertAccelPeakMs2 / gravityMPerS2
+				raiseMax(&s.MaxPoundingG, &s.MaxPoundingAt, &g, p.At)
+			}
 		}
 		if p.TWSKts != nil {
 			twsSum += *p.TWSKts
@@ -123,7 +185,7 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 
 		// Underway is judged from position, which every point has: a leg
 		// counts when it was covered at one knot or better.
-		if meters/dt >= passageRestSOGKts*trackMetersPerKnot {
+		if underwayLeg(meters, dt) {
 			s.UnderwaySeconds += dt
 			if p.SOGKts != nil {
 				sogWeighted += *p.SOGKts * dt
@@ -148,6 +210,13 @@ func computePassageStats(pts []recordedTrackPoint) passageStats {
 	}
 	if fuelComplete {
 		s.FuelBurnedL = &fuelL
+	}
+	s.FeltSpells, s.FeltDeg, s.FeltReason = feltOf(pts)
+	if s.MaxRollAccelDps2 == nil {
+		s.SnapReason = snapMissingReason(pts, figureSnap)
+	}
+	if s.MaxPoundingG == nil {
+		s.PoundingReason = poundingMissingReason(pts)
 	}
 	return s
 }

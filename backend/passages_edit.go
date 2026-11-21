@@ -46,12 +46,18 @@ type passagePatch struct {
 }
 
 // passageRatings are the values a passage's rating may take besides blank.
-var passageRatings = map[string]bool{"comfortable": true, "lively": true, "shouldnt_have_gone": true}
+var passageRatings = map[string]bool{ratingComfortable: true, ratingLively: true, ratingShouldntHaveGone: true}
+
+const (
+	ratingComfortable      = "comfortable"
+	ratingLively           = "lively"
+	ratingShouldntHaveGone = "shouldnt_have_gone"
+)
 
 // moreCautiousRating returns the rating a merge keeps: shouldnt_have_gone over
 // lively over comfortable over blank.
 func moreCautiousRating(a, b string) string {
-	rank := map[string]int{"": 0, "comfortable": 1, "lively": 2, "shouldnt_have_gone": 3}
+	rank := map[string]int{"": 0, ratingComfortable: 1, ratingLively: 2, ratingShouldntHaveGone: 3}
 	if rank[b] > rank[a] {
 		return b
 	}
@@ -189,7 +195,7 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	// describe: clear it and queue the half for naming again, as a trim does.
 	// The second half is new, so it is queued already; the wake after commit
 	// gets both named promptly.
-	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), first.ToName, id); err != nil {
+	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=0, edited=1, stats_json=NULL, felt_deg=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), first.ToName, id); err != nil {
 		return
 	}
 	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -300,7 +306,7 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 			return m, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, source=?, rating=?, edited=1, stats_json=NULL WHERE id=?`,
+	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, source=?, rating=?, edited=1, stats_json=NULL, felt_deg=NULL WHERE id=?`,
 		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.Source, m.Rating, m.ID); err != nil {
 		return m, err
 	}
@@ -345,7 +351,7 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	if moveTo {
 		rec.ToName = ""
 	}
-	if _, err := tx.Exec(`UPDATE passages SET start_ms=?, end_ms=?, from_name=?, to_name=?, edited=1, stats_json=NULL,
+	if _, err := tx.Exec(`UPDATE passages SET start_ms=?, end_ms=?, from_name=?, to_name=?, edited=1, stats_json=NULL, felt_deg=NULL,
 		name_attempted_ms = CASE WHEN ? THEN NULL ELSE name_attempted_ms END WHERE id=?`,
 		start.UnixMilli(), end.UnixMilli(), rec.FromName, rec.ToName, moveFrom || moveTo, id); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)

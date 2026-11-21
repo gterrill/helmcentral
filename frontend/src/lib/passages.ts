@@ -44,10 +44,82 @@ export interface PassageStats {
   max_pitch_at?: number | null
   max_heave_m?: number | null
   max_heave_at?: number | null
+  /** How the passage felt: sway in degrees, and the 15-minute spells it was
+   * worked out from. Null with a reason on a passage without motion. */
+  felt_deg?: number | null
+  felt_reason?: string
+}
+
+/** The words for how a passage felt. The server names them from the operator's ratings. */
+export type FeltBand = 'comfortable' | 'lively' | 'rough'
+
+export const FELT_BAND_WORDS: Record<FeltBand, string> = {
+  comfortable: 'Comfortable',
+  lively: 'Lively',
+  rough: 'Rough',
+}
+
+/** The felt heading shared by the list and the passage page: the band word, the
+ * figure until the bands are learned, a dash without a figure. */
+export function feltHeadline(band: FeltBand | null | undefined, deg: number | null | undefined): string {
+  if (band) return FELT_BAND_WORDS[band]
+  return deg === null || deg === undefined || !Number.isFinite(deg) ? ABSENT : `${deg.toFixed(1)}°`
+}
+
+/** The edges learned from the operator's ratings, in degrees of felt sway. */
+export interface ComfortBands {
+  learned: boolean
+  /** Rated passages with a felt figure that the edges came from (or the count so far). */
+  rated_count: number
+  /** Why the bands are not learned yet, or what they were learned from, in the server's words. */
+  reason?: string
+  summary?: string
+  lively_from_deg: number | null
+  rough_from_deg: number | null
+}
+
+export interface FeltSpell {
+  /** Unix seconds. */
+  start: number
+  end: number
+  sway_deg: number
+  band: FeltBand | null
+}
+
+export interface FeltSnap {
+  kind?: 'sideways_g' | 'roll_accel'
+  value: number | null
+  at: number | null
+  reason?: string
+  /** What would improve the figure, such as the missing helm height. */
+  note?: string
+}
+
+export interface FeltPounding {
+  value_g: number | null
+  at: number | null
+  reason?: string
+}
+
+/** Everything the passage page shows about how the passage felt. */
+export interface PassageFelt {
+  deg: number | null
+  reason?: string
+  band: FeltBand | null
+  band_note?: string
+  bands: ComfortBands
+  spells: FeltSpell[]
+  snap: FeltSnap
+  pounding: FeltPounding
 }
 
 export interface PassageSummary extends PassageRecord {
   stats: PassageStats
+  /** The felt band word, null when there is no felt figure or the bands are not learned yet. */
+  felt_band?: FeltBand | null
+  felt_band_note?: string
+  /** The server's hover text for the felt column: what the figure means, or why there is none. */
+  felt_hint?: string
   /** IANA zone at the first recorded point, for dates in the boat's own time.
    * Null when the passage has none, and `timezone_error` then says why. */
   timezone: string | null
@@ -63,6 +135,7 @@ export interface PassageDetail extends PassageSummary {
    * boat marker follows this; the line on the map is `track`. */
   replay_track: [number, number][][]
   replay_times: number[][]
+  felt?: PassageFelt
 }
 
 /** One passage as its own page reads it: the tracks plus the rating and the Mate plans. */
@@ -457,6 +530,16 @@ export function clockFor(timeline: Timeline, id: string, at: number): number | n
   const e = timeline.entries.find((x) => x.id === id)
   if (!e) return null
   return e.offset + Math.max(0, Math.min(e.end - e.start, at - e.start))
+}
+
+/** A real time range inside a passage, as replay clock values. The range is
+ * clipped to the passage; one lying wholly outside it (a trimmed-out stretch),
+ * or in a passage not on the timeline, is null. Unlike clockFor it never pins
+ * an outside time to the passage's edge. */
+export function spellClocks(timeline: Timeline, id: string, start: number, end: number): { from: number; to: number } | null {
+  const e = timeline.entries.find((x) => x.id === id)
+  if (!e || end <= e.start || start >= e.end) return null
+  return { from: e.offset + Math.max(start, e.start) - e.start, to: e.offset + Math.min(end, e.end) - e.start }
 }
 
 /** An instant inside a water rise, for labelling it: the middle, not an edge. */

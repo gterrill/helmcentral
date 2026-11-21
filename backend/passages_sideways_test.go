@@ -169,7 +169,7 @@ func TestPassageDetailSidewaysGCallsTheFeedSlowOnlyWhenMostRatesAreUnderTheFloor
 		}
 		pts[100].MotionRateHz = pfloat(5)
 	})
-	if strings.Contains(r, "below 8 Hz") || !strings.Contains(r, "No point") {
+	if strings.Contains(r, "below 8 Hz") || !strings.Contains(r, "no point has sideways g") {
 		t.Errorf("reason %q", r)
 	}
 }

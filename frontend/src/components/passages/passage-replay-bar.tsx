@@ -1,6 +1,7 @@
 import { Map as MapIcon, Minus, Pause, Play, Plus, RefreshCw, Signpost, SlidersHorizontal, Video } from 'lucide-react'
 import { useId, useMemo, type ReactNode } from 'react'
 
+import { MotionStrip, type MotionSpellTick } from '@/components/passages/motion-strip'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupButton } from '@/components/ui/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -67,14 +68,22 @@ export interface PassageReplayBarProps {
   onSignTickClick?: (id: string) => void
   /** The sign editor, shown under the bar while the Signs button is on. */
   signsEditor?: ReactNode
+  /** The motion strip: one stretch per 15-minute spell, coloured by band. Tapping one moves the replay to its start. */
+  motionStrip?: MotionSpellTick[]
+  onMotionSeek?: (clock: number) => void
 }
+
+const NO_SPELLS: MotionSpellTick[] = []
+const noSeek = () => {}
 
 export function PassageReplayBar({
   clock, total, playing, readout, speed, lengths = PASSAGE_REPLAY_LENGTHS, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
   insetView, onInsetViewChange, insetViewError = null, onInsetViewRetry,
   shotTicks = [], shotTicksDisabled = false, cameraOpen = false, onCameraToggle, onTickClick, editor,
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
+  motionStrip = NO_SPELLS, onMotionSeek = noSeek,
 }: PassageReplayBarProps) {
+  const stripped = motionStrip.length > 0
   // The Select's items, built once for the lengths on offer and not on every frame of the replay.
   const lengthLabelId = useId()
   const items = useMemo(() => lengths.map((l) => ({ value: l.id, label: l.label })), [lengths])
@@ -92,7 +101,7 @@ export function PassageReplayBar({
       >
         {playing ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
       </Button>
-      <div className={cn('relative flex min-w-24 flex-[1_1_10rem] items-center', onSignsToggle && 'pb-5', shotTicks.length > 0 && 'pt-3')}>
+      <div className={cn('relative flex min-w-24 flex-[1_1_10rem] items-center', onSignsToggle && (stripped ? 'pb-11' : 'pb-5'), !onSignsToggle && stripped && 'pb-6', shotTicks.length > 0 && 'pt-3')}>
         <input
           type="range"
           aria-label="Replay position"
@@ -127,7 +136,7 @@ export function PassageReplayBar({
             aria-label={t.label}
             aria-pressed={t.selected}
             disabled={disabled}
-            className="group absolute bottom-0 flex h-5 w-5 -translate-x-1/2 items-center justify-center bg-transparent focus-visible:outline-hidden"
+            className={cn('group absolute flex h-5 w-5 -translate-x-1/2 items-center justify-center bg-transparent focus-visible:outline-hidden', stripped ? 'bottom-6' : 'bottom-0')}
             style={{ left: `${Math.max(0, Math.min(1, t.fraction)) * 100}%` }}
             onClick={() => onSignTickClick?.(t.id)}
           >
@@ -140,6 +149,7 @@ export function PassageReplayBar({
             />
           </button>
         ))}
+        {stripped && <MotionStrip spells={motionStrip} disabled={disabled} onSeek={onMotionSeek} />}
       </div>
       <span className="min-w-0 max-w-full truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
     </div>

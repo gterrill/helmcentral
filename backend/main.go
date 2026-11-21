@@ -648,8 +648,9 @@ func main() {
 	// sends (ADR 0295). The main stream's 1 Hz cap stays as it is.
 	go newSignalKMotionClient(motionAcc, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// Fills the passages recorded before that stream from InfluxDB history,
-	// once (ADR 0296).
-	go startMotionBackfill(streamCtx, pas, settingsPath)
+	// once (ADR 0296), and only then works out every passage whose figures are
+	// missing or old (ADR 0298).
+	go startPassageFigures(streamCtx, pas, settingsPath)
 	// The document indexer (above): started once at boot and woken
 	// immediately so any document left pending/extract or pending/enrich by
 	// a crash or restart resumes right away rather than waiting for the

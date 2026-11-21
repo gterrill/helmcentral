@@ -8,6 +8,13 @@ import { decodePassageDecision, oneOf, STATES, type PassageDecision, type Passag
 export const PASSAGE_RATINGS = ['comfortable', 'lively', 'shouldnt_have_gone'] as const
 export type PassageRating = '' | (typeof PASSAGE_RATINGS)[number]
 
+/** The words for each rating, in the order the operator picks them. */
+export const PASSAGE_RATING_LABELS: Record<Exclude<PassageRating, ''>, string> = {
+  comfortable: 'Comfortable',
+  lively: 'Lively',
+  shouldnt_have_gone: "Shouldn't have gone",
+}
+
 export const PLANS_UNREADABLE = "Couldn't read the Mate plans for this passage."
 export const RATING_UNREADABLE = "Couldn't read how this passage went."
 
