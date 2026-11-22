@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -47,14 +47,85 @@ func squaresInBox(south, west, north, east float64) ([]coverageSquare, error) {
 // coastlineLoader reads the coverage squares one route needs. It reads the
 // records once and each square's lines once, however many margins are tried.
 type coastlineLoader struct {
-	r      *offlineCoastlineReader
-	byKey  map[coverageSquare]coastlineSquareRecord
-	lines  map[coverageSquare][]shorelineLine
+	r     *offlineCoastlineReader
+	byKey map[coverageSquare]coastlineSquareRecord
+	lines map[coverageSquare][]shorelineLine
+	// ready checks the coastline is on and reads which squares are held, once. Its
+	// errors are typed (coastlineLookupError), as codes.
+	ready  func() error
 	loaded bool
+	// coverage is the squares the boat is downloading, worked out once, the first
+	// time a square is found missing.
+	coverage func() (map[coverageSquare]bool, error)
+	// sets is what around found, per key; plans is what plan found.
+	sets  map[aroundKey]aroundResult
+	plans map[aroundKey]planResult
 }
 
 func (r *offlineCoastlineReader) newLoader() *coastlineLoader {
-	return &coastlineLoader{r: r, lines: map[coverageSquare][]shorelineLine{}}
+	l := &coastlineLoader{r: r, lines: map[coverageSquare][]shorelineLine{}, sets: map[aroundKey]aroundResult{}, plans: map[aroundKey]planResult{}}
+	l.ready = func() error {
+		// Success is remembered; an error is not, so a transient one is retried.
+		if l.loaded {
+			return nil
+		}
+		if err := l.load(); err != nil {
+			return err
+		}
+		l.loaded = true
+		return nil
+	}
+	l.coverage = sync.OnceValues(func() (map[coverageSquare]bool, error) { return r.coverage() })
+	return l
+}
+
+func (l *coastlineLoader) load() error {
+	r := l.r
+	if r == nil || r.Store == nil {
+		return &coastlineLookupError{Problem: coastlineNotOnInstall}
+	}
+	enabled, err := r.Enabled()
+	if err != nil {
+		return &coastlineLookupError{Problem: coastlineSettingUnreadable, Err: err}
+	}
+	if !enabled {
+		return &coastlineLookupError{Problem: coastlineOff}
+	}
+	recs, err := r.Store.Records()
+	if err != nil {
+		return err
+	}
+	l.byKey = make(map[coverageSquare]coastlineSquareRecord, len(recs))
+	for _, rec := range recs {
+		l.byKey[rec.Square] = rec
+	}
+	return nil
+}
+
+// squareLines is one held square's lines, read once.
+func (l *coastlineLoader) squareLines(sq coverageSquare) ([]shorelineLine, error) {
+	if got, ok := l.lines[sq]; ok {
+		return got, nil
+	}
+	got, err := l.r.Store.Lines([]coverageSquare{sq})
+	if err != nil {
+		return nil, err
+	}
+	l.lines[sq] = got
+	return got, nil
+}
+
+// sortedSquares is the squares by latitude then longitude, the order the store
+// reads them in.
+func sortedSquares(squares []coverageSquare) []coverageSquare {
+	out := append([]coverageSquare(nil), squares...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Lat != out[j].Lat {
+			return out[i].Lat < out[j].Lat
+		}
+		return out[i].Lon < out[j].Lon
+	})
+	return out
 }
 
 // inBox is the shoreline of every square a box touches. Every square must be
@@ -62,33 +133,14 @@ func (r *offlineCoastlineReader) newLoader() *coastlineLoader {
 // definition). A square that is not is named in the error: a route over a
 // coastline with a hole in it could cross land.
 func (l *coastlineLoader) inBox(south, west, north, east float64) ([]shorelineLine, error) {
-	r := l.r
-	if r == nil || r.Store == nil {
-		return nil, fmt.Errorf("Offline coastline is not available on this install")
-	}
-	enabled, err := r.Enabled()
-	if err != nil {
-		return nil, fmt.Errorf("could not read the Offline coastline setting: %w", err)
-	}
-	if !enabled {
-		return nil, fmt.Errorf("Offline coastline is off — turn it on in Settings → Offline coastline")
+	if err := l.ready(); err != nil {
+		return nil, coastlineSetupError(err)
 	}
 	needed, err := squaresInBox(south, west, north, east)
 	if err != nil {
 		return nil, err
 	}
-	if !l.loaded {
-		recs, err := r.Store.Records()
-		if err != nil {
-			return nil, err
-		}
-		l.byKey = make(map[coverageSquare]coastlineSquareRecord, len(recs))
-		for _, rec := range recs {
-			l.byKey[rec.Square] = rec
-		}
-		l.loaded = true
-	}
-	var missing []string
+	var missing []missingSquare
 	for _, sq := range needed {
 		rec, held := l.byKey[sq]
 		switch {
@@ -96,27 +148,23 @@ func (l *coastlineLoader) inBox(south, west, north, east float64) ([]shorelineLi
 		case squareInland(sq):
 			// no sea within 20 nm, so no coastline to hold
 		case held && rec.Status == coastlineStatusFailed:
-			missing = append(missing, fmt.Sprintf("%s (download failed: %s)", sq.Label(), rec.LastError))
+			missing = append(missing, missingSquare{Label: sq.Label(), State: "download failed: " + rec.LastError})
 		default:
-			missing = append(missing, fmt.Sprintf("%s (not downloaded)", sq.Label()))
+			missing = append(missing, missingSquare{Label: sq.Label(), State: "not downloaded"})
 		}
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("the route needs Offline coastline squares that are not held: %s. Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier. %s",
-			strings.Join(missing, ", "), coastlineCoverageRadiusNm, coastlineDownloadHint)
+			joinMissing(missing), coastlineCoverageRadiusNm, coastlineDownloadHint)
 	}
 	var out []shorelineLine
 	for _, sq := range needed {
 		if rec, held := l.byKey[sq]; !held || rec.Status != coastlineStatusReady {
 			continue
 		}
-		got, ok := l.lines[sq]
-		if !ok {
-			got, err = r.Store.Lines([]coverageSquare{sq})
-			if err != nil {
-				return nil, err
-			}
-			l.lines[sq] = got
+		got, err := l.squareLines(sq)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, got...)
 	}
@@ -400,13 +448,21 @@ func (r *offlineCoastlineReader) coverageStamp() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not read the Offline coastline squares: %w", err)
 	}
+	return stampOfRecords(recs), nil
+}
+
+// stampOfRecords identifies the ready squares among recs, in the order given: a
+// square downloaded again, replaced, added or removed changes it. The route
+// cache keys on the stamp of every square held; a stored fetch figure keys on
+// the stamp of the squares around its position.
+func stampOfRecords(recs []coastlineSquareRecord) string {
 	h := fnv.New64a()
 	for _, rec := range recs {
 		if rec.Status == coastlineStatusReady {
 			fmt.Fprintf(h, "%v,%v,%d,%d;", rec.Square.Lat, rec.Square.Lon, rec.DownloadedAt.Unix(), rec.DataAsOf.Unix())
 		}
 	}
-	return strconv.FormatUint(h.Sum64(), 16), nil
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // memoisedRouter checks the install, the switch and the squares once, then

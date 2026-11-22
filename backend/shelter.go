@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -107,15 +108,30 @@ type shelterSegment struct {
 	line           int
 }
 
-func estimateShelter(lat, lon float64, lines []shorelineLine) shelterEstimate {
+// projectShoreline puts the lines on a flat plane in metres around a position,
+// east and north, as the segments rays are cast over and the closed reef rings
+// (by line index) that can contain the position. The shelter estimate and the
+// logbook's fetch cap both cast over it.
+// lonDelta is the longitude difference lon - ref wrapped to (-180, 180], so a
+// point just across the antimeridian sits a short way off, not 360 degrees.
+func lonDelta(lon, ref float64) float64 {
+	d := math.Mod(lon-ref, 360)
+	if d > 180 {
+		d -= 360
+	} else if d <= -180 {
+		d += 360
+	}
+	return d
+}
+
+func projectShoreline(lat, lon float64, lines []shorelineLine) (segs []shelterSegment, rings map[int][][2]float64) {
 	kx := math.Cos(lat*math.Pi/180) * math.Pi / 180 * shelterEarthRadiusM
 	ky := math.Pi / 180 * shelterEarthRadiusM
 	project := func(p shorelinePoint) (float64, float64) {
-		return (p.Lon - lon) * kx, (p.Lat - lat) * ky
+		return lonDelta(p.Lon, lon) * kx, (p.Lat - lat) * ky
 	}
 
-	var segs []shelterSegment
-	rings := map[int][][2]float64{}
+	rings = map[int][][2]float64{}
 	for i, line := range lines {
 		pts := make([][2]float64, len(line.Points))
 		for j, p := range line.Points {
@@ -129,15 +145,15 @@ func estimateShelter(lat, lon float64, lines []shorelineLine) shelterEstimate {
 			rings[i] = pts
 		}
 	}
+	return segs, rings
+}
 
+func estimateShelter(lat, lon float64, lines []shorelineLine) shelterEstimate {
+	segs, rings := projectShoreline(lat, lon, lines)
 	host := hostReefRing(rings)
 
 	maxM := shelterMaxFetchNm * metersPerNauticalMile
-	fetch := make([]float64, shelterBearingCount)
-	hit := make([]int, shelterBearingCount) // line index, -1 = open
-	for k := range fetch {
-		fetch[k], hit[k] = castShelterRay(segs, float64(k*shelterBearingStepDeg), maxM)
-	}
+	fetch, hit := castShelterRays(segs, shelterBearings(), maxM) // hit is a line index, -1 = open
 
 	est := shelterEstimate{Caveat: shelterCaveat}
 	if host >= 0 {
@@ -253,6 +269,25 @@ func castShelterRay(segs []shelterSegment, bearingDeg, maxM float64) (float64, i
 	return best, who
 }
 
+// shelterBearings is the 36 compass bearings every shelter estimate looks along.
+func shelterBearings() []float64 {
+	out := make([]float64, shelterBearingCount)
+	for k := range out {
+		out[k] = float64(k * shelterBearingStepDeg)
+	}
+	return out
+}
+
+// castShelterRays casts one ray along each bearing: how far the first segment is,
+// and its line index (-1 when nothing lies within maxM).
+func castShelterRays(segs []shelterSegment, bearings []float64, maxM float64) (dist []float64, hit []int) {
+	dist, hit = make([]float64, len(bearings)), make([]int, len(bearings))
+	for i, b := range bearings {
+		dist[i], hit[i] = castShelterRay(segs, b, maxM)
+	}
+	return dist, hit
+}
+
 // shelterArcs folds the per-bearing grades into contiguous compass arcs,
 // treating the circle as cyclic so an arc can run through north.
 func shelterArcs(bearings []shelterBearing) []shelterArc {
@@ -364,6 +399,43 @@ type shelterResult struct {
 	// Reading says how old the shoreline is.
 	Reading string `json:"reading"`
 	shelterEstimate
+}
+
+// ShorelineAround is the shoreline within shelterMaxFetchNm of a position, or why
+// the shelter estimate cannot be made there, in the words Mate gives the operator.
+func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet, error) {
+	set, err := r.newLoader().around(lat, lon)
+	return set, shelterError(err, lat, lon)
+}
+
+// shelterError words a failed coastline lookup for the shelter estimate. An error
+// that is not a coastlineLookupError comes back as it was.
+func shelterError(err error, lat, lon float64) error {
+	var ce *coastlineLookupError
+	if !errors.As(err, &ce) {
+		return err
+	}
+	switch ce.Problem {
+	case coastlineInland:
+		return fmt.Errorf("%.4f, %.4f is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon)
+	case coastlineSquaresMissing:
+		own, _ := squareContaining(lat, lon)
+		for _, m := range ce.Missing {
+			if m.Label != own.Label() {
+				continue
+			}
+			switch m.State {
+			case "outside coverage":
+				return fmt.Errorf("%.4f, %.4f is outside Offline coastline coverage: Helmcentral holds the squares within %.0f nm of the boat and any it downloaded earlier (%s is not among them). %s",
+					lat, lon, coastlineCoverageRadiusNm, own.Label(), coastlineDownloadHint)
+			case "still downloading":
+				return fmt.Errorf("Offline coastline coverage for this area is still downloading (%s); try again later", own.Label())
+			}
+			return fmt.Errorf("Offline coastline coverage for this area is not available: %s: %s. %s", own.Label(), m.State, coastlineDownloadHint)
+		}
+		return fmt.Errorf("shelter at %.4f, %.4f needs neighbouring Offline coastline squares that are not held: %s. %s", lat, lon, joinMissing(ce.Missing), coastlineDownloadHint)
+	}
+	return coastlineSetupError(err)
 }
 
 // shelterAt reads the Offline coastline around a position and estimates its

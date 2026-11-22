@@ -90,6 +90,34 @@ export interface SeaTrainFigures {
 export interface SeaTrain extends SeaTrainFigures {
   /** Where it comes from relative to the heading, in the server's words ("on the port beam"). */
   direction: string
+  /** The fetch check on a wind wave. Its height and period are the capped ones when `capped`, and the model's own
+   * when `unchecked`. Absent on a swell, and when no check was made. */
+  fetch?: FetchCheck
+  /** A swell the shore closes in is not judged: its figures say nothing about this sea. */
+  enclosed?: boolean
+  /** A swell whose shore could not be read keeps the model's figure, and `note` says why. */
+  unchecked?: boolean
+  /** What the check made of the train, in the server's words: after a wind wave's figures, in brackets, and in
+   * place of an enclosed swell's. Absent when no check was made. */
+  note?: string
+}
+
+/** The figures a wind wave's fetch check went by (ADR 0300). */
+export interface FetchCheck {
+  check: 'capped' | 'within' | 'open' | 'unchecked'
+  /** The wind was too light to have a direction, so the fetch is the longest in any direction. */
+  calm?: boolean
+  wind_kts?: number
+  fetch_nm?: number
+  cap_height_m?: number
+  cap_period_s?: number
+  /** The model's own wind wave, when it was capped. */
+  hindcast_height_m?: number
+  hindcast_period_s?: number
+  /** Why it was not checked. */
+  reason?: string
+  /** What the limit depends on (a reef and the tide). */
+  caveat?: string
 }
 
 /** The sea behind one spell (ADR 0299): its swell and wind wave, or the reason
@@ -123,8 +151,10 @@ export interface FeltSpell {
   sea?: SpellSea
 }
 
-const seaTrainText = (kind: string, t: SeaTrain): string =>
-  `${kind} ${t.height_m.toFixed(1)} m ${Math.round(t.period_s)} s ${t.direction}`
+const seaTrainText = (kind: string, t: SeaTrain): string => {
+  if (t.enclosed && t.note) return t.note
+  return `${kind} ${t.height_m.toFixed(1)} m ${Math.round(t.period_s)} s ${t.direction}${t.note ? ` (${t.note})` : ''}`
+}
 
 /** What a sea with neither swell nor wind wave is called. */
 export const NO_SWELL_OR_WIND_WAVE = 'no swell or wind wave'

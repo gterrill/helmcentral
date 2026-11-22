@@ -32,24 +32,7 @@ func thomasShoreline() []shorelineLine {
 // at local 12:00, a southerly at 15:00 and an unknown-direction row at 18:00.
 func shelterForecastDeps(t *testing.T, lines []shorelineLine, enabled bool) assistantToolDeps {
 	t.Helper()
-	store := newTestCoastlineStore(t)
-	needed, err := squaresWithin(thomasLat, thomasLon, shelterMaxFetchNm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	own, _ := squareContaining(thomasLat, thomasLon)
-	for _, sq := range needed {
-		if squareInland(sq) {
-			continue
-		}
-		var l []shorelineLine
-		if sq == own {
-			l = lines
-		}
-		if err := store.SaveSquareAsOf(sq, l, time.Now(), coastlineTestDataAsOf); err != nil {
-			t.Fatal(err)
-		}
-	}
+	store := seedCoastlineAround(t, thomasLat, thomasLon, lines)
 	reader := &offlineCoastlineReader{Enabled: func() (bool, error) { return enabled, nil }, Store: store}
 	now := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
 	wx := &capturingWeatherProvider{bundle: weatherForecastBundle{Hourly: []weatherHourPoint{

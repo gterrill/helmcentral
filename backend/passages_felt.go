@@ -56,7 +56,28 @@ type feltFitFeatures struct {
 	// Nil when no point had a figure, which is any spell without 10 Hz data.
 	RollAccelPeakDps2 *float64 `json:"roll_accel_peak_dps2,omitempty"`
 	VertAccelPeakG    *float64 `json:"vert_accel_peak_g,omitempty"`
+	// WindKept says the spell was worked out when the true wind was kept with it
+	// (ADR 0300). A spell stored before has no wind to judge a fetch by, and the
+	// logbook says so instead of calling it unrecorded.
+	WindKept bool `json:"wind_kept,omitempty"`
+	// WindKts is the mean true wind speed over the spell, as recorded. Nil when no
+	// point had one.
+	WindKts *float64 `json:"wind_kts,omitempty"`
+	// WindFromDeg is the direction the wind came from, degrees true: the heading
+	// plus the true wind angle at each point, averaged with each point weighted by
+	// its wind speed. Nil when no point had a wind, a heading and an angle, and
+	// when the mean cancels out (see WindDirMissing).
+	WindFromDeg *float64 `json:"wind_from_deg,omitempty"`
+	// WindDirMissing says why WindFromDeg is nil: windDirVaried when the points
+	// had a wind direction but swung round too much to average, windDirNoHeading
+	// when none had a heading and a wind angle. Empty when the direction is there.
+	WindDirMissing string `json:"wind_dir_missing,omitempty"`
 }
+
+const (
+	windDirVaried    = "varied"
+	windDirNoHeading = "no heading"
+)
 
 // feltSpell is a spell as it is stored with the stats: the core and the features
 // the fit reads. Both are embedded, so the stored JSON stays one flat object.
@@ -212,6 +233,11 @@ func feltOf(pts []recordedTrackPoint) (spells []feltSpell, felt *float64, reason
 		headSin, headCos   float64
 		headings           int
 		rollAccel, vertG   *float64
+		windSum            float64 // knots, over windN points
+		windN              int
+		fromSin, fromCos   float64 // wind-from direction, each point weighted by its speed
+		fromWeight         float64
+		fromPairs          int // points with both a heading and a wind angle
 	}
 	var cur *spell
 	flush := func() {
@@ -223,7 +249,24 @@ func feltOf(pts []recordedTrackPoint) (spells []feltSpell, felt *float64, reason
 					PitchRMSDeg:       math.Sqrt(cur.pitch2 / cur.measured),
 					RollAccelPeakDps2: cur.rollAccel,
 					VertAccelPeakG:    cur.vertG,
+					WindKept:          true,
 				},
+			}
+			if cur.windN > 0 {
+				mean := cur.windSum / float64(cur.windN)
+				sp.WindKts = &mean
+				sp.WindDirMissing = windDirNoHeading
+				if cur.fromPairs > 0 {
+					// Points had a heading and a wind angle. If their speeds sum to
+					// nothing, or the directions cancel, the direction can't be told.
+					sp.WindDirMissing = windDirVaried
+					if cur.fromWeight > 0 {
+						if rad, _, ok := circularMean(cur.fromSin/cur.fromWeight, cur.fromCos/cur.fromWeight); ok {
+							deg := angleDegrees(angleBearing, rad)
+							sp.WindFromDeg, sp.WindDirMissing = &deg, ""
+						}
+					}
+				}
 			}
 			// The recorded position nearest the middle of the spell, found in
 			// place among the spell's own points.
@@ -271,6 +314,19 @@ func feltOf(pts []recordedTrackPoint) (spells []feltSpell, felt *float64, reason
 			cur.headSin += math.Sin(rad)
 			cur.headCos += math.Cos(rad)
 			cur.headings++
+		}
+		if p.TWSKts != nil {
+			cur.windSum += *p.TWSKts
+			cur.windN++
+			if p.HeadingDeg != nil && p.TWADeg != nil {
+				// angleTrueWater is signed, positive from starboard, so the wind
+				// comes from the heading plus it.
+				rad := (*p.HeadingDeg + *p.TWADeg) * math.Pi / 180
+				cur.fromSin += *p.TWSKts * math.Sin(rad)
+				cur.fromCos += *p.TWSKts * math.Cos(rad)
+				cur.fromWeight += *p.TWSKts
+				cur.fromPairs++
+			}
 		}
 		if p.RollAccelPeakDps2 != nil && (cur.rollAccel == nil || *p.RollAccelPeakDps2 > *cur.rollAccel) {
 			v := *p.RollAccelPeakDps2
@@ -387,8 +443,8 @@ type passageFelt struct {
 
 // buildPassageFelt is the felt block of a passage page. seas is the stored sea
 // for the passage's spells, each spell finding its own by its key; nil leaves the
-// sea off.
-func buildPassageFelt(st passageStats, sideways passageSidewaysG, bands comfortBands, seas *seaLookup) passageFelt {
+// sea off. judge, when set, checks each spell's sea against the shore (ADR 0300).
+func buildPassageFelt(st passageStats, sideways passageSidewaysG, bands comfortBands, seas *seaLookup, judge *fetchLookup) passageFelt {
 	f := passageFelt{Deg: st.FeltDeg, Reason: st.FeltReason, Bands: bands, Spells: []feltSpellOut{}}
 	if st.FeltDeg != nil {
 		f.Band, f.BandNote = feltBandFor(bands, *st.FeltDeg)
@@ -398,6 +454,9 @@ func buildPassageFelt(st passageStats, sideways passageSidewaysG, bands comfortB
 		out := feltSpellOut{feltSpellCore: sp.feltSpellCore, Band: band}
 		if seas != nil {
 			sea := seas.forSpell(sp)
+			if judge != nil {
+				judge.judge(sp, &sea)
+			}
 			out.Sea = &sea
 		}
 		f.Spells = append(f.Spells, out)

@@ -158,7 +158,7 @@ func TestSnapAndPoundingMaximaWithTheirTimes(t *testing.T) {
 
 // feltBlockOf is the felt block a passage page would show for these points.
 func feltBlockOf(pts []recordedTrackPoint) passageFelt {
-	return buildPassageFelt(computePassageStats(pts), passageSidewaysG{}, comfortBands{}, nil)
+	return buildPassageFelt(computePassageStats(pts), passageSidewaysG{}, comfortBands{}, nil, nil)
 }
 
 func TestSnapPresentAndNoHeaveSaysNoHeave(t *testing.T) {

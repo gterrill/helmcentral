@@ -39,8 +39,9 @@ type passageFigures struct {
 // 3 added the felt figure, its spells, and the snap and pounding maxima; 4 gave
 // snap and pounding a reason of their own in place of one shared code; 5 gave
 // each spell its middle position, mean heading, roll and pitch RMS apart, and
-// snap and pounding peaks (ADR 0299).
-const passageFiguresVersion = 5
+// snap and pounding peaks (ADR 0299); 6 gave each spell its mean true wind and
+// where it came from (ADR 0300).
+const passageFiguresVersion = 6
 
 // parseFigures reads a row's stats_json. ok is false for a missing or unreadable
 // value.
@@ -335,16 +336,16 @@ func recomputeStalePassages(ctx context.Context, store *passageStore, work func(
 // missing or old, so none is worked out before it has been filled. main runs it
 // in its own goroutine with the streams' context.
 //
-// The sea sweep (ADR 0299) follows, so its first pass finds every passage's
-// figures already worked out. It then runs every hour until ctx ends, so this
+// The sea sweep (ADR 0299, ADR 0300) follows, so its first pass finds every
+// passage's figures already worked out. It then runs every hour until ctx ends, so this
 // function returns only at shutdown.
 func startPassageFigures(ctx context.Context, store *passageStore, settingsPath string) {
-	startPassageFiguresWith(ctx, store, settingsPath, waveProviderResolver(settingsPath), seaSweepEvery, time.Now)
+	startPassageFiguresWith(ctx, store, settingsPath, waveProviderResolver(settingsPath), onBoardCoastline, seaSweepEvery, time.Now)
 }
 
 // startPassageFiguresWith is startPassageFigures with the sweep's wave plugin,
-// interval and clock given, for tests.
-func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsPath string, resolve func() (waveProvider, string, error), every time.Duration, clock func() time.Time) {
+// coastline, interval and clock given, for tests.
+func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsPath string, resolve func() (waveProvider, string, error), coast func() *offlineCoastlineReader, every time.Duration, clock func() time.Time) {
 	runMotionBackfillOnce(ctx, store, settingsPath, time.Now().UTC())
 	if ctx.Err() != nil {
 		return
@@ -353,7 +354,7 @@ func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsP
 	if ctx.Err() != nil {
 		return
 	}
-	runSeaSweeps(ctx, store, resolve, every, clock)
+	runSeaSweeps(ctx, store, resolve, coast, every, clock)
 }
 
 // bandsReasonUnreadable is the reason a page carries when the bands could not be
