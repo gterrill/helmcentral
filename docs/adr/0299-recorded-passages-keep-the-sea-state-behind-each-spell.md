@@ -141,6 +141,15 @@ cannot overlap itself, and an hourly scan of the passages is cheap. The interval
 the clock are parameters, so a test runs the loop with a short interval and a
 chosen clock.
 
+Each pass has a second step after the hindcast, which ADR 0300 describes:
+`runSeaFetch` works out what the offline coastline says of each spell that now has
+a sea state (how far the wind ran over water, and whether the swell's quarter is
+closed) and stores it beside the hindcast. Running it in the same pass means an
+hour fetched now has its shore worked out now. It reads the same passages through
+the same function, builds at most 2000 geometries a pass and honours ctx like the
+hindcast, and a pass that finds nothing to do logs nothing. It takes the coastline
+as a parameter, as the hindcast takes the wave plugin, so a test stands in for it.
+
 A pass honours ctx between requests. It logs one line, in the shape of ADR 0296's,
 only when it did something or failed: how many hours it filled, how many had no
 value (with the first few reasons), and how many failed (with the first few

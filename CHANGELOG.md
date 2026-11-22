@@ -26,6 +26,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A passage's wind wave is now checked against the shore, so sheltered water
+  stops reading rough.** The wave model can't see a bay or a river, so it gave
+  wind waves several times higher than the boat felt. Helmcentral now estimates
+  how far the wind ran over water before it reached you, using the shore held in
+  Offline coastline, and holds the wind wave to what that distance allows. The
+  label then reads like "wind wave 0.3 m 2 s on the port bow (fetch-limited from
+  0.9 m 5 s: 3.1 nm fetch in 14 kn)", and names only what was lowered. A wave
+  under the limit, or in open water, is left as it was and says so. When
+  Helmcentral can't check a spell, because Offline coastline is off, a square
+  hasn't downloaded or the boat recorded no wind, it shows the model's figure and
+  says "not checked against fetch" with the reason. Swell in a bay the shore
+  closes round is marked "not judged in enclosed water", and swell Helmcentral
+  can't judge for want of the shore says "not checked for enclosed water" with
+  the reason. Helmcentral works the shore out during its hourly look at the sea,
+  so a passage's checks appear within the next hourly look, and until then a
+  spell says "not worked out yet". Passages you've already recorded are worked
+  out again when Helmcentral starts, so nothing needs doing. Nothing is rated or
+  ranked from this yet.
+
 - **Each spell of a passage now shows the sea it was in.** The replay strip's
   label for a spell names the swell and the wind wave with their height, period
   and which way they came from relative to your heading, such as "Sea: swell

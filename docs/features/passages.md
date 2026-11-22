@@ -201,10 +201,81 @@ verdict. It sits beside your own rating and doesn't change it.
   was. When only some of the passage's spells have a sea, the line says how many
   don't, such as "(no sea for 3 of 12 spells)", so you know the largest waves
   come from the rest. The model's figure is for a patch of sea about 28 km
-  across, so in a river or a sheltered bay it reads high. Each figure is the
+  across, so in a river or a sheltered bay it reads high. The next point
+  covers how Helmcentral corrects the wind wave for that. Each figure is the
   model's value at the top of the hour nearest the middle of the spell, not an
   average over the hour, so a spell that ran from 10:40 to 10:54 gets the 11:00
   figure.
+- The wind wave and the shore: a wind can only build so much sea over the water
+  upwind of you, so the wind wave in sheltered water can't be as high as the
+  model says. Helmcentral checks each spell's wind wave against the charted
+  shore held in Offline coastline. It takes the wind the boat recorded and the
+  direction it blew from, and measures how far that wind ran over water before
+  it reached you, averaged over a spread of 15 degrees either side. Where the
+  shore is close upwind, the wind wave is held to what that distance allows, and
+  its period is held to its own limit too. The label then shows the lower
+  figures and where they came from, such as "wind wave 0.3 m 2 s on the port
+  bow (fetch-limited from 0.9 m 5 s: 3.1 nm fetch in 14 kn)". The check has four
+  outcomes:
+  - Fetch-limited: the shore was close enough that the wind couldn't have built
+    the model's wave, so the label shows the lower figure. The label names only
+    what was lowered. If only the period was, it reads "(period fetch-limited
+    from 5 s: 3.1 nm fetch in 14 kn)", and if only the height was, it reads
+    "(fetch-limited from 0.9 m: 3.1 nm fetch in 14 kn)". The label rounds a
+    height to 0.1 m and a period to a whole second, so a cut too small to show at
+    that rounding isn't named. If neither cut shows, the wave reads as within the
+    limit.
+  - Within the limit: the model's wave was already lower than the shore allows,
+    so it stands, such as "(within the 0.6 m fetch limit)".
+  - Open water upwind: no shore within 15 nautical miles upwind, so nothing
+    limits the wave and the model's figure stands, shown as "(open water
+    upwind)".
+  - Not checked: Helmcentral keeps the model's figure and labels it, such as
+    "(not checked against fetch: the Offline coastline is off)". It never shows
+    an unchecked wave as though it had been checked.
+
+  A spell isn't checked when Offline coastline is off or isn't on this install,
+  when a square within 15 nautical miles hasn't downloaded, has failed or is
+  outside coverage (the label names the square), when the position is inland or
+  charted ashore, or when the boat recorded no true wind for the spell. It also
+  isn't checked for a spell stored before the wind was kept, or one where the
+  wind direction swung round too much to average or couldn't be worked out
+  because the heading or wind angle was missing. In a calm, under 1 knot, the
+  wind has no direction, so Helmcentral looks in every direction. If any
+  direction is open water, nothing limits the wave and the label says "(open
+  water nearby)". If the shore closes round you everywhere, it holds the wave to
+  the longest fetch in any direction, and the label gives the fetch "in a calm"
+  in place of a wind speed. A reef upwind blocks the wind's run like land does,
+  but the reef covers and
+  uncovers with the tide, so the label says the limit depends on the tide. The
+  Felt line's largest wind wave counts only the spells that were checked, and
+  says how many weren't, such as "(wind wave not checked against fetch for 4 of
+  12 spells)". The check uses the shore as charted and doesn't allow for wind
+  bending round a headland, so treat it as an estimate and not a measurement.
+- When the shore is worked out: Helmcentral measures the shore for each spell
+  during the same hourly look that fetches the sea, straight after it, and keeps
+  the result. Opening a passage only reads what it kept, so it stays quick. A
+  spell whose shore hasn't been worked out yet shows the model's figure and says
+  "(not checked against fetch: not worked out yet)", and its swell says "not
+  checked for enclosed water: not worked out yet". That is what you'll see for a
+  new passage, a spell whose sea came in at the last look, and any spell near a
+  square of Offline coastline that has just been downloaded again, replaced or
+  added. The checks appear within the next hourly look. A square that goes
+  missing is named straight away, and turning Offline coastline off says so
+  straight away, even for spells that were already worked out. If Offline
+  coastline is off or not on this install, nothing is worked out until it is
+  available.
+- Swell in enclosed water: when the charted shore closes in every direction
+  within 30 degrees of where the swell comes from, the open sea can't reach you.
+  The label then says "swell not judged in enclosed water" instead of showing
+  the model's figures, and the Felt line leaves that spell out of the largest
+  swell and says how many it left out. The stored figure isn't changed. The
+  check needs the same coastline as the wind wave check. When the coastline
+  isn't available, can't be read, or the position is charted ashore, or the
+  spell's shore isn't worked out yet, the swell keeps the model's figure and the
+  label says "not checked for enclosed water" with the reason. The Felt
+  line leaves that swell out of the largest swell and counts it, such as "swell
+  not checked for enclosed water for 3 of 12 spells".
 - No sea shown: a spell says why it has no sea instead of showing a number. The
   hour may not have been fetched yet. Helmcentral waits until an hour is 12 hours
   old before it asks, because the model keeps adjusting its figures for about

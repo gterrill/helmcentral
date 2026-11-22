@@ -242,6 +242,9 @@ func createPassageSchema(db *sql.DB) error {
 	if err := createSeaHindcastSchema(db); err != nil {
 		return err
 	}
+	if err := createSeaFetchSchema(db); err != nil {
+		return err
+	}
 	if err := createAnchorTrailSchema(db); err != nil {
 		return err
 	}

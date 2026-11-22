@@ -655,12 +655,15 @@ func TestSeaHindcastKeyIsTheHourAndThePositionNotThePassage(t *testing.T) {
 	}
 }
 
+// noCoastline is the sweep's coastline on an install that has none.
+func noCoastline() *offlineCoastlineReader { return nil }
+
 // startUpOnce runs the start-up work with a sweep that stops after its first
 // pass: the clock cancels the context as the pass takes the time.
 func startUpOnce(store *passageStore, settingsPath string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startPassageFiguresWith(ctx, store, settingsPath, waveProviderResolver(settingsPath), time.Hour, func() time.Time {
+	startPassageFiguresWith(ctx, store, settingsPath, waveProviderResolver(settingsPath), noCoastline, time.Hour, func() time.Time {
 		cancel()
 		return time.Now().UTC()
 	})
@@ -719,7 +722,7 @@ func startSweeps(t *testing.T, store *passageStore, fake waveProvider, every tim
 	d := make(chan struct{})
 	go func() {
 		defer close(d)
-		runSeaSweeps(ctx, store, resolveTo(fake), every, clock.now)
+		runSeaSweeps(ctx, store, resolveTo(fake), noCoastline, every, clock.now)
 	}()
 	stop = func() {
 		cancel()
@@ -1018,7 +1021,12 @@ func TestPassageDetailCarriesEachSpellsSeaAndTheSummary(t *testing.T) {
 		}
 	}
 	summary := felt["sea"].(map[string]any)
-	if summary["swell"].(map[string]any)["height_m"].(float64) != 0.8 {
+	// No coastline is held in this test, so the swell was not judged for enclosed
+	// water: it keeps its figure, says so, and is out of the passage's peak.
+	if swell["unchecked"] != true || !strings.HasPrefix(swell["note"].(string), "not checked for enclosed water: ") {
+		t.Errorf("swell %+v, want it labelled not checked", swell)
+	}
+	if summary["swell"] != nil || !strings.Contains(fmt.Sprint(summary["reason"], summary["partial"]), "swell not checked for enclosed water") {
 		t.Errorf("summary %+v", summary)
 	}
 	if _, ok := summary["flat"]; ok {

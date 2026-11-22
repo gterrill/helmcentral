@@ -653,14 +653,16 @@ func waveProviderResolver(settingsPath string) func() (waveProvider, string, err
 // seaSweepEvery is how often the sweep looks for spell hours with no sea yet.
 const seaSweepEvery = time.Hour
 
-// runSeaSweeps is the one loop that keeps the sea filled (ADR 0299): a pass
-// now, then one every interval, until ctx ends. Each pass takes the time afresh
-// from now and picks up whatever passages, edits and imports have come since the
+// runSeaSweeps is the one loop that keeps the sea filled (ADR 0299) and what the
+// shore says of it worked out (ADR 0300): a pass now, then one every interval,
+// until ctx ends. Each pass fills the hindcast, then the fetch figures of every
+// spell that has a sea state. It takes the time afresh from now and picks up
+// whatever passages, edits, imports and coastline squares have come since the
 // last, so nothing else needs to ask for a fill. A pass that finds nothing to do
 // logs nothing.
-func runSeaSweeps(ctx context.Context, store *passageStore, resolve func() (waveProvider, string, error), every time.Duration, now func() time.Time) {
+func runSeaSweeps(ctx context.Context, store *passageStore, resolve func() (waveProvider, string, error), coast func() *offlineCoastlineReader, every time.Duration, now func() time.Time) {
 	for ctx.Err() == nil {
-		runSeaHindcast(ctx, store, resolve, now().UTC())
+		runSeaPass(ctx, store, resolve, coast, now().UTC())
 		timer := time.NewTimer(every)
 		select {
 		case <-ctx.Done():
@@ -678,6 +680,19 @@ func runSeaSweeps(ctx context.Context, store *passageStore, resolve func() (wave
 type seaTrain struct {
 	seaTrainFigures
 	Direction string `json:"direction"`
+	// Fetch is the fetch check on a wind wave (ADR 0300). Nil on a swell, and when
+	// no check was made.
+	Fetch *fetchCheck `json:"fetch,omitempty"`
+	// Enclosed says a swell was not judged: the shore closes the quarter it comes
+	// from, so its figures say nothing about this sea.
+	Enclosed bool `json:"enclosed,omitempty"`
+	// Unchecked says a swell kept the model's figure because the shore could not be
+	// read to judge it for enclosed water; Note says why.
+	Unchecked bool `json:"unchecked,omitempty"`
+	// Note is what the check made of the train, in the words the page shows after
+	// its figures (wind wave) or in their place (enclosed swell). Empty when no
+	// check was made.
+	Note string `json:"note,omitempty"`
 }
 
 // spellSea is the sea behind one spell. With no sea state Reason says why. A
@@ -866,6 +881,19 @@ func seaSummaryOf(spells []feltSpellOut) passageSea {
 	var out passageSea
 	var reasons []string
 	allReasons := true
+	// A swell not judged in enclosed water and a wind wave not checked against its
+	// fetch are the model's figures for a sea the boat was not in, so neither is a
+	// peak; each is counted instead (ADR 0300).
+	var unchecked, enclosed, swellUnchecked int
+	addPeak := func(peak **seaPeak, t *seaTrain, notJudged *int, at int64) {
+		switch {
+		case t == nil:
+		case t.Enclosed || (t.Fetch != nil && t.Fetch.Check == seaCheckUnchecked):
+			*notJudged++
+		case *peak == nil || t.HeightM > (*peak).HeightM:
+			*peak = &seaPeak{seaTrainFigures: t.seaTrainFigures, At: at}
+		}
+	}
 	for _, sp := range spells {
 		if sp.Sea == nil {
 			allReasons = false
@@ -877,21 +905,42 @@ func seaSummaryOf(spells []feltSpellOut) passageSea {
 		}
 		allReasons = false
 		at := sp.Start + (sp.End-sp.Start)/2
-		if t := sp.Sea.Swell; t != nil && (out.Swell == nil || t.HeightM > out.Swell.HeightM) {
-			out.Swell = &seaPeak{seaTrainFigures: t.seaTrainFigures, At: at}
+		if s := sp.Sea.Swell; s != nil && s.Unchecked {
+			swellUnchecked++ // the shore could not be read, so it was not judged for enclosed water
+		} else {
+			addPeak(&out.Swell, s, &enclosed, at)
 		}
-		if t := sp.Sea.WindWave; t != nil && (out.WindWave == nil || t.HeightM > out.WindWave.HeightM) {
-			out.WindWave = &seaPeak{seaTrainFigures: t.seaTrainFigures, At: at}
-		}
+		addPeak(&out.WindWave, sp.Sea.WindWave, &unchecked, at)
 	}
-	switch missing := len(reasons); {
-	case missing == 0:
-	case allReasons:
+	var parts []string
+	if unchecked > 0 {
+		parts = append(parts, fmt.Sprintf("wind wave not checked against fetch for %d of %d spells", unchecked, len(spells)))
+	}
+	if enclosed > 0 {
+		parts = append(parts, fmt.Sprintf("swell not judged in enclosed water for %d of %d spells", enclosed, len(spells)))
+	}
+	if swellUnchecked > 0 {
+		parts = append(parts, fmt.Sprintf("swell not checked for enclosed water for %d of %d spells", swellUnchecked, len(spells)))
+	}
+	notes := strings.Join(parts, "; ")
+	missing := len(reasons)
+	noPeaks := out.Swell == nil && out.WindWave == nil
+	switch {
+	case missing > 0 && allReasons:
 		out.Reason = passageSeaReason(reasons)
-	case out.Swell == nil && out.WindWave == nil:
+	case noPeaks && missing > 0 && notes != "":
+		out.Reason = fmt.Sprintf("No sea state for %d of %d spells; %s.", missing, len(spells), notes)
+	case noPeaks && missing > 0:
 		out.Reason = fmt.Sprintf("No sea state for %d of %d spells, and no swell or wind wave in the rest.", missing, len(spells))
+	case noPeaks && notes != "":
+		// Never "flat": the spells that were left out were not looked at.
+		out.Reason = capitalise(notes) + "."
+	case noPeaks:
 	default:
-		out.Partial = fmt.Sprintf("no sea for %d of %d spells", missing, len(spells))
+		if missing > 0 {
+			parts = append([]string{fmt.Sprintf("no sea for %d of %d spells", missing, len(spells))}, parts...)
+		}
+		out.Partial = strings.Join(parts, "; ")
 	}
 	return out
 }

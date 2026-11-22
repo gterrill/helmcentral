@@ -86,21 +86,101 @@ func TestSpellSnapAndPoundingFiguresAreThePeaksInsideItAndNilWithout10HzData(t *
 	}
 }
 
-func TestStatsVersionFiveRecomputesRowsStoredAtFour(t *testing.T) {
-	if passageFiguresVersion != 5 {
-		t.Fatalf("version %d, want 5", passageFiguresVersion)
+func TestStatsVersionSixRecomputesRowsStoredAtFiveAndFour(t *testing.T) {
+	if passageFiguresVersion != 6 {
+		t.Fatalf("version %d, want 6", passageFiguresVersion)
 	}
-	store, recs := feltPassages(t)
-	old, _ := json.Marshal(map[string]any{"version": 4, "stats": passageStats{}, "start_lat": -20.0, "start_lon": 149.0})
-	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(old), recs[0].ID); err != nil {
-		t.Fatal(err)
+	for _, old := range []int{4, 5} {
+		store, recs := feltPassages(t)
+		raw, _ := json.Marshal(map[string]any{"version": old, "stats": passageStats{}, "start_lat": -20.0, "start_lon": 149.0})
+		if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(raw), recs[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		ids, err := store.staleFigureIDs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 1 || ids[0] != recs[0].ID {
+			t.Errorf("stored at %d: stale %v, want only %s", old, ids, recs[0].ID)
+		}
 	}
-	ids, err := store.staleFigureIDs()
-	if err != nil {
-		t.Fatal(err)
+}
+
+// The wind a spell had, kept for the fetch cap (ADR 0300): the mean true wind
+// speed, and the direction it came from, worked out as the heading plus the true
+// wind angle and averaged with each point weighted by its speed.
+func TestSpellKeepsTheTrueWindAndWhereItCameFrom(t *testing.T) {
+	pts := feltRun()
+	setSway(pts, 1, 15, 1, 1)
+	for i := 0; i <= 15; i++ {
+		pts[i].HeadingDeg = pfloat(0)
+		pts[i].TWADeg = pfloat(90) // heading 000, wind angle +90: from 090
+		pts[i].TWSKts = pfloat(10 + float64(i%2)*10)
 	}
-	if len(ids) != 1 || ids[0] != recs[0].ID {
-		t.Errorf("stale %v, want only %s", ids, recs[0].ID)
+	sp := computePassageStats(pts).FeltSpells[0]
+	if !sp.WindKept {
+		t.Error("a spell worked out now says wind was kept")
+	}
+	if sp.WindKts == nil || !approx(*sp.WindKts, 15, 1.5) {
+		t.Errorf("mean wind %v, want about 15", sp.WindKts)
+	}
+	if sp.WindFromDeg == nil || !approx(*sp.WindFromDeg, 90, 0.5) {
+		t.Errorf("wind from %v, want 090", sp.WindFromDeg)
+	}
+}
+
+func TestSpellWindDirectionNeedsAHeadingAndAWindAngle(t *testing.T) {
+	pts := feltRun()
+	setSway(pts, 1, 15, 1, 1)
+	for i := 0; i <= 15; i++ {
+		pts[i].TWADeg = pfloat(90)
+		pts[i].TWSKts = pfloat(12)
+	}
+	sp := computePassageStats(pts).FeltSpells[0]
+	if sp.WindKts == nil || sp.WindFromDeg != nil || sp.WindDirMissing != windDirNoHeading {
+		t.Errorf("wind with no heading: speed %v, from %v, missing %q", sp.WindKts, sp.WindFromDeg, sp.WindDirMissing)
+	}
+	bare := feltRun()
+	setSway(bare, 1, 15, 1, 1)
+	for i := range bare {
+		bare[i].TWSKts = nil
+	}
+	sp = computePassageStats(bare).FeltSpells[0]
+	if !sp.WindKept || sp.WindKts != nil || sp.WindFromDeg != nil {
+		t.Errorf("no wind recorded: %+v", sp.feltFitFeatures)
+	}
+}
+
+func TestSpellWindThatSwungRoundHasNoDirection(t *testing.T) {
+	pts := feltRun()
+	setSway(pts, 1, 15, 1, 1)
+	for i := 0; i <= 15; i++ {
+		pts[i].HeadingDeg = pfloat(0)
+		pts[i].TWSKts = pfloat(12)
+		pts[i].TWADeg = pfloat(90)
+		if i%2 == 0 {
+			pts[i].TWADeg = pfloat(-90) // from 270
+		}
+	}
+	sp := computePassageStats(pts).FeltSpells[0]
+	if sp.WindKts == nil || sp.WindFromDeg != nil || sp.WindDirMissing != windDirVaried {
+		t.Errorf("east then west wind: speed %v, from %v, missing %q", sp.WindKts, sp.WindFromDeg, sp.WindDirMissing)
+	}
+}
+
+// A dead calm with a heading and a wind angle has a direction nobody can tell,
+// not a missing heading.
+func TestSpellWithNoWindStrengthButAHeadingSaysVariedNotNoHeading(t *testing.T) {
+	pts := feltRun()
+	setSway(pts, 1, 15, 1, 1)
+	for i := 0; i <= 15; i++ {
+		pts[i].HeadingDeg = pfloat(0)
+		pts[i].TWADeg = pfloat(90)
+		pts[i].TWSKts = pfloat(0)
+	}
+	sp := computePassageStats(pts).FeltSpells[0]
+	if sp.WindKts == nil || sp.WindFromDeg != nil || sp.WindDirMissing != windDirVaried {
+		t.Errorf("heading and angle but no wind strength: speed %v, from %v, missing %q", sp.WindKts, sp.WindFromDeg, sp.WindDirMissing)
 	}
 }
 
@@ -116,7 +196,7 @@ func TestSpellFiguresStayOffTheWire(t *testing.T) {
 	if strings.Contains(string(listJSON), "mid_lat") || strings.Contains(string(listJSON), "felt_spells") {
 		t.Errorf("the list carries spell figures: %s", listJSON)
 	}
-	pageJSON, _ := json.Marshal(buildPassageFelt(st, passageSidewaysG{}, comfortBands{}, nil).Spells)
+	pageJSON, _ := json.Marshal(buildPassageFelt(st, passageSidewaysG{}, comfortBands{}, nil, nil).Spells)
 	for _, key := range []string{"mid_lat", "mean_heading", "roll_rms", "pitch_rms", "roll_accel", "vert_accel"} {
 		if strings.Contains(string(pageJSON), key) {
 			t.Errorf("the page's spells carry %s: %s", key, pageJSON)

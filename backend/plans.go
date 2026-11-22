@@ -800,9 +800,11 @@ var planLegsDeadline = 60 * time.Second
 // planRoutes remembers the plan legs' routed segments.
 var planRoutes = newWaterRouteCache()
 
-// planCoastline is the on-board shoreline, wired as the route_distance tool
-// wires it (offlineCoastlineReaderFor). A variable so a test can stand in.
-var planCoastline = func() *offlineCoastlineReader {
+// onBoardCoastline is the on-board shoreline, wired as the route_distance tool
+// wires it (offlineCoastlineReaderFor): the plan legs route over it and the
+// passage page judges each spell's sea against it. A variable so a test can
+// stand in.
+var onBoardCoastline = func() *offlineCoastlineReader {
 	return offlineCoastlineReaderFor(getEnv("SETTINGS_FILE", "../settings.yaml"))()
 }
 
@@ -820,7 +822,7 @@ func planSegmentRouter() segmentRouter {
 			return stand(ctx, a[0], a[1], b[0], b[1])
 		}
 	}
-	route, err := planCoastline().memoisedRouter(planRoutes)
+	route, err := onBoardCoastline().memoisedRouter(planRoutes)
 	if err != nil {
 		return func(context.Context, [2]float64, [2]float64) (waterRoute, error) { return waterRoute{}, err }
 	}

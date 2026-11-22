@@ -203,7 +203,11 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: buildPassageFelt(figures.Stats, sideways, bands, store.seaLookupFor(figures.Stats.FeltSpells)), PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	// Each spell's sea is judged against what the sea sweep stored of the on-board
+	// shoreline; the page never reads the shoreline itself (ADR 0300).
+	sea := store.seaLookupFor(figures.Stats.FeltSpells)
+	felt := buildPassageFelt(figures.Stats, sideways, bands, sea, newFetchView(onBoardCoastline(), store, figures.Stats.FeltSpells))
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: felt, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

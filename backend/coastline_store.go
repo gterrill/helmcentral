@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
 )
@@ -391,16 +390,7 @@ func (s *coastlineStore) Records() ([]coastlineSquareRecord, error) {
 // by id; coastline is clipped to its square and is simply joined.
 func (s *coastlineStore) Lines(squares []coverageSquare) ([]shorelineLine, error) {
 	defer lockCoastlineLines.held(&s.mu).release()
-	var out []shorelineLine
-	seenReef := map[string]bool{}
-	sorted := append([]coverageSquare(nil), squares...)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Lat != sorted[j].Lat {
-			return sorted[i].Lat < sorted[j].Lat
-		}
-		return sorted[i].Lon < sorted[j].Lon
-	})
-	for _, sq := range sorted {
+	return joinSquareLines(squares, func(sq coverageSquare) ([]shorelineLine, error) {
 		var blob []byte
 		var status string
 		err := s.db.QueryRow(`SELECT status, geometry FROM coastline_squares WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon).Scan(&status, &blob)
@@ -413,6 +403,22 @@ func (s *coastlineStore) Lines(squares []coverageSquare) ([]shorelineLine, error
 		lines, err := decodeShorelineLines(blob)
 		if err != nil {
 			return nil, fmt.Errorf("decode coastline square %s: %w", sq.Label(), err)
+		}
+		return lines, nil
+	})
+}
+
+// joinSquareLines is the one place that says how squares make a shoreline: in
+// latitude then longitude order, each square's lines as linesOf gives them, with
+// a reef that crosses a square's edge (held whole in every square it touches)
+// given once, by its id. The store and the loader both read through it.
+func joinSquareLines(squares []coverageSquare, linesOf func(coverageSquare) ([]shorelineLine, error)) ([]shorelineLine, error) {
+	var out []shorelineLine
+	seenReef := map[string]bool{}
+	for _, sq := range sortedSquares(squares) {
+		lines, err := linesOf(sq)
+		if err != nil {
+			return nil, err
 		}
 		for _, l := range lines {
 			if l.Kind == "reef" {
