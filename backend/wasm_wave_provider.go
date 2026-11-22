@@ -132,6 +132,9 @@ type wasmFetchWavesOutput struct {
 	// with its fallback (an operator setting). Both are optional.
 	Model        string `json:"model"`
 	FallbackUsed bool   `json:"fallback_used"`
+
+	// ModelLabel is how the plugin words Model for the operator (ADR 0301).
+	ModelLabel string `json:"model_label"`
 }
 
 // validateWaveFigures rejects a combined figure no sea can have. A plugin that
@@ -198,6 +201,7 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 	}
 
 	bundle.SeaTempC = out.SeaSurfaceTemperatureC
+	bundle.Model, bundle.ModelLabel = out.Model, out.ModelLabel
 	if out.FallbackUsed {
 		bundle.FallbackModel = out.Model
 	}
@@ -487,7 +491,7 @@ func mapWasmWaveHindcastOutput(pluginID string, out wasmFetchWaveHindcastOutput,
 	}
 	bundle := waveHindcastBundle{Points: make([]waveHindcastSeries, 0, want)}
 	for i, pt := range out.Points {
-		if strings.TrimSpace(pt.Model) == "" || strings.TrimSpace(pt.ModelLabel) == "" {
+		if !(waveModelRef{ID: pt.Model, Label: pt.ModelLabel}).named() {
 			return waveHindcastBundle{}, fmt.Errorf("plugin %q: fetch_wave_hindcast points[%d] did not name its model and model_label", pluginID, i)
 		}
 		hours := make([]wasmWaveHourOutput, len(pt.Hourly))

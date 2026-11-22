@@ -207,7 +207,9 @@ func getPassageHandler(c echo.Context) error {
 	// shoreline; the page never reads the shoreline itself (ADR 0300).
 	sea := store.seaLookupFor(figures.Stats.FeltSpells)
 	felt := buildPassageFelt(figures.Stats, sideways, bands, sea, newFetchView(onBoardCoastline(), store, figures.Stats.FeltSpells))
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: felt, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	// The comfort model is the boat's, not the passage's, so it sits beside the
+	// passage and not in its Felt block.
+	return c.JSON(http.StatusOK, map[string]any{"comfort_model": store.comfort.Load().wire(), "passage": passageDetail{passageRecord: rec, Stats: figures.Stats.forWire(), Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, SidewaysG: sideways, Felt: felt, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

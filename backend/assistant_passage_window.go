@@ -137,6 +137,13 @@ type passageHour struct {
 	HasWaveDir                 bool
 	HasWavePeriod              bool
 	WavePeriodS                float64
+
+	// Swell and WindWave are the two wave systems of the hour, nil for one the
+	// model has none of, and WaveModel the model they came from and how the plugin
+	// words it (ADR 0301). The comfort model reads these; no verdict, answer or
+	// change mark does.
+	Swell, WindWave *seaTrainFigures
+	WaveModel       waveModelRef
 }
 
 // passageForecast is one point's hourly forecast keyed by the unix time of the
@@ -1116,6 +1123,8 @@ func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) m
 				if wp.WavePeriodS != nil && *wp.WavePeriodS > 0 {
 					h.HasWavePeriod, h.WavePeriodS = true, *wp.WavePeriodS
 				}
+				h.Swell, h.WindWave = wp.systems()
+				h.WaveModel = vb.modelRef()
 				out[k] = h
 			}
 		}

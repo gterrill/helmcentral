@@ -34,6 +34,14 @@ describe('the Felt row', () => {
     expect(screen.getByTestId('passage-felt')).toHaveTextContent('Learned from 7 rated passages: Lively from 1.8°.')
   })
 
+  it('shows the server\'s comfort model line, and nothing when it sends none', () => {
+    const line = 'Comfort model: sway learned from 12 passages (skill 0.42); snap and pounding not yet: needs 5 passages with 10 Hz motion, has 1.'
+    const { rerender } = render(<PassageFeltRow felt={felt()} rating="" comfortModel={line} />)
+    expect(screen.getByTestId('felt-comfort-model')).toHaveTextContent(line)
+    rerender(<PassageFeltRow felt={felt()} rating="" />)
+    expect(screen.queryByTestId('felt-comfort-model')).toBeNull()
+  })
+
   it('says not rated, and spells out the shouldn\'t have gone rating', () => {
     const { rerender } = render(<PassageFeltRow felt={felt()} rating="" />)
     expect(screen.getByTestId('felt-rating')).toHaveTextContent('Not rated')

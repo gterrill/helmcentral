@@ -139,7 +139,15 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, boolInt(rec.Edited), boolInt(rec.FromNameEdited), boolInt(rec.ToNameEdited), rec.Rating, id); err != nil {
 		return rec, fmt.Errorf("update passage: %w", err)
 	}
-	return rec, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return rec, err
+	}
+	if p.Hidden != nil {
+		// A hidden passage is left out of the comfort fit, so hiding or showing one
+		// changes what it learns from.
+		s.comfort.signal()
+	}
+	return rec, nil
 }
 
 // splitSnap is how far from a join a split still lands on the join.
@@ -207,6 +215,7 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	if err = tx.Commit(); err != nil {
 		return
 	}
+	s.comfort.signal()
 	if join == "" && passageNamesWake != nil {
 		passageNamesWake()
 	}
@@ -313,6 +322,7 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 	if err := tx.Commit(); err != nil {
 		return m, err
 	}
+	s.comfort.signal()
 	if untitled && passageNamesWake != nil {
 		passageNamesWake()
 	}
@@ -359,6 +369,7 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	if err := tx.Commit(); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)
 	}
+	s.comfort.signal()
 	rec.Start, rec.End, rec.Edited = start, end, true
 	if (moveFrom || moveTo) && passageNamesWake != nil {
 		passageNamesWake()

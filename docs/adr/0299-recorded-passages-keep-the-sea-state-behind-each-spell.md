@@ -74,6 +74,23 @@ A wave system with no period is no system, as in the forecast. Open-Meteo report
 a flat component as three zeros, so a NULL swell on a row with no reason means the
 model gave no swell. A reason means the model gave nothing for the hour.
 
+A row also keeps the combined wave height the model gave (`wave_height_m`, NULL
+when it gave none), added with `ensureColumn`. Without it a row with neither system
+can't tell a calm hour from a plugin that gave no split. A system with no height is
+absent, on the forecast and here alike. A row with neither system reads as flat
+only when its combined height is under 0.1 m. At 0.1 m or more, or with no
+combined height, it reads as "The wave plugin gave no swell and wind-wave split for
+this hour.", the page's reason and the comfort model's. It is never read as calm.
+
+`wave_height_seen` is 1 on every row stored with the figure asked for. A row from
+before the column has 0 and, unless it holds a reason, is fetched again by the
+hourly sweep within the same budget and rate limits as any other hour, once. The
+answer only adds the combined height, and only when it is good and from the same
+model as the stored row. A refusal, an hour with no figure or another model leaves
+the stored row as it was, with no combined height. Either way the row is marked as
+asked, so a plugin that never gives the combined height is not asked again every
+hour.
+
 ### 3. Spells carry what the hindcast and the fit need
 
 A stored spell is two parts. Its core is what a page shows: the start, the end and
@@ -99,7 +116,7 @@ values are instantaneous at the hour, so a spell whose middle is at 10:47 is the
 `runSeaHindcast` is one pass. It finds every spell hour at least 12 hours old that
 has no row. The wait is there because the model's values for an hour keep changing
 for about half a day while forecast-lead runs are replaced, and a stored row is
-never refetched. A passage's sea therefore shows about 12 hours after the hour it
+never refetched, except once for a row stored before the combined height was kept. A passage's sea therefore shows about 12 hours after the hour it
 covers. The first pass covers every recorded passage back to 2026-10-11. It plans each passage on its
 own: the passage's wanted hours, cut into windows of up to seven days, and one
 request for each window, covering the cells that passage needs over that
@@ -206,8 +223,10 @@ none. The words are built on `relativeAngleLabel`, the five bands Mate uses, so
 the two describe one sea alike: "ahead" (the head band, which spans both sides),
 "on the port bow", "on the starboard beam", "on the port quarter", and "astern"
 (the following band). Bow, beam and quarter take the side the sea comes from. A
-sea state with neither swell nor wind wave is a flat sea, and the page says so
-without a field of its own. A spell whose hour has not been fetched yet says so,
+sea state with neither swell nor wind wave and a combined height under 0.1 m is a
+flat sea, and the page says so without a field of its own. With a combined height
+of 0.1 m or more, or none, the page says the plugin gave no swell and wind-wave
+split, and such a spell counts as one with no sea in the passage summary. A spell whose hour has not been fetched yet says so,
 and so does one with no recorded position. A failure to read the table is logged
 and every spell carries it as the reason. Every reason ends in a full stop,
 whoever worded it: the plugin's reasons carry one, and the host adds one to a

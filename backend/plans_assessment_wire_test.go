@@ -298,7 +298,7 @@ func recordPassage(t *testing.T, store *passageStore, now time.Time, daysAgo int
 		t.Fatal(err)
 	}
 	figures := passageFigures{Stats: passageStats{DistanceNM: nm, UnderwaySeconds: underwayHours * 3600}}
-	if err := store.storeFigures(rec, figures); err != nil {
+	if _, err := store.storeFigures(rec, figures, 0); err != nil {
 		t.Fatal(err)
 	}
 }

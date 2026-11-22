@@ -471,6 +471,61 @@ func TestSeaHindcastKeepsAFlatSeaAsFilled(t *testing.T) {
 	}
 }
 
+// A row stored before the combined height was kept is asked for again once. The
+// answer may add the height to a good row of the same model; any other answer
+// leaves the stored row as it was and only marks the hour as asked.
+func TestARefetchOfAnOldRowOnlyAddsTheCombinedHeightToAGoodRowOfTheSameModel(t *testing.T) {
+	k := seaKey{HourMs: 3_600_000, LatC: 1, LonC: 2}
+	stored := seaHindcastRow{seaKey: k, Provider: "fake-waves", Model: "ncep_gfswave025", FetchedMs: 1,
+		Swell: &seaTrainFigures{HeightM: 0.8, PeriodS: 9, FromDeg: 270}}
+	good := 1.4
+	for _, tc := range []struct {
+		name     string
+		answer   seaHindcastRow
+		wantH    *float64
+		wantSwel float64
+	}{
+		{"same model, good", seaHindcastRow{seaKey: k, Provider: "fake-waves", Model: "ncep_gfswave025", FetchedMs: 9, WaveHeightM: &good,
+			Swell: &seaTrainFigures{HeightM: 0.1, PeriodS: 3, FromDeg: 10}}, &good, 0.8},
+		{"refusal", seaHindcastRow{seaKey: k, Provider: "fake-waves", Model: "ncep_gfswave025", FetchedMs: 9, MissingReason: "no data"}, nil, 0.8},
+		{"different model", seaHindcastRow{seaKey: k, Provider: "fake-waves", Model: "blend", FetchedMs: 9, WaveHeightM: &good}, nil, 0.8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestPassageStore(t)
+			if err := store.StoreSeaHindcastRows([]seaHindcastRow{stored}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.db.Exec(`UPDATE sea_hindcast_hours SET wave_height_m = NULL, wave_height_seen = 0`); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.StoreSeaHindcastRows([]seaHindcastRow{tc.answer}); err != nil {
+				t.Fatal(err)
+			}
+			got := store.mustSeaRow(t, k)
+			if !got.WaveHeightSeen || got.Model != "ncep_gfswave025" || got.MissingReason != "" || got.FetchedMs != 1 ||
+				got.Swell == nil || got.Swell.HeightM != tc.wantSwel {
+				t.Errorf("stored row damaged: %+v", got)
+			}
+			if (got.WaveHeightM == nil) != (tc.wantH == nil) || (tc.wantH != nil && *got.WaveHeightM != *tc.wantH) {
+				t.Errorf("combined height %v, want %v", got.WaveHeightM, tc.wantH)
+			}
+		})
+	}
+}
+
+func (s *passageStore) mustSeaRow(t *testing.T, k seaKey) seaHindcastRow {
+	t.Helper()
+	rows, err := s.SeaHindcastRowsBetween(k.HourMs, k.HourMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := rows[k]
+	if !ok {
+		t.Fatalf("no row for %+v", k)
+	}
+	return r
+}
+
 func TestSeaHindcastStoresNothingOnATransientErrorAndTriesAgainNextTime(t *testing.T) {
 	store, _, spells := seaPassage(t)
 	buf := logOf(t)
@@ -882,9 +937,16 @@ func TestSeaForSpellShapesTheTrainsAndSaysWhyWhenThereIsNoSea(t *testing.T) {
 		t.Errorf("no position: %q", r)
 	}
 
-	flat := seaForSpell(spellWithHeading(&north), &seaHindcastRow{Model: "ncep_gfswave025"}, nil)
+	flat := seaForSpell(spellWithHeading(&north), &seaHindcastRow{Model: "ncep_gfswave025", WaveHeightM: pfloat(0.05)}, nil)
 	if flat.Swell != nil || flat.WindWave != nil || flat.Reason != "" {
 		t.Errorf("a flat sea: %+v", flat)
+	}
+	// A combined sea of 0.1 m or more, or none stored, with neither system is a plugin
+	// that gave no split, not a flat sea.
+	for _, h := range []*float64{pfloat(0.1), nil} {
+		if got := seaForSpell(spellWithHeading(&north), &seaHindcastRow{Model: "ncep_gfswave025", WaveHeightM: h}, nil); got.Reason != seaReasonNoSplit {
+			t.Errorf("combined %v with no system: %+v", h, got)
+		}
 	}
 
 	missing := seaForSpell(spellWithHeading(&north), &seaHindcastRow{MissingReason: "GFS-Wave has no value at this cell"}, nil)

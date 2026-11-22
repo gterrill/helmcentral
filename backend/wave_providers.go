@@ -22,8 +22,14 @@
 //	  "hourly": [{time, wave_height_m, wave_period_s, wave_direction_deg,
 //	              wind_wave_height_m, wind_wave_direction_deg, wind_wave_period_s,
 //	              swell_wave_height_m, swell_wave_direction_deg, swell_wave_period_s}],
-//	  "sea_surface_temperature_c": float64 (optional)
+//	  "sea_surface_temperature_c": float64 (optional),
+//	  "model": string, "model_label": string, "fallback_used": bool (optional)
 //	}
+//
+// model names the model the figures came from and model_label is how the plugin
+// words it for the operator (ADR 0301). A plugin gives both every time, so the
+// comfort model can match the forecast to the sea it learned from. A plugin that
+// leaves them out still works, and the comfort model says to update it.
 //
 // wave_height_m, wave_period_s and wave_direction_deg are OPTIONAL. A plugin
 // omits the key for an hour in which its model has no value, and the host
@@ -140,6 +146,29 @@ type waveHourPoint struct {
 	SwellWavePeriodS      float64
 }
 
+// waveModelRef is the wave model a figure came from: its id and how the plugin
+// words it for the operator (ADR 0301). The forecast and the hindcast name their
+// model the same way and are held to the same rule.
+type waveModelRef struct {
+	ID    string
+	Label string
+}
+
+// named says the plugin gave both. The hindcast refuses a series that does not;
+// the forecast tolerates an older plugin that does not, and the comfort model
+// then gives the hour a reason that says to update it.
+func (m waveModelRef) named() bool {
+	return strings.TrimSpace(m.ID) != "" && strings.TrimSpace(m.Label) != ""
+}
+
+func (b waveForecastBundle) modelRef() waveModelRef {
+	return waveModelRef{ID: b.Model, Label: b.ModelLabel}
+}
+
+func (s waveHindcastSeries) modelRef() waveModelRef {
+	return waveModelRef{ID: s.Model, Label: s.ModelLabel}
+}
+
 // waveForecastBundle is one provider round-trip's worth of data - the
 // return value of waveProvider.FetchWaves and of a WASM plugin's
 // fetch_waves, mapped to typed Go values. SeaTempC is nil when the
@@ -155,6 +184,13 @@ type waveForecastBundle struct {
 	// FallbackModel names the model the provider swapped to because the usual
 	// one had no data at the point. Empty when the usual model answered.
 	FallbackModel string
+
+	// Model is the id of the model the figures came from and ModelLabel how the
+	// plugin words it (ADR 0301). Both are kept whether or not the plugin fell
+	// back. A plugin that does not name its model leaves them empty, and the
+	// comfort model then says to update it.
+	Model      string
+	ModelLabel string
 }
 
 // currentHourPoint is one hour of modelled current. Nil figures are absent,

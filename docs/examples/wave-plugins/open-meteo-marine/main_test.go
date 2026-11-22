@@ -915,3 +915,66 @@ func TestChooseHindcast_ARefusalIsAnAnswerAndAnyOtherFailureIsAnError(t *testing
 		t.Error("a 503 is an error the host retries")
 	}
 }
+
+func TestBuildWavesOutput_NamesTheModelAndHowTheLogbookWordsIt(t *testing.T) {
+	hours, err := parseWaveBody(readHindcastFixture(t, "hindcast_six_hours.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := buildWavesOutput(hours, modelGFSWave, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back map[string]any
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back["model"] != "ncep_gfswave025" || back["model_label"] != "GFS-Wave" {
+		t.Errorf("model %v label %v, want ncep_gfswave025 and GFS-Wave", back["model"], back["model_label"])
+	}
+	if _, used := back["fallback_used"]; used {
+		t.Errorf("fallback_used present when the usual model answered: %v", back)
+	}
+
+	blend, err := buildWavesOutput(hours, modelBlend, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blend.Model != "best_match" || blend.ModelLabel != "The Open-Meteo best-match blend" || !blend.FallbackUsed {
+		t.Errorf("blend output: %+v", blend)
+	}
+}
+
+func TestBuildWavesOutput_AnUnknownModelIsAnErrorNotABlankLabel(t *testing.T) {
+	if _, err := buildWavesOutput(nil, "mystery_model", false, nil); err == nil {
+		t.Fatal("a model with no label must be an error")
+	}
+}
+
+func TestHindcastPoints_TakeTheirLabelFromTheOneTableAndAnUnknownModelIsAnError(t *testing.T) {
+	hours := []waveHourOutput{{Time: "a"}}
+	gfs, err := hindcastPointFor(modelGFSWave, hours)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gfs.Model != "ncep_gfswave025" || gfs.ModelLabel != "GFS-Wave" || gfs.Hourly[0].MissingReason != "GFS-Wave has no value at this cell." {
+		t.Errorf("GFS-Wave point: %+v", gfs)
+	}
+	blend, err := refusedPointFor(modelBlend, hours, "No.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blend.ModelLabel != "The Open-Meteo best-match blend" || blend.Hourly[0].MissingReason != "No." {
+		t.Errorf("refused blend point: %+v", blend)
+	}
+	if _, err := hindcastPointFor("mystery_model", hours); err == nil {
+		t.Error("a hindcast point for a model with no label must be an error")
+	}
+	if _, err := refusedPointFor("mystery_model", hours, "No."); err == nil {
+		t.Error("a refused hindcast point for a model with no label must be an error")
+	}
+}

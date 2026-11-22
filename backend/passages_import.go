@@ -231,6 +231,13 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 	}
 	from, to := pts[0].At, pts[len(pts)-1].At
 
+	// Ask for a comfort fit once the points and the detected passages are in, on
+	// any way out, so the fit never runs ahead of the passages it should see.
+	defer func() {
+		if sum.PointsAdded > 0 || sum.PassagesCreated > 0 {
+			s.comfort.signal()
+		}
+	}()
 	if err := s.storeImportedPoints(pts, from, to, &sum); err != nil {
 		return sum, err
 	}

@@ -170,7 +170,7 @@ export function PassageEditPanel({
       </FormSection>
 
       <FormSection title="How it went">
-        <PassageFeltRow felt={passage.felt} rating={passage.rating} onSeek={onSeek} timeZone={passage.timezone} />
+        <PassageFeltRow felt={passage.felt} rating={passage.rating} onSeek={onSeek} timeZone={passage.timezone} comfortModel={passage.comfortModel?.summary} />
         <PassageMotion stats={passage.stats} onSeek={onSeek} />
         <div role="group" aria-label="How it went" className="flex flex-wrap gap-2">
           {RATINGS.map((r) => (
