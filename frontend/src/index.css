@@ -240,19 +240,14 @@
        component, because the tick radii are derived from the bar radii in the
        same file: a skin free to move one and not the other could put a bar
        through its neighbour. Nothing about a skin needs them anyway. */
-    /* The bars draw in the dial's sweep gradient, not this flat colour, so
-       amber and red only ever mean a tank level alert. It is what the skin's
-       glow takes its colour from. */
-    --fuel-bar: var(--primary);
+    /* The fill on a tank with no level alert. Amber and red come from the
+       tank's tone, so they only ever mean a tank level alert. */
+    --fuel-fill: var(--primary);
     --fuel-track: var(--muted);
     --fuel-tick-major: var(--dial-tick-major);
     --fuel-tick-minor: var(--dial-tick-major);
     --fuel-label: var(--dial-label);
-    /* A whole `filter` value, not one drop-shadow's arguments the way
-       --dial-needle-glow is. That single argument list can only make one
-       falloff, which is why the dial's glow never matched the reference: the
-       bars there have a tight emissive core and a wide bloom, which is two
-       stacked drop-shadows. `none` is the valid no-op. */
+    /* A whole `filter` value, so a skin can stack as many drop-shadows as it wants. `none` is the valid no-op. */
     --fuel-bar-glow: none;
     /* The engine cluster's readout cards, bullet graphs and footer. Opacities
        are plain numbers, so the skin restates them; the colours indirect, so it
@@ -395,9 +390,8 @@
     --dial-needle-r: 100px;
     --dial-needle-w: 48px;
     --fuel-track: 205 32% 18%;
-    --fuel-bar-glow:
-      drop-shadow(0 0 2px hsl(var(--fuel-bar) / 0.9))
-      drop-shadow(0 0 10px hsl(var(--fuel-bar) / 0.5));
+    --fuel-fill: 210 100% 94%;
+    --fuel-bar-glow: drop-shadow(0 0 5px hsl(var(--fuel-fill) / 0.35));
     /* Cluster cards sit a step above the board so their outline is not the only
        thing separating them from it. */
     --cluster-band-idle: 0.2;

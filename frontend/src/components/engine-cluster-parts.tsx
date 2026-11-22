@@ -1,7 +1,7 @@
 import { Thermometer, Zap } from 'lucide-react'
-import { useId, useMemo, type CSSProperties, type ReactNode } from 'react'
+import { useMemo, type CSSProperties, type ReactNode } from 'react'
 
-import { DIAL_TICK_W, SweepStops } from '@/components/ui/cluster-dial'
+import { DIAL_TICK_W } from '@/components/ui/cluster-dial'
 import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
 import { useTelemetryHistory } from '@/hooks/use-telemetry-history'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
@@ -10,8 +10,8 @@ import {
   bulletFor, chargeStageLabel, type BulletBand, type BulletMark, type BulletModel, type BulletTone,
 } from '@/lib/engine-cluster-bullet'
 import {
-  FUEL_BAR_W, FUEL_FOOT_SIZE, FUEL_LEGEND_SIZE, FUEL_R_AFT, FUEL_SCALE_SIZE, FUEL_R_FWD, GAP_ARCS, fuelArc, fuelFeet, fuelLegendPoint, fuelScaleLabels,
-  fuelSweep, fuelTicks, fuelTitleLeft, fuelTotalX, gapArcLabelAt, gapArcMark, gapArcPath, type GapArcName,
+  FUEL_BAR_W, FUEL_CAP_SIZE, FUEL_FOOT_SIZE, FUEL_GEOMETRY, FUEL_PCT_SIZE, FUEL_RADII, FUEL_SCALE_SIZE, FUEL_TOTAL_SIZE, GAP_ARCS, fuelArc,
+  gapArcLabelAt, gapArcMark, gapArcPath, type GapArcName,
 } from '@/lib/engine-cluster-layout'
 import { reading } from '@/lib/cluster-readings'
 import { isStale } from '@/lib/staleness'
@@ -234,8 +234,7 @@ export function FuelFan({ config, title, side, values, ages }: {
   values: Values
   ages: Ages
 }) {
-  const radii = [FUEL_R_FWD, FUEL_R_AFT]
-  const bars = config.bars.slice(0, radii.length).map((bar, i) => {
+  const bars = config.bars.slice(0, FUEL_RADII.length).map((bar, i) => {
     const level = bulletFor(bar.level, values, ages)
     const rawLevel = level.stale ? null : (values[bar.level.path] ?? null)
     // A capacity that has gone stale is as unknown as a stale level: the total must not mix an old figure in.
@@ -243,7 +242,7 @@ export function FuelFan({ config, title, side, values, ages }: {
     const volume = rawLevel === null || rawCap === null ? null : rawLevel * rawCap
     const percent = level.converted
     return {
-      r: radii[i], level, percent, volume, rawCap,
+      r: FUEL_RADII[i], level, percent, volume, rawCap,
       label: bar.level.label.trim() || (i === 0 ? 'FWD' : 'AFT'),
     }
   })
@@ -253,86 +252,71 @@ export function FuelFan({ config, title, side, values, ages }: {
   const capacity = known ? bars.reduce((sum, b) => sum + (b.rawCap ?? 0), 0) : null
   const fmt = (v: number | null) => (volumeSlot ? formatQuantity(v, volumeSlot.quantity, volumeSlot.unit, 0) : null)
   const unit = volumeSlot ? unitOption(volumeSlot.quantity, volumeSlot.unit).label : ''
-  const ticks = fuelTicks(side)
-  const feet = fuelFeet(side)
-  const left = fuelTitleLeft(side)
-  const gradientId = useId()
+  const { ticks, labels, feet, captions, tracks } = FUEL_GEOMETRY[side][bars.length >= 2 ? 2 : 1]
+  // Say what is missing: live percentages over "tank not reporting" would read as a contradiction.
+  const levelsLive = bars.length > 0 && bars.every((b) => b.percent !== null)
   const fuelLabel = title.trim() ? `${title.trim()} fuel` : 'Fuel'
+  const fractionOf = (percent: number | null) => (percent === null ? 0 : Math.max(0, Math.min(1, percent / 100)))
+  const fills = bars.map((bar, i) => ({ bar, i, f: fractionOf(bar.percent) })).filter(({ f }) => f > 0)
+  const healthyFills: typeof fills = []
+  const alertFills: typeof fills = []
+  for (const fill of fills) (fill.bar.level.tone === 'neutral' ? healthyFills : alertFills).push(fill)
+  const fillPath = ({ bar, i, f }: (typeof fills)[number]) => (
+    <path key={i} data-fuel-fill={i} d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={FUEL_BAR_W}
+      style={{ stroke: bar.level.tone === 'neutral' ? 'hsl(var(--fuel-fill))' : fillOf(bar.level.tone) }} />
+  )
 
   return (
     <g data-fuel-fan="" data-side={side}>
-      <defs>
-        {/* The dial's own sweep, fixed to the scale and not to each fill, so a half-full tank shows
-            half the climb. One run per bar, to its own head, so two full tanks end equally bright.
-            Amber and red are left for a tank level alert. */}
-        {bars.map((bar, i) => {
-          const sweep = fuelSweep(side, bar.r)
-          return (
-            <linearGradient key={i} id={`${gradientId}-${i}`} gradientUnits="userSpaceOnUse"
-              x1={0} y1={sweep.foot} x2={0} y2={sweep.top}>
-              <SweepStops />
-            </linearGradient>
-          )
-        })}
-      </defs>
-      {bars.map((bar, i) => {
-        const f = bar.percent === null ? 0 : Math.max(0, Math.min(1, bar.percent / 100))
-        return (
-          <g key={i} data-fuel-bar={i} data-bar-state={bar.percent === null ? 'absent' : 'reading'} data-tone={bar.level.tone}>
-            <path d={fuelArc(side, bar.r, 1)} fill="none" strokeWidth={FUEL_BAR_W}
-              strokeDasharray={bar.percent === null ? '6 8' : undefined}
-              style={{ stroke: 'hsl(var(--fuel-track))', opacity: bar.percent === null ? 0.55 : 1 }} />
-            {f > 0 && (
-              <path d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={FUEL_BAR_W}
-                style={{
-                  stroke: bar.level.tone === 'neutral' ? `url(#${gradientId}-${i})` : fillOf(bar.level.tone),
-                  filter: bar.level.tone === 'neutral' ? 'var(--fuel-bar-glow)' : undefined,
-                }} />
-            )}
-          </g>
-        )
-      })}
+      {bars.map((bar, i) => (
+        <g key={i} data-fuel-bar={i} data-bar-state={bar.percent === null ? 'absent' : 'reading'} data-tone={bar.level.tone}>
+          <path d={tracks[i]} fill="none" strokeWidth={FUEL_BAR_W}
+            strokeDasharray={bar.percent === null ? '6 8' : undefined}
+            style={{ stroke: 'hsl(var(--fuel-track))', opacity: bar.percent === null ? 0.55 : 1 }} />
+        </g>
+      ))}
+      {/* One glow over every healthy fill; amber and red fills stay unfiltered. */}
+      {healthyFills.length > 0 && (
+        <g style={{ filter: 'var(--fuel-bar-glow)' }}>{healthyFills.map(fillPath)}</g>
+      )}
+      {alertFills.map(fillPath)}
       <path d={ticks.minor} fill="none" strokeWidth={DIAL_TICK_W.minor} style={{ stroke: 'hsl(var(--fuel-tick-minor))' }} />
       <path d={ticks.major} fill="none" strokeWidth={DIAL_TICK_W.major} style={{ stroke: 'hsl(var(--fuel-tick-major))' }} />
-      {fuelScaleLabels(side).map((s) => (
-        <text key={s.value} x={s.x} y={s.y} fontSize={FUEL_SCALE_SIZE} fontWeight="600" textAnchor="middle" dominantBaseline="central"
+      {labels.map((s) => (
+        <text key={s.value} data-fuel-scale="" x={s.x} y={s.y} fontSize={FUEL_SCALE_SIZE} fontWeight="600" textAnchor="middle" dominantBaseline="central"
           style={{ fill: 'hsl(var(--fuel-label))' }}>{s.value}</text>
       ))}
       {bars.map((bar, i) => (
-        <text key={`foot${i}`} x={feet[i].x} y={feet[i].y} fontSize={FUEL_FOOT_SIZE} fontWeight="600" letterSpacing="1"
-          textAnchor={feet[i].anchor} dominantBaseline="central" style={{ fill: 'hsl(var(--muted-foreground))' }}>
-          {bar.label.toUpperCase()}
-        </text>
-      ))}
-      {bars.map((bar, i) => {
-        if (bar.percent === null) return null
-        const legend = fuelLegendPoint(side, bar.r, Math.max(0, Math.min(1, bar.percent / 100)))
-        return (
-          <text key={`leg${i}`} data-fuel-legend={i} x={legend.x} y={legend.y} fontSize={FUEL_LEGEND_SIZE} fontWeight="700"
-            textAnchor="middle" dominantBaseline="central"
-            transform={`rotate(${legend.rotate.toFixed(1)} ${legend.x.toFixed(1)} ${legend.y.toFixed(1)})`}
-            // Inside the bar the backdrop runs from a faint wash at the foot to a bright blue at the head, so no
-            // single text colour reads on all of it. A halo in the card's colour does.
-            stroke={legend.inside ? 'hsl(var(--cluster-surface))' : undefined} strokeWidth={3.5} strokeLinejoin="round"
-            paintOrder="stroke" style={{ fill: 'hsl(var(--foreground))' }}>
-            {Math.round(bar.percent)}%
+        <g key={`foot${i}`}>
+          <text data-fuel-legend={i} x={feet[i].x} y={feet[i].pctY} fontSize={FUEL_PCT_SIZE} fontWeight="700"
+            textAnchor={feet[i].anchor} dominantBaseline="central" className="tabular-nums"
+            style={{ fill: fillOf(bar.level.tone) }}>
+            {bar.percent === null ? '--' : `${Math.round(bar.percent)}%`}
           </text>
-        )
-      })}
-
-      <foreignObject x={left} y={129} width={220} height={20}>
-        <div className={`flex h-full items-center gap-2 ${side === 'stbd' ? 'justify-end' : 'justify-start'}`}>
+          <text x={feet[i].x} y={feet[i].y} fontSize={FUEL_FOOT_SIZE} fontWeight="600" letterSpacing="1"
+            textAnchor={feet[i].anchor} dominantBaseline="central" style={{ fill: 'hsl(var(--muted-foreground))' }}>
+            {bar.label.toUpperCase()}
+          </text>
+        </g>
+      ))}
+      <foreignObject x={captions.title.x} y={captions.title.y} width={captions.title.w} height={captions.title.h}>
+        <div className="flex h-full items-center justify-center gap-2">
           <CLUSTER_ICONS.fuel className="size-[18px] shrink-0 text-primary" aria-hidden="true" />
           <span className={`${LABEL} truncate`}>{fuelLabel}</span>
         </div>
       </foreignObject>
-      <foreignObject x={fuelTotalX(side) - 110} y={477} width={220} height={32}>
-        <div className="flex h-full items-baseline justify-center gap-1.5 whitespace-nowrap">
-          <span data-testid="fuel-total" className="font-display text-3xl font-semibold leading-none tabular-nums text-gauge-primary">
-            {fmt(total) ?? '--'}
-          </span>
-          <span className="text-sm font-semibold text-muted-foreground">
-            {known ? `/ ${fmt(capacity)} ${unit}` : 'tank not reporting'}
+      <foreignObject x={captions.total.x} y={captions.total.y} width={captions.total.w} height={captions.total.h}>
+        <div className="flex h-full flex-col items-center whitespace-nowrap">
+          <div className="flex items-baseline gap-1.5">
+            <span data-testid="fuel-total" className="font-display font-semibold leading-none tabular-nums text-gauge-primary"
+              style={{ fontSize: FUEL_TOTAL_SIZE }}>
+              {fmt(total) ?? '--'}
+            </span>
+            {known && <span className="text-sm font-semibold text-muted-foreground">{unit}</span>}
+          </div>
+          <span data-testid="fuel-capacity" className="mt-0.5 font-semibold leading-none text-muted-foreground"
+            style={{ fontSize: FUEL_CAP_SIZE }}>
+            {known ? `of ${fmt(capacity)} ${unit}` : levelsLive ? 'capacity not reporting' : 'tank not reporting'}
           </span>
         </div>
       </foreignObject>

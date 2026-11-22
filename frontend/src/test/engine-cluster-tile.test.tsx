@@ -2,7 +2,6 @@ import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
-import { FUEL_BAR_W } from '@/lib/engine-cluster-layout'
 import type { ResolvedClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
@@ -403,6 +402,43 @@ describe('fuel fan', () => {
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('1564')
   })
 
+  test('prints each tank percentage under its bar, not inside it', () => {
+    const { container } = renderCluster({ ...full, fuel })
+    expect(container.querySelector('[data-fuel-legend="0"]')).toHaveTextContent('87%')
+    expect(container.querySelector('[data-fuel-legend="1"]')).toHaveTextContent('40%')
+    expect(container.querySelector('[data-fuel-legend="0"]')?.getAttribute('transform')).toBeNull()
+  })
+
+  test('shows -- in place of a tank that is not reporting', () => {
+    const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
+    expect(container.querySelector('[data-fuel-legend="1"]')).toHaveTextContent('--')
+    expect(container.querySelector('[data-fuel-legend="0"]')).toHaveTextContent('87%')
+  })
+
+  test('names the capacity on a line under the total', () => {
+    renderCluster({ ...full, fuel })
+    expect(screen.getByTestId('fuel-capacity')).toHaveTextContent('of 2500 L')
+  })
+
+  test('says the tank is not reporting under a -- total', () => {
+    renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
+    expect(screen.getByTestId('fuel-capacity')).toHaveTextContent('tank not reporting')
+  })
+
+  test('says the capacity is not reporting when both levels are live but a capacity is missing', () => {
+    const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.capacity': null })
+    expect(container.querySelector('[data-fuel-legend="0"]')).toHaveTextContent('87%')
+    expect(container.querySelector('[data-fuel-legend="1"]')).toHaveTextContent('40%')
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
+    expect(screen.getByTestId('fuel-capacity')).toHaveTextContent('capacity not reporting')
+  })
+
+  test('labels the scale every 20 per cent', () => {
+    const { container } = renderCluster({ ...full, fuel })
+    const labels = [...container.querySelectorAll('[data-fuel-scale]')].map((n) => n.textContent)
+    expect(labels).toEqual(['0', '20', '40', '60', '80', '100'])
+  })
+
   test('says so rather than totalling a tank that is not reporting', () => {
     const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
@@ -426,33 +462,32 @@ describe('fuel fan colour', () => {
     },
   }
   const fill = (container: HTMLElement, i: number) =>
-    container.querySelectorAll(`[data-fuel-bar="${i}"] path`)[1] as SVGPathElement
+    container.querySelector(`[data-fuel-fill="${i}"]`) as SVGPathElement
 
-  test('a healthy tank draws in the dial gradient', () => {
+  test('a healthy tank draws in the fuel fill colour', () => {
     const { container } = renderCluster(levelled)
-    const stroke = fill(container, 0).style.stroke
-    expect(stroke).toMatch(/^url\(#.+\)$/)
-    const id = stroke.slice(5, -1)
-    expect(container.querySelector(`linearGradient[id="${id}"]`)).not.toBeNull()
+    expect(fill(container, 0).style.stroke).toBe('hsl(var(--fuel-fill))')
+    expect(fill(container, 1).style.stroke).toBe('hsl(var(--fuel-fill))')
   })
 
-  test('each tank climbs a gradient run to its own head, so two full tanks end equally bright', () => {
-    const { container } = renderCluster(levelled)
-    const gradientOf = (i: number) => container.querySelector(`linearGradient[id="${fill(container, i).style.stroke.slice(5, -1)}"]`)!
-    expect(gradientOf(0)).not.toBe(gradientOf(1))
-    expect(gradientOf(0).getAttribute('y2')).not.toBe(gradientOf(1).getAttribute('y2'))
-  })
-
-  test('a tank in its warn band draws in the zone colour, not the gradient', () => {
+  test('a tank in its warn band draws in the zone colour, not the fuel fill', () => {
     const { container } = renderCluster(levelled, { ...values, 'tanks.fuel.2.currentLevel': 0.15 })
     expect(container.querySelector('[data-fuel-bar="0"]')).toHaveAttribute('data-tone', 'warn')
-    expect(fill(container, 0).style.stroke).not.toContain('url(')
+    expect(fill(container, 0).style.stroke).not.toContain('--fuel-fill')
   })
 
-  test('a tank in its alarm band draws in the zone colour, not the gradient', () => {
+  test('a percentage takes its tank tone, and stays foreground when healthy', () => {
+    const { container } = renderCluster(levelled, { ...values, 'tanks.fuel.2.currentLevel': 0.15 })
+    const pct = (i: number) => (container.querySelector(`[data-fuel-legend="${i}"]`) as SVGTextElement).style.fill
+    expect(pct(0)).toBe(fill(container, 0).style.stroke)
+    expect(pct(0)).not.toBe('hsl(var(--foreground))')
+    expect(pct(1)).toBe('hsl(var(--foreground))')
+  })
+
+  test('a tank in its alarm band draws in the zone colour, not the fuel fill', () => {
     const { container } = renderCluster(levelled, { ...values, 'tanks.fuel.2.currentLevel': 0.05 })
     expect(container.querySelector('[data-fuel-bar="0"]')).toHaveAttribute('data-tone', 'alarm')
-    expect(fill(container, 0).style.stroke).not.toContain('url(')
+    expect(fill(container, 0).style.stroke).not.toContain('--fuel-fill')
   })
 })
 
@@ -462,8 +497,8 @@ describe('fuel fan staleness', () => {
   test('a stale level blanks the fill, the percentage and the total together', () => {
     const { container } = renderCluster(railed, values, { ages: { 'tanks.fuel.4.currentLevel': 300 } })
     expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
-    expect(container.querySelector('[data-fuel-legend="1"]')).toBeNull()
-    expect(container.querySelector(`[data-fuel-bar="1"] path[stroke-width="${FUEL_BAR_W}"]:not([stroke-dasharray])`)).toBeNull()
+    expect(container.querySelector('[data-fuel-legend="1"]')).toHaveTextContent('--')
+    expect(container.querySelector('[data-fuel-fill="1"]')).toBeNull()
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
   })
 
