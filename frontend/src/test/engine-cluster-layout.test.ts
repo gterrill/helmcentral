@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  CARD_H, CARD_TOPS, CLUSTER_H, CLUSTER_INNER_TOP, CLUSTER_SIZES, CLUSTER_W, STACKED_MARGIN, STRIP_H, STRIP_MARGIN, clusterLayout, fuelArc, fuelFeet, fuelPoint, fuelTitleLeft, gapArcPath, mirrorX,
+  CARD_CORNER_R, CARD_H, CARD_TOPS, DIAL_CX, CLUSTER_H, CLUSTER_INNER_TOP, CLUSTER_SIZES, CLUSTER_W, FUEL_FOOT_SIZE, FUEL_R_AFT, FUEL_R_FWD, STACKED_MARGIN, STRIP_H, STRIP_MARGIN, clusterLayout, fuelArc, fuelCaptions, fuelCentreX, fuelFeet, fuelPoint, fuelScaleLabels, gapArcPath, mirrorX,
 } from '@/lib/engine-cluster-layout'
 
 /** Pulls every "x y" pair out of an SVG path built from M/L/Q commands. */
@@ -55,13 +55,49 @@ describe('engine cluster layout: the starboard tile is the port tile reflected',
   test('the fuel fan and its title sit on the outer edge', () => {
     expect(fuelPoint('port', 256, 0.5)[0]).toBeLessThan(CLUSTER_W / 2)
     expect(fuelPoint('stbd', 256, 0.5)[0]).toBeGreaterThan(CLUSTER_W / 2)
-    expect(fuelTitleLeft('port')).toBeLessThan(fuelTitleLeft('stbd'))
+    expect(fuelCentreX('port')).toBeLessThan(fuelCentreX('stbd'))
+    // The title is centred on the fan, so it sits left of the dial on port and mirrors on stbd.
+    expect(fuelCentreX('port')).toBeLessThan(DIAL_CX - 100)
+    expect(fuelCentreX('port') + fuelCentreX('stbd')).toBeCloseTo(CLUSTER_W, 0)
+    const { title, total } = fuelCaptions('port')
+    expect(title.x + title.w / 2).toBeCloseTo(fuelCentreX('port'), 5)
+    // The total sits below the foot captions and inside the fuel card, with room to spare.
+    const footBottom = fuelFeet('port')[0].y + FUEL_FOOT_SIZE / 2
+    const cardBottom = CARD_TOPS[3] + CARD_H
+    expect(total.y).toBeGreaterThan(footBottom)
+    expect(total.y + total.h).toBeLessThanOrEqual(cardBottom - 4)
+    // The title sits above the top of the outer arc.
+    const arcTop = Math.min(...points(fuelArc('port', FUEL_R_AFT, 1)).map((p) => p[1]))
+    expect(title.y + title.h).toBeLessThan(arcTop)
+    expect(fuelScaleLabels('port').map((s) => s.value)).toEqual([0, 20, 40, 60, 80, 100])
     const port = points(fuelArc('port', 256, 0.6))
     const stbd = points(fuelArc('stbd', 256, 0.6))
     port.forEach(([x, y], k) => {
       expect(stbd[k][0]).toBeCloseTo(CLUSTER_W - x, 0)
       expect(stbd[k][1]).toBeCloseTo(y, 0)
     })
+  })
+
+  test('the title and total boxes clear the fuel card rounded corners, on both sides and for one or two tanks', () => {
+    for (const side of ['port', 'stbd'] as const) {
+      for (const count of [1, 2] as const) {
+        const { title, total } = fuelCaptions(side, count)
+        for (const box of [title, total]) {
+          const [lo, hi] = [box.x, box.x + box.w]
+          if (side === 'port') expect(lo).toBeGreaterThanOrEqual(STACKED_MARGIN + CARD_CORNER_R)
+          else expect(hi).toBeLessThanOrEqual(CLUSTER_W - STACKED_MARGIN - CARD_CORNER_R)
+        }
+      }
+    }
+  })
+
+  test('a one-tank fan centres its title and total on the one arc foot', () => {
+    for (const side of ['port', 'stbd'] as const) {
+      const footX = fuelPoint(side, FUEL_R_FWD, 0)[0]
+      const { title, total } = fuelCaptions(side, 1)
+      expect(total.x + total.w / 2).toBeCloseTo(footX, 5)
+      expect(title.x + title.w / 2).toBeCloseTo(footX, 5)
+    }
   })
 
   test('an empty fuel arc draws nothing', () => {

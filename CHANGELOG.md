@@ -147,6 +147,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The engine cluster's fuel gauge is easier to read.** The percentage for
+  each tank sits under its arc, and the total shows with its capacity below it.
+  The scale is now labelled every 20 percent. On the instrument skin the fills
+  are bright near-white with a soft glow. On every other theme a healthy fill is
+  one flat colour instead of the old gradient.
 - **The passage page's figures are tidier.** The wind tile says it's the mean
   wind, fuel burned shows the fuel per nautical mile, the house battery tile is
   left out when the battery stayed within 5 points, and distances read "nm"

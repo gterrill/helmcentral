@@ -28,6 +28,8 @@ export const DIAL_CY = 320
 /** The cut the readout cards leave round the dial. */
 const CARD_CUT_R = 204
 
+/** Radius of a card's rounded outer corners. */
+export const CARD_CORNER_R = 22
 const CARD_X0 = 430
 const CARD_X1 = CLUSTER_W - STACKED_MARGIN
 export const CARD_TOPS = [119, 221, 323, 425] as const
@@ -35,19 +37,44 @@ export const CARD_H = 96
 
 export const FUEL_R_FWD = 256
 export const FUEL_R_AFT = 284
+/** Bar radii in tank order (forward, then aft): the one list the tracks and the fills both take their radius from. */
+export const FUEL_RADII = [FUEL_R_FWD, FUEL_R_AFT] as const
 const FUEL_SPAN = 24
 /** Stroke width of a tank bar and its track. The ticks and scale numbers sit inside the inner bar's edge (256 - 11) with a gap. */
 export const FUEL_BAR_W = 22
 /** Type sizes on the fan, here because the legend's reach and the captions' drop are worked out from them. */
-export const FUEL_LEGEND_SIZE = 14
-export const FUEL_FOOT_SIZE = 14
-/** The 0 / 50 / 100 numbers. FUEL_LABEL_R leaves room for them inside the ticks. */
-export const FUEL_SCALE_SIZE = 18
+export const FUEL_PCT_SIZE = 15
+export const FUEL_FOOT_SIZE = 12
+/** The 0 / 20 / ... / 100 numbers. FUEL_LABEL_R leaves room for them inside the ticks. */
+export const FUEL_SCALE_SIZE = 12
 /** Radii of the tick marks and the scale numbers' centre, measured in from the inner bar's edge. */
 const FUEL_TICK_OUT = FUEL_R_FWD - FUEL_BAR_W / 2 - 4
 const FUEL_TICK_MAJOR_IN = FUEL_TICK_OUT - 11
 const FUEL_TICK_MINOR_IN = FUEL_TICK_OUT - 6
-const FUEL_LABEL_R = FUEL_TICK_MAJOR_IN - FUEL_SCALE_SIZE - 2
+/** Clear space between the scale numbers and the major ticks. */
+const FUEL_LABEL_GAP = 8
+const FUEL_LABEL_R = FUEL_TICK_MAJOR_IN - FUEL_SCALE_SIZE / 2 - FUEL_LABEL_GAP
+/** Percent between labelled major ticks on the fan's scale; minor ticks sit at half steps. */
+export const FUEL_SCALE_STEP = 20
+/** Gaps in the stack under each arc's foot: bar edge to figure, figure to caption. */
+const FUEL_PCT_GAP = 2
+const FUEL_CAPTION_GAP = 1
+/**
+ * The title and total blocks are this wide, centred on the drawn arcs. Two
+ * tanks centre at x 153 (port), so 176 keeps the box's outer edge at 65, clear
+ * of the fuel card's rounded corner (40 + 22 = 62).
+ */
+const FUEL_CAPTION_W = 176
+/** How many tank arcs are drawn: the inner (forward) one alone, or both. */
+export type FuelBarCount = 1 | 2
+const FUEL_TITLE_Y = 129
+const FUEL_TITLE_H = 20
+/** Type sizes of the litres total and the "of N L" line under it. */
+export const FUEL_TOTAL_SIZE = 26
+export const FUEL_CAP_SIZE = 12
+/** Space from the foot captions' bottom to the total's top, and the total block's padding below its two lines (including their 2 px lead). */
+const FUEL_TOTAL_GAP = 5
+const FUEL_TOTAL_PAD = 3
 
 const RAD = Math.PI / 180
 /** How far a bar's square end drops below its centre line at the foot (and rises at the head). */
@@ -67,7 +94,7 @@ const n1 = (v: number) => v.toFixed(1)
  * its text has to start.
  */
 export function cardPath(x0: number, y0: number, x1: number, y1: number, tf: (x: number) => number, cx = DIAL_CX) {
-  const rr = 22
+  const rr = CARD_CORNER_R
   const P = (x: number, y: number) => `${n1(tf(x))} ${n1(y)}`
   const L = (y: number) => {
     const dy = y - DIAL_CY
@@ -219,21 +246,14 @@ export function fuelArc(side: ClusterSide, r: number, f: number): string {
   return d
 }
 
-/** The y of the foot and of the head of the bar at radius `r`, which is the run its colour sweep climbs. */
-export function fuelSweep(side: ClusterSide, r: number) {
-  return {
-    foot: fuelPoint(side, r, 0)[1] + FUEL_BAR_EDGE,
-    top: fuelPoint(side, r, 1)[1] - FUEL_BAR_EDGE,
-  }
-}
-
 /** The fan's tick marks, in two paths so majors can be heavier. */
 export function fuelTicks(side: ClusterSide) {
   let minor = ''
   let major = ''
-  for (let i = 0; i <= 10; i += 1) {
-    const t = i / 10
-    const isMajor = i % 5 === 0
+  const half = FUEL_SCALE_STEP / 2
+  for (let i = 0; i <= 100 / half; i += 1) {
+    const t = (i * half) / 100
+    const isMajor = i % 2 === 0
     const [ax, ay] = fuelPoint(side, isMajor ? FUEL_TICK_MAJOR_IN : FUEL_TICK_MINOR_IN, t)
     const [bx, by] = fuelPoint(side, FUEL_TICK_OUT, t)
     const seg = `M${n1(ax)} ${n1(ay)}L${n1(bx)} ${n1(by)}`
@@ -243,54 +263,68 @@ export function fuelTicks(side: ClusterSide) {
   return { minor, major }
 }
 
-/** Where the 0 / 50 / 100 scale numbers sit. */
+/** Where the 0 / 20 / ... / 100 scale numbers sit. */
 export function fuelScaleLabels(side: ClusterSide) {
-  return [0, 50, 100].map((p) => {
+  return Array.from({ length: 100 / FUEL_SCALE_STEP + 1 }, (_, i) => i * FUEL_SCALE_STEP).map((p) => {
     const [x, y] = fuelPoint(side, FUEL_LABEL_R, p / 100)
     return { value: p, x, y }
   })
 }
 
-/** Where a tank's percentage label rides: inside the bar's end when it fits, beyond it when not. */
-export function fuelLegendPoint(side: ClusterSide, r: number, fraction: number) {
-  const length = r * 2 * FUEL_SPAN * RAD
-  // The label's centre sits half its "100%" width (about 2.4 em of bold) plus a
-  // 3 px margin from the end of the fill, so it clears the end either way.
-  const off = (FUEL_LEGEND_SIZE * 1.2 + 3) / length
-  const inside = fraction >= 2 * off
-  const t = inside ? fraction - off : fraction + off
-  const [x, y] = fuelPoint(side, r, t)
-  const angle = FUEL_SPAN - 2 * FUEL_SPAN * t
-  return { x, y, inside, rotate: side === 'stbd' ? -90 + angle : -90 - angle }
-}
-
-/** The 'FWD' / 'AFT' captions under the foot of each arc. */
+/**
+ * The percentage and the 'FWD' / 'AFT' caption under the foot of each arc: the
+ * percentage on `pctY`, the caption on `y` below it.
+ */
 export function fuelFeet(side: ClusterSide) {
   const [fx, fy] = fuelPoint(side, FUEL_R_FWD, 0)
   const [ax, ay] = fuelPoint(side, FUEL_R_AFT, 0)
   // One baseline for both, under whichever bar ends lower, so the pair reads as
   // a row. The bar's square end drops a little below its centre line.
-  const y = Math.max(fy, ay) + FUEL_BAR_EDGE + FUEL_FOOT_SIZE
-  // The feet are only about 26 px apart, less than one caption is wide, so each
-  // caption runs away from its neighbour: the outer bar's outward, the inner's inward.
+  const pctY = Math.max(fy, ay) + FUEL_BAR_EDGE + FUEL_PCT_GAP + FUEL_PCT_SIZE / 2
+  const y = pctY + FUEL_PCT_SIZE / 2 + FUEL_CAPTION_GAP + FUEL_FOOT_SIZE / 2
+  // The feet are only about 26 px apart, less than one figure is wide, so each
+  // one runs away from its neighbour: the outer bar's outward, the inner's inward.
   const outward: 'start' | 'end' = side === 'stbd' ? 'start' : 'end'
   const inward: 'start' | 'end' = side === 'stbd' ? 'end' : 'start'
   return [
-    { label: 'FWD', x: fx, y, anchor: inward },
-    { label: 'AFT', x: ax, y, anchor: outward },
+    { x: fx, y, pctY, anchor: inward },
+    { x: ax, y, pctY, anchor: outward },
   ]
 }
 
-/** Centre of the two arcs' feet, which is where the litres total sits. */
-export function fuelTotalX(side: ClusterSide): number {
+/** Centre of the drawn arcs' feet (both tanks, or the inner arc alone for one), which is where the litres total and the title sit. */
+export function fuelCentreX(side: ClusterSide, count: FuelBarCount = 2): number {
   const [fx] = fuelPoint(side, FUEL_R_FWD, 0)
+  if (count === 1) return fx
   const [ax] = fuelPoint(side, FUEL_R_AFT, 0)
   return (fx + ax) / 2
 }
 
-/** Left edge of the fuel title block, which sits on the outer edge. */
-export function fuelTitleLeft(side: ClusterSide): number {
-  return side === 'stbd' ? CLUSTER_W - 56 - 220 : 56
+/** The title block above the fan and the total block under it, centred on the drawn arcs. */
+export function fuelCaptions(side: ClusterSide, count: FuelBarCount = 2) {
+  const x = fuelCentreX(side, count) - FUEL_CAPTION_W / 2
+  const footBottom = fuelFeet(side)[0].y + FUEL_FOOT_SIZE / 2
+  return {
+    title: { x, y: FUEL_TITLE_Y, w: FUEL_CAPTION_W, h: FUEL_TITLE_H },
+    total: { x, y: footBottom + FUEL_TOTAL_GAP, w: FUEL_CAPTION_W, h: FUEL_TOTAL_SIZE + FUEL_CAP_SIZE + FUEL_TOTAL_PAD },
+  }
+}
+
+function buildFuelGeometry(side: ClusterSide, count: FuelBarCount) {
+  return {
+    ticks: fuelTicks(side),
+    labels: fuelScaleLabels(side),
+    feet: fuelFeet(side),
+    captions: fuelCaptions(side, count),
+    // The tracks are the full arcs; only the fills change with a reading.
+    tracks: FUEL_RADII.map((r) => fuelArc(side, r, 1)),
+  }
+}
+
+/** Everything about the fan that depends on the side and the number of tanks drawn, built once. */
+export const FUEL_GEOMETRY: Record<ClusterSide, Record<FuelBarCount, ReturnType<typeof buildFuelGeometry>>> = {
+  port: { 1: buildFuelGeometry('port', 1), 2: buildFuelGeometry('port', 2) },
+  stbd: { 1: buildFuelGeometry('stbd', 1), 2: buildFuelGeometry('stbd', 2) },
 }
 
 /** A point at `deg` clockwise from straight up, `r` from the dial centre. */

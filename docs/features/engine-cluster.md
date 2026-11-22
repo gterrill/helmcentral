@@ -23,9 +23,11 @@ Here's what each part of the tile tells you:
 - **Two arcs at the foot of the dial.** Coolant temperature is on the left and
   gearbox oil temperature is on the right. If you haven't connected an arc, the
   tile doesn't draw it.
-- **Fuel arcs** on the outer edge: forward and aft tank, with litres in the
-  tanks against capacity. An arc turns amber and then red at the same levels the
-  tank's alarms use, which you set on the tank's equipment page.
+- **Fuel arcs** on the outer edge: forward and aft tank. Each arc has its
+  percentage over its FWD or AFT caption, and the scale is labelled every 20
+  percent. Below them is one litres total for both tanks, with the capacity
+  under it. An arc turns amber and then red at the same levels the tank's
+  alarms use, which you set on the tank's equipment page.
 - **Footer.** It shows the starter battery voltage, the gearbox oil pressure
   and the exhaust temperature. It also shows the alternator with its current,
   output power, temperature, charge stage and a one-hour trace of current. If

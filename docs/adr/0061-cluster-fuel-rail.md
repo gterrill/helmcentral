@@ -10,6 +10,22 @@ Amended by [ADR 0214](0214-tank-levels-drive-the-tiles-and-the-alarms.md): a fue
 bar no longer carries zones or raises an alarm. Its colours and the low fuel
 alarm come from the tank's own levels.
 
+Amended again for the fan's current look, which replaces the sweep gradient, the
+in-bar percentage and the 25 percent scale described below:
+
+- A healthy tank fills in one solid colour, `--fuel-fill`. The base theme sets it
+  to the flat `--primary` with no glow. The instrument skin sets it to a pale
+  near-white and adds a single faint glow over the healthy fills. The dial's
+  sweep gradient is gone. Amber and red still mean only a tank level alert.
+- The in-bar percentage is gone. One row of bold percentages sits under the arcs'
+  feet, each over its FWD or AFT caption and coloured by the tank's tone. An
+  absent tank reads `--`.
+- The scale is labelled every 20 percent, with major ticks at those labels and
+  minor ticks every 10.
+- The total is two lines centred under the fan: the litres with the unit beside
+  it, then "of N L", or "tank not reporting" when the total is `--`. The title
+  is centred on the fan.
+
 ## Context
 
 The vessel carries four fuel tanks, two a side. Until now the dashboard showed
@@ -188,10 +204,8 @@ never clear.
   a skin free to move one and not the other could put a bar through its
   neighbour. Only colour and the glow are tokens.
 - `--fuel-bar-glow` holds a whole `filter` value rather than one drop-shadow's
-  arguments, which is how `--dial-needle-glow` is written. One argument list can
-  only make one falloff, and the reference's bars have a tight emissive core and
-  a wide bloom. That is two stacked `drop-shadow()` functions, and it is why the
-  dial's glow never matched.
+  arguments, which is how `--dial-needle-glow` is written, so a skin can stack as
+  many falloffs as it likes. The instrument skin uses one faint `drop-shadow()`.
 - `reading`, `zoneFor` and `zoneTextClass` moved from `engine-cluster-tile.tsx`
   to `lib/cluster-readings.ts`, since a component the tile renders cannot import
   from the tile. `zoneStroke` in `dial-ring.tsx` was exported as `zoneColor` and
