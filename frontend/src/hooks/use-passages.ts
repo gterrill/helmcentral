@@ -10,7 +10,7 @@ import {
   type CruiseDetailResponse,
 } from '@/lib/passages-api'
 import { decodePassageDetailExtras } from '@/lib/passage-plans'
-import type { CruiseRecord, PassageDetail, PassageSummary, PassageView } from '@/lib/passages'
+import type { ComfortModelStatus, CruiseRecord, PassageDetail, PassageSummary, PassageView } from '@/lib/passages'
 import { errorMessage } from '@/lib/errors'
 
 const NO_PASSAGES: PassageSummary[] = []
@@ -39,8 +39,8 @@ export function usePassageList() {
   }
 }
 
-function selectPassageView(raw: { passage: PassageDetail }): PassageView {
-  return { ...raw.passage, ...decodePassageDetailExtras(raw.passage) }
+function selectPassageView(raw: { passage: PassageDetail; comfort_model?: ComfortModelStatus }): PassageView {
+  return { ...raw.passage, ...decodePassageDetailExtras(raw.passage), comfortModel: raw.comfort_model }
 }
 
 /** One passage with its tracks. */

@@ -96,6 +96,21 @@ type seaHindcastRow struct {
 	Swell         *seaTrainFigures
 	WindWave      *seaTrainFigures
 	MissingReason string
+	// WaveHeightM is the combined wave height the model gave for the hour, nil when
+	// it gave none or the row was stored before the figure was kept.
+	WaveHeightM *float64
+	// WaveHeightSeen says the row was stored with the figure kept, so a nil
+	// WaveHeightM is the plugin's own answer and not a row from before.
+	WaveHeightSeen bool
+}
+
+// noSplit says the hour has neither a swell nor a wind wave, yet is not known to
+// be calm: its combined height is 0.1 m or more, or unknown. A system with no
+// height is no system. The page and the comfort fit both read such an hour as one
+// the plugin gave no split for, never as a flat sea, and the forecast side holds
+// to the same line (comfortGap).
+func (r seaHindcastRow) noSplit() bool {
+	return seaHasNoSplit(r.Swell, r.WindWave, r.WaveHeightM)
 }
 
 func createSeaHindcastSchema(db *sql.DB) error {
@@ -116,6 +131,15 @@ func createSeaHindcastSchema(db *sql.DB) error {
 		PRIMARY KEY (hour_ms, lat_c, lon_c)
 	)`); err != nil {
 		return fmt.Errorf("create sea hindcast schema: %w", err)
+	}
+	// The combined wave height the model gave for the hour, kept so an hour with
+	// neither system can be told from a calm one. wave_height_seen is 1 once the
+	// plugin has been asked for the hour with the figure kept, so a plugin that
+	// never gives it is not asked again every sweep.
+	for _, c := range [][2]string{{"wave_height_m", "REAL"}, {"wave_height_seen", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := ensureColumn(db, "sea_hindcast_hours", c[0], c[1]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -138,7 +162,10 @@ func trainFromColumns(h, p, d sql.NullFloat64) *seaTrainFigures {
 }
 
 // StoreSeaHindcastRows keeps the rows in one transaction. An hour already held is
-// left as it is.
+// left as it is, except one stored before the combined wave height was kept: it
+// takes the combined height from the row fetched now, once, when that row is good
+// and from the same model, and is marked as asked either way. Nothing else of the
+// stored row changes (every row stored here has seen the figure asked for).
 func (s *passageStore) StoreSeaHindcastRows(rows []seaHindcastRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -151,11 +178,20 @@ func (s *passageStore) StoreSeaHindcastRows(rows []seaHindcastRow) error {
 	for _, r := range rows {
 		sh, sp, sd := trainColumns(r.Swell)
 		wh, wp, wd := trainColumns(r.WindWave)
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO sea_hindcast_hours
+		var combined any
+		if r.WaveHeightM != nil {
+			combined = *r.WaveHeightM
+		}
+		if _, err := tx.Exec(`INSERT INTO sea_hindcast_hours
 			(hour_ms, lat_c, lon_c, provider, model, fetched_ms, swell_height_m, swell_period_s, swell_dir_deg,
-			 wind_wave_height_m, wind_wave_period_s, wind_wave_dir_deg, missing_reason)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.HourMs, r.LatC, r.LonC, r.Provider, r.Model, r.FetchedMs, sh, sp, sd, wh, wp, wd, r.MissingReason); err != nil {
+			 wind_wave_height_m, wind_wave_period_s, wind_wave_dir_deg, missing_reason, wave_height_m, wave_height_seen)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+			ON CONFLICT (hour_ms, lat_c, lon_c) DO UPDATE SET
+			 wave_height_m = CASE WHEN excluded.missing_reason = '' AND excluded.model = sea_hindcast_hours.model
+			                      THEN excluded.wave_height_m ELSE sea_hindcast_hours.wave_height_m END,
+			 wave_height_seen = 1
+			WHERE sea_hindcast_hours.wave_height_seen = 0 AND sea_hindcast_hours.missing_reason = ''`,
+			r.HourMs, r.LatC, r.LonC, r.Provider, r.Model, r.FetchedMs, sh, sp, sd, wh, wp, wd, r.MissingReason, combined); err != nil {
 			return fmt.Errorf("store sea hindcast: %w", err)
 		}
 	}
@@ -167,7 +203,7 @@ func (s *passageStore) StoreSeaHindcastRows(rows []seaHindcastRow) error {
 // the cells it wants out of the answer.
 func (s *passageStore) SeaHindcastRowsBetween(first, last int64) (map[seaKey]seaHindcastRow, error) {
 	rows, err := s.db.Query(`SELECT hour_ms, lat_c, lon_c, provider, model, fetched_ms, swell_height_m, swell_period_s, swell_dir_deg,
-		wind_wave_height_m, wind_wave_period_s, wind_wave_dir_deg, missing_reason
+		wind_wave_height_m, wind_wave_period_s, wind_wave_dir_deg, missing_reason, wave_height_m, wave_height_seen
 		FROM sea_hindcast_hours WHERE hour_ms BETWEEN ? AND ?`, first, last)
 	if err != nil {
 		return nil, fmt.Errorf("read sea hindcast: %w", err)
@@ -176,11 +212,15 @@ func (s *passageStore) SeaHindcastRowsBetween(first, last int64) (map[seaKey]sea
 	out := map[seaKey]seaHindcastRow{}
 	for rows.Next() {
 		var r seaHindcastRow
-		var sh, sp, sd, wh, wp, wd sql.NullFloat64
-		if err := rows.Scan(&r.HourMs, &r.LatC, &r.LonC, &r.Provider, &r.Model, &r.FetchedMs, &sh, &sp, &sd, &wh, &wp, &wd, &r.MissingReason); err != nil {
+		var sh, sp, sd, wh, wp, wd, combined sql.NullFloat64
+		if err := rows.Scan(&r.HourMs, &r.LatC, &r.LonC, &r.Provider, &r.Model, &r.FetchedMs, &sh, &sp, &sd, &wh, &wp, &wd, &r.MissingReason, &combined, &r.WaveHeightSeen); err != nil {
 			return nil, fmt.Errorf("read sea hindcast: %w", err)
 		}
 		r.Swell, r.WindWave = trainFromColumns(sh, sp, sd), trainFromColumns(wh, wp, wd)
+		if combined.Valid {
+			c := combined.Float64
+			r.WaveHeightM = &c
+		}
 		out[r.seaKey] = r
 	}
 	if err := rows.Err(); err != nil {
@@ -256,7 +296,10 @@ func (s *passageStore) seaHoursNeeded(now time.Time) (needed [][]seaKey, failed 
 		}
 		var mine []seaKey
 		for k := range keys {
-			if _, have := held[k]; !have && !claimed[k] {
+			// An hour stored before the combined height was kept is asked for again,
+			// once: without it the page cannot tell a calm hour from one with no split.
+			row, have := held[k]
+			if (!have || (!row.WaveHeightSeen && row.MissingReason == "")) && !claimed[k] {
 				mine = append(mine, k)
 			}
 		}
@@ -357,13 +400,23 @@ func seaRowFor(k seaKey, providerID string, series waveHindcastSeries, fetched t
 	if row.MissingReason != "" {
 		return row
 	}
-	if h.SwellWavePeriodS > 0 {
-		row.Swell = &seaTrainFigures{HeightM: h.SwellWaveHeightM, PeriodS: h.SwellWavePeriodS, FromDeg: h.SwellWaveDirectionDeg}
-	}
-	if h.WindWavePeriodS > 0 {
-		row.WindWave = &seaTrainFigures{HeightM: h.WindWaveHeightM, PeriodS: h.WindWavePeriodS, FromDeg: h.WindWaveDirectionDeg}
-	}
+	row.Swell, row.WindWave = h.systems()
+	row.WaveHeightM = h.WaveHeightM
 	return row
+}
+
+// systems are the hour's two wave systems, nil for one with no period: a system
+// with no period is no system. The stored hindcast and the forecast hour both
+// read an hour through here, so the sea the model learns from and the sea it
+// predicts for are cut the same way.
+func (p waveHourPoint) systems() (swell, wind *seaTrainFigures) {
+	if p.SwellWavePeriodS > 0 {
+		swell = &seaTrainFigures{HeightM: p.SwellWaveHeightM, PeriodS: p.SwellWavePeriodS, FromDeg: p.SwellWaveDirectionDeg}
+	}
+	if p.WindWavePeriodS > 0 {
+		wind = &seaTrainFigures{HeightM: p.WindWaveHeightM, PeriodS: p.WindWavePeriodS, FromDeg: p.WindWaveDirectionDeg}
+	}
+	return swell, wind
 }
 
 func failedOutcomes(keys []seaKey, why string) []seaOutcome {
@@ -561,8 +614,13 @@ func (s *passageStore) recordSkip(err error) seaHindcastSummary {
 // it out afresh.
 func (s *passageStore) setSeaProblem(reason string) {
 	s.seaMu.Lock()
-	defer s.seaMu.Unlock()
+	changed := s.seaProblem != reason
 	s.seaProblem = reason
+	s.seaMu.Unlock()
+	// The comfort fit says when new sea hours wait for the plugin, so a change asks for one.
+	if changed && s.comfort != nil {
+		s.comfort.signal()
+	}
 }
 
 // seaProblemNow is the reason the last sweep could not ask, or "".
@@ -659,7 +717,8 @@ const seaSweepEvery = time.Hour
 // spell that has a sea state. It takes the time afresh from now and picks up
 // whatever passages, edits, imports and coastline squares have come since the
 // last, so nothing else needs to ask for a fill. A pass that finds nothing to do
-// logs nothing.
+// logs nothing. A pass that stored something asks the comfort model worker for a
+// fit (ADR 0301); the fit itself does not run on the sweep.
 func runSeaSweeps(ctx context.Context, store *passageStore, resolve func() (waveProvider, string, error), coast func() *offlineCoastlineReader, every time.Duration, now func() time.Time) {
 	for ctx.Err() == nil {
 		runSeaPass(ctx, store, resolve, coast, now().UTC())
@@ -695,6 +754,39 @@ type seaTrain struct {
 	Note string `json:"note,omitempty"`
 }
 
+// seaVerdict says whether a wave system was judged against the shore. The page's
+// peaks and the comfort model both set aside what was not, and read it here, so
+// the two cannot disagree on what counts as judged.
+type seaVerdict int
+
+const (
+	seaJudged seaVerdict = iota
+	seaSwellEnclosed
+	seaSwellUnchecked
+	seaWindUnchecked
+)
+
+// swellVerdict is the verdict on a swell. A swell not checked for enclosed water
+// comes before one found enclosed. Nil is judged: there is no swell to set aside.
+func (t *seaTrain) swellVerdict() seaVerdict {
+	switch {
+	case t == nil:
+	case t.Unchecked:
+		return seaSwellUnchecked
+	case t.Enclosed:
+		return seaSwellEnclosed
+	}
+	return seaJudged
+}
+
+// windVerdict is the verdict on a wind wave.
+func (t *seaTrain) windVerdict() seaVerdict {
+	if t != nil && t.Fetch != nil && t.Fetch.Check == seaCheckUnchecked {
+		return seaWindUnchecked
+	}
+	return seaJudged
+}
+
 // spellSea is the sea behind one spell. With no sea state Reason says why. A
 // sea state with neither swell nor wind wave is a flat sea.
 type spellSea struct {
@@ -709,6 +801,9 @@ const (
 	seaReasonNoPosition = "This spell has no recorded position to look up the sea for."
 	// seaReasonNoFigure is stored for an hour the wave plugin's answer leaves out.
 	seaReasonNoFigure = "The wave plugin gave no figure for this hour."
+	// seaReasonNoSplit is the reason for an hour whose stored sea has neither a swell
+	// nor a wind wave but a combined height that is not a calm one, or none.
+	seaReasonNoSplit = "The wave plugin gave no swell and wind-wave split for this hour."
 )
 
 // seaWords says where a sea comes from, in words, relative to the heading:
@@ -765,6 +860,8 @@ func seaForSpell(sp feltSpell, row *seaHindcastRow, readErr error) spellSea {
 		return spellSea{Reason: seaReasonNotFetched}
 	case row.MissingReason != "":
 		return spellSea{Reason: endSentence(row.MissingReason)}
+	case row.noSplit():
+		return spellSea{Reason: seaReasonNoSplit}
 	}
 	return spellSea{Swell: seaTrainOf(row.Swell, sp.MeanHeadingDeg), WindWave: seaTrainOf(row.WindWave, sp.MeanHeadingDeg)}
 }
@@ -806,17 +903,69 @@ func (s *passageStore) seaLookupFor(spells []feltSpell) *seaLookup {
 	return &seaLookup{rows: rows, problem: s.seaProblemNow()}
 }
 
+// hourFor is the stored hour behind a spell when it holds a sea state: false for
+// a spell with no position, no stored hour, or an hour the model had no value for.
+func (l *seaLookup) hourFor(sp feltSpell) (seaHindcastRow, bool) {
+	k, ok := sp.seaKey()
+	row, held := l.rows[k]
+	return row, ok && held && row.MissingReason == ""
+}
+
+// forEachSeaPassage reads each of the passages in turn, oldest first, with the
+// stored sea behind its spells, and hands them to fn until fn says to stop. A
+// passage with no spells is passed over. It returns ctx's error when ctx ends
+// first. A passage whose figures or hindcast rows cannot be read goes to
+// readFailed, which says whether to carry on.
+//
+// PassageFiguresFor works out and stores the figures of a stale passage; readers
+// that reach one together share the work (figuresFlight), so no walk needs a lock
+// of its own.
+func (s *passageStore) forEachSeaPassage(ctx context.Context, records []passageRecord, readFailed func(rec passageRecord, err error) (carryOn bool), fn func(rec passageRecord, spells []feltSpell, seas *seaLookup) (carryOn bool)) error {
+	for _, rec := range records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f, err := s.PassageFiguresFor(rec)
+		var seas *seaLookup
+		if err == nil {
+			if seas = s.seaLookupFor(f.Stats.FeltSpells); seas != nil && seas.err != nil {
+				err = fmt.Errorf("its hindcast rows could not be read: %w", seas.err)
+			}
+		}
+		if err != nil {
+			if !readFailed(rec, err) {
+				return nil
+			}
+			continue
+		}
+		if seas == nil {
+			continue
+		}
+		if !fn(rec, f.Stats.FeltSpells, seas) {
+			return nil
+		}
+	}
+	return nil
+}
+
 // forSpell is the sea behind one spell, from the row kept under its own key.
 func (l *seaLookup) forSpell(sp feltSpell) spellSea {
+	sea, _ := l.forSpellWithModel(sp)
+	return sea
+}
+
+// forSpellWithModel is forSpell with the id of the wave model behind the stored
+// hour, from the one lookup. The model is "" when no hour is stored.
+func (l *seaLookup) forSpellWithModel(sp feltSpell) (sea spellSea, model string) {
 	if k, ok := sp.seaKey(); ok {
 		if row, held := l.rows[k]; held {
-			return seaForSpell(sp, &row, l.err)
+			return seaForSpell(sp, &row, l.err), row.Model
 		}
 	}
 	if l.err == nil && l.problem != "" && sp.hasPosition() {
-		return spellSea{Reason: l.problem}
+		return spellSea{Reason: l.problem}, ""
 	}
-	return seaForSpell(sp, nil, l.err)
+	return seaForSpell(sp, nil, l.err), ""
 }
 
 // seaPeak is the largest of one kind of wave and when it was: Unix seconds, the
@@ -865,6 +1014,8 @@ func passageSeaReason(reasons []string) string {
 		return "No spell on this passage has a recorded position to look up the sea for."
 	case r == seaReasonUnreadable:
 		return "The recorded sea state for this passage couldn't be read."
+	case r == seaReasonNoSplit:
+		return "The wave plugin gave no swell and wind-wave split for this passage's hours."
 	case strings.HasPrefix(r, seaReasonCantFetch):
 		// The host's own sentence, naming the plugin; it says nothing of an hour.
 		return r
@@ -885,12 +1036,8 @@ func seaSummaryOf(spells []feltSpellOut) passageSea {
 	// fetch are the model's figures for a sea the boat was not in, so neither is a
 	// peak; each is counted instead (ADR 0300).
 	var unchecked, enclosed, swellUnchecked int
-	addPeak := func(peak **seaPeak, t *seaTrain, notJudged *int, at int64) {
-		switch {
-		case t == nil:
-		case t.Enclosed || (t.Fetch != nil && t.Fetch.Check == seaCheckUnchecked):
-			*notJudged++
-		case *peak == nil || t.HeightM > (*peak).HeightM:
+	raisePeak := func(peak **seaPeak, t *seaTrain, at int64) {
+		if *peak == nil || t.HeightM > (*peak).HeightM {
 			*peak = &seaPeak{seaTrainFigures: t.seaTrainFigures, At: at}
 		}
 	}
@@ -905,12 +1052,23 @@ func seaSummaryOf(spells []feltSpellOut) passageSea {
 		}
 		allReasons = false
 		at := sp.Start + (sp.End-sp.Start)/2
-		if s := sp.Sea.Swell; s != nil && s.Unchecked {
-			swellUnchecked++ // the shore could not be read, so it was not judged for enclosed water
-		} else {
-			addPeak(&out.Swell, s, &enclosed, at)
+		if s := sp.Sea.Swell; s != nil {
+			switch s.swellVerdict() {
+			case seaSwellUnchecked:
+				swellUnchecked++ // the shore could not be read, so it was not judged for enclosed water
+			case seaSwellEnclosed:
+				enclosed++
+			default:
+				raisePeak(&out.Swell, s, at)
+			}
 		}
-		addPeak(&out.WindWave, sp.Sea.WindWave, &unchecked, at)
+		if w := sp.Sea.WindWave; w != nil {
+			if w.windVerdict() == seaWindUnchecked {
+				unchecked++
+			} else {
+				raisePeak(&out.WindWave, w, at)
+			}
+		}
 	}
 	var parts []string
 	if unchecked > 0 {

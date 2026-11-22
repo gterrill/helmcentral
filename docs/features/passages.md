@@ -287,6 +287,13 @@ verdict. It sits beside your own rating and doesn't change it.
   no value for that patch of water, which is common near shore. Open-Meteo may
   refuse a date, for example one older than its archive, and then the spell says
   so. A spell recorded without a position has nowhere to look up, and says that.
+  The model may also give a combined wave height for the hour without splitting
+  it into swell and wind wave. The spell then says "The wave plugin gave no swell
+  and wind-wave split for this hour", and it isn't shown as a calm sea. Helmcentral
+  calls a sea calm only when the combined wave is under 0.1 m. Hours stored by an
+  earlier release didn't keep that height, so Helmcentral fetches them again over
+  the following hourly looks, within the same limits as any other hour, and
+  they read as having no split until then.
   Or your wave plugin is missing, or your open-meteo-marine plugin is too old to
   give past hours: every spell then says "The sea state can't be fetched" and
   names the plugin to install, until the next hourly look finds one that works.
@@ -329,6 +336,33 @@ come from your own ratings on this boat:
   rougher than every rated passage the page says so.
 - Your rating: the words move as you rate more passages. Your own rating is never
   changed.
+
+Under the Felt line, one more line says what Helmcentral has learned about how
+this boat answers the sea. It starts with "Comfort model:", then says which of
+sway, snap and pounding it has learned, from how many passages, and what it still
+needs for the rest. Helmcentral learns from your recorded passages and the sea each
+spell was in, and only from spells whose sea it could check against the shore. It
+tests itself by leaving out each passage in turn and seeing whether it can guess
+how that passage went. It trusts sway once it has 8 passages and 60 spells and
+guesses better than a fixed figure would, and it trusts snap and pounding once it
+has 5 passages and 30 spells with 10 Hz motion. Until then the line says what's
+missing. It looks again when Helmcentral starts, when new sea figures come in, when
+Offline coastline changes, and when you trim, split, merge or import a passage.
+It only reads what's been worked out, and each look re-judges only the passages
+whose figures, sea or shore changed.
+
+The line also says when something is still being got ready:
+
+- Waiting passages: a passage whose figures haven't been worked out yet, for
+  example one you've just trimmed, counts as waiting, as in "2 passages are waiting
+  for their figures to be worked out". It joins the model once its figures are
+  stored, which happens when Helmcentral starts or the first time you open it. If
+  working them out keeps failing, the line gives the error instead of waiting.
+- No wave plugin: when Helmcentral can't ask your wave plugin for new hours, the
+  line says "new sea hours are waiting for the wave plugin". The model keeps
+  learning from the hours it already has.
+
+Nothing on a plan changes yet.
 
 Along the replay's slider is a thin strip with one stretch for each 15-minute
 spell, coloured green for Comfortable, amber for Lively and red for Rough. It's

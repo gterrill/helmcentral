@@ -476,6 +476,25 @@ func hindcastHours(hours []waveHourOutput, label string) []hindcastHourOutput {
 	return out
 }
 
+// hindcastPointFor is one point's answer from the model that gave it, labelled
+// from the one table (labelForModel) the forecast export uses too.
+func hindcastPointFor(model string, hours []waveHourOutput) (hindcastPointOutput, error) {
+	label, err := labelForModel(model)
+	if err != nil {
+		return hindcastPointOutput{}, err
+	}
+	return hindcastPointOutput{Model: model, ModelLabel: label, Hourly: hindcastHours(hours, label)}, nil
+}
+
+// refusedPointFor is a point whose hours all carry the refusal's sentence.
+func refusedPointFor(model string, hours []waveHourOutput, sentence string) (hindcastPointOutput, error) {
+	label, err := labelForModel(model)
+	if err != nil {
+		return hindcastPointOutput{}, err
+	}
+	return hindcastPointOutput{Model: model, ModelLabel: label, Hourly: refusedHours(hours, sentence)}, nil
+}
+
 // refusedHours is a point's hours, each with no figures and the sentence for why.
 func refusedHours(hours []waveHourOutput, sentence string) []hindcastHourOutput {
 	out := make([]hindcastHourOutput, len(hours))
@@ -509,7 +528,11 @@ func chooseHindcast(points []currentsPoint, fallback bool, fetch func([]currents
 	var landIdx []int
 	var landPoints []currentsPoint
 	for i, hours := range primary {
-		out.Points[i] = hindcastPointOutput{Model: modelGFSWave, ModelLabel: labelGFSWave, Hourly: hindcastHours(hours, labelGFSWave)}
+		pt, err := hindcastPointFor(modelGFSWave, hours)
+		if err != nil {
+			return fetchHindcastOutput{}, err
+		}
+		out.Points[i] = pt
 		if fallback && hoursHaveNoWaves(hours) {
 			landIdx = append(landIdx, i)
 			landPoints = append(landPoints, points[i])
@@ -525,7 +548,11 @@ func chooseHindcast(points []currentsPoint, fallback bool, fetch func([]currents
 		// point keeps its hours, every one carrying the refusal sentence as its
 		// missing reason, so the host settles them and shows no sea.
 		for _, i := range landIdx {
-			out.Points[i] = hindcastPointOutput{Model: modelGFSWave, ModelLabel: labelGFSWave, Hourly: refusedHours(primary[i], refused.Sentence())}
+			pt, err := refusedPointFor(modelGFSWave, primary[i], refused.Sentence())
+			if err != nil {
+				return fetchHindcastOutput{}, err
+			}
+			out.Points[i] = pt
 		}
 		return out, nil
 	}
@@ -533,7 +560,11 @@ func chooseHindcast(points []currentsPoint, fallback bool, fetch func([]currents
 		return fetchHindcastOutput{}, fmt.Errorf("GFS-Wave has no data here and the blend fallback failed: %w", err)
 	}
 	for j, i := range landIdx {
-		out.Points[i] = hindcastPointOutput{Model: modelBlend, ModelLabel: labelBlend, Hourly: hindcastHours(blend[j], labelBlend)}
+		pt, err := hindcastPointFor(modelBlend, blend[j])
+		if err != nil {
+			return fetchHindcastOutput{}, err
+		}
+		out.Points[i] = pt
 	}
 	return out, nil
 }
@@ -780,8 +811,34 @@ type waveHourOutput struct {
 type fetchWavesOutput struct {
 	Hourly                 []waveHourOutput `json:"hourly"`
 	SeaSurfaceTemperatureC *float64         `json:"sea_surface_temperature_c,omitempty"`
-	Model                  string           `json:"model,omitempty"`
-	FallbackUsed           bool             `json:"fallback_used,omitempty"`
+	// Model names the forecast model the figures came from, and ModelLabel is how
+	// the logbook words it. Both are always present, so the host can match the
+	// forecast to the sea it learned the comfort model from.
+	Model        string `json:"model"`
+	ModelLabel   string `json:"model_label"`
+	FallbackUsed bool   `json:"fallback_used,omitempty"`
+}
+
+// labelForModel is how the plugin words a model it can answer with. A model with
+// no label is a bug in the plugin, so it is an error and never a blank.
+func labelForModel(model string) (string, error) {
+	switch model {
+	case modelGFSWave:
+		return labelGFSWave, nil
+	case modelBlend:
+		return labelBlend, nil
+	}
+	return "", fmt.Errorf("no label for wave model %q", model)
+}
+
+// buildWavesOutput is fetch_waves' answer for the series chosen: its hours, the
+// optional sea temperature, and the model that gave them with its label.
+func buildWavesOutput(hours []waveHourOutput, model string, fellBack bool, seaTemp *float64) (fetchWavesOutput, error) {
+	label, err := labelForModel(model)
+	if err != nil {
+		return fetchWavesOutput{}, err
+	}
+	return fetchWavesOutput{Hourly: hours, SeaSurfaceTemperatureC: seaTemp, Model: model, ModelLabel: label, FallbackUsed: fellBack}, nil
 }
 
 // clampForecastDays returns a clamped forecast_days value: default to 10 if

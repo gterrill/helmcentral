@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Breaking
 
+- **Replace your Open-Meteo Marine plugin again if you placed it by hand, so
+  the comfort model can match a forecast to the sea it learned from.** The
+  plugin's wave forecast now names its model and how to word it. What to do:
+  - If you installed Helmcentral with the installer, nothing. It replaces the
+    plugin.
+  - If you placed `open-meteo-marine.wasm` by hand, copy the one from this
+    release's plugin bundle over it. With the old plugin nothing you see today
+    changes, and the comfort model says to update the wave plugin when it needs
+    the forecast.
 - **Replace your Open-Meteo Marine plugin if you placed it by hand, so each
   passage can show the sea it was in.** Helmcentral now asks the plugin for the
   swell and wind waves of the past hours your passages ran through. What to do:
@@ -26,6 +35,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The passage page now says what Helmcentral has learned about how your boat
+  answers the sea.** Under the Felt line, one new line reads like "Comfort
+  model: sway learned from 12 passages (skill 0.42); snap and pounding not yet:
+  needs 5 passages with 10 Hz motion, has 1." Helmcentral learns from your
+  recorded passages and the sea each spell was in, and trusts sway, snap or
+  pounding only once it has enough passages and guesses better than a fixed
+  figure would. The line also says when passages are still waiting for their
+  figures to be worked out, and when new sea hours are waiting for the wave
+  plugin. Sea hours stored by an earlier release didn't keep the model's combined
+  wave height, so Helmcentral fetches them again over the following hourly looks,
+  within the same limits as any other hour. Until an hour is fetched again, a
+  spell with no swell or wind wave says the plugin gave no split, and is never
+  shown as a calm sea. Nothing on a plan changes yet.
 - **A passage's wind wave is now checked against the shore, so sheltered water
   stops reading rough.** The wave model can't see a bay or a river, so it gave
   wind waves several times higher than the boat felt. Helmcentral now estimates

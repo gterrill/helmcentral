@@ -250,40 +250,25 @@ func runSeaFetchWithin(ctx context.Context, store *passageStore, coast func() *o
 	}
 
 	var failures []string
-passages:
-	for _, rec := range records {
-		if ctx.Err() != nil {
-			sum.Stopped = seaStopped
-			break
-		}
-		f, err := store.PassageFiguresFor(rec)
-		if err != nil {
-			log.Printf("passages: sea fetch: passage %s left out: %v", rec.ID, err)
-			sum.PassagesFailed++
-			continue
-		}
-		seas := store.seaLookupFor(f.Stats.FeltSpells)
-		if seas != nil && seas.err != nil {
-			log.Printf("passages: sea fetch: passage %s left out: its hindcast rows could not be read: %v", rec.ID, seas.err)
-			sum.PassagesFailed++
-			continue
-		}
-		if seas == nil {
-			continue
-		}
+	// A passage that cannot be read is left out and counted, and the sweep goes on
+	// (the comfort fit, which walks the same passages, stops instead).
+	walkErr := store.forEachSeaPassage(ctx, records, func(rec passageRecord, err error) bool {
+		log.Printf("passages: sea fetch: passage %s left out: %v", rec.ID, err)
+		sum.PassagesFailed++
+		return true
+	}, func(rec passageRecord, felt []feltSpell, seas *seaLookup) bool {
 		geos := map[fetchGeoKey]*fetchGeometry{}
 		failedGeos := map[fetchGeoKey]bool{}
 		var out []fetchRay
 		stopped := seaRanOn
 	spells:
-		for _, sp := range f.Stats.FeltSpells {
+		for _, sp := range felt {
 			if ctx.Err() != nil {
 				stopped = seaStopped
 				break
 			}
-			k, ok := sp.seaKey()
-			hour, held := seas.rows[k]
-			if !ok || !held || hour.MissingReason != "" {
+			hour, ok := seas.hourFor(sp)
+			if !ok {
 				continue
 			}
 			requests := fetchRequests(sp, hour)
@@ -291,7 +276,7 @@ passages:
 				continue
 			}
 			if !start() {
-				return sum
+				return false
 			}
 			latE6, lonE6, lat, lon := fetchPos(sp)
 			plan, err := loader.plan(lat, lon)
@@ -351,8 +336,15 @@ passages:
 		}
 		if stopped != seaRanOn {
 			sum.Stopped = stopped
-			break passages
+			return false
 		}
+		return true
+	})
+	if sum.Skipped != "" {
+		return sum
+	}
+	if walkErr != nil {
+		sum.Stopped = seaStopped
 	}
 	sum.Squares = len(loader.lines)
 	if sum.Built > 0 || sum.Failed > 0 || sum.Stopped != seaRanOn || sum.PassagesFailed > 0 {
@@ -373,10 +365,17 @@ passages:
 
 // runSeaPass is one pass of the sea sweep: the hindcast is filled first, so a
 // spell whose hour was fetched this pass has its shore worked out in the same
-// pass.
+// pass. A pass that stored sea hours or fetch rows asks for a comfort fit, which
+// learns from both, and so does one that finds the Offline coastline changed (it
+// turned on or off, or a square was downloaded again), since the same stored rows
+// then judge a spell differently. One that did neither leaves the fit as it is.
 func runSeaPass(ctx context.Context, store *passageStore, resolve func() (waveProvider, string, error), coast func() *offlineCoastlineReader, now time.Time) {
-	runSeaHindcast(ctx, store, resolve, now)
-	runSeaFetch(ctx, store, coast)
+	hindcast := runSeaHindcast(ctx, store, resolve, now)
+	fetch := runSeaFetch(ctx, store, coast)
+	changed := store.coastlineChanged(coast())
+	if hindcast.Filled+hindcast.NoValue > 0 || fetch.Rows > 0 || changed {
+		store.comfort.signal()
+	}
 }
 
 // ── what the page reads ──────────────────────────────────────────────────
@@ -390,12 +389,9 @@ type fetchLookup struct {
 	rowsErr error
 }
 
-// newFetchView reads the stored rows for a passage's spells in one query. A nil
-// reader is a coastline that is not on this install, and every spell says so.
-func newFetchView(r *offlineCoastlineReader, store *passageStore, spells []feltSpell) *fetchLookup {
-	f := &fetchLookup{loader: r.newLoader()}
-	var minLat, maxLat, minLon, maxLon int
-	found := false
+// fetchBox is the bounds, in millionths of a degree, of the positions of the
+// spells that have one, and false when none has.
+func fetchBox(spells []feltSpell) (minLat, maxLat, minLon, maxLon int, found bool) {
 	for _, sp := range spells {
 		if !sp.hasPosition() {
 			continue
@@ -408,12 +404,60 @@ func newFetchView(r *offlineCoastlineReader, store *passageStore, spells []feltS
 		minLat, maxLat = min(minLat, latE6), max(maxLat, latE6)
 		minLon, maxLon = min(minLon, lonE6), max(maxLon, lonE6)
 	}
-	if found {
-		if f.rows, f.rowsErr = store.FetchRaysWithin(minLat, maxLat, minLon, maxLon); f.rowsErr != nil {
-			log.Printf("passages: %v", f.rowsErr)
-		}
+	return minLat, maxLat, minLon, maxLon, found
+}
+
+// newFetchView reads the stored rows for a passage's spells in one query. A nil
+// reader is a coastline that is not on this install, and every spell says so.
+func newFetchView(r *offlineCoastlineReader, store *passageStore, spells []feltSpell) *fetchLookup {
+	f := newFetchViewWith(r.newLoader(), store, spells)
+	if f.rowsErr != nil {
+		log.Printf("passages: %v", f.rowsErr)
 	}
 	return f
+}
+
+// newFetchViewWith is newFetchView with the coastline loader given, so a caller
+// that judges many passages reads each square's record once. A failed read is kept
+// in the view and every spell then says so.
+func newFetchViewWith(loader *coastlineLoader, store *passageStore, spells []feltSpell) *fetchLookup {
+	f := &fetchLookup{loader: loader}
+	if minLat, maxLat, minLon, maxLon, found := fetchBox(spells); found {
+		f.rows, f.rowsErr = store.FetchRaysWithin(minLat, maxLat, minLon, maxLon)
+	}
+	return f
+}
+
+// coastlineState names the Offline coastline as it is now: not on the install, off,
+// unreadable, or on with the stamp of the squares held. A change in it changes what
+// a stored fetch figure says of a spell, though no new row is stored.
+func coastlineState(r *offlineCoastlineReader) string {
+	if r == nil || r.Store == nil {
+		return "not on this install"
+	}
+	enabled, err := r.Enabled()
+	if err != nil {
+		return "setting unreadable: " + err.Error()
+	}
+	if !enabled {
+		return "off"
+	}
+	stamp, err := r.coverageStamp()
+	if err != nil {
+		return "squares unreadable: " + err.Error()
+	}
+	return "on " + stamp
+}
+
+// coastlineChanged says the coastline is not as it was at the last call. The first
+// call only notes it: the start-up fit reads it afresh anyway.
+func (s *passageStore) coastlineChanged(r *offlineCoastlineReader) bool {
+	state := coastlineState(r)
+	s.coastMu.Lock()
+	defer s.coastMu.Unlock()
+	changed := s.coastStateKnown && s.coastState != state
+	s.coastState, s.coastStateKnown = state, true
+	return changed
 }
 
 // judge applies the fetch check to a spell's sea from the stored figures. A spell

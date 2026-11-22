@@ -95,7 +95,7 @@ function snapText(snap: PassageFelt['snap']): string | null {
 /** How the passage felt: the band word beside the operator's own rating, the
  * felt figure, and the snap and pounding peaks, each a button to its moment.
  * A figure that was not recorded says why. The rating is never changed here. */
-export function PassageFeltRow({ felt, rating, onSeek, timeZone = null }: { felt: PassageFelt | undefined; rating: PassageRating; onSeek?: (at: number) => void; timeZone?: string | null }) {
+export function PassageFeltRow({ felt, rating, onSeek, timeZone = null, comfortModel }: { felt: PassageFelt | undefined; rating: PassageRating; onSeek?: (at: number) => void; timeZone?: string | null; comfortModel?: string }) {
   if (!felt) return null
   const snap = snapText(felt.snap)
   const pounding = felt.pounding.value_g !== null && Number.isFinite(felt.pounding.value_g) ? `${felt.pounding.value_g.toFixed(2)} g` : null
@@ -145,6 +145,7 @@ export function PassageFeltRow({ felt, rating, onSeek, timeZone = null }: { felt
       {snap && felt.snap.note && <p className="text-xs text-muted-foreground">{felt.snap.note}</p>}
       {felt.sea && <p data-testid="felt-sea" className="text-xs text-muted-foreground">Sea: {seaSummaryText(felt.sea, timeZone)}</p>}
       {felt.deg !== null && <p className="text-xs text-muted-foreground">{felt.bands.summary ?? felt.bands.reason}</p>}
+      {comfortModel && <p data-testid="felt-comfort-model" className="text-xs text-muted-foreground">{comfortModel}</p>}
     </div>
   )
 }

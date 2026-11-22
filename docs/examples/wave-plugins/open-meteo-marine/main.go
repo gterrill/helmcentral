@@ -162,11 +162,10 @@ func fetchWaves() int32 {
 	}
 
 	// Build output
-	output := fetchWavesOutput{
-		Hourly:                 hourlyData,
-		SeaSurfaceTemperatureC: seaTemp,
-		Model:                  model,
-		FallbackUsed:           fellBack,
+	output, err := buildWavesOutput(hourlyData, model, fellBack, seaTemp)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
 	}
 
 	if err := pdk.OutputJSON(output); err != nil {

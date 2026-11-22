@@ -67,29 +67,72 @@ func (s *passageStore) PassageStatsFor(rec passageRecord) (passageStats, error) 
 
 // PassageFiguresFor returns the stored figures, computing and storing them
 // first when the row has none.
+//
+// Readers that find one passage stale together work it out once: the current
+// figures are read outside the guard, and the stale path runs in figuresFlight,
+// which reads the row again first. The figures it returns are shared between its
+// callers and must not be changed. A store made from points read before the row
+// was cleared (an import into the range, a trim) is refused by the generation
+// the row had when it was read, so the cleared row stays cleared and is worked
+// out again from the new points.
 func (s *passageStore) PassageFiguresFor(rec passageRecord) (passageFigures, error) {
-	var raw sql.NullString
-	var cached *passageFigures
-	if err := s.db.QueryRow(`SELECT stats_json FROM passages WHERE id = ?`, rec.ID).Scan(&raw); err != nil {
-		return passageFigures{}, fmt.Errorf("read passage stats: %w", err)
+	raw, gen, err := s.readFiguresRow(rec.ID)
+	if err != nil {
+		return passageFigures{}, err
 	}
+	if f, ok := parseFigures(raw); ok && f.current() {
+		if f.Timezone == "" && f.StartLat != nil && f.StartLon != nil {
+			// Stored before the zone was kept: look it up this once
+			// and keep it.
+			if name, _ := f.lookupStartZone(rec.ID); name != "" {
+				f.Timezone = name
+				s.storeFigures(rec, f, gen)
+			}
+		}
+		return f, nil
+	}
+	// The generation the reader saw is part of the key, so a reader that comes after
+	// a clear starts its own flight and never joins one that read the old points.
+	key := fmt.Sprintf("%s|%d|%d|%d", rec.ID, rec.Start.UnixMilli(), rec.End.UnixMilli(), gen)
+	v, err, _ := s.figuresFlight.Do(key, func() (any, error) {
+		f, stored, err := s.workOutFigures(rec)
+		// A refused store worked nothing out, so it neither records nor clears a failure.
+		if err != nil || stored {
+			s.noteFiguresResult(rec.ID, err)
+		}
+		return f, err
+	})
+	return v.(passageFigures), err
+}
+
+// readFiguresRow is a passage's stored stats and the generation of the row.
+func (s *passageStore) readFiguresRow(id string) (raw sql.NullString, gen int64, err error) {
+	if err := s.db.QueryRow(`SELECT stats_json, figures_gen FROM passages WHERE id = ?`, id).Scan(&raw, &gen); err != nil {
+		return raw, 0, fmt.Errorf("read passage stats: %w", err)
+	}
+	return raw, gen, nil
+}
+
+// workOutFigures is the stale path of PassageFiguresFor: it reads the row again,
+// since the flight before it may have stored the figures, then works them out
+// from the track and stores them. stored says the figures returned are the ones
+// the row holds: false when the store was refused because the row changed since
+// the points were read.
+func (s *passageStore) workOutFigures(rec passageRecord) (f passageFigures, stored bool, err error) {
+	raw, gen, err := s.readFiguresRow(rec.ID)
+	if err != nil {
+		return passageFigures{}, false, err
+	}
+	var cached *passageFigures
 	if f, ok := parseFigures(raw); ok {
 		if f.current() {
-			if f.Timezone == "" && f.StartLat != nil && f.StartLon != nil {
-				// Stored before the zone was kept: look it up this once
-				// and keep it.
-				if name, _ := f.lookupStartZone(rec.ID); name != "" {
-					f.Timezone = name
-					s.storeFigures(rec, f)
-				}
-			}
-			return f, nil
+			return f, true, nil
 		}
 		cached = &f
 	}
 	pts, err := s.TrackPointsBetween(rec.Start, rec.End)
 	if err != nil {
-		return passageFigures{}, err
+		return passageFigures{}, false, err
 	}
 	if cached != nil && len(pts) == 0 {
 		// Nothing to work it out from; the stored figures stand. Keep them at the
@@ -101,17 +144,64 @@ func (s *passageStore) PassageFiguresFor(rec passageRecord) (passageFigures, err
 			cached.StartLon = nil
 		}
 		cached.Stats.setNoPointsReasons()
-		if err := s.storeFigures(rec, *cached); err != nil {
-			return *cached, err
+		ok, err := s.storeFigures(rec, *cached, gen)
+		if err != nil {
+			return *cached, false, err
 		}
-		return *cached, nil
+		return *cached, ok, nil
+	}
+	s.figuresComputed.Add(1)
+	if s.figuresHook != nil {
+		s.figuresHook()
 	}
 	st := passageFigures{Version: passageFiguresVersion, Stats: computePassageStats(pts), StartLon: startLon(pts), StartLat: startLat(pts)}
 	st.Timezone, _ = st.lookupStartZone(rec.ID)
-	if err := s.storeFigures(rec, st); err != nil {
-		return st, err
+	ok, err := s.storeFigures(rec, st, gen)
+	if err != nil {
+		return st, false, err
 	}
-	return st, nil
+	return st, ok, nil
+}
+
+// noteFiguresResult keeps the error of a passage whose figures could not be worked
+// out, for the comfort fit to word, and drops it once they are. A new or changed
+// error asks for a fit, which reads it.
+func (s *passageStore) noteFiguresResult(id string, err error) {
+	s.figuresFailMu.Lock()
+	prev, had := s.figuresFailed[id]
+	switch {
+	case err != nil:
+		if s.figuresFailed == nil {
+			s.figuresFailed = map[string]string{}
+		}
+		s.figuresFailed[id] = err.Error()
+	case had:
+		delete(s.figuresFailed, id)
+	}
+	changed := (err != nil && (!had || prev != err.Error())) || (err == nil && had)
+	s.figuresFailMu.Unlock()
+	if changed && s.comfort != nil {
+		s.comfort.signal()
+	}
+}
+
+// pruneFiguresFailed forgets the failures of passages that are not in live, as a
+// merge or a split leaves ids behind.
+func (s *passageStore) pruneFiguresFailed(live map[string]bool) {
+	s.figuresFailMu.Lock()
+	defer s.figuresFailMu.Unlock()
+	for id := range s.figuresFailed {
+		if !live[id] {
+			delete(s.figuresFailed, id)
+		}
+	}
+}
+
+// figuresFailure is the last error from working out a passage's figures, or "".
+func (s *passageStore) figuresFailure(id string) string {
+	s.figuresFailMu.Lock()
+	defer s.figuresFailMu.Unlock()
+	return s.figuresFailed[id]
 }
 
 // Sideways g at the helm (ADR 0297): how hard the roll throws someone standing
@@ -214,20 +304,30 @@ func currentHelmHeight() (*float64, error) {
 }
 
 // storeFigures writes the figures to the row, only if the range is still the
-// one they were worked out for, so a trim racing this read cannot leave stale
-// figures behind.
-func (s *passageStore) storeFigures(rec passageRecord, f passageFigures) error {
+// one they were worked out for and the row is still at the generation it had
+// when they were read, so a trim or an import racing this read cannot leave stale
+// figures behind. It says whether the row was written, and asks the comfort fit
+// for a fit when it was.
+func (s *passageStore) storeFigures(rec passageRecord, f passageFigures, gen int64) (stored bool, err error) {
 	buf, err := json.Marshal(f)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// felt_deg is kept in a column of its own so the comfort bands can be learned
 	// from every rated passage without reading each one's stats.
-	if _, err := s.db.Exec(`UPDATE passages SET stats_json = ?, felt_deg = ? WHERE id = ? AND start_ms = ? AND end_ms = ?`,
-		string(buf), f.Stats.FeltDeg, rec.ID, rec.Start.UnixMilli(), rec.End.UnixMilli()); err != nil {
-		return fmt.Errorf("store passage stats: %w", err)
+	res, err := s.db.Exec(`UPDATE passages SET stats_json = ?, felt_deg = ? WHERE id = ? AND start_ms = ? AND end_ms = ? AND figures_gen = ?`,
+		string(buf), f.Stats.FeltDeg, rec.ID, rec.Start.UnixMilli(), rec.End.UnixMilli(), gen)
+	if err != nil {
+		return false, fmt.Errorf("store passage stats: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store passage stats: %w", err)
+	}
+	if n == 1 && s.comfort != nil {
+		s.comfort.signal()
+	}
+	return n == 1, nil
 }
 
 // ListPassageSummaries is the visible passages, newest first, with their
@@ -354,7 +454,17 @@ func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsP
 	if ctx.Err() != nil {
 		return
 	}
+	// The start-up fit is the worker's, asked for here so it follows the recompute.
+	// The sweeps start without waiting for it, and a first pass that stores
+	// something asks for one more.
+	store.comfort.signal()
+	worker := make(chan struct{})
+	go func() {
+		defer close(worker)
+		store.comfort.run(ctx, store, coast)
+	}()
 	runSeaSweeps(ctx, store, resolve, coast, every, clock)
+	<-worker
 }
 
 // bandsReasonUnreadable is the reason a page carries when the bands could not be

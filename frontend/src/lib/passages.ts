@@ -202,6 +202,29 @@ export interface PassageFelt {
   sea?: PassageSea
 }
 
+/** How one of sway, snap and pounding stands in the boat's comfort model. */
+export interface ComfortGroupStatus {
+  name: string
+  learned: boolean
+  passages: number
+  spells: number
+  /** Only when learned. */
+  skill?: number
+  /** Why it is not learned yet. */
+  reason?: string
+}
+
+/** What the boat's comfort model has learned so far. It belongs to the boat, not to the passage it comes with. */
+export interface ComfortModelStatus {
+  /** The server's sentence, starting "Comfort model:". */
+  summary: string
+  error?: string
+  /** How many passages the fit has not read yet, for want of their figures; the summary says so. */
+  waiting_passages?: number
+  /** One for each wave model it has learned from. */
+  models: { model: string; sway: ComfortGroupStatus; snap: ComfortGroupStatus; pounding: ComfortGroupStatus }[]
+}
+
 export interface PassageSummary extends PassageRecord {
   stats: PassageStats
   /** The felt band word, null when there is no felt figure or the bands are not learned yet. */
@@ -228,7 +251,7 @@ export interface PassageDetail extends PassageSummary {
 }
 
 /** One passage as its own page reads it: the tracks plus the rating and the Mate plans. */
-export type PassageView = PassageDetail & PassageDetailExtras
+export type PassageView = PassageDetail & PassageDetailExtras & { comfortModel?: ComfortModelStatus }
 
 export interface CruiseRecord {
   id: string

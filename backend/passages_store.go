@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 )
 
 // The track point log, passages and cruises (ADR 0176), in helmcentral.sqlite.
@@ -124,6 +125,27 @@ type passageStore struct {
 	// memory only; see setSeaProblem.
 	seaMu      sync.Mutex
 	seaProblem string
+
+	// figuresFlight lets readers that meet one stale passage together work its
+	// figures out once; figuresFailMu guards figuresFailed, the last error of each
+	// passage whose figures could not be worked out, which the comfort fit words.
+	figuresFlight   singleflight.Group
+	figuresFailMu   sync.Mutex
+	figuresFailed   map[string]string
+	coastMu         sync.Mutex
+	coastState      string
+	coastStateKnown bool
+
+	// comfort owns the comfort model fitted from the recorded passages (ADR 0301).
+	// Its fit is kept in memory only. A change to a passage's track asks it for a
+	// fit with comfort.signal.
+	comfort *comfortModelWorker
+
+	// figuresComputed counts the passages whose figures were worked out from their
+	// track, and figuresHook, when set, runs after the points are read and before
+	// the figures are stored: both are for tests.
+	figuresComputed atomic.Int64
+	figuresHook     func()
 }
 
 func newPassageStore(dbPath string) (*passageStore, error) {
@@ -135,7 +157,7 @@ func newPassageStore(dbPath string) (*passageStore, error) {
 		db.Close()
 		return nil, err
 	}
-	return &passageStore{db: db}, nil
+	return &passageStore{db: db, comfort: newComfortModelWorker()}, nil
 }
 
 func (s *passageStore) close() error { return s.db.Close() }
@@ -783,10 +805,18 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 		{"stats_json", "TEXT"},
 		{"felt_deg", "REAL"},
 		{"rating", "TEXT NOT NULL DEFAULT ''"},
+		{"figures_gen", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {
 			return err
 		}
+	}
+	// figures_gen counts the writes to stats_json, a clear as much as a store. The
+	// comfort fit tells from it whether a passage's figures changed without reading
+	// them, and a store made from figures read before a clear is refused by it.
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS passages_figures_gen AFTER UPDATE OF stats_json ON passages
+		BEGIN UPDATE passages SET figures_gen = figures_gen + 1 WHERE id = NEW.id; END`); err != nil {
+		return fmt.Errorf("create passage figures trigger: %w", err)
 	}
 	// Rows with no source are filled on every start, and only where their
 	// track says exactly where they came from.
