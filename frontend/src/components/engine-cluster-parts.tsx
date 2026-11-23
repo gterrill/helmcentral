@@ -1,5 +1,5 @@
 import { Thermometer, Zap } from 'lucide-react'
-import { useMemo, type CSSProperties, type ReactNode } from 'react'
+import { useId, useMemo, type CSSProperties, type ReactNode } from 'react'
 
 import { DIAL_TICK_W } from '@/components/ui/cluster-dial'
 import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
@@ -221,6 +221,13 @@ export function gapArcNames(): GapArcName[] {
   return Object.keys(GAP_ARCS) as GapArcName[]
 }
 
+// Baselines of the litres total and its "of N L" line, measured down from the top
+// of the total's box: the total sits on its font's ascent, the capacity line sits
+// below the total's line box (plus the old 2 px gap) on its own ascent.
+const FONT_ASCENT = 0.85
+const FUEL_TOTAL_BASELINE = Math.round(FUEL_TOTAL_SIZE * FONT_ASCENT)
+const FUEL_CAP_BASELINE = Math.round(FUEL_TOTAL_SIZE + 2 + FUEL_CAP_SIZE * FONT_ASCENT)
+
 /**
  * The fuel fan on the outer edge: up to two tanks as concentric arcs, a scale
  * along the foot of them and the litres total underneath. Fill colour follows
@@ -256,15 +263,21 @@ export function FuelFan({ config, title, side, values, ages }: {
   // Say what is missing: live percentages over "tank not reporting" would read as a contradiction.
   const levelsLive = bars.length > 0 && bars.every((b) => b.percent !== null)
   const fuelLabel = title.trim() ? `${title.trim()} fuel` : 'Fuel'
+  const totalX = captions.total.x + captions.total.w / 2
+  const clipId = useId()
   const fractionOf = (percent: number | null) => (percent === null ? 0 : Math.max(0, Math.min(1, percent / 100)))
   const fills = bars.map((bar, i) => ({ bar, i, f: fractionOf(bar.percent) })).filter(({ f }) => f > 0)
-  const healthyFills: typeof fills = []
-  const alertFills: typeof fills = []
-  for (const fill of fills) (fill.bar.level.tone === 'neutral' ? healthyFills : alertFills).push(fill)
-  const fillPath = ({ bar, i, f }: (typeof fills)[number]) => (
-    <path key={i} data-fuel-fill={i} d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={FUEL_BAR_W}
-      style={{ stroke: bar.level.tone === 'neutral' ? 'hsl(var(--fuel-fill))' : fillOf(bar.level.tone) }} />
-  )
+  // Healthy fills share one glow; amber and red fills stay unfiltered.
+  const healthyFills: ReactNode[] = []
+  const alertFills: ReactNode[] = []
+  for (const { bar, i, f } of fills) {
+    const healthy = bar.level.tone === 'neutral'
+    const path = (
+      <path key={i} data-fuel-fill={i} d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={FUEL_BAR_W}
+        style={{ stroke: healthy ? 'hsl(var(--fuel-fill))' : fillOf(bar.level.tone) }} />
+    )
+    ;(healthy ? healthyFills : alertFills).push(path)
+  }
 
   return (
     <g data-fuel-fan="" data-side={side}>
@@ -277,9 +290,9 @@ export function FuelFan({ config, title, side, values, ages }: {
       ))}
       {/* One glow over every healthy fill; amber and red fills stay unfiltered. */}
       {healthyFills.length > 0 && (
-        <g style={{ filter: 'var(--fuel-bar-glow)' }}>{healthyFills.map(fillPath)}</g>
+        <g style={{ filter: 'var(--fuel-bar-glow)' }}>{healthyFills}</g>
       )}
-      {alertFills.map(fillPath)}
+      {alertFills}
       <path d={ticks.minor} fill="none" strokeWidth={DIAL_TICK_W.minor} style={{ stroke: 'hsl(var(--fuel-tick-minor))' }} />
       <path d={ticks.major} fill="none" strokeWidth={DIAL_TICK_W.major} style={{ stroke: 'hsl(var(--fuel-tick-major))' }} />
       {labels.map((s) => (
@@ -305,21 +318,23 @@ export function FuelFan({ config, title, side, values, ages }: {
           <span className={`${LABEL} truncate`}>{fuelLabel}</span>
         </div>
       </foreignObject>
-      <foreignObject x={captions.total.x} y={captions.total.y} width={captions.total.w} height={captions.total.h}>
-        <div className="flex h-full flex-col items-center whitespace-nowrap">
-          <div className="flex items-baseline gap-1.5">
-            <span data-testid="fuel-total" className="font-display font-semibold leading-none tabular-nums text-gauge-primary"
-              style={{ fontSize: FUEL_TOTAL_SIZE }}>
-              {fmt(total) ?? '--'}
-            </span>
-            {known && <span className="text-sm font-semibold text-muted-foreground">{unit}</span>}
-          </div>
-          <span data-testid="fuel-capacity" className="mt-0.5 font-semibold leading-none text-muted-foreground"
-            style={{ fontSize: FUEL_CAP_SIZE }}>
-            {known ? `of ${fmt(capacity)} ${unit}` : levelsLive ? 'capacity not reporting' : 'tank not reporting'}
-          </span>
-        </div>
-      </foreignObject>
+      {/* SVG text does not clip itself: cut it off at the caption box, as the foreignObject used to. */}
+      <clipPath id={clipId}>
+        <rect x={captions.total.x} y={captions.total.y} width={captions.total.w} height={captions.total.h} />
+      </clipPath>
+      <g data-fuel-total-group="" clipPath={`url(#${clipId})`}>
+        <text x={totalX} y={captions.total.y + FUEL_TOTAL_BASELINE} textAnchor="middle" fontWeight="600" className="font-display"
+          style={{ fontSize: FUEL_TOTAL_SIZE, fontVariantNumeric: 'tabular-nums', fill: 'hsl(var(--gauge-primary))' }}>
+          <tspan data-testid="fuel-total">{fmt(total) ?? '--'}</tspan>
+          {known && (
+            <tspan dx={6} className="font-sans text-sm" style={{ fontVariantNumeric: 'normal', fill: 'hsl(var(--muted-foreground))' }}>{unit}</tspan>
+          )}
+        </text>
+        <text data-testid="fuel-capacity" x={totalX} y={captions.total.y + FUEL_CAP_BASELINE} textAnchor="middle" fontWeight="600"
+          style={{ fontSize: FUEL_CAP_SIZE, fill: 'hsl(var(--muted-foreground))' }}>
+          {known ? `of ${fmt(capacity)} ${unit}` : levelsLive ? 'capacity not reporting' : 'tank not reporting'}
+        </text>
+      </g>
     </g>
   )
 }
