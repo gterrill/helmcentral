@@ -174,6 +174,9 @@ func capitalise(s string) string {
 	if s == "" {
 		return s
 	}
+	if startsAcronym(s) {
+		return s
+	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 

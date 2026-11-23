@@ -31,6 +31,8 @@ interface PlanLegAssessmentApi extends LegResultApi {
   still_in_port?: boolean;
   depart: string;
   depart_suggested: boolean;
+  /** Null when the leg's departure is not suggested, or has no ranking to explain. */
+  depart_basis: string | null;
   arrive: string;
   hours: number | null;
   speed_kn: number | null;
@@ -121,6 +123,7 @@ function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
     stillInPort: l.still_in_port === true,
     depart: l.depart === "" ? null : l.depart,
     departSuggested: l.depart_suggested,
+    departBasis: l.depart_basis,
     arrive: l.arrive === "" ? null : l.arrive,
     hours: l.hours,
     speedKn: l.speed_kn,

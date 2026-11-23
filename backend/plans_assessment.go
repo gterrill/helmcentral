@@ -18,8 +18,10 @@ import (
 // rules Mate's assess_passage_window uses (passageAssessor.cell, ADR 0191 and
 // 0194) against the operator's passage limits, at the departure the operator
 // set or, with none set, the best one inside the day's daylight: not a No-Go,
-// Go before Marginal, then the fairest current (rankTidalDepartures). Nothing
-// here asks a model: a figure that cannot be had is left out with its reason,
+// Go before Marginal, then the fairest current (rankTidalDepartures). When the
+// plan page asks for comfort, the departures of the best verdict are then ranked
+// by how the leg is forecast to feel, the current breaking ties (ADR 0303). No
+// verdict asks a model: a figure that cannot be had is left out with its reason,
 // never guessed.
 //
 // No omitempty on the fields the Forecast page binds: its TypeScript
@@ -113,6 +115,11 @@ type planLegAssessment struct {
 	// chosen for it (ADR 0302). Null when it was not looked for: a verdicts-only
 	// assessment, a leg with no forecast, a caller that is not the plan page.
 	Comfort *planLegComfort `json:"comfort"`
+	// DepartBasis says in a sentence why the suggested departure is the one chosen:
+	// ranked for comfort, or why comfort could not rank it. Null unless the
+	// departure is suggested, comfort was asked for and the leg had a tier of
+	// departures to rank (ADR 0303).
+	DepartBasis *string `json:"depart_basis"`
 }
 
 // planStopNight is an official warning in force the night the boat is at a stop.
@@ -266,6 +273,11 @@ type planLegWork struct {
 	// fairest current first.
 	cands      []tidalDeparture
 	assessable bool
+	// ranking is how the request chooses a suggested departure when comfort is asked
+	// for, nil when it is not. choice holds the candidates of a leg whose departure
+	// comfort has still to rank.
+	ranking *departureRanking
+	choice  *departureChoice
 }
 
 // fail leaves the leg without a verdict and says why.
@@ -781,9 +793,40 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 		}
 		log.Printf("plans: %d stop forecasts failed, first at %s: %v", len(stops.failed), firstKey, first)
 	}
+	// A suggested departure is ranked for comfort only when comfort is asked for,
+	// wired and able to judge (newDepartureRanking). The verdicts are then made first,
+	// at every candidate, and the departure, current and limiting figure are written
+	// once comfort has chosen (ADR 0303). Otherwise the leg is chosen as it always was,
+	// at the first Go, and says why comfort did not choose.
+	var run *planComfortRun
+	if env.comfort && d.comfort != nil && !env.verdictsOnly && forecastErr == nil && as != nil {
+		r := newPlanComfortRun(as, env, d.comfort)
+		run = &r
+	}
+	ranking := newDepartureRanking(run)
+	for _, w := range assessable {
+		w.ranking = ranking
+	}
 	d.judgeLegs(ctx, as, forecastErr, assessable, out)
 	if env.verdictsOnly {
 		return
+	}
+	// The ranking has a budget of its own, so the verdicts never wait on comfort.
+	// Each leg that ranks gets an even share of the time left.
+	deadline, left := time.Now().Add(planRankingBudget), 0
+	for _, w := range assessable {
+		if w.choice != nil {
+			left++
+		}
+	}
+	for _, w := range assessable {
+		if w.choice == nil {
+			continue
+		}
+		legCtx, cancelLeg := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(left))
+		rankDepartures(legCtx, ranking, w)
+		cancelLeg()
+		left--
 	}
 	// The wind changes come after the verdicts, so a leg's departure is the one
 	// chosen for it and its ETA follows.
@@ -805,12 +848,13 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	}
 	nights = append(nights, arrivalNights(p, arrivals, env.now)...)
 	out.NightWinds = nightWinds(as, stops, nights, env)
-	// Comfort comes last, at the departure each leg's verdict was made at, and is
-	// worked out once for each leg, never for each candidate departure.
-	if env.comfort && d.comfort != nil && forecastErr == nil && as != nil {
-		run := newPlanComfortRun(as, env, d.comfort)
+	// The comfort chip comes last, at the departure chosen for each leg. A suggested
+	// departure's chip is the one the ranking made; any other is walked here, once.
+	if run != nil {
 		for _, w := range windLegs {
-			w.res.Comfort = run.leg(ctx, w)
+			if w.res.Comfort == nil {
+				w.res.Comfort = run.leg(ctx, w)
+			}
 		}
 	}
 }
@@ -842,7 +886,9 @@ func newPlanComfortRun(as *passageAssessor, env planEnv, d *planComfortDeps) pla
 			return nil, "the comfort bands couldn't be read: " + err.Error()
 		}
 		helm, helmErr := d.helmHeight()
-		return newComfortSetup(set, bands, helm, helmErr, d.loader, d.memo), ""
+		setup := newComfortSetup(set, bands, helm, helmErr, d.loader, d.memo)
+		setup.onPredict = d.onPredict
+		return setup, ""
 	})}
 }
 
@@ -893,11 +939,17 @@ func legSpan(w *planLegWork, env planEnv) (legSpanOf, string) {
 		}
 		return legSpanOf{depart: w.eta.Add(-hoursDuration(w.hours)), arrive: w.eta, from: env.now}, ""
 	}
-	depart, arrive := w.chosenDepart, w.chosenArrive
-	if depart.IsZero() {
-		arrive = time.Time{} // an ETA with no departure is no span
+	if w.chosenDepart.IsZero() {
+		return legSpanOf{}, "" // an ETA with no departure is no span
 	}
-	return legSpanOf{depart: depart, arrive: arrive, from: depart}, ""
+	return w.spanFrom(w.chosenDepart), ""
+}
+
+// spanFrom is the span of the leg for a departure at t: it arrives its hours later,
+// as setDeparture puts the row's times, and is read from the departure.
+func (w *planLegWork) spanFrom(t time.Time) legSpanOf {
+	depart := t.Truncate(time.Second)
+	return legSpanOf{depart: depart, arrive: t.Add(hoursDuration(w.hours)).Truncate(time.Second), from: depart}
 }
 
 // arrival is the instant the leg lands at its stop, when it has one: the ETA of
@@ -1013,13 +1065,21 @@ func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork) {
 }
 
 // judgeLeg judges a leg at the operator's departure, or at the best departure the
-// ranking found, and writes the verdict and what is beside it.
+// ranking found, and writes the verdict and what is beside it. When the leg's
+// ranking can rank, a suggested leg's departures are all judged and the departure,
+// its current and the figures beside the verdict wait for comfort to choose among
+// them (rankDepartures); every departure of the tier it chooses in has the verdict
+// this one has. Otherwise the leg stops at the first Go, and says why comfort did not
+// choose when comfort was asked for.
 func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *planLegWork) {
 	var cell passageWindowCell
 	var err error
-	var chosen tidalDeparture
+	var choice *departureChoice
 	if w.depart.IsZero() {
-		chosen, cell, err = chooseDeparture(ctx, as, w)
+		choice, err = chooseDeparture(ctx, as, w)
+		if err == nil {
+			cell = choice.cells[choice.best]
+		}
 	} else {
 		cell, err = as.cell(ctx, w.i, w.plan, w.depart, w.toLoc)
 	}
@@ -1028,17 +1088,16 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 		w.fail(planKindOther, err.Error())
 		return
 	}
-	beyond := cell.State == "no_data" && cell.noData == passageNoDataBeyondForecast
-	// A suggested departure and its current are shown only for a leg that has a
-	// verdict or a gap to explain; one with no forecast yet shows neither.
-	if w.depart.IsZero() && !beyond {
-		w.setDeparture(chosen.Depart, true)
-		w.setCurrent(chosen.Current, nil)
+	beyond := cell.beyondForecast()
+	switch {
+	case choice != nil && w.ranking.ranks() && choice.tier() != "":
+		w.choice = choice
+	case choice != nil:
+		w.settle(choice.cands[choice.best], cell, beyond)
+		w.res.DepartBasis = w.ranking.currentOnly(choice)
+	default:
+		w.settle(tidalDeparture{}, cell, beyond)
 	}
-	if cell.Limiting != nil {
-		w.res.Limiting = cell.Limiting.Short
-	}
-	w.res.NotChecked = cell.NotChecked
 	switch {
 	case cell.State != "no_data":
 		w.res.Verdict = cell.State
@@ -1050,6 +1109,12 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 		w.res.Verdict = "no_data"
 		w.res.Note, w.res.NoteKind = planNoteGap, planKindGap
 	}
+}
+
+// beyondForecast says the cell has no verdict yet because its run goes past the
+// forecast's last hour.
+func (c passageWindowCell) beyondForecast() bool {
+	return c.State == "no_data" && c.noData == passageNoDataBeyondForecast
 }
 
 // departureOrder ranks a cell for choosing a departure: Go, then Marginal, then a
@@ -1071,30 +1136,73 @@ func departureOrder(cell passageWindowCell) int {
 	return 3
 }
 
-// chooseDeparture judges the ranked departures, fairest current first, and takes
+// settle writes the departure chosen for a leg and what is beside it: the departure
+// and its current, for a leg the operator set no time for, then the figure that
+// decided the verdict and what was not checked.
+func (w *planLegWork) settle(chosen tidalDeparture, cell passageWindowCell, beyond bool) {
+	// A suggested departure and its current are shown only for a leg that has a
+	// verdict or a gap to explain; one with no forecast yet shows neither.
+	if w.depart.IsZero() && !beyond {
+		w.setDeparture(chosen.Depart, true)
+		w.setCurrent(chosen.Current, nil)
+	}
+	if cell.Limiting != nil {
+		w.res.Limiting = cell.Limiting.Short
+	}
+	w.res.NotChecked = cell.NotChecked
+}
+
+// cellUnjudged is the state of a departure whose cell could not be judged and was left
+// out: it is neither chosen nor ranked.
+const cellUnjudged = "unjudged"
+
+// departureCell judges the leg at one departure. It is a variable so a test can make
+// one departure fail.
+var departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, depart time.Time) (passageWindowCell, error) {
+	return as.cell(ctx, w.i, w.plan, depart, w.toLoc)
+}
+
+// chooseDeparture judges the ranked departures, fairest current first, and finds
 // the best: one that is not a No-Go, Go before Marginal, the fairest current among
 // equals. When every one is a No-Go it takes the one closest to its limit, and its
-// verdict says No-Go.
-func chooseDeparture(ctx context.Context, as *passageAssessor, w *planLegWork) (tidalDeparture, passageWindowCell, error) {
-	var best tidalDeparture
-	var bestCell passageWindowCell
-	found := false
-	for _, c := range w.cands {
-		cell, err := as.cell(ctx, w.i, w.plan, c.Depart, w.toLoc)
+// verdict says No-Go. It stops at the first Go, unless the leg's ranking ranks: then
+// every departure is judged, for comfort to choose among.
+func chooseDeparture(ctx context.Context, as *passageAssessor, w *planLegWork) (*departureChoice, error) {
+	ch := &departureChoice{cands: w.cands}
+	foundGo := false
+	for i, c := range w.cands {
+		cell, err := departureCell(ctx, as, w, c.Depart)
 		if err != nil {
-			return tidalDeparture{}, passageWindowCell{}, err
+			// Without ranking the leg would have stopped at the first Go and never
+			// judged this one. A departure after a Go that cannot be judged is left
+			// out, so comfort never fails a leg that had a verdict; one before it
+			// fails the leg as it always did.
+			if !foundGo || !w.ranking.ranks() {
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				// The request ran out of time, not the forecast: stop, and count this
+				// departure and the ones after it as not judged for lack of time.
+				ch.unreached = len(w.cands) - i
+				break
+			}
+			log.Printf("plans: departure %s of leg %s to %s left out of the comfort ranking: %v", c.Depart.Format(time.RFC3339), w.from.Name, w.to.Name, err)
+			ch.cells = append(ch.cells, passageWindowCell{State: cellUnjudged})
+			continue
 		}
-		better := !found || departureOrder(cell) < departureOrder(bestCell) ||
-			(cell.State == "no_go" && bestCell.State == "no_go" && cell.ratio < bestCell.ratio)
-		if better {
-			best, bestCell, found = c, cell, true
+		ch.cells = append(ch.cells, cell)
+		foundGo = foundGo || cell.State == "go"
+		best := ch.cells[ch.best]
+		if i > 0 && (departureOrder(cell) < departureOrder(best) ||
+			(cell.State == "no_go" && best.State == "no_go" && cell.ratio < best.ratio)) {
+			ch.best = i
 		}
-		if cell.State == "go" {
+		if cell.State == "go" && !w.ranking.ranks() {
 			// The candidates are in order of current, so the first Go is the best.
 			break
 		}
 	}
-	return best, bestCell, nil
+	return ch, nil
 }
 
 // readWarnings finds the official warnings in force on the nights the boat is at

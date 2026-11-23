@@ -88,7 +88,7 @@ type lcIn struct {
 	helm     *float64
 	noHelm   bool
 	reader   *offlineCoastlineReader
-	memo     *fetchGeoMemo
+	memo     *shoreRayMemo
 	from     time.Time
 	underway bool
 	// arriveAfter moves the arrival from the departure plus one hour for each forecast stamp.
@@ -106,7 +106,7 @@ func lcRun(t *testing.T, in lcIn) *planLegComfort {
 	return c
 }
 
-func lcRunMemo(t *testing.T, in lcIn) (*planLegComfort, *fetchGeoMemo) {
+func lcRunMemo(t *testing.T, in lcIn) (*planLegComfort, *shoreRayMemo) {
 	t.Helper()
 	c, _, memo := lcRunAll(t, in)
 	return c, memo
@@ -130,7 +130,7 @@ func lcWorst(c *planLegComfort) string {
 	return worst
 }
 
-func lcRunAll(t *testing.T, in lcIn) (*planLegComfort, []judgedHour, *fetchGeoMemo) {
+func lcRunAll(t *testing.T, in lcIn) (*planLegComfort, []judgedHour, *shoreRayMemo) {
 	t.Helper()
 	hours := float64(len(in.hours))
 	route := in.route
@@ -168,7 +168,7 @@ func lcRunAll(t *testing.T, in lcIn) (*planLegComfort, []judgedHour, *fetchGeoMe
 	}
 	memo := in.memo
 	if memo == nil {
-		memo = newCountedMemo(fetchGeoBudgetSegments)
+		memo = newCountedMemo(shoreRayEntries)
 	}
 	from := in.from
 	if from.IsZero() {
@@ -192,8 +192,12 @@ func lcRunAll(t *testing.T, in lcIn) (*planLegComfort, []judgedHour, *fetchGeoMe
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	c, judged := input.run(ctx)
-	return c, judged, memo
+	judged, blocked := input.judgedHours(ctx)
+	input.endLeg()
+	if blocked != "" {
+		return notJudged(blocked), nil, memo
+	}
+	return input.comfortOf(judged), judged, memo
 }
 
 // lcMust stops a test whose leg came back without the hours it reads.
@@ -378,7 +382,7 @@ func TestComfortGroup_LeadNamesTheLargerPartAndTheBiggerSystem(t *testing.T) {
 // 9
 func TestFetchGeoMemo_KeepsBuildsAcrossRequestsAndRebuildsWhenTheShoreChanges(t *testing.T) {
 	reader := fetchReader(t)
-	memo := newCountedMemo(fetchGeoBudgetSegments)
+	memo := newCountedMemo(shoreRayEntries)
 	hours := lcHours(lcHour(0.5, 0), lcHour(0.5, 0))
 	lcRunMemo(t, lcIn{reader: reader, memo: memo, hours: hours})
 	first := memo.builtCount()
@@ -408,29 +412,7 @@ func TestFetchGeoMemo_KeepsBuildsAcrossRequestsAndRebuildsWhenTheShoreChanges(t 
 	}
 }
 
-func TestFetchGeoMemo_EvictsTheLeastRecentlyUsedPastItsCap(t *testing.T) {
-	memo := newCountedMemo(2)
-	build := func() (*fetchGeometry, error) { return &fetchGeometry{}, nil }
-	key := func(n int) fetchGeoMemoKey { return fetchGeoMemoKey{latE3: n, stamp: "s"} }
-	for _, n := range []int{1, 2, 1, 3} { // 2 is the least recently used when 3 arrives
-		if _, err := memo.get(context.Background(), key(n), build); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got := memo.builtCount(); got != 3 {
-		t.Fatalf("builds = %d, want 3", got)
-	}
-	memo.get(context.Background(), key(1), build)
-	if got := memo.builtCount(); got != 3 {
-		t.Errorf("1 was kept, but it built again: %d", got)
-	}
-	memo.get(context.Background(), key(2), build)
-	if got := memo.builtCount(); got != 4 {
-		t.Errorf("2 was evicted and should build again: %d", got)
-	}
-}
-
-func TestFetchGeoMemo_ConcurrentReadersOfOneKeyBuildItOnce(t *testing.T) {
+func TestShoreRayMemo_ConcurrentRequestsForOneGeometryBuildItOnce(t *testing.T) {
 	memo := newCountedMemo(8)
 	var wg sync.WaitGroup
 	got := make([]*fetchGeometry, 16)
@@ -438,7 +420,7 @@ func TestFetchGeoMemo_ConcurrentReadersOfOneKeyBuildItOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			g, err := memo.get(context.Background(), fetchGeoMemoKey{latE3: 1, stamp: "s"}, func() (*fetchGeometry, error) {
+			g, err := memo.geometry(context.Background(), shoreSpotKey{latE3: 1, stamp: "s"}, func() (*fetchGeometry, error) {
 				time.Sleep(20 * time.Millisecond)
 				return &fetchGeometry{}, nil
 			})
@@ -454,18 +436,18 @@ func TestFetchGeoMemo_ConcurrentReadersOfOneKeyBuildItOnce(t *testing.T) {
 	}
 	for _, g := range got {
 		if g == nil || g != got[0] {
-			t.Fatal("readers got different geometries")
+			t.Fatal("requests got different geometries")
 		}
 	}
 }
 
-func TestFetchGeoMemo_AFailedBuildIsNotKept(t *testing.T) {
+func TestShoreRayMemo_AFailedBuildIsNotKept(t *testing.T) {
 	memo := newCountedMemo(8)
-	k := fetchGeoMemoKey{latE3: 1, stamp: "s"}
-	if _, err := memo.get(context.Background(), k, func() (*fetchGeometry, error) { return nil, errors.New("no lines") }); err == nil {
+	k := shoreSpotKey{latE3: 1, stamp: "s"}
+	if _, err := memo.geometry(context.Background(), k, func() (*fetchGeometry, error) { return nil, errors.New("no lines") }); err == nil {
 		t.Fatal("the failure was swallowed")
 	}
-	g, err := memo.get(context.Background(), k, func() (*fetchGeometry, error) { return &fetchGeometry{}, nil })
+	g, err := memo.geometry(context.Background(), k, func() (*fetchGeometry, error) { return &fetchGeometry{}, nil })
 	if err != nil || g == nil {
 		t.Fatalf("a failure was kept: %v %v", g, err)
 	}
@@ -629,17 +611,25 @@ func TestLegComfort_MoreThanThreeStretchesReadAsAtTimes(t *testing.T) {
 
 // ── through the plan assessment ──────────────────────────────────────────
 
-// lcForecast is a week of mild weather with a small swell, each hour naming its model.
-func lcForecast() forecastSource {
+// lcForecastOf is a forecast of every hour of the 14th to the 24th, the hour at h as
+// at(h) gives it.
+func lcForecastOf(at func(h time.Time) passageHour) forecastSource {
 	hours := map[int64]passageHour{}
 	for h := paAt(14, 0, 0); !h.After(paAt(24, 23, 0)); h = h.Add(time.Hour) {
-		x := lcHour(0.2, 100)
-		x.WindDirDeg = 190
-		hours[h.Unix()] = x
+		hours[h.Unix()] = at(h)
 	}
 	return forecastSource{Provider: "wx", WaveProvider: "waves", Fetch: func(context.Context, float64, float64) (passageForecast, error) {
 		return passageForecast{Hours: hours}, nil
 	}}
+}
+
+// lcForecast is a week of mild weather with a small swell, each hour naming its model.
+func lcForecast() forecastSource {
+	return lcForecastOf(func(time.Time) passageHour {
+		x := lcHour(0.2, 100)
+		x.WindDirDeg = 190
+		return x
+	})
 }
 
 func lcDeps(t *testing.T, f *paFake, modelCalls *atomic.Int32) planAssessDeps {
@@ -655,7 +645,7 @@ func lcDeps(t *testing.T, f *paFake, modelCalls *atomic.Int32) planAssessDeps {
 		bands:      func() (comfortBands, error) { return bands, nil },
 		helmHeight: func() (*float64, error) { return ptr(2.0), nil },
 		loader:     func() *coastlineLoader { return reader.newLoader() },
-		memo:       newCountedMemo(fetchGeoBudgetSegments),
+		memo:       newCountedMemo(shoreRayEntries),
 	}
 	return d
 }
@@ -762,36 +752,8 @@ func TestAssessPlan_ComfortIsWorkedOutOnceForEachLegAtTheChosenDeparture(t *test
 // builds every shore geometry, warm reads them from the memo. A request makes its
 // own loader either way, so the squares' records are read each time.
 func BenchmarkLegComfortThreeLegs(b *testing.B) {
-	lines := loadShorelineFile(b, "testdata/water_route/whitsundays.json.gz")
-	store := newTestCoastlineStore(b)
 	legs := [][2]shorelinePoint{{coralSeaMarina, haslewood}, {haslewood, cidHarbour}, {cidHarbour, goldsmithAnchorage}}
-	own, err := squareContaining(haslewood.Lat, haslewood.Lon)
-	if err != nil {
-		b.Fatal(err)
-	}
-	held := map[coverageSquare]bool{}
-	for _, leg := range legs {
-		for _, p := range leg {
-			needed, err := squaresWithin(p.Lat, p.Lon, shelterMaxFetchNm)
-			if err != nil {
-				b.Fatal(err)
-			}
-			for _, sq := range needed {
-				if squareInland(sq) || held[sq] {
-					continue
-				}
-				held[sq] = true
-				var l []shorelineLine
-				if sq == own {
-					l = lines
-				}
-				if err := store.SaveSquareAsOf(sq, l, coastlineTestAt, coastlineTestDataAsOf); err != nil {
-					b.Fatal(err)
-				}
-			}
-		}
-	}
-	reader := &offlineCoastlineReader{Enabled: func() (bool, error) { return true, nil }, Store: store}
+	reader := whitsundaysReader(b, legs)
 	set, bands, helm := lcSet(1), lcBands(), 2.0
 	hour := lcHour(0.5, 120)
 	hour.WindMS, hour.WindDirDeg = kn(15), 110
@@ -815,7 +777,7 @@ func BenchmarkLegComfortThreeLegs(b *testing.B) {
 		}
 		plans = append(plans, prepared{plan, h})
 	}
-	request := func(memo *fetchGeoMemo) {
+	request := func(memo *shoreRayMemo) {
 		setup := newComfortSetup(set, bands, &helm, nil, func() *coastlineLoader { return reader.newLoader() }, memo)
 		for _, p := range plans {
 			c := legComfort(context.Background(), legComfortInput{
@@ -829,11 +791,11 @@ func BenchmarkLegComfortThreeLegs(b *testing.B) {
 	}
 	b.Run("cold", func(b *testing.B) {
 		for range b.N {
-			request(newFetchGeoMemo(fetchGeoBudgetSegments))
+			request(newShoreRayMemo(shoreRayEntries))
 		}
 	})
 	b.Run("warm", func(b *testing.B) {
-		memo := newCountedMemo(fetchGeoBudgetSegments)
+		memo := newCountedMemo(shoreRayEntries)
 		request(memo)
 		if memo.builtCount() == 0 {
 			b.Fatal("no shore geometry was built, so the benchmark measures nothing")
@@ -842,6 +804,136 @@ func BenchmarkLegComfortThreeLegs(b *testing.B) {
 		for range b.N {
 			request(memo)
 		}
+	})
+}
+
+// whitsundaysReader holds the Whitsundays' real coast, and open water in every other
+// square within reach of the legs' ends.
+func whitsundaysReader(b *testing.B, legs [][2]shorelinePoint) *offlineCoastlineReader {
+	b.Helper()
+	lines := loadShorelineFile(b, "testdata/water_route/whitsundays.json.gz")
+	own, err := squareContaining(haslewood.Lat, haslewood.Lon)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var ends [][2]float64
+	for _, leg := range legs {
+		for _, p := range leg {
+			ends = append(ends, [2]float64{p.Lat, p.Lon})
+		}
+	}
+	store := seedCoastlineAlong(b, coastlineTestAt, ends, func(sq coverageSquare) []shorelineLine {
+		if sq == own {
+			return lines
+		}
+		return nil
+	})
+	return &offlineCoastlineReader{Enabled: func() (bool, error) { return true, nil }, Store: store}
+}
+
+// BenchmarkRankComfort ranks one leg's real candidate set: a departure every 15
+// minutes from 6 AM to 5.45 PM, 48 of them, each judged hour by hour over the
+// Whitsundays' coast. Cold builds every geometry its rays need; warm reads every ray
+// from the memo and builds none (the builds/op figure).
+func BenchmarkRankComfort(b *testing.B) {
+	benchRank(b, [][2]shorelinePoint{{coralSeaMarina, haslewood}}) // marina to marina, as BenchmarkLegComfortThreeLegs
+}
+
+// BenchmarkRankComfortThreeLegs is the same for the three legs of
+// BenchmarkLegComfortThreeLegs, ranked one after another in one request.
+func BenchmarkRankComfortThreeLegs(b *testing.B) {
+	benchRank(b, [][2]shorelinePoint{{coralSeaMarina, haslewood}, {haslewood, cidHarbour}, {cidHarbour, goldsmithAnchorage}})
+}
+
+func benchRank(b *testing.B, legs [][2]shorelinePoint) {
+	reader := whitsundaysReader(b, legs)
+	set, bands, helm := lcSet(1), lcBands(), 2.0
+	hour := lcHour(0.5, 120)
+	hour.WindMS, hour.WindDirDeg = kn(15), 110
+	hour.WindWave = &seaTrainFigures{HeightM: 0.6, PeriodS: 4, FromDeg: 110}
+	hours := map[int64]passageHour{}
+	for t := paAt(14, 0, 0); t.Before(paAt(15, 12, 0)); t = t.Add(time.Hour) {
+		hours[t.Unix()] = hour
+	}
+	as := newPassageAssessor(pwLimitsAll(), forecastSource{}, pwNoTides, pwSun)
+	type rankedLeg struct {
+		w      *planLegWork
+		choice *departureChoice
+	}
+	var work []rankedLeg
+	for _, leg := range legs {
+		nm := haversineMeters(leg[0].Lat, leg[0].Lon, leg[1].Lat, leg[1].Lon) / metersPerNauticalMile
+		legHours := math.Max(2, math.Ceil(nm/6))
+		plan := planPassageLeg(0, passageLegArgs{Name: "leg", Route: []passageRoutePoint{{Lat: leg[0].Lat, Lon: leg[0].Lon}, {Lat: leg[1].Lat, Lon: leg[1].Lon}}, PassageHours: &legHours})
+		for _, pt := range plan.samples {
+			as.cache[passagePointKey(pt)] = passagePointHours{hours: hours, last: paAt(15, 11, 0).Unix()}
+		}
+		choice := &departureChoice{}
+		for d := paAt(14, 6, 0); !d.After(paAt(14, 17, 45)); d = d.Add(15 * time.Minute) {
+			choice.cands = append(choice.cands, tidalDeparture{Depart: d})
+			choice.cells = append(choice.cells, passageWindowCell{State: "go"})
+		}
+		work = append(work, rankedLeg{&planLegWork{plan: plan, hours: legHours, fromLoc: paLoc}, choice})
+	}
+	newRanking := func(memo *shoreRayMemo) *departureRanking {
+		setup := newComfortSetup(set, bands, &helm, nil, func() *coastlineLoader { return reader.newLoader() }, memo)
+		return &departureRanking{run: planComfortRun{as: as}, setup: setup}
+	}
+	// The candidates ranked are counted once, outside the timing.
+	candidates, ranked := 0, 0
+	rk := newRanking(newShoreRayMemo(shoreRayEntries))
+	for _, l := range work {
+		for i := range l.choice.cands {
+			candidates++
+			if _, hours, why := l.choice.judge(context.Background(), rk, l.w, i); why == "" {
+				if _, why = rankKeyOf(hours); why == "" {
+					ranked++
+				}
+			}
+		}
+		rk.setup.endLeg()
+	}
+	// A leg whose every candidate has swell not judged mid-leg (enclosed water) is
+	// not ranked, and says so; every candidate is still judged.
+	legsRanked := 0
+	request := func(memo *shoreRayMemo) {
+		rk := newRanking(memo)
+		legsRanked = 0
+		for _, l := range work {
+			_, basis, chip := l.choice.rank(context.Background(), rk, l.w)
+			switch {
+			case strings.HasPrefix(basis, "Chosen for comfort: ") && chip != nil:
+				legsRanked++
+			case !strings.HasPrefix(basis, "Not chosen for comfort: "):
+				b.Fatalf("no basis: %q", basis)
+			}
+		}
+	}
+	b.Run("cold", func(b *testing.B) {
+		var last *shoreRayMemo
+		for range b.N {
+			last = newCountedMemo(shoreRayEntries)
+			request(last)
+		}
+		b.ReportMetric(float64(candidates), "candidates")
+		b.ReportMetric(float64(ranked), "ranked")
+		b.ReportMetric(float64(legsRanked), "legs-ranked")
+		b.ReportMetric(float64(last.builtCount()), "builds/op")
+		b.ReportMetric(float64(last.held()), "memo-entries")
+	})
+	b.Run("warm", func(b *testing.B) {
+		memo := newCountedMemo(shoreRayEntries)
+		request(memo)
+		primed := memo.builtCount()
+		if primed == 0 {
+			b.Fatal("no shore geometry was built, so the benchmark measures nothing")
+		}
+		b.ResetTimer()
+		for range b.N {
+			request(memo)
+		}
+		b.ReportMetric(float64(memo.builtCount()-primed)/float64(b.N), "builds/op")
+		b.ReportMetric(float64(memo.held()), "memo-entries")
 	})
 }
 

@@ -40,32 +40,44 @@ func landRing(half float64) shorelineLine {
 	return fetchWay("island", fetchPt(-half, half), fetchPt(-half, -half), fetchPt(half, -half), fetchPt(half, half), fetchPt(-half, half))
 }
 
+// seedCoastlineAlong holds, saved at savedAt, every square within reach of the points
+// ([lat, lon]) that is not inland, each with the lines linesIn gives for it.
+func seedCoastlineAlong(t testing.TB, savedAt time.Time, points [][2]float64, linesIn func(coverageSquare) []shorelineLine) *coastlineStore {
+	t.Helper()
+	store := newTestCoastlineStore(t)
+	held := map[coverageSquare]bool{}
+	for _, p := range points {
+		needed, err := squaresWithin(p[0], p[1], shelterMaxFetchNm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sq := range needed {
+			if squareInland(sq) || held[sq] {
+				continue
+			}
+			held[sq] = true
+			if err := store.SaveSquareAsOf(sq, linesIn(sq), savedAt, coastlineTestDataAsOf); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return store
+}
+
 // seedCoastlineAround holds every square within reach of a position that is not
 // inland, the lines in the one that holds the position.
 func seedCoastlineAround(t *testing.T, lat, lon float64, lines []shorelineLine) *coastlineStore {
 	t.Helper()
-	store := newTestCoastlineStore(t)
-	needed, err := squaresWithin(lat, lon, shelterMaxFetchNm)
-	if err != nil {
-		t.Fatal(err)
-	}
 	own, err := squareContaining(lat, lon)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sq := range needed {
-		if squareInland(sq) {
-			continue
-		}
-		var held []shorelineLine
+	return seedCoastlineAlong(t, time.Now(), [][2]float64{{lat, lon}}, func(sq coverageSquare) []shorelineLine {
 		if sq == own {
-			held = lines
+			return lines
 		}
-		if err := store.SaveSquareAsOf(sq, held, time.Now(), coastlineTestDataAsOf); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return store
+		return nil
+	})
 }
 
 // fetchReader holds every square within reach of the test position, the lines in

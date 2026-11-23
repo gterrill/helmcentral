@@ -44,6 +44,11 @@ and never read back from the row's text, and say the ETA has passed in the same 
 
 ### 2. Comfort is worked out once, at the chosen departure, for the plan page only
 
+*Amended by [ADR 0303](0303-a-suggested-departure-is-ranked-by-comfort-then-current.md):
+for a suggested departure, comfort is now worked out for each candidate of the best
+verdict, and the chip is the chosen candidate's. A leg judges a departure every 15
+minutes, about 40 to 50, not "up to five".*
+
 The assessment judges up to five candidate departures a leg. Comfort runs after the
 verdicts, once for each leg, at the departure the verdict was made at. Only the plan
 page's endpoint asks for it (`planAssessOptions.Comfort`). A verdicts-only run, a
@@ -68,8 +73,10 @@ been, so each hour casts its own rays. For each hour:
   the land.
 - The coastline loader of the request plans the squares within 15 nm and stamps
   them.
-- The shore geometry for that snapped position and stamp comes from a memo, or is
-  built from the squares' lines and kept.
+- What the shore says along a bearing from that snapped position, for that stamp,
+  comes from a memo. When the memo has no answer, the request builds the shore
+  geometry for the position from the squares' lines, casts the ray over it and keeps
+  the answer in the memo.
 - The wind wave is checked with `checkWindWave` and the swell with the enclosed
   check, exactly as ADR 0300 words them. The refactor is mechanical: they take a
   `windInput` (kept, speed, direction, why missing, and whether it was taken over a
@@ -77,27 +84,42 @@ been, so each hour casts its own rays. For each hour:
   judged as before. A leg's wind is the forecast's, and its reasons say "this hour".
   A position charted ashore is a flag the check sets, not words read back from a note.
 
-The memo is wired into the comfort readers once, not reached for as a global. It is a
-least-recently-used list sized by what it holds: it drops the oldest once its
-geometries pass 400,000 segments (about 16 MB), a position with no shore in reach
-counting one, and it always keeps the newest. It is keyed by the snapped position and
-the stamp of the squares. A square downloaded again, replaced or removed gives a new
-stamp, so a stale geometry is never read for a changed shore. Readers that miss on
-one key at once share one build, a failed build is not kept, and a geometry is never
-changed after it is built, so readers share it without a lock.
+The memo is wired into the comfort readers once, not reached for as a global. It
+keeps answers, not geometries. An answer is one ray result: the distance to the shore
+along a bearing and whether a reef stops it, whether the water is open, or that the
+position is charted ashore. Each is a few bytes, where a geometry is tens of thousands
+of segments. The key is the snapped position, the stamp of its squares, the kind of
+ray (wind, calm or swell) and the bearing in tenths of a degree. A square downloaded
+again, replaced or removed gives a new stamp, so only the positions that read it miss,
+and a stale answer is never read for a changed shore. The memo is a least-recently-used
+list of 32,768 answers, a few hundred bytes each, under 10 MB in all. A position
+charted ashore is an answer and is kept.
 
-Two more things stop the same shore being read twice. A request remembers each
-snapped position it has read, or why it could not, so a plan with more positions
-than the memo holds never builds one twice in a request, and asks the memo and the
-coastline once for each position. And the squares' own lines are kept the same way
-as the geometries, by the state each square was downloaded in (1,000,000 points,
-about 16 MB), so a new position in a square already read does not read it again.
+A geometry lives only inside the request. The request builds it the first time one of
+the position's rays misses, builds it once for each leg whatever the number of rays
+cast over it, and lets it go when the leg is judged, so it holds about one leg's worth.
+Requests that miss on the same position at once share one build, and a failed build is
+not kept.
 
-On the Whitsundays fixture, three legs of about ten hours each take about 76 ms cold
-and about 11 ms warm on a laptop (`BenchmarkLegComfortThreeLegs`), the finer snap
-building more geometries; the target for cold was 200 ms. The model, bands and helm
-height are read when the first leg that gets comfort asks for them, so a plan whose
-legs all skip comfort reads none.
+A reason the shore could not be read, such as the coastline off, a square missing or
+failed, or the position inland, is never kept in the memo. It belongs to the request
+that met it, so the next request, with the coastline on, gets its rays. The same goes
+for running out of time.
+
+Two more things stop the same shore being read twice. A request remembers each ray it
+has read, so a memo that drops an answer in the middle of a request never costs a
+second build, and each snapped position's squares are planned once. And the squares'
+own lines are kept by the state each square was downloaded in (1,000,000 points, about
+16 MB), and joined once for every position of the request that shares them, so a new
+position in a square already read does not read it again.
+
+On the Whitsundays fixture, three legs of about ten hours each take about 52 ms cold
+and under 1 ms warm on a laptop (`BenchmarkLegComfortThreeLegs`); the target for cold
+was 200 ms. A warm run builds no geometry. A new forecast run is not warm, though: its
+bearings differ from the last run's, so its rays miss and each position is built again,
+at about the cost of a cold run. The model, bands and helm height are read when the
+first leg that gets comfort asks for them, so a plan whose legs all skip comfort reads
+none.
 
 A shore that can't be read leaves the sea unjudged, never calm: the coastline off,
 a square missing or failed, the position inland. Every hour then carries the reason
@@ -141,11 +163,12 @@ bands are not learned reads "Comfort not learned yet. Roughest sea: roll, swell 
 sea steeper than any recorded adds that clause, and each gap follows as a sentence of
 its own with its length: "Not judged for 1 h: swell not judged in enclosed water."
 
-The assessment's deadline reaches the comfort. When the request runs out of time, no
-more shore geometry is built and a reader waiting on another request's build stops
-waiting. The hours not reached read "the comfort check ran out of time", never a word
-and never silently missing. A build that another request abandoned for its own
-deadline is built again by the reader that waited on it.
+The assessment's deadline reaches the comfort. A request past its deadline reads no
+ray, warm or not, builds no more shore geometry, and keeps nothing in the memo, and a
+request waiting on another's build stops waiting. The hours not reached read "the
+comfort check ran out of time", never a word and never silently missing. A build that
+another request abandoned for its own deadline is built again by the request that
+waited on it.
 
 ### 5. Hours read as stretches
 
@@ -208,7 +231,8 @@ the hours as lines, and the row holds whether it is open, as it does for the rou
 ## What it is not
 
 - Not a verdict. Go, Marginal and No-Go are the passage limits' and unchanged.
-- Not a departure ranking. The chosen departure is the one the verdict chose.
+- Not a departure ranking. The chosen departure is the one the verdict chose
+  (amended by ADR 0303: a suggested departure is now ranked by comfort).
 - Not Mate's. Mate reads the leg through `get_plans`, which has no comfort key.
 - Not stored. Comfort is worked out when the page asks, from the live model and the
   forecast.

@@ -144,7 +144,9 @@ func (c *fetchCheck) note() string {
 }
 
 // fetchGeometry is the shore around one spell's position: the segments a ray
-// from it can reach. Only the sweep builds one.
+// from it can reach. The sweep builds one for each spell it stores. A plan
+// assessment builds one for a position whose rays the shore ray memo does not
+// hold, and lets it go when the leg is judged (comfortSetup.geometryAt).
 type fetchGeometry struct {
 	segs []shelterSegment
 	// onLand says the position is inside the charted coastline.

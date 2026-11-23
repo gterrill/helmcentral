@@ -188,7 +188,7 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 			},
 			helmHeight: currentHelmHeight,
 			loader:     func() *coastlineLoader { return offlineCoastlineReaderFor(settingsPath)().newLoader() },
-			memo:       legFetchGeometries,
+			memo:       legShoreRays,
 		},
 		sun:          sunTimes,
 		dawn:         civilDawn,

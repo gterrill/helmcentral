@@ -20,15 +20,18 @@ import (
 
 // planComfortDeps are the readers a leg's comfort needs, so a test supplies fakes
 // and production wires the fitted model, the learned bands, the helm height, the
-// Offline coastline and the memo of shore geometries. Every reader must be set:
-// a reader that is not is a programming error the assessment says so, never a
-// leg quietly without comfort. Comfort is off by a nil *planComfortDeps.
+// Offline coastline and the memo of what the shore said of each position (ray
+// results, kept between requests). Every reader must be set: a reader that is not
+// is a programming error the assessment says so, never a leg quietly without
+// comfort. Comfort is off by a nil *planComfortDeps.
 type planComfortDeps struct {
 	model      func() (*comfortModelSet, error)
 	bands      func() (comfortBands, error)
 	helmHeight func() (*float64, error)
 	loader     func() *coastlineLoader
-	memo       *fetchGeoMemo
+	memo       *shoreRayMemo
+	// onPredict is a test hook, nil in production: it is set on the request's setup.
+	onPredict func()
 }
 
 // unwired names a reader that is not set, "" when every one is.
@@ -43,41 +46,74 @@ func (d *planComfortDeps) unwired() string {
 	case d.loader == nil:
 		return "coastline"
 	case d.memo == nil:
-		return "shore geometry memo"
+		return "shore ray memo"
 	}
 	return ""
 }
 
 // comfortSetup is what every leg of one request shares: the model, the bands, the
 // helm height, the request's one coastline loader (made when an hour first reaches
-// the shore) and the shore each snapped position gave. A request judges its legs one
-// after another, so the shores need no lock.
+// the shore), the rays already cast and the positions they were cast at. A request
+// judges its legs one after another, so the maps need no lock.
 type comfortSetup struct {
 	set     *comfortModelSet
 	bands   comfortBands
 	helm    *float64
 	helmErr error
 	loader  func() *coastlineLoader
-	memo    *fetchGeoMemo
-	shores  map[[2]int]shoreRays
+	// loaderMade is true once loader has built the request's loader.
+	loaderMade bool
+	memo       *shoreRayMemo
+	// shores is each snapped position this request has looked at.
+	shores map[[2]int]*shoreSpot
+	// rays is every result this request has read, from the memo or cast itself, so a
+	// result the memo has since dropped is not asked for again.
+	rays map[shoreRayKey]rayResult
 	// onPredict is a test hook, nil in production: the model was asked for an hour.
 	onPredict func()
 }
 
-// shoreRays is what the shore gave at one snapped position, or why it gave none.
-type shoreRays struct {
-	rays rayFunc
-	why  string
+// shoreSpot is one snapped position as a request sees it.
+type shoreSpot struct {
+	key        shoreSpotKey
+	slat, slon float64
+	// why is why the shore cannot be read here, "" when it can. It is the request's
+	// alone, never put in the memo: the next request may find the coastline on, the
+	// square downloaded.
+	why string
+	// geo is the shoreline projected around the position, built when a ray is not in
+	// the memo and let go when the leg ends.
+	geo *fetchGeometry
 }
 
-func newComfortSetup(set *comfortModelSet, bands comfortBands, helm *float64, helmErr error, newLoader func() *coastlineLoader, memo *fetchGeoMemo) *comfortSetup {
-	return &comfortSetup{
+func newComfortSetup(set *comfortModelSet, bands comfortBands, helm *float64, helmErr error, newLoader func() *coastlineLoader, memo *shoreRayMemo) *comfortSetup {
+	s := &comfortSetup{
 		set: set, bands: bands, helm: helm, helmErr: helmErr, memo: memo,
-		loader: sync.OnceValue(func() *coastlineLoader {
-			l := newLoader()
-			l.shared = memo.lines
-			return l
-		}),
+		shores: map[[2]int]*shoreSpot{},
+		rays:   map[shoreRayKey]rayResult{},
+	}
+	s.loader = sync.OnceValue(func() *coastlineLoader {
+		l := newLoader()
+		l.shared = memo.lines
+		s.loaderMade = true
+		return l
+	})
+	return s
+}
+
+// endLeg lets go of the geometries built for the leg just judged, so a request holds
+// about one leg's worth. The rays cast stay.
+func (s *comfortSetup) endLeg() {
+	for _, sp := range s.shores {
+		sp.geo = nil
+	}
+	// The loader keeps each square's lines and each position's joined set for the
+	// request; the shared cache keeps the squares between legs, so a later leg reads
+	// them from there.
+	if s.loaderMade {
+		l := s.loader()
+		clear(l.sets)
+		clear(l.lines)
 	}
 }
 
@@ -126,6 +162,10 @@ const (
 	comfortBeyondSteep    = "in seas steeper than any recorded passage"
 	comfortMaxStretches   = 3
 	comfortHelmHeightNeed = "Snap needs the helm height: enter it under Settings, Vessel"
+	// comfortNotLearnedReason is the leg's whole reason before the bands are learned,
+	// and the chip's first sentence; comfortNoHourReason is a leg with no hour at all.
+	comfortNotLearnedReason = "Comfort not learned yet"
+	comfortNoHourReason     = "the leg has no hour to judge"
 )
 
 // judgedHour is an hour with what the text is made from, beside what the wire
@@ -250,68 +290,116 @@ func comfortSnapKey(lat, lon float64) [2]int {
 }
 
 // raysAt is the rays over the shore at a position, snapped to 0.001 degree. A request
-// reads each snapped position once, the geometry comes from the memo kept between
-// requests, and a position the shore could not be read at says why every time.
+// looks at each snapped position once. A ray is read from the request's own results,
+// then from the memo kept between requests, and only then cast, over a geometry built
+// for the position the first time it is needed. A position the shore could not be
+// read at says why for the rest of the request, and only this one.
 func (s *comfortSetup) raysAt(ctx context.Context, lat, lon float64) raySource {
 	return func() (rayFunc, string) {
-		k := comfortSnapKey(lat, lon)
-		if r, ok := s.shores[k]; ok {
-			return r.rays, r.why
+		// A request whose time is up reads nothing, warm or not.
+		if ctx.Err() != nil {
+			return nil, comfortReasonOutOfTime
 		}
-		rays, why := s.readShore(ctx, k[0], k[1])
-		if s.shores == nil {
-			s.shores = map[[2]int]shoreRays{}
+		sp, why := s.spotAt(comfortSnapKey(lat, lon))
+		if why != "" {
+			return nil, why
 		}
-		s.shores[k] = shoreRays{rays, why}
-		return rays, why
+		return func(kind string, bearingDeg float64) (rayResult, string) {
+			return s.ray(ctx, sp, kind, bearingDeg)
+		}, ""
 	}
 }
 
-func (s *comfortSetup) readShore(ctx context.Context, latE3, lonE3 int) (rayFunc, string) {
-	slat, slon := float64(latE3)/comfortSnapScale, float64(lonE3)/comfortSnapScale
-	if ctx.Err() != nil {
-		return nil, comfortReasonOutOfTime
+// spotAt is the request's look at a snapped position: the state of its squares, or
+// why they cannot be read.
+func (s *comfortSetup) spotAt(k [2]int) (*shoreSpot, string) {
+	if sp, ok := s.shores[k]; ok {
+		return sp, sp.why
 	}
-	loader := s.loader()
-	plan, err := loader.plan(slat, slon)
+	sp := &shoreSpot{slat: float64(k[0]) / comfortSnapScale, slon: float64(k[1]) / comfortSnapScale}
+	s.shores[k] = sp
+	plan, err := s.loader().plan(sp.slat, sp.slon)
 	if err != nil {
-		return nil, coastlineReason(err)
+		sp.why = coastlineReason(err)
+		return sp, sp.why
 	}
-	geo, err := s.memo.get(ctx, fetchGeoMemoKey{latE3: latE3, lonE3: lonE3, stamp: plan.Stamp}, func() (*fetchGeometry, error) {
+	sp.key = shoreSpotKey{latE3: int32(k[0]), lonE3: int32(k[1]), stamp: plan.Stamp}
+	return sp, ""
+}
+
+// ray is what the shore says along one bearing at a position.
+func (s *comfortSetup) ray(ctx context.Context, sp *shoreSpot, kind string, bearingDeg float64) (rayResult, string) {
+	if ctx.Err() != nil {
+		return rayResult{}, comfortReasonOutOfTime
+	}
+	dd := 0
+	if kind != fetchKindCalm {
+		dd = bearingDD(bearingDeg)
+	}
+	key := shoreRayKey{shoreSpotKey: sp.key, kind: shoreRayKind(kind), dd: int16(dd)}
+	if res, ok := s.rays[key]; ok {
+		return res, ""
+	}
+	res, ok := s.memo.rays.get(key)
+	if !ok {
+		// A build that failed for this position in this request fails the rest alike.
+		if sp.why != "" {
+			return rayResult{}, sp.why
+		}
+		geo, why := s.geometryAt(ctx, sp)
+		if why != "" {
+			return rayResult{}, why
+		}
+		res = geo.ray(kind, dd)
+		s.memo.rays.put(key, res)
+	}
+	s.rays[key] = res
+	return res, ""
+}
+
+// geometryAt is the shore projected around a position, built once for the leg. Its
+// squares' lines are joined once for every position that shares them (loader.around).
+func (s *comfortSetup) geometryAt(ctx context.Context, sp *shoreSpot) (*fetchGeometry, string) {
+	if sp.geo != nil {
+		return sp.geo, ""
+	}
+	geo, err := s.memo.geometry(ctx, sp.key, func() (*fetchGeometry, error) {
 		// The request's time may run out between one square and the next: no more
 		// geometry is built for a request that has nobody waiting.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		set, err := loader.linesFor(plan.Needed)
+		set, err := s.loader().around(sp.slat, sp.slon)
 		if err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return newFetchGeometry(slat, slon, set.Lines), nil
+		return newFetchGeometry(sp.slat, sp.slon, set.Lines), nil
 	})
 	if err != nil {
+		// Running out of time is the ranking's budget or the request's, which a later
+		// walk may not share: it is not kept as the position's reason.
 		if ctx.Err() != nil {
 			return nil, comfortReasonOutOfTime
 		}
-		return nil, coastlineReason(err)
+		sp.why = coastlineReason(err)
+		return nil, sp.why
 	}
-	return func(kind string, bearingDeg float64) (rayResult, string) {
-		dd := 0
-		if kind != fetchKindCalm {
-			dd = bearingDD(bearingDeg)
-		}
-		return geo.ray(kind, dd), ""
-	}, ""
+	sp.geo = geo
+	return geo, ""
 }
 
 // legComfort judges a leg hour by hour and words the result. A leg whose model is
 // held back, or whose bands are not learned, says so instead of giving a word.
 func legComfort(ctx context.Context, in legComfortInput) *planLegComfort {
-	c, _ := in.run(ctx)
-	return c
+	defer in.endLeg()
+	hours, blocked := in.judgedHours(ctx)
+	if blocked != "" {
+		return notJudged(blocked)
+	}
+	return in.comfortOf(hours)
 }
 
 // comfortLadderResult is what the ladder finds for a leg: Blocked is the reason the
@@ -396,20 +484,22 @@ func legModels(lhs []legHour) []waveModelRef {
 	return out
 }
 
-// run judges the leg: the ladder first, then each hour of a leg the ladder lets by.
-func (in legComfortInput) run(ctx context.Context) (*planLegComfort, []judgedHour) {
+// judgedHours walks the leg and judges each hour, or says why the leg cannot be
+// judged at all: the walk failed, or the ladder blocked it, the ladder first and then
+// each hour of a leg it lets by. The ranking of departures (comfort_rank.go) reads
+// the same hours the chip is made from.
+func (in legComfortInput) judgedHours(ctx context.Context) (hours []judgedHour, blocked string) {
 	var lhs []legHour
 	if err := in.as.walkLegHours(in.plan, in.depart, in.arrive, in.from, in.arrive, func(lh legHour) error {
 		lhs = append(lhs, lh)
 		return nil
 	}); err != nil {
-		return notJudged(err.Error()), nil
+		return nil, err.Error()
 	}
 	if rung := comfortLadder(in.set, in.bands.Learned, legModels(lhs)); rung.Blocked != "" {
-		return notJudged(rung.Blocked), nil
+		return nil, rung.Blocked
 	}
-	hours := in.judge(ctx, lhs)
-	return in.comfortOf(hours), hours
+	return in.judge(ctx, lhs), ""
 }
 
 // judge judges each forecast hour of a leg the ladder let by. The request's time may
@@ -754,7 +844,7 @@ func (s stretch) phrase(i, n int, underway bool) string {
 // text is the first line of the chip.
 func (in legComfortInput) text(hours []judgedHour, stretches []stretch) string {
 	if len(hours) == 0 {
-		return notJudgedText("the leg has no hour to judge")
+		return notJudgedText(comfortNoHourReason)
 	}
 	var judged []judgedHour
 	for _, h := range hours {
@@ -779,7 +869,7 @@ func (in legComfortInput) text(hours []judgedHour, stretches []stretch) string {
 // sea of the judged hours, whether any was steeper than the record, then each gap as
 // a sentence of its own with its length.
 func (in legComfortInput) unlearnedText(judged []judgedHour, stretches []stretch) string {
-	parts := []string{"Comfort not learned yet."}
+	parts := []string{comfortNotLearnedReason + "."}
 	if len(judged) > 0 {
 		all := stretch{hours: judged}
 		rough := all.roughest()
