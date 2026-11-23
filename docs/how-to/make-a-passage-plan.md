@@ -98,7 +98,15 @@ page says the limits aren't set and shows no verdicts.
 4. Look at **Current**. "0.8 kn hindering" means the modelled current runs
    against you at that time. A dash means the model has no figure for the leg,
    and hovering over it says why.
-5. Read the line above the days. It says when the verdicts were worked out and
+5. Read the **Comfort** line under the passage row. It says how the leg should
+   feel at the time the verdict is judged for, hour by hour, in stretches such
+   as "Lively for the first 2 h: roll, swell 0.6 m 4 s on the port bow. Then
+   Comfortable." The line under it gives the most snap and pounding. Tap it to
+   see each hour. An hour it can't judge says why, for example "swell not
+   judged in enclosed water", and never reads as Comfortable. The line says
+   "Comfort not learned yet" until you've rated enough passages for the bands,
+   and it's about the ride, not your limits, so it has no Go or No-Go colour.
+6. Read the line above the days. It says when the verdicts were worked out and
    when the forecast behind them was fetched. They update on their own each
    time the forecast refreshes. After you change the plan, the verdict and the
    current read "…" until the new answer arrives, and a check that fails says

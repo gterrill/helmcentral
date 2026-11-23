@@ -168,6 +168,30 @@ export interface PlanLegAssessment {
   notChecked: string[];
   /** The wind changes between the departure and the ETA, worked out on the server. */
   windChanges: PlanRowWindChanges;
+  /** How the leg is forecast to feel at its chosen departure (ADR 0302); null when the server did not look. */
+  comfort: PlanLegComfort | null;
+}
+
+/** The band the server read an hour into; "" is none (not judged, or bands not learned). Never a colour. */
+export type ComfortBand = "" | "comfortable" | "lively" | "rough";
+
+/** One forecast hour of a leg's comfort: the server's line for it, and the band it read into. */
+export interface PlanComfortHour {
+  at: string;
+  /** The boat clock at the leg's start: "10 AM". */
+  label: string;
+  band: ComfortBand;
+  /** The sea is steeper than any the model learned from. */
+  beyond: boolean;
+  /** The hour in one line, in the server's words. */
+  line: string;
+}
+
+/** A leg's chip: the server's sentence, the motion line under it and the hours behind them. */
+export interface PlanLegComfort {
+  text: string;
+  motion: string;
+  hours: PlanComfortHour[];
 }
 
 /**

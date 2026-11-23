@@ -44,7 +44,7 @@ const leg = (from: number): PlanLeg => ({
 const legAssessment = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
   hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [],
-  windChanges: { changes: [], notChecked: null }, ...over,
+  windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
 
 const assessment = (over: Partial<PlanAssessment> = {}): PlanAssessment => ({

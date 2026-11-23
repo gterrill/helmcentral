@@ -554,6 +554,43 @@ func (g comfortGroup) at(heading float64, swell, wind *seaTrainFigures) (value f
 	return value, parts, beyond
 }
 
+// comfortLead is what leads a group's figure for a sea: the word (roll or pitch,
+// whichever is the larger part) and the wave system that adds most to it (swell
+// or wind wave).
+type comfortLead struct {
+	Word   string
+	System string
+}
+
+// lead works out what leads the group's figure for a sea, from the targets'
+// figures the prediction already made (parts, in the order of the group's fits).
+// The word is the target with the larger figure; the system is the one that adds
+// more to that target's variance, and with nothing to tell them apart the taller.
+// A group that is not learned leads with nothing.
+func (g comfortGroup) lead(parts []float64, heading float64, swell, wind *seaTrainFigures) comfortLead {
+	var best *comfortTargetFit
+	var bestV float64
+	for i, f := range g.Fits {
+		if v := parts[i]; best == nil || v > bestV {
+			best, bestV = f, v
+		}
+	}
+	if best == nil {
+		return comfortLead{}
+	}
+	xs, xw := comfortFeature(best.Target, swell, heading), comfortFeature(best.Target, wind, heading)
+	swellPart, windPart := best.Coef.Bs*xs*xs, best.Coef.Bw*xw*xw
+	windLeads := windPart > swellPart
+	if windPart == swellPart {
+		windLeads = wind != nil && (swell == nil || wind.HeightM > swell.HeightM)
+	}
+	system := "swell"
+	if windLeads {
+		system = "wind wave"
+	}
+	return comfortLead{Word: string(best.Target), System: system}
+}
+
 // fitTargets fits each target of a group over the passages.
 func fitTargets(def comfortGroupDef, passages [][]comfortSpell) []*comfortTargetFit {
 	fits := make([]*comfortTargetFit, len(def.targets))
@@ -721,6 +758,9 @@ type comfortFigure struct {
 type comfortPrediction struct {
 	Sway, Snap, Pounding comfortFigure
 	RollDeg, PitchDeg    *float64
+	// swayParts is each of the sway group's targets' own figure, in the order of
+	// its fits, for what leads the sway.
+	swayParts []float64
 }
 
 // figures lists the prediction's figures in the order of comfortGroupDefs.
@@ -750,27 +790,50 @@ func lowerArticle(label string) string {
 	return label
 }
 
+// standing is the fit for a wave model, or why the set has none: not worked out,
+// couldn't be, learned on nothing, or learned on other wave models.
+func (s *comfortModelSet) standing(model waveModelRef) (*comfortFit, string) {
+	if s == nil {
+		return nil, "The comfort model is " + comfortNotWorkedOut + "."
+	}
+	if s.Err != "" {
+		return nil, "The comfort model couldn't be worked out: " + s.Err + "."
+	}
+	fit := s.Fits[model.ID]
+	if fit != nil {
+		return fit, ""
+	}
+	if len(s.Fits) == 0 {
+		return nil, comfortReasonNoLearn
+	}
+	return nil, fmt.Sprintf("The comfort model was learned on %s; this forecast comes from %s.", strings.Join(s.sortedModels(), " and "), lowerArticle(model.Label))
+}
+
+// heldBack is why the set can judge no hour at all, whatever the hour's wave model:
+// not worked out, couldn't be, nothing learned, or sway held back for every model.
+// "" when some model can judge.
+func (s *comfortModelSet) heldBack() string {
+	if s == nil || s.Err != "" || len(s.Fits) == 0 {
+		_, why := s.standing(waveModelRef{})
+		return why
+	}
+	for _, f := range s.Fits {
+		if f.Sway.Learned {
+			return ""
+		}
+	}
+	return capitalise(s.Fits[s.sortedModels()[0]].Sway.Reason) + "."
+}
+
 func (s *comfortModelSet) predict(in comfortHourInput) comfortPrediction {
 	var p comfortPrediction
 	figs := p.figures()
-	none := func(why string) comfortPrediction {
+	fit, why := s.standing(in.Model)
+	if fit == nil {
 		for _, f := range figs {
 			f.Reason = why
 		}
 		return p
-	}
-	if s == nil {
-		return none("The comfort model is " + comfortNotWorkedOut + ".")
-	}
-	if s.Err != "" {
-		return none("The comfort model couldn't be worked out: " + s.Err + ".")
-	}
-	fit := s.Fits[in.Model.ID]
-	if fit == nil {
-		if len(s.Fits) == 0 {
-			return none(comfortReasonNoLearn)
-		}
-		return none(fmt.Sprintf("The comfort model was learned on %s; this forecast comes from %s.", strings.Join(s.sortedModels(), " and "), lowerArticle(in.Model.Label)))
 	}
 	for i, g := range fit.groups() {
 		if !g.Learned {
@@ -779,6 +842,9 @@ func (s *comfortModelSet) predict(in comfortHourInput) comfortPrediction {
 		}
 		v, parts, beyond := g.at(in.HeadingDeg, in.Swell, in.WindWave)
 		figs[i].Value, figs[i].Beyond = &v, beyond
+		if i == 0 {
+			p.swayParts = parts
+		}
 		if len(parts) == 2 {
 			roll, pitch := parts[0], parts[1]
 			p.RollDeg, p.PitchDeg = &roll, &pitch

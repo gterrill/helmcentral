@@ -109,6 +109,10 @@ type planLegAssessment struct {
 	// WindChanges are the changes in the wind between the departure and the ETA,
 	// worked out here so the page only draws them (ADR 0287).
 	WindChanges planWindChanges `json:"wind_changes"`
+	// Comfort is how the leg is forecast to feel, hour by hour, at the departure
+	// chosen for it (ADR 0302). Null when it was not looked for: a verdicts-only
+	// assessment, a leg with no forecast, a caller that is not the plan page.
+	Comfort *planLegComfort `json:"comfort"`
 }
 
 // planStopNight is an official warning in force the night the boat is at a stop.
@@ -161,6 +165,10 @@ type planAssessOptions struct {
 	// Env, when not nil, is the limits and speed already read, shared by several
 	// assessments of one request; they are not read again.
 	Env *planEnv
+	// Comfort asks for each judged leg's comfort at its chosen departure (ADR 0302).
+	// Only the plan page's own endpoint sets it: a verdict, a change mark, a Mate
+	// answer or a slip never reads it.
+	Comfort bool
 }
 
 // planDepartureQuery is a leg as the ranking and the current read it: the routed
@@ -205,12 +213,18 @@ type planAssessDeps struct {
 	// keptSuggestion reads the first suggestion kept for a leg on a day, without
 	// writing one (documentStore.KeptSuggestion). Nil reads none.
 	keptSuggestion func(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error)
+	// comfort reads what a leg's comfort needs. Nil is comfort off, for a caller
+	// that never asks for it. When a run asks for comfort, every reader must be
+	// set: one that is not is reported on each leg, never left as no comfort.
+	comfort *planComfortDeps
 }
 
 // planEnv is what every leg of an assessment shares.
 type planEnv struct {
-	now           time.Time
-	verdictsOnly  bool
+	now          time.Time
+	verdictsOnly bool
+	// comfort says each judged leg's comfort is asked for (ADR 0302).
+	comfort       bool
 	limits        passageLimits
 	limitsErr     error
 	limitsProblem string
@@ -241,7 +255,13 @@ type planLegWork struct {
 	// it has what that needs.
 	underway  bool
 	windReady bool
-	eta       time.Time
+	// etaWhy is why a leg under way has no readable ETA, "" when it has one.
+	etaWhy string
+	eta    time.Time
+	// chosenDepart and chosenArrive are the departure and arrival the leg's row
+	// shows, as instants: zero until set. They are set with res.Depart and
+	// res.Arrive, never apart.
+	chosenDepart, chosenArrive time.Time
 	// cands are the departures to choose among when the operator set none,
 	// fairest current first.
 	cands      []tidalDeparture
@@ -262,8 +282,21 @@ func (w *planLegWork) markProgress(progress string) {
 }
 
 func (w *planLegWork) setDeparture(t time.Time, suggested bool) {
-	w.res.Depart, w.res.DepartSuggested = fmtLeg(t, w.fromLoc), suggested
-	w.res.Arrive = fmtLeg(t.Add(hoursDuration(w.hours)), w.toLoc)
+	w.putDepart(t)
+	w.res.DepartSuggested = suggested
+	w.putArrive(t.Add(hoursDuration(w.hours)))
+}
+
+// putDepart and putArrive set the departure and arrival the row shows, in their
+// stop's clock, and keep them as the instants the row's text was made from.
+func (w *planLegWork) putDepart(t time.Time) {
+	w.chosenDepart = t.Truncate(time.Second)
+	w.res.Depart = fmtLeg(t, w.fromLoc)
+}
+
+func (w *planLegWork) putArrive(t time.Time) {
+	w.chosenArrive = t.Truncate(time.Second)
+	w.res.Arrive = fmtLeg(t, w.toLoc)
 }
 
 func (w *planLegWork) setCurrent(r planCurrentReading, err error) {
@@ -323,6 +356,7 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		NightWinds: []planNightWinds{},
 	}
 	env.verdictsOnly = opts.VerdictsOnly
+	env.comfort = opts.Comfort
 	progress, underway := opts.Progress, (*planUnderway)(nil)
 	if progress == nil {
 		progress, underway = d.readProgress(ctx, p, &out)
@@ -367,7 +401,9 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		d.prepareLeg(work[i], byFrom[i], env)
 		if i == underwayLeg {
 			// With no limits to judge by the leg says so below; nothing is read for it.
-			if why := work[i].prepareUnderway(byFrom[i], env); env.limitsProblem == "" && why != "" {
+			why := work[i].prepareUnderway(byFrom[i], env)
+			work[i].etaWhy = why
+			if env.limitsProblem == "" && why != "" {
 				out.Legs[i].WindChanges.NotChecked, work[i].changesRead = why, true
 			}
 		}
@@ -525,7 +561,7 @@ func (w *planLegWork) setOperatorDeparture(now time.Time) (planNoteKind, string)
 		}
 		y, mo, dd := day.Date()
 		w.depart = time.Date(y, mo, dd, h, m, 0, 0, w.fromLoc)
-		w.res.Depart = fmtLeg(w.depart, w.fromLoc)
+		w.putDepart(w.depart)
 		if w.depart.Before(now) {
 			return planKindPast, planNoteDepartPast
 		}
@@ -544,7 +580,7 @@ func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) 
 	// The arrival is known from the hours and the speed, so it shows even for a
 	// leg that is not judged.
 	if !w.depart.IsZero() {
-		w.res.Arrive = fmtLeg(w.depart.Add(hoursDuration(w.hours)), w.toLoc)
+		w.putArrive(w.depart.Add(hoursDuration(w.hours)))
 	}
 	if w.hours > planAssessMaxLegHours {
 		return planKindOvernight, planNoteOvernight
@@ -769,20 +805,108 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	}
 	nights = append(nights, arrivalNights(p, arrivals, env.now)...)
 	out.NightWinds = nightWinds(as, stops, nights, env)
+	// Comfort comes last, at the departure each leg's verdict was made at, and is
+	// worked out once for each leg, never for each candidate departure.
+	if env.comfort && d.comfort != nil && forecastErr == nil && as != nil {
+		run := newPlanComfortRun(as, env, d.comfort)
+		for _, w := range windLegs {
+			w.res.Comfort = run.leg(ctx, w)
+		}
+	}
+}
+
+// planComfortRun is what the comfort of every leg of one assessment shares: the
+// forecast, and the model, bands, helm height and coastline loader read once.
+// problem is why no leg could be set up, when none could.
+type planComfortRun struct {
+	as  *passageAssessor
+	env planEnv
+	// ready reads the comfort readers on the first leg that needs them, once.
+	ready func() (*comfortSetup, string)
+}
+
+// newPlanComfortRun reads each of the comfort readers once. A reader that is not
+// wired, or that fails, is the run's problem, said on every leg that would have
+// had comfort.
+func newPlanComfortRun(as *passageAssessor, env planEnv, d *planComfortDeps) planComfortRun {
+	return planComfortRun{as: as, env: env, ready: sync.OnceValues(func() (*comfortSetup, string) {
+		if what := d.unwired(); what != "" {
+			return nil, "the " + what + " reader is not wired"
+		}
+		set, err := d.model()
+		if err != nil {
+			return nil, "the comfort model couldn't be read: " + err.Error()
+		}
+		bands, err := d.bands()
+		if err != nil {
+			return nil, "the comfort bands couldn't be read: " + err.Error()
+		}
+		helm, helmErr := d.helmHeight()
+		return newComfortSetup(set, bands, helm, helmErr, d.loader, d.memo), ""
+	})}
+}
+
+// leg is a leg's comfort, or nil when the leg has none to look at: no verdict and
+// not under way.
+func (r planComfortRun) leg(ctx context.Context, w *planLegWork) *planLegComfort {
+	switch {
+	case w.underway && !w.windReady:
+		// No readable ETA: say why, as the wind changes do, never that the ETA passed.
+		if w.etaWhy == "" {
+			return nil
+		}
+		return notJudged(w.etaWhy)
+	case w.underway:
+	case w.res.Verdict != "" && !w.chosenDepart.IsZero() && !w.chosenArrive.IsZero():
+	default:
+		return nil
+	}
+	setup, problem := r.ready()
+	if problem != "" {
+		return notJudged(problem)
+	}
+	span, why := legSpan(w, r.env)
+	if why != "" {
+		return &planLegComfort{Text: why + ".", Hours: []planComfortHour{}}
+	}
+	return legComfort(ctx, legComfortInput{
+		comfortSetup: setup, as: r.as, plan: w.plan, loc: w.fromLoc,
+		depart: span.depart, arrive: span.arrive, from: span.from, underway: w.underway,
+	})
+}
+
+// planETAPassed is why a leg under way has no span left: its ETA is behind it.
+const planETAPassed = "The leg is under way and its ETA has passed"
+
+// legSpanOf is the span of a leg a reading covers. depart and arrive are its real
+// departure and ETA, the chosen ones; from is where the reading starts, the
+// departure, or now for the leg under way.
+type legSpanOf struct{ depart, arrive, from time.Time }
+
+// legSpan is a leg's span for the readings that follow its verdict (the wind
+// changes and the comfort). A leg under way whose ETA has passed has no span, and
+// why says so. A leg with no departure has no arrival either.
+func legSpan(w *planLegWork, env planEnv) (legSpanOf, string) {
+	if w.underway {
+		if !w.eta.After(env.now) {
+			return legSpanOf{}, planETAPassed
+		}
+		return legSpanOf{depart: w.eta.Add(-hoursDuration(w.hours)), arrive: w.eta, from: env.now}, ""
+	}
+	depart, arrive := w.chosenDepart, w.chosenArrive
+	if depart.IsZero() {
+		arrive = time.Time{} // an ETA with no departure is no span
+	}
+	return legSpanOf{depart: depart, arrive: arrive, from: depart}, ""
 }
 
 // arrival is the instant the leg lands at its stop, when it has one: the ETA of
-// the leg under way, else the arrival the verdict was made at. A time that cannot
-// be read is already said on the leg's own row.
+// the leg under way, else the arrival the verdict was made at.
 func (w *planLegWork) arrival() (time.Time, bool) {
 	if w.underway {
 		return w.eta, w.windReady
 	}
-	if w.res.Arrive == "" {
-		return time.Time{}, false
-	}
-	t, err := time.Parse(time.RFC3339, w.res.Arrive)
-	return t, err == nil
+	return w.chosenArrive, !w.chosenArrive.IsZero()
 }
 
 // judgeLegs judges every leg whose forecast was fetched, or fails them all with
@@ -1134,5 +1258,5 @@ func planAssessmentHandler(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), planAssessmentDeadline)
 	defer cancel()
 	legs := planLegs(ctx, d)
-	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps, planAssessOptions{}))
+	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps, planAssessOptions{Comfort: true}))
 }

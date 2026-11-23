@@ -6,7 +6,9 @@ import { PLANS_PATH } from "@/hooks/use-plans";
 import { fetchQuery, invalidateQueries, useApiQuery } from "@/lib/api-query";
 import {
   mapLegResult,
+  type ComfortBand,
   type LegResultApi,
+  type PlanLegComfort,
   type Plan,
   type PlanAssessment,
   type PlanLegAssessment,
@@ -36,6 +38,28 @@ interface PlanLegAssessmentApi extends LegResultApi {
   current_note: string;
   not_checked: string[] | null;
   wind_changes: WindChangesApi;
+  comfort?: ComfortApi | null;
+}
+
+interface ComfortApi {
+  text: string;
+  motion: string;
+  hours: Array<{ at: string; label: string; band: string; beyond: boolean; line: string }> | null;
+}
+
+/** A band the server named; any other word is refused rather than shown as no band. */
+function mapBand(word: string): ComfortBand {
+  if (word === "" || word === "comfortable" || word === "lively" || word === "rough") return word;
+  throw new Error(`The plan assessment named a comfort band this page does not know: ${word}`);
+}
+
+function mapComfort(raw: ComfortApi | null | undefined): PlanLegComfort | null {
+  if (!raw) return null;
+  return {
+    text: raw.text,
+    motion: raw.motion,
+    hours: (raw.hours ?? []).map((h) => ({ at: h.at, label: h.label, band: mapBand(h.band), beyond: h.beyond, line: h.line })),
+  };
 }
 
 interface WindChangesApi {
@@ -104,6 +128,7 @@ function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
     currentNote: l.current_note,
     notChecked: l.not_checked ?? [],
     windChanges: mapWindChanges(l.wind_changes),
+    comfort: mapComfort(l.comfort),
   };
 }
 

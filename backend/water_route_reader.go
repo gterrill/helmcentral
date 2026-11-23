@@ -50,6 +50,9 @@ type coastlineLoader struct {
 	r     *offlineCoastlineReader
 	byKey map[coverageSquare]coastlineSquareRecord
 	lines map[coverageSquare][]shorelineLine
+	// shared, when set, keeps squares' lines between loaders, by the state each
+	// square was downloaded in.
+	shared *squareLinesCache
 	// ready checks the coastline is on and reads which squares are held, once. Its
 	// errors are typed (coastlineLookupError), as codes.
 	ready  func() error
@@ -102,16 +105,32 @@ func (l *coastlineLoader) load() error {
 	return nil
 }
 
-// squareLines is one held square's lines, read once.
+// squareLines is one held square's lines, read once. With a shared cache, a square
+// another request read as it is now is not read again.
 func (l *coastlineLoader) squareLines(sq coverageSquare) ([]shorelineLine, error) {
 	if got, ok := l.lines[sq]; ok {
 		return got, nil
+	}
+	var key squareLinesKey
+	if l.shared != nil {
+		rec := l.byKey[sq]
+		key = squareLinesKey{square: sq, downloadedAt: rec.DownloadedAt.Unix(), dataAsOfSec: rec.DataAsOf.Unix()}
+		if got, ok := l.shared.lru.get(key); ok {
+			l.lines[sq] = got
+			return got, nil
+		}
 	}
 	got, err := l.r.Store.Lines([]coverageSquare{sq})
 	if err != nil {
 		return nil, err
 	}
 	l.lines[sq] = got
+	if l.shared != nil {
+		if l.shared.onRead != nil {
+			l.shared.onRead()
+		}
+		l.shared.lru.put(key, got)
+	}
 	return got, nil
 }
 

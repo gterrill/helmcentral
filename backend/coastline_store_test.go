@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func newTestCoastlineStore(t *testing.T) *coastlineStore {
+func newTestCoastlineStore(t testing.TB) *coastlineStore {
 	t.Helper()
 	s, err := newCoastlineStore(filepath.Join(t.TempDir(), "helmcentral.sqlite"))
 	if err != nil {

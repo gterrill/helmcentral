@@ -188,38 +188,22 @@ func legWindChanges(as *passageAssessor, w *planLegWork, env planEnv) planWindCh
 		out.NotChecked = err.Error()
 		return out
 	}
-	var day, depart, arrive time.Time
+	span, why := legSpan(w, env)
+	if why != "" {
+		out.NotChecked = why + ", so there is no span left to check."
+		return out
+	}
+	var day time.Time
 	if w.underway {
-		depart, arrive = env.now, w.eta
-		if !arrive.After(depart) {
-			out.NotChecked = "The leg is under way and its ETA has passed, so there is no span left to check."
-			return out
-		}
 		y, m, d := env.now.In(w.fromLoc).Date()
 		day = time.Date(y, m, d, 0, 0, 0, 0, w.fromLoc)
-	} else {
-		if day, err = dayStart(w.from.Depart, w.fromLoc); err != nil {
-			out.NotChecked = "The departure date is not readable: " + err.Error()
-			return out
-		}
-		for _, s := range []struct {
-			text string
-			into *time.Time
-		}{{w.res.Depart, &depart}, {w.res.Arrive, &arrive}} {
-			if s.text == "" {
-				continue
-			}
-			if *s.into, err = time.Parse(time.RFC3339, s.text); err != nil {
-				out.NotChecked = "A leg time is not readable: " + err.Error()
-				return out
-			}
-		}
-		if depart.IsZero() {
-			arrive = time.Time{} // an ETA with no departure is no span
-		}
+	} else if day, err = dayStart(w.from.Depart, w.fromLoc); err != nil {
+		out.NotChecked = "The departure date is not readable: " + err.Error()
+		return out
 	}
+	// The window starts where the reading does: the departure, or now for a leg under way.
 	course := w.course
-	return rowWindChanges(passageHoursAsWeather(point.hours), legChangeWindow(day, depart, arrive, w.fromLoc),
+	return rowWindChanges(passageHoursAsWeather(point.hours), legChangeWindow(day, span.from, span.arrive, w.fromLoc),
 		day, env.now, w.fromLoc, env.limits, env.limitsErr, &course)
 }
 

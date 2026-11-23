@@ -18,7 +18,7 @@ import {
 const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "A → B|2026-11-14", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "",
   depart: null, departSuggested: false, arrive: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
-  windChanges: { changes: [], notChecked: null }, ...over,
+  windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
 
 const stops = ["Mooloolaba", "Manly", "Boat Works"].map((name) => ({ name }));

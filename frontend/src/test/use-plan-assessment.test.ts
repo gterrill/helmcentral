@@ -145,7 +145,7 @@ describe("verdictText and currentText", () => {
   const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
     leg: 0, date: "2026-11-14", key: "k", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
     hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
-    windChanges: { changes: [], notChecked: null }, ...over,
+    windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
   });
 
   it("names the limiting factor on a marginal or no-go leg", () => {

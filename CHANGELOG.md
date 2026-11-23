@@ -35,6 +35,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A leg on a passage plan now says how the ride should feel, hour by hour.**
+  Under a leg with a verdict, a new Comfort line reads like "Lively for the first
+  2 h: roll, swell 0.6 m 4 s on the port bow. Then Comfortable." A second line gives
+  the most snap and pounding on the leg, and a tap shows every hour. It comes
+  from how your boat moved in the seas she has recorded and from the passages
+  you've rated, so until Helmcentral has learned both the line says "Comfort not
+  learned yet" or why it can't judge. A wind wave in sheltered water is cut to the
+  fetch where the boat will be that hour, and a swell inside enclosed water isn't
+  judged. An hour Helmcentral can't judge says why and is never shown as
+  Comfortable. A sea rougher or steeper than anything you've recorded says so. The
+  word has no Go or No-Go colour, and Go, Marginal and No-Go are unchanged.
 - **The passage page now says what Helmcentral has learned about how your boat
   answers the sea.** Under the Felt line, one new line reads like "Comfort
   model: sway learned from 12 passages (skill 0.42); snap and pounding not yet:
