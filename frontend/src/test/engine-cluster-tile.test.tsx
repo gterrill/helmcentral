@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import type { ResolvedClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
+import { fuelCaptions } from '@/lib/engine-cluster-layout'
 import { setViewportWidth } from './viewport'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
@@ -443,6 +444,36 @@ describe('fuel fan', () => {
     const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
     expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
+  })
+})
+
+describe('fuel fan total', () => {
+  test('the total and capacity are clipped to the caption box', () => {
+    const { container } = renderCluster({ ...full, fuel })
+    const group = container.querySelector('[data-fuel-total-group]') as SVGGElement
+    const ref = /^url\(#(.+)\)$/.exec(group.getAttribute('clip-path') ?? '')
+    expect(ref).not.toBeNull()
+    const rect = container.querySelector(`[id="${ref![1]}"] rect`) as SVGRectElement
+    const box = fuelCaptions('port').total
+    expect([rect.getAttribute('x'), rect.getAttribute('y'), rect.getAttribute('width'), rect.getAttribute('height')].map(Number))
+      .toEqual([box.x, box.y, box.w, box.h])
+    expect(group.querySelector('[data-testid="fuel-total"]')).not.toBeNull()
+    expect(group.querySelector('[data-testid="fuel-capacity"]')).not.toBeNull()
+  })
+
+  test('a one-tank fan clips to its own caption box, and both lines sit inside it', () => {
+    const one = { ...fuel, bars: fuel.bars.slice(0, 1) }
+    const { container } = renderCluster({ ...full, fuel: one })
+    const group = container.querySelector('[data-fuel-total-group]') as SVGGElement
+    const id = /^url\(#(.+)\)$/.exec(group.getAttribute('clip-path') ?? '')![1]
+    const rect = container.querySelector(`[id="${id}"] rect`) as SVGRectElement
+    const box = fuelCaptions('port', 1).total
+    expect(Number(rect.getAttribute('x'))).toBe(box.x)
+    for (const text of group.querySelectorAll(':scope > text')) {
+      const y = Number(text.getAttribute('y'))
+      expect(y).toBeGreaterThan(box.y)
+      expect(y).toBeLessThanOrEqual(box.y + box.h)
+    }
   })
 })
 
