@@ -462,6 +462,10 @@ func TestPatchAnchorWatch_PositionClearsPlaceNameAndResolvesFreshForTheNewPoint(
 		defer anchorWatchMu.RUnlock()
 		return anchorWatchState != nil && anchorWatchState.PlaceName == "Old Place"
 	})
+	// The name lands in memory before the save that still holds the
+	// single-flight guard; a PATCH in that window has its resolve turned away
+	// and no tick runs here to retry it.
+	waitForPlaceNameResolveIdle(t)
 
 	// Reconfigure the provider so a place name landing after the PATCH can
 	// only be the fresh resolve this fix is supposed to start, not a stale
@@ -483,6 +487,9 @@ func TestPatchAnchorWatch_PositionClearsPlaceNameAndResolvesFreshForTheNewPoint(
 		defer anchorWatchMu.RUnlock()
 		return anchorWatchState != nil && anchorWatchState.PlaceName == "New Place"
 	})
+	// Same window at the end: let the PATCH's resolve finish saving before
+	// t.TempDir() is removed under it.
+	waitForPlaceNameResolveIdle(t)
 }
 
 // Test (code-review finding, round 2): Undo re-sends the pre-Adjust position
