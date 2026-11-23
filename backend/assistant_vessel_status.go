@@ -399,6 +399,21 @@ func describeAge(d time.Duration) string {
 	return fmt.Sprintf("%d days", int(d.Hours()/24))
 }
 
+// durationText is a span as a plan leg's comfort chip says it: minutes under an
+// hour, else hours and any minutes.
+func durationText(d time.Duration) string {
+	m := int(math.Round(d.Minutes()))
+	switch {
+	case m < 1:
+		return "under a minute"
+	case m < 60:
+		return fmt.Sprintf("%d min", m)
+	case m%60 == 0:
+		return fmt.Sprintf("%d h", m/60)
+	}
+	return fmt.Sprintf("%d h %d min", m/60, m%60)
+}
+
 // staleReason is the reason a reading of this age is not given.
 func staleReason(age time.Duration, known bool) string {
 	if !known {

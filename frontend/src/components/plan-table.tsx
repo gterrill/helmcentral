@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Map as MapIcon, Plus } from "lucide-react";
 
+import { PlanComfortChip } from "@/components/plan-comfort-chip";
 import { PlanLegMap } from "@/components/plan-leg-map";
 import { Button } from "@/components/ui/button";
 import { FORECAST_REFRESH_SECONDS } from "@/config/app-config";
@@ -382,18 +383,23 @@ function buildRowAssessments(
 function Cell({
   label,
   className = "",
+  block = false,
   children,
 }: {
   label: string;
   className?: string;
+  /** Content that is itself blocks: the label sits above it, not beside it. */
+  block?: boolean;
   children: ReactNode;
 }) {
   return (
     <div role="cell" className={`min-w-0 ${className}`}>
-      <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground @[72rem]:hidden">
+      <span
+        className={`${block ? "block" : "mr-1.5"} text-[10px] font-medium uppercase tracking-wider text-muted-foreground @[72rem]:hidden`}
+      >
         {label}
       </span>
-      <span className="text-sm tabular-nums">{children}</span>
+      {block ? <div>{children}</div> : <span className="text-sm tabular-nums">{children}</span>}
     </div>
   );
 }
@@ -592,6 +598,7 @@ const PlanDayRow = memo(function PlanDayRow({
   onAddNight: (stopIndex: number) => void;
 }) {
   const [mapOpen, setMapOpen] = useState(false);
+  const [comfortOpen, setComfortOpen] = useState(false);
   const passage = row.kind === "passage";
   const from = plan.stops[passage ? row.legIndex : row.stopIndex];
   const to = passage ? plan.stops[row.legIndex + 1] : null;
@@ -797,6 +804,12 @@ const PlanDayRow = memo(function PlanDayRow({
           </p>
         )}
       </div>
+
+      {passage && assessed.leg?.comfort && (
+        <Cell label="Comfort" block className="@[72rem]:col-start-3 @[72rem]:col-span-8">
+          <PlanComfortChip comfort={assessed.leg.comfort} open={comfortOpen} onToggle={() => setComfortOpen((v) => !v)} />
+        </Cell>
+      )}
 
       {mapOpen && hasMap && leg && to && (
         <div className="mt-2 @[72rem]:col-span-10">

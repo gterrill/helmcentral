@@ -368,6 +368,32 @@ Current or Verdict:
   figures, and then the cell shows a dash with the reason when you hover over
   it. A missing reading is never shown as zero. The model covers about sixteen
   days, and the figure is read for the time you leave.
+- **Comfort.** Under a passage row that has a verdict, a line says how the leg
+  should feel at the time it's judged for, for example "Lively for the first 2
+  h: roll, swell 0.6 m 4 s on the port bow. Then Comfortable." It comes from how
+  your own boat moved in the seas she has recorded, and from the words you gave
+  your passages when you rated them, so it only speaks once Helmcentral has
+  learned both. Until the bands are learned, the line says "Comfort not learned
+  yet" and gives the roughest sea, with no word on it. The word is never a
+  colour, because Go, Marginal and No-Go are about your limits and this is about
+  the ride. The line under it gives the most snap and pounding of the leg. Tap the line to see every hour.
+  - **Sheltered water.** The wind wave is cut to what the wind can build over
+    the fetch upwind of where the boat will be that hour, worked out from the
+    Offline coastline. A swell inside enclosed water isn't judged, and the hour
+    says so. Turn the coastline on in **Settings → Offline coastline**, or the
+    hours say they weren't checked.
+  - **Where it says it can't.** An hour with no wave figure, a forecast from an
+    older wave plugin, a position charted ashore (a berth in a marina can be) or
+    a model learned on another wave model says why and gets no word. It never
+    reads as Comfortable.
+  - **Beyond what you've recorded.** With no "Shouldn't have gone" passage
+    rated yet, a sea rougher than any you rated reads "Lively, rougher than any
+    recorded passage". A sea steeper than any in your record adds "in seas
+    steeper than any recorded passage", even when the sway is mild, because the
+    figure is a stretch beyond what the boat has shown.
+  - **Where it stops.** It's worked out for the time the verdict is judged at,
+    not for every time that day, and Mate doesn't quote it yet. Snap needs your
+    helm height under **Settings, Vessel**.
 - **Verdict.** Each passage row ends with Go, Marginal, No-Go or No data, and
   names what decided it, like "No-Go: gusts 32 kn ahead". Helmcentral works it
   out with the same rules as Mate's passage window check, against the limits you

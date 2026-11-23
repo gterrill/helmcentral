@@ -792,6 +792,38 @@ func lastHour(hours map[int64]passageHour) int64 {
 	return last
 }
 
+// legHour is one forecast stamp of a leg walked hour by hour.
+type legHour struct {
+	t        time.Time
+	lat, lon float64
+	seg      passageSegment
+	hour     passageHour
+	have     bool
+	point    passagePointHours
+}
+
+// walkLegHours yields each hourly stamp from the hour containing from up to, and
+// not including, until, with the leg's position at that stamp reckoned over the
+// real span legDepart to legArrive.
+func (as *passageAssessor) walkLegHours(plan passageLegPlan, legDepart, legArrive, from, until time.Time, yield func(legHour) error) error {
+	for t := from.Truncate(time.Hour); t.Before(until); t = t.Add(time.Hour) {
+		frac := 0.0
+		if legArrive.After(legDepart) {
+			frac = float64(t.Sub(legDepart)) / float64(legArrive.Sub(legDepart))
+		}
+		lat, lon, seg := plan.at(frac)
+		point, err := as.hoursAt(plan.nearestSample(lat, lon))
+		if err != nil {
+			return err
+		}
+		h, have := point.hours[t.Unix()]
+		if err := yield(legHour{t: t, lat: lat, lon: lon, seg: seg, hour: h, have: have, point: point}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // cell judges one leg leaving at depart, reading its days in loc. Its errors
 // carry no tool name; the caller adds its own.
 func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time, loc *time.Location) (passageWindowCell, error) {
@@ -841,24 +873,15 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 	if lastStamp.Before(arrive) {
 		lastStamp = lastStamp.Add(time.Hour)
 	}
-	for t := depart.Truncate(time.Hour); !t.After(lastStamp); t = t.Add(time.Hour) {
-		frac := 0.0
-		if arrive.After(depart) {
-			frac = float64(t.Sub(depart)) / float64(arrive.Sub(depart))
-		}
-		lat, lon, seg := plan.at(frac)
-		point, err := as.hoursAt(plan.nearestSample(lat, lon))
-		if err != nil {
-			return cell, err
-		}
-		h, ok := point.hours[t.Unix()]
+	walkErr := as.walkLegHours(plan, depart, arrive, depart, lastStamp.Add(time.Hour), func(lh legHour) error {
+		t, seg, point, h, ok := lh.t, lh.seg, lh.point, lh.hour, lh.have
 		if !ok {
 			// An hour past the last the forecast has is a leg further ahead than
 			// it reaches; one before it is a hole in the data, and so is every
 			// hour of a point whose forecast came back with none.
 			missing, gap = true, gap || point.last == 0 || t.Unix() <= point.last
 			tally.gap(t, depart, arrive)
-			continue
+			return nil
 		}
 		// Judged at the precision the card prints, so what the operator
 		// reads is what was compared with the limit.
@@ -870,7 +893,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		windFrom := degreesToDirection(h.WindDirDeg)
 		lim := as.limits.sector(sector)
 		if lim.WindKnNoGo == nil {
-			return cell, fmt.Errorf("Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
+			return fmt.Errorf("Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
 		}
 		windNoGo := *lim.WindKnNoGo
 		sev, ratio := judge(windKn, rawWindKn, windNoGo)
@@ -934,7 +957,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 				if angleBetween(set, h.WindDirDeg) <= passageWindowTideWindowDeg {
 					tideNoGo := windNoGo - *as.limits.WindAgainstTideOffsetKn
 					if tideNoGo <= 0 {
-						return cell, fmt.Errorf("the wind against tide reduction (%g kn) is not below the %s no-go wind (%g kn). Fix it in Settings → Mate → Passage limits", *as.limits.WindAgainstTideOffsetKn, sector, windNoGo)
+						return fmt.Errorf("the wind against tide reduction (%g kn) is not below the %s no-go wind (%g kn). Fix it in Settings → Mate → Passage limits", *as.limits.WindAgainstTideOffsetKn, sector, windNoGo)
 					}
 					sev, ratio := judge(windKn, rawWindKn, tideNoGo)
 					consider(passageCandidate{sev, ratio, "wind_against_tide", "",
@@ -943,6 +966,10 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 				}
 			}
 		}
+		return nil
+	})
+	if walkErr != nil {
+		return cell, walkErr
 	}
 
 	if as.limits.DaylightArrival {

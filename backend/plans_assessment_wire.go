@@ -116,6 +116,10 @@ func (m *planForecastMemo) keep(key string, now time.Time, f passageForecast) {
 	m.m[key] = planForecastMemoEntry{at: now, f: f}
 }
 
+// errPassageStoreNotRunning is what a comfort reader says when the recorded
+// passages it learns from are not there: the leg says so, and is not "not learned".
+var errPassageStoreNotRunning = errors.New("the passage store is not running")
+
 // planAssessDepsFromTool wires the providers and the clock d carries, the boat's
 // recorded speed, the fair-tide ranking and the modelled current. A run whose
 // tool deps are pinned or replayed assesses on that clock and those providers.
@@ -168,6 +172,23 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 		},
 		keptSuggestion: func(planID int64, legKey, day string, loc *time.Location) (time.Time, bool, error) {
 			return globalDocumentStore.KeptSuggestion(planID, legKey, day, loc)
+		},
+		comfort: &planComfortDeps{
+			model: func() (*comfortModelSet, error) {
+				if globalPassageStore == nil {
+					return nil, errPassageStoreNotRunning
+				}
+				return globalPassageStore.comfort.Load(), nil
+			},
+			bands: func() (comfortBands, error) {
+				if globalPassageStore == nil {
+					return comfortBands{}, errPassageStoreNotRunning
+				}
+				return globalPassageStore.ComfortBands()
+			},
+			helmHeight: currentHelmHeight,
+			loader:     func() *coastlineLoader { return offlineCoastlineReaderFor(settingsPath)().newLoader() },
+			memo:       legFetchGeometries,
 		},
 		sun:          sunTimes,
 		dawn:         civilDawn,

@@ -748,6 +748,9 @@ type seaTrain struct {
 	// Unchecked says a swell kept the model's figure because the shore could not be
 	// read to judge it for enclosed water; Note says why.
 	Unchecked bool `json:"unchecked,omitempty"`
+	// ashore says the swell was not checked because the position is charted
+	// ashore; Unchecked is set with it.
+	ashore bool
 	// Note is what the check made of the train, in the words the page shows after
 	// its figures (wind wave) or in their place (enclosed swell). Empty when no
 	// check was made.

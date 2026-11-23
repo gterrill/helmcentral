@@ -100,6 +100,8 @@ type fetchCheck struct {
 	Reason string `json:"reason,omitempty"`
 	// Caveat is what the limit depends on, when the wave was checked.
 	Caveat string `json:"caveat,omitempty"`
+	// Ashore says the wave was not checked because the position is charted ashore.
+	Ashore bool `json:"-"`
 }
 
 // note is the check in the words the page shows after the wind wave's figures.
@@ -361,12 +363,35 @@ func (g *fetchGeometry) ray(kind string, dd int) rayResult {
 // changed: a capped wind wave carries the model's own beside the capped one. A
 // spell with no sea is left as it is.
 func judgeSea(sp feltSpell, sea *spellSea, src raySource) {
+	judgeSeaWind(spellWind(sp), sea, src)
+}
+
+// windInput is the wind a wind wave is checked against: the wind kept with a
+// recorded spell, or the forecast's for an hour of a leg. Kept says the wind was
+// known at all; a spell stored before the wind was kept has none to judge by.
+type windInput struct {
+	kept       bool
+	kts        *float64
+	fromDeg    *float64
+	dirMissing string
+	// span names what the wind was taken over, "spell" or "hour", for the reasons
+	// that say so.
+	span string
+}
+
+// spellWind is the wind kept with a recorded spell.
+func spellWind(sp feltSpell) windInput {
+	return windInput{kept: sp.WindKept, kts: sp.WindKts, fromDeg: sp.WindFromDeg, dirMissing: sp.WindDirMissing, span: "spell"}
+}
+
+// judgeSeaWind is judgeSea for the wind given.
+func judgeSeaWind(wind windInput, sea *spellSea, src raySource) {
 	if sea.Reason != "" || (sea.Swell == nil && sea.WindWave == nil) {
 		return
 	}
 	rays := sync.OnceValues(src)
 	if w := sea.WindWave; w != nil {
-		w.Fetch = checkWindWave(sp, w, rays)
+		w.Fetch = checkWindWave(wind, w, rays)
 		w.Note = w.Fetch.note()
 	}
 	if s := sea.Swell; s != nil {
@@ -381,7 +406,7 @@ func judgeSea(sp feltSpell, sea *spellSea, src raySource) {
 		case why != "":
 			s.Unchecked, s.Note = true, swellUncheckedNote+why
 		case res.OnLand:
-			s.Unchecked, s.Note = true, swellUncheckedNote+reasonAshore
+			s.Unchecked, s.ashore, s.Note = true, true, swellUncheckedNote+reasonAshore
 		case !res.Open:
 			s.Enclosed, s.Note = true, swellEnclosedNote
 		}
@@ -429,25 +454,25 @@ func joinMissingPlain(missing []missingSquare) string {
 // checkWindWave checks a spell's wind wave against its fetch and, when the shore
 // caps it, replaces its figures with the cap. It asks for the rays only after the
 // wind itself is known to be usable.
-func checkWindWave(sp feltSpell, w *seaTrain, rays raySource) *fetchCheck {
+func checkWindWave(wind windInput, w *seaTrain, rays raySource) *fetchCheck {
 	c := &fetchCheck{}
 	unchecked := func(reason string) *fetchCheck {
 		c.Check, c.Reason = seaCheckUnchecked, reason
 		return c
 	}
 	switch {
-	case !sp.WindKept:
-		return unchecked("this spell was stored before wind was kept")
-	case sp.WindKts == nil:
-		return unchecked("no true wind was recorded for this spell")
+	case !wind.kept:
+		return unchecked("this " + wind.span + " was stored before wind was kept")
+	case wind.kts == nil:
+		return unchecked("no true wind was recorded for this " + wind.span)
 	}
-	tws := *sp.WindKts
+	tws := *wind.kts
 	c.WindKts = &tws
 	calm := tws < fetchCalmKts
 	c.Calm = calm
-	if !calm && sp.WindFromDeg == nil {
-		if sp.WindDirMissing == windDirVaried {
-			return unchecked("the wind direction varied too much during the spell")
+	if !calm && wind.fromDeg == nil {
+		if wind.dirMissing == windDirVaried {
+			return unchecked("the wind direction varied too much during the " + wind.span)
 		}
 		return unchecked("no wind direction was recorded; it needs the heading and the wind angle")
 	}
@@ -458,13 +483,14 @@ func checkWindWave(sp feltSpell, w *seaTrain, rays raySource) *fetchCheck {
 	// A calm has no direction, and its one row is kept under bearing 0.
 	kind, bearing := fetchKindCalm, 0.0
 	if !calm {
-		kind, bearing = fetchKindWind, *sp.WindFromDeg
+		kind, bearing = fetchKindWind, *wind.fromDeg
 	}
 	res, why := get(kind, bearing)
 	switch {
 	case why != "":
 		return unchecked(why)
 	case res.OnLand:
+		c.Ashore = true
 		return unchecked(reasonAshore)
 	case res.Open:
 		c.Check = seaCheckOpen
