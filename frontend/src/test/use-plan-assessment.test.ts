@@ -35,13 +35,13 @@ const API_ASSESSMENT = {
   legs: [
     {
       leg: 0, date: "2026-11-14", verdict: "no_go", limiting: "gusts 32 kn ahead", note: "", note_kind: "",
-      depart: "2026-11-14T06:30:00+10:00", depart_suggested: false, arrive: "2026-11-14T11:30:00+10:00",
+      depart: "2026-11-14T06:30:00+10:00", depart_suggested: false, depart_basis: null, arrive: "2026-11-14T11:30:00+10:00",
       hours: 5, speed_kn: 6, current_kn: -0.8, current_note: "", not_checked: ["wave"],
       wind_changes: { changes: [], not_checked: "" },
     },
     {
       leg: 1, date: "2026-11-15", verdict: "", limiting: "", note: "No daylight window", note_kind: "no_window",
-      depart: "", depart_suggested: false, arrive: "", hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
+      depart: "", depart_suggested: false, depart_basis: null, arrive: "", hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
       wind_changes: { changes: [], not_checked: "" },
     },
   ],
@@ -131,6 +131,13 @@ describe("mapAssessment", () => {
     expect(a.stops[0]).toEqual({ stop: 1, nights: [{ date: "2026-11-14", warning: "Gale Warning", url: "https://example.test/w" }] });
   });
 
+  it("reads depart_basis as its words, or null", () => {
+    const basis = "Chosen for comfort: Comfortable throughout, then the fairest stream of 6 alike.";
+    const raw = { ...API_ASSESSMENT, legs: [{ ...API_ASSESSMENT.legs[0], depart_basis: basis }, API_ASSESSMENT.legs[1]] };
+    const a = mapAssessment(raw as never);
+    expect(a.legs.map((l) => l.departBasis)).toEqual([basis, null]);
+  });
+
   it("keeps the window-passed note kind as itself, not as other", () => {
     const raw = { ...API_ASSESSMENT, legs: [{ ...API_ASSESSMENT.legs[1], note: "Today's window has passed", note_kind: "window_passed" }] };
     expect(mapAssessment(raw as never).legs[0].noteKind).toBe("window_passed");
@@ -143,7 +150,7 @@ describe("mapAssessment", () => {
 
 describe("verdictText and currentText", () => {
   const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
-    leg: 0, date: "2026-11-14", key: "k", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
+    leg: 0, date: "2026-11-14", key: "k", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, departBasis: null, arrive: null,
     hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
     windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
   });

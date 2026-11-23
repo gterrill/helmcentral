@@ -358,6 +358,35 @@ Current or Verdict:
   - Every time a No-Go: it shows the least bad one, and its verdict says No-Go.
     It never hides a bad time.
 
+  Among the Go times, or the Marginal ones when none is Go, it picks the
+  calmest ride before it looks at the stream. It works out how each time would
+  feel, hour by hour, the way the Comfort line does, and prefers:
+
+  1. The time whose roughest hour is the calmest.
+  2. Then the fewest whole hours at that roughest. Any time in it counts as at
+     least an hour.
+  3. Then no hours in seas steeper than any you've recorded.
+  4. Then the fairest stream.
+
+  A line under the suggested time says what it was chosen on, for example
+  "Chosen for comfort: Lively for 1 h instead of 3 h."
+
+  - **Harbour ends.** Hours it can't judge at the start or end of the leg, such
+    as getting out of a harbour or into one, are left out, and the line adds
+    "Not judged leaving and entering harbour." A berth the chart puts ashore is
+    left out the same way, without that sentence.
+  - **Other gaps at an end.** If an end hour is missing for some other reason,
+    such as no forecast figure for it, the line doesn't call it harbour. It
+    says how long and why, like "Not judged for the last 2 h: the forecast has
+    no figure for this hour, so comfort can't be judged."
+  - **Gaps mid-leg.** A time with an hour it can't judge in the middle of the
+    leg, including a position the chart puts ashore, never beats one it could
+    judge. Neither does a time whose forecast couldn't be read. The line then ends with how many times were left out and why, like "2 of 8 times
+    not judged: the comfort check ran out of time."
+  - **No ranking.** When comfort can't rank the times, because it isn't learned
+    yet or took too long, the line says why and the time with the fairest
+    stream stands.
+
   If no time fits the daylight, the row says "No daylight window" and shows no
   time and no verdict. If the departures can't be ranked, for example because
   the current model has no figures near the shore, the row says no departure was
@@ -391,9 +420,12 @@ Current or Verdict:
     recorded passage". A sea steeper than any in your record adds "in seas
     steeper than any recorded passage", even when the sway is mild, because the
     figure is a stretch beyond what the boat has shown.
-  - **Where it stops.** It's worked out for the time the verdict is judged at,
-    not for every time that day, and Mate doesn't quote it yet. Snap needs your
-    helm height under **Settings, Vessel**.
+  - **Where it stops.** It's worked out for the time the verdict is judged at.
+    For a suggested time that's the calmest one, found as described above. A
+    time you set is judged as you set it, and Helmcentral never moves it. Mate
+    doesn't quote the Comfort line yet, and the times Mate suggests still go by
+    the fairest stream alone. Snap needs your helm height under **Settings,
+    Vessel**.
 - **Verdict.** Each passage row ends with Go, Marginal, No-Go or No data, and
   names what decided it, like "No-Go: gusts 32 kn ahead". Helmcentral works it
   out with the same rules as Mate's passage window check, against the limits you

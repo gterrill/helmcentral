@@ -70,12 +70,15 @@ type planReportLeg struct {
 	Note            string   `json:"note,omitempty"`
 	Depart          string   `json:"depart,omitempty"`
 	DepartSuggested bool     `json:"depart_suggested,omitempty"`
-	Arrive          string   `json:"arrive,omitempty"`
-	Hours           *float64 `json:"hours,omitempty"`
-	SpeedKn         *float64 `json:"speed_kn,omitempty"`
-	CurrentKn       *float64 `json:"current_kn,omitempty"`
-	CurrentNote     string   `json:"current_note,omitempty"`
-	NotChecked      []string `json:"not_checked,omitempty"`
+	// DepartBasis says what a suggested departure was chosen on. get_plans does not
+	// rank for comfort, so it says the current alone chose it (ADR 0303).
+	DepartBasis string   `json:"depart_basis,omitempty"`
+	Arrive      string   `json:"arrive,omitempty"`
+	Hours       *float64 `json:"hours,omitempty"`
+	SpeedKn     *float64 `json:"speed_kn,omitempty"`
+	CurrentKn   *float64 `json:"current_kn,omitempty"`
+	CurrentNote string   `json:"current_note,omitempty"`
+	NotChecked  []string `json:"not_checked,omitempty"`
 	// WindChanges are the changes in the wind between the departure and the
 	// arrival, as the table shows them: Label is already the boat clock.
 	WindChanges planWindChanges `json:"wind_changes"`
@@ -363,6 +366,11 @@ func planReportLegOf(p plan, l planLegAssessment, routed planLeg) (planReportLeg
 		Progress: l.Progress, StillInPort: l.StillInPort, Verdict: l.Verdict, Limiting: l.Limiting, Note: l.Note,
 		Depart: depart, DepartSuggested: l.DepartSuggested, Arrive: arrive, Hours: l.Hours, SpeedKn: l.SpeedKn,
 		CurrentKn: l.CurrentKn, CurrentNote: l.CurrentNote, NotChecked: l.NotChecked, WindChanges: l.WindChanges,
+	}
+	// A leg with no Go or Marginal time was chosen closest to its limit, not by the
+	// current, so it has no basis to give.
+	if l.DepartSuggested && (l.Verdict == "go" || l.Verdict == "marginal") {
+		out.DepartBasis = planReportDepartBasis
 	}
 	if routed.Error != "" {
 		out.RouteError = routed.Error

@@ -170,7 +170,7 @@ func TestPlanComfortRun_ReadsTheModelBandsAndHelmHeightOnlyWhenALegNeedsThem(t *
 			return ptr(2.0), nil
 		},
 		loader: func() *coastlineLoader { return nil },
-		memo:   newCountedMemo(fetchGeoBudgetSegments),
+		memo:   newCountedMemo(shoreRayEntries),
 	}
 	run := newPlanComfortRun(nil, planEnv{now: paAt(14, 9, 0)}, d) // both legs' ETAs have passed: no walk
 	if got := run.leg(context.Background(), &planLegWork{res: &planLegAssessment{}}); got != nil || reads != 0 {

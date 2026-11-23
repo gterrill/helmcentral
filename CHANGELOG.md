@@ -158,6 +158,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A suggested departure on a passage plan now goes to the calmest ride, then
+  the fairest stream.** Among the Go times for a leg, or the Marginal ones when
+  none is Go, Helmcentral works out how each would feel and picks the time whose
+  roughest hour is the calmest, with the fewest whole hours in it. The stream
+  settles a tie. A small line under the suggested time says why it was chosen,
+  for example "Chosen for comfort: Lively for 1 h instead of 3 h." When some
+  times couldn't be judged, the line says how many. When comfort can't rank the
+  times, because it isn't learned yet, the wave forecast can't be judged yet or
+  the check took too long, the line says so and the time with the fairest
+  stream stands. Go, Marginal and No-Go don't change, a time you set is never
+  moved, and Mate's suggested departures still go by the stream alone.
 - **The engine cluster's fuel gauge is easier to read.** The percentage for
   each tank sits under its arc, and the total shows with its capacity below it.
   The scale is now labelled every 20 percent. On the instrument skin the fills

@@ -117,8 +117,8 @@ func TestLegComfort_PredictsEachJudgedHourOnce(t *testing.T) {
 	}
 }
 
-// E1, E4: a leg that comes back over its own positions, in a memo that holds one
-// geometry, still builds each position once and asks the memo once for each.
+// E1, E4: a leg that comes back over its own positions, in a memo that holds one ray
+// result, still builds each position once.
 func TestLegComfort_AnOutAndBackLegBuildsEachPositionOnceEvenInATinyMemo(t *testing.T) {
 	a, b := fetchPt(-1, 0), fetchPt(1, 0)
 	route := []passageRoutePoint{{Lat: a.Lat, Lon: a.Lon}, {Lat: b.Lat, Lon: b.Lon}, {Lat: a.Lat, Lon: a.Lon}}
@@ -145,9 +145,6 @@ func TestLegComfort_AnOutAndBackLegBuildsEachPositionOnceEvenInATinyMemo(t *test
 	if got := memo.builtCount(); got != len(distinct) {
 		t.Errorf("built %d geometries for %d distinct positions", got, len(distinct))
 	}
-	if got := memo.lookupCount(); got != len(distinct) {
-		t.Errorf("asked the memo %d times for %d distinct positions", got, len(distinct))
-	}
 }
 
 func sign(x float64) float64 {
@@ -160,7 +157,7 @@ func sign(x float64) float64 {
 // E2: a square's lines are read once, however many new positions lie in it.
 func TestFetchGeoMemo_ReadsASquaresLinesOnceWhateverTheNextPositions(t *testing.T) {
 	reader := fetchReader(t)
-	memo := newCountedMemo(fetchGeoBudgetSegments)
+	memo := newCountedMemo(shoreRayEntries)
 	lcRunMemo(t, lcIn{reader: reader, memo: memo, hours: lcHours(lcHour(0.5, 0), lcHour(0.5, 0))})
 	first := memo.readCount()
 	if first == 0 || memo.builtCount() == 0 {
@@ -176,41 +173,8 @@ func TestFetchGeoMemo_ReadsASquaresLinesOnceWhateverTheNextPositions(t *testing.
 	}
 }
 
-// E1: the memo is sized by what it holds. A position with no shore costs one; a
-// geometry of many segments costs that many; the newest is always kept.
-func TestFetchGeoMemo_IsSizedBySegmentsNotByEntries(t *testing.T) {
-	memo := newCountedMemo(10)
-	key := func(n int) fetchGeoMemoKey { return fetchGeoMemoKey{latE3: n, stamp: "s"} }
-	build := func(segs int) func() (*fetchGeometry, error) {
-		return func() (*fetchGeometry, error) { return &fetchGeometry{segs: make([]shelterSegment, segs)}, nil }
-	}
-	for n := 1; n <= 10; n++ { // ten positions with no shore fill a budget of ten
-		memo.get(context.Background(), key(n), build(0))
-	}
-	for n := 1; n <= 10; n++ {
-		memo.get(context.Background(), key(n), build(0))
-	}
-	if got := memo.builtCount(); got != 10 {
-		t.Fatalf("ten empty positions in a budget of ten: %d builds", got)
-	}
-	memo.get(context.Background(), key(100), build(8)) // eight segments push out the eight oldest
-	memo.get(context.Background(), key(100), build(8))
-	if got := memo.builtCount(); got != 11 {
-		t.Fatalf("the heavy geometry was not kept: %d builds", got)
-	}
-	memo.get(context.Background(), key(1), build(0))
-	if got := memo.builtCount(); got != 12 {
-		t.Errorf("the oldest should have gone to make room: %d builds", got)
-	}
-	memo.get(context.Background(), key(200), build(500)) // heavier than the whole budget: kept alone
-	memo.get(context.Background(), key(200), build(500))
-	if got := memo.builtCount(); got != 13 {
-		t.Errorf("a geometry over the budget was not kept alone: %d builds", got)
-	}
-}
-
 // E1: a request that judges the same positions again, in a memo that cannot hold
-// them, builds nothing twice, since the request remembers the positions it has read.
+// them, builds nothing twice, since the request remembers the rays it has cast.
 func TestLegComfort_OneRequestNeverBuildsAPositionTwiceEvenWhenTheSharedMemoCycles(t *testing.T) {
 	memo := newCountedMemo(1)
 	reader := fetchReader(t)
@@ -231,7 +195,7 @@ func TestLegComfort_OneRequestNeverBuildsAPositionTwiceEvenWhenTheSharedMemoCycl
 // square downloaded again is.
 func TestSquareLinesCache_FollowsTheStateOfTheSquare(t *testing.T) {
 	reader := fetchReader(t)
-	memo := newCountedMemo(fetchGeoBudgetSegments)
+	memo := newCountedMemo(shoreRayEntries)
 	hours := lcHours(lcHour(0.5, 0), lcHour(0.5, 0))
 	lcRunMemo(t, lcIn{reader: reader, memo: memo, hours: hours})
 	first := memo.readCount()

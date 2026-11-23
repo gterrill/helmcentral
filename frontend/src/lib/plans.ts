@@ -160,6 +160,12 @@ export interface PlanLegAssessment {
   noteKind: PlanNoteKind;
   depart: string | null;
   departSuggested: boolean;
+  /**
+   * Why a suggested departure is the one chosen, worded by the server: ranked for
+   * comfort, or why comfort could not rank it (ADR 0303). Null when the departure is
+   * the operator's, comfort was not asked for, or the leg had nothing to rank.
+   */
+  departBasis: string | null;
   arrive: string | null;
   hours: number | null;
   speedKn: number | null;

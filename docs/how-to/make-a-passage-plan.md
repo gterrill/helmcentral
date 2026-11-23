@@ -84,7 +84,13 @@ page says the limits aren't set and shows no verdicts.
 2. Look at **Depart → ETA**. A time in plain type is the one you set with
    **Leave at**. A time in italics, like "Suggested 6.40 AM", is Helmcentral's
    suggestion, and the verdict is judged at that time. It's the Go time with the
-   fairest stream, or a Marginal one when no time is Go. When every time that
+   calmest ride, or a Marginal one when no time is Go, and the fairest stream
+   settles a tie. A small line under it says what it was chosen on, for example
+   "Chosen for comfort: Lively for 1 h instead of 3 h." If the line ends "Not
+   judged leaving and entering harbour", the hours at the harbour ends were left
+   out and the time was chosen on the rest. When comfort can't rank
+   the times, that line says why, and the time with the fairest stream stands.
+   When every time that
    day is a No-Go, it shows the least bad one, and the verdict says No-Go. To use
    another, choose **Change plan** and set **Leave at**. Helmcentral never moves
    a time you set. The arrival comes from the speed your boat made on the

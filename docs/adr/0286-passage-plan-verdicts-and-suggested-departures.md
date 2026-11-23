@@ -116,6 +116,10 @@ If every departure is a No-Go, the plan shows the least bad one, the one whose
 worst figure stands closest to its limit, with its No-Go verdict. A bad time is
 shown as bad and never hidden. The plan walks the ranking from the fairest
 current down and stops at the first Go, so a fair day judges one departure.
+*Amended by [ADR 0303](0303-a-suggested-departure-is-ranked-by-comfort-then-current.md):
+when the plan page asks for comfort, every departure is judged and the best
+verdict's departures are ranked by comfort before the current. With comfort off the
+walk stops at the first Go as described here.*
 
 Plans carry no flood direction, so the tide phase method cannot rank, and the
 ranking says so in the operator's words. When the model has no current for the

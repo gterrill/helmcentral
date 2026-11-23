@@ -436,6 +436,10 @@ function departEtaText(
   return { text: "—", suggested: false };
 }
 
+/** What a suggested time means, whatever the line under it says: the choice is by the verdict, then, when comfort is checked, the ride, then the current. */
+const SUGGESTED_DEPARTURE_TITLE =
+  "Suggested: no departure time is set. The best verdict inside daylight (Go over Marginal, No-Go only when every time is No-Go), then, when comfort is checked, the calmest ride, then the fairest stream.";
+
 function DepartEtaCell({
   passage,
   a,
@@ -455,18 +459,22 @@ function DepartEtaCell({
   if (!passage || a?.progress) return <Cell label="Depart → ETA">—</Cell>;
   const { text, suggested } = departEtaText(a, fromZone, toZone, operatorTime);
   const waiting = text === "—" && a === undefined && state === "loading";
+  // The server says what a suggested time was chosen on (ADR 0303), shown under the
+  // time; the tooltip is always the general account of how the time is picked.
+  const basis = suggested ? (a?.departBasis ?? null) : null;
   return (
     <Cell label="Depart → ETA">
       <span
         className={`block break-words ${suggested ? "italic text-muted-foreground" : ""}`}
-        title={
-          suggested
-            ? "Suggested: no departure time is set. The best verdict inside daylight (Go over Marginal, No-Go only when every time is No-Go), then the fairest stream."
-            : undefined
-        }
+        title={suggested ? SUGGESTED_DEPARTURE_TITLE : undefined}
       >
         {waiting ? "…" : text}
       </span>
+      {basis !== null && (
+        <span className="block break-words text-xs not-italic text-muted-foreground">
+          {basis}
+        </span>
+      )}
     </Cell>
   );
 }

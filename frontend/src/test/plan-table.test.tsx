@@ -42,7 +42,7 @@ const leg = (from: number): PlanLeg => ({
 });
 
 const legAssessment = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
-  leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, arrive: null,
+  leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, departBasis: null, arrive: null,
   hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [],
   windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
@@ -128,6 +128,47 @@ describe("PlanTable verdicts", () => {
     expect(passage).toHaveTextContent("No-Go: gusts 32 kn ahead");
     expect(passage).toHaveTextContent("Suggested 6.40 AM → 11.40 AM");
     expect(passage).toHaveTextContent("0.8 kn hindering");
+  });
+
+  it("says under a suggested time what it was chosen on, and in its tooltip", () => {
+    const basis = "Chosen for comfort: Lively for 1 h instead of 3 h, then the fairest stream.";
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T06:40:00+10:00", departSuggested: true, departBasis: basis,
+            arrive: "2026-11-14T11:40:00+10:00",
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+      }),
+    );
+    const line = within(rows()[0]).getByText(basis);
+    // The whole line shows, wrapped: a phone has no tooltip to read the rest in.
+    expect(line).toHaveClass("text-muted-foreground", "break-words");
+    expect(line).not.toHaveClass("truncate");
+    const time = within(rows()[0]).getByText("Suggested 6.40 AM → 11.40 AM");
+    // The tooltip is the general account, not the line shown again.
+    expect(time.getAttribute("title")).toMatch(/the calmest ride, then the fairest stream\.$/);
+    expect(time.getAttribute("title")).not.toContain(basis);
+  });
+
+  it("keeps the fixed account of a suggested time when the server gives no basis", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T06:40:00+10:00", departSuggested: true, departBasis: null,
+            arrive: "2026-11-14T11:40:00+10:00",
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+      }),
+    );
+    const time = within(rows()[0]).getByText("Suggested 6.40 AM → 11.40 AM");
+    expect(time.getAttribute("title")).toMatch(/the calmest ride, then the fairest stream\.$/);
+    expect(rows()[0]).not.toHaveTextContent("Chosen for comfort");
+    expect(rows()[0]).not.toHaveTextContent("Not chosen for comfort");
   });
 
   it("shows the operator's own time as plain, not as a suggestion", () => {

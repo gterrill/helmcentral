@@ -87,12 +87,12 @@ func TestLegComfort_StopsAtTheRequestDeadlineAndSaysSoForTheHoursItDidNotReach(t
 }
 
 // 2: a reader waiting for another request's build stops when its own request is done.
-func TestFetchGeoMemo_AWaiterStopsWaitingWhenItsRequestIsDone(t *testing.T) {
+func TestShoreRayMemo_AWaiterStopsWaitingWhenItsRequestIsDone(t *testing.T) {
 	memo := newCountedMemo(8)
-	k := fetchGeoMemoKey{latE3: 1, stamp: "s"}
+	k := shoreSpotKey{latE3: 1, stamp: "s"}
 	release, started := make(chan struct{}), make(chan struct{})
 	defer close(release)
-	go memo.get(context.Background(), k, func() (*fetchGeometry, error) {
+	go memo.geometry(context.Background(), k, func() (*fetchGeometry, error) {
 		close(started)
 		<-release
 		return &fetchGeometry{}, nil
@@ -102,7 +102,7 @@ func TestFetchGeoMemo_AWaiterStopsWaitingWhenItsRequestIsDone(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := memo.get(ctx, k, func() (*fetchGeometry, error) { return nil, errors.New("must not build") })
+		_, err := memo.geometry(ctx, k, func() (*fetchGeometry, error) { return nil, errors.New("must not build") })
 		result <- err
 	}()
 	select {
@@ -117,12 +117,12 @@ func TestFetchGeoMemo_AWaiterStopsWaitingWhenItsRequestIsDone(t *testing.T) {
 
 // 2: a build another request abandoned for its own deadline is not this request's
 // failure; the waiter builds the geometry itself.
-func TestFetchGeoMemo_AWaiterDoesNotInheritAnotherRequestsDeadline(t *testing.T) {
+func TestShoreRayMemo_AWaiterDoesNotInheritAnotherRequestsDeadline(t *testing.T) {
 	memo := newCountedMemo(8)
-	k := fetchGeoMemoKey{latE3: 1, stamp: "s"}
+	k := shoreSpotKey{latE3: 1, stamp: "s"}
 	builder, abandon := context.WithCancel(context.Background())
 	started := make(chan struct{})
-	go memo.get(builder, k, func() (*fetchGeometry, error) {
+	go memo.geometry(builder, k, func() (*fetchGeometry, error) {
 		close(started)
 		<-builder.Done()
 		return nil, builder.Err()
@@ -134,7 +134,7 @@ func TestFetchGeoMemo_AWaiterDoesNotInheritAnotherRequestsDeadline(t *testing.T)
 	}
 	got := make(chan result, 1)
 	go func() {
-		g, err := memo.get(context.Background(), k, func() (*fetchGeometry, error) { return &fetchGeometry{}, nil })
+		g, err := memo.geometry(context.Background(), k, func() (*fetchGeometry, error) { return &fetchGeometry{}, nil })
 		got <- result{g, err}
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -174,7 +174,7 @@ func TestWeightedLRU_APutOfAKeyAlreadyHeldReplacesItAndKeepsTheBudgetRight(t *te
 // counts it once.
 func TestSquareLinesCache_LoadersMissingTheSameSquareTogetherCountItOnce(t *testing.T) {
 	reader := fetchReader(t, fetchWay("n", fetchPt(-18, 3), fetchPt(18, 3)))
-	cache := newFetchGeoMemo(fetchGeoBudgetSegments).lines
+	cache := newShoreRayMemo(shoreRayEntries).lines
 	needed, err := squaresWithin(fetchTestLat, fetchTestLon, shelterMaxFetchNm)
 	if err != nil {
 		t.Fatal(err)

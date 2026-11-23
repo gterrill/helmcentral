@@ -322,7 +322,16 @@ func lowerFirst(s string) string {
 	if s == "" {
 		return s
 	}
+	if startsAcronym(s) {
+		return s
+	}
 	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// startsAcronym says the word's second letter is a capital, an acronym or a name such
+// as "OSM" or "iPhone", which changing the first letter would spoil.
+func startsAcronym(s string) bool {
+	return len(s) > 1 && s[1] >= 'A' && s[1] <= 'Z'
 }
 
 func describeWatch(d describeInput) string {
