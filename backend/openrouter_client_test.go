@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -450,10 +451,11 @@ func TestOpenRouterChatCompletion_CommentLinesAreIgnored(t *testing.T) {
 // response body captured live against the configured model
 // (openrouter_stream_fixtures_live_test.go,
 // [[feedback_verify_fixtures_against_live_data]]) rather than an assumed
-// shape - it carries fields (reasoning, reasoning_details, provider,
-// service_tier, native_finish_reason...) this decoder deliberately ignores,
-// and repeats content:"" and finish_reason:"stop" across more than one
-// chunk, both of which an assumed fixture would be unlikely to include.
+// shape - it carries fields (provider, service_tier, native_finish_reason,
+// the plain "reasoning" string...) this decoder ignores, reasoning_details
+// fragments it merges onto the message, and repeats content:"" and
+// finish_reason:"stop" across more than one chunk, both of which an assumed
+// fixture would be unlikely to include.
 func TestOpenRouterChatCompletion_TextFixtureDecodesLiveCapturedShape(t *testing.T) {
 	body, err := os.ReadFile("testdata/openrouter_stream_text.txt")
 	if err != nil {
@@ -490,6 +492,70 @@ func TestOpenRouterChatCompletion_TextFixtureDecodesLiveCapturedShape(t *testing
 	joined := strings.Join(*fragments, "")
 	if joined != wantContent {
 		t.Fatalf("expected onContent's fragments to concatenate to the final content, got %q", joined)
+	}
+}
+
+// TestOpenRouterChatCompletion_GeminiReasoningToolCallRoundTrips decodes
+// testdata/openrouter_stream_reasoning_toolcall.txt, a live Gemini tool-call
+// round (TestCaptureOpenRouterReasoningRoundTrip_Live, whose second request
+// sending these details back was accepted). Gemini sends one
+// reasoning.encrypted detail whole in a single chunk; the decoded message
+// must carry it exactly as it arrived.
+func TestOpenRouterChatCompletion_GeminiReasoningToolCallRoundTrips(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_stream_reasoning_toolcall.txt")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var want []openRouterReasoningDetail
+	for _, line := range strings.Split(string(body), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok || !strings.Contains(data, "reasoning_details") {
+			continue
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					ReasoningDetails []openRouterReasoningDetail `json:"reasoning_details"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatalf("parse fixture chunk: %v", err)
+		}
+		want = append(want, chunk.Choices[0].Delta.ReasoningDetails...)
+	}
+	if len(want) != 1 || want[0]["type"] != "reasoning.encrypted" {
+		t.Fatalf("fixture no longer holds one encrypted detail: %v", want)
+	}
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	msg := resp.Choices[0].Message
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %+v", msg.ToolCalls)
+	}
+
+	if !reflect.DeepEqual(msg.ReasoningDetails, want) {
+		t.Fatalf("decoded reasoning_details differ from what Gemini sent\n got: %v\nwant: %v", msg.ReasoningDetails, want)
+	}
+
+	// The outgoing body, the part the live round 2 proved Gemini accepts,
+	// must carry the same details.
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+	var sent struct {
+		ReasoningDetails []openRouterReasoningDetail `json:"reasoning_details"`
+	}
+	if err := json.Unmarshal(out, &sent); err != nil {
+		t.Fatalf("parse marshalled message: %v", err)
+	}
+	if !reflect.DeepEqual(sent.ReasoningDetails, want) {
+		t.Fatalf("marshalled reasoning_details differ from what Gemini sent\n got: %v\nwant: %v", sent.ReasoningDetails, want)
 	}
 }
 
@@ -1185,5 +1251,204 @@ func TestOpenRouterChatCompletion_UsageFixturesCarryPromptCacheDetails(t *testin
 		if u.PromptTokens != tc.prompt || u.PromptTokensDetails.CachedTokens != tc.cached || u.PromptTokensDetails.CacheWriteTokens != tc.written {
 			t.Fatalf("%s: unexpected usage %+v", tc.file, u)
 		}
+	}
+}
+
+// The DeepSeek capture streams one reasoning.text detail as many
+// single-token fragments at index 0; they must come back as one entry.
+func TestOpenRouterChatCompletion_MergesReasoningDetailFragmentsByIndex(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_stream_text.txt")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	details := resp.Choices[0].Message.ReasoningDetails
+	if len(details) != 1 {
+		t.Fatalf("expected one merged detail, got %d: %+v", len(details), details)
+	}
+	d := details[0]
+	text, _ := d["text"].(string)
+	if !strings.HasPrefix(text, "We need to answer \"What is the capital of France") {
+		t.Fatalf("fragments not concatenated in order: %q", text)
+	}
+	if d["type"] != "reasoning.text" || d["format"] != "unknown" || d["index"] != float64(0) {
+		t.Fatalf("expected type/format/index kept once, got %+v", d)
+	}
+}
+
+// reasoningAccumJSON runs fragments through the accumulator and returns the
+// result as JSON (keys sorted), so a test can state the whole outcome.
+func reasoningAccumJSON(t *testing.T, fragments ...openRouterReasoningDetail) string {
+	t.Helper()
+	var a openRouterReasoningAccum
+	for _, f := range fragments {
+		a.add(f)
+	}
+	out, err := json.Marshal(a.finish())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// SYNTHETIC (hand-written): two signed text blocks streamed back to back,
+// all at index 0, stay two entries. The signature closes a block.
+// SYNTHETIC (hand-written): an empty signature is no signature, as in the
+// SDK's `!lastDetail.signature`, so it doesn't close the block.
+func TestOpenRouterReasoningAccum_EmptySignatureKeepsBlockOpen(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.text", "text": "A", "signature": ""},
+		openRouterReasoningDetail{"type": "reasoning.text", "text": "B", "signature": ""},
+		openRouterReasoningDetail{"type": "reasoning.text", "signature": "sig"},
+	)
+	want := `[{"signature":"sig","text":"AB","type":"reasoning.text"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// SYNTHETIC (hand-written): a null field on a detail is sent back as null,
+// not dropped.
+func TestOpenRouterReasoningAccum_KeepsNullFields(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.encrypted", "id": nil, "data": "AAA"},
+	)
+	want := `[{"data":"AAA","id":null,"type":"reasoning.encrypted"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestOpenRouterReasoningAccum_SignatureClosesTextBlock(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(0), "text": "A"},
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(0), "signature": "sig1"},
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(0), "text": "B"},
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(0), "signature": "sig2"},
+	)
+	want := `[{"index":0,"signature":"sig1","text":"A","type":"reasoning.text"},` +
+		`{"index":0,"signature":"sig2","text":"B","type":"reasoning.text"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// SYNTHETIC (hand-written): two whole encrypted blocks in a row, same index,
+// the second without an id, stay two entries and their data is not joined.
+func TestOpenRouterReasoningAccum_EncryptedBlocksNeverMerge(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.encrypted", "id": "call_A", "index": float64(0), "data": "AAA"},
+		openRouterReasoningDetail{"type": "reasoning.encrypted", "index": float64(0), "data": "BBB"},
+	)
+	want := `[{"data":"AAA","id":"call_A","index":0,"type":"reasoning.encrypted"},` +
+		`{"data":"BBB","index":0,"type":"reasoning.encrypted"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// SYNTHETIC (hand-written): index is ignored, so a later text fragment that
+// has none still joins the unsigned text entry before it.
+func TestOpenRouterReasoningAccum_IgnoresIndex(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(0), "text": "We "},
+		openRouterReasoningDetail{"type": "reasoning.text", "text": "need "},
+		openRouterReasoningDetail{"type": "reasoning.text", "index": float64(3), "text": "it", "signature": "sig", "format": "f"},
+	)
+	want := `[{"format":"f","index":0,"signature":"sig","text":"We need it","type":"reasoning.text"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// SYNTHETIC (hand-written): summary pieces join; only the previous entry is
+// checked, so summary, encrypted, summary gives three entries.
+func TestOpenRouterReasoningAccum_SummaryJoinsOnlyWithPreviousEntry(t *testing.T) {
+	joined := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.summary", "summary": "One "},
+		openRouterReasoningDetail{"type": "reasoning.summary", "summary": "thing.", "format": "f"},
+	)
+	if want := `[{"format":"f","summary":"One thing.","type":"reasoning.summary"}]`; joined != want {
+		t.Fatalf("got  %s\nwant %s", joined, want)
+	}
+	split := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"type": "reasoning.summary", "summary": "a"},
+		openRouterReasoningDetail{"type": "reasoning.encrypted", "data": "X"},
+		openRouterReasoningDetail{"type": "reasoning.summary", "summary": "b"},
+	)
+	want := `[{"summary":"a","type":"reasoning.summary"},{"data":"X","type":"reasoning.encrypted"},` +
+		`{"summary":"b","type":"reasoning.summary"}]`
+	if split != want {
+		t.Fatalf("got  %s\nwant %s", split, want)
+	}
+}
+
+// SYNTHETIC (hand-written): an entry with no type or an unknown type is never
+// merged, and a field this code does not know about is kept as received.
+func TestOpenRouterReasoningAccum_UnknownAndUntypedStandAlone(t *testing.T) {
+	got := reasoningAccumJSON(t,
+		openRouterReasoningDetail{"text": "a"},
+		openRouterReasoningDetail{"text": "b"},
+		openRouterReasoningDetail{"type": "reasoning.future", "future_field": map[string]any{"k": float64(1)}},
+	)
+	want := `[{"text":"a"},{"text":"b"},{"future_field":{"k":1},"type":"reasoning.future"}]`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// SYNTHETIC (hand-written, not a live capture): a whole stream with a text
+// block whose signature arrives late, an encrypted block sent in two chunks
+// (two entries, as the rule allows no merge), and a field this code does not
+// know about.
+func TestOpenRouterChatCompletion_SyntheticReasoningDetailsStream(t *testing.T) {
+	sse := "" +
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_details":[{"type":"reasoning.text","text":"a","index":0,"future_field":{"k":1}}]}}]}` + "\n\n" +
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.text","text":"b","signature":"sig","index":0},{"type":"reasoning.encrypted","data":"AB","id":"tc_1","format":"google-gemini-v1","index":1}]}}]}` + "\n\n" +
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"CD","index":1}]},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, sse)}}
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	got, err := json.Marshal(resp.Choices[0].Message.ReasoningDetails)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"future_field":{"k":1},"index":0,"signature":"sig","text":"ab","type":"reasoning.text"},` +
+		`{"data":"AB","format":"google-gemini-v1","id":"tc_1","index":1,"type":"reasoning.encrypted"},` +
+		`{"data":"CD","index":1,"type":"reasoning.encrypted"}]`
+	if string(got) != want {
+		t.Fatalf("merged details:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestOpenRouterMessage_OmitsReasoningDetailsWhenNone(t *testing.T) {
+	data, err := json.Marshal(openRouterMessage{Role: "assistant", Content: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "reasoning_details") {
+		t.Fatalf("expected no reasoning_details key, got %s", data)
+	}
+}
+
+func TestOpenRouterMessage_ReasoningDetailsRoundTrip(t *testing.T) {
+	in := `{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}],"reasoning_details":[{"type":"reasoning.text","text":"x","index":0}]}`
+	var m openRouterMessage
+	if err := json.Unmarshal([]byte(in), &m); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"reasoning_details":[{"index":0,"text":"x","type":"reasoning.text"}]`) {
+		t.Fatalf("reasoning_details lost: %s", out)
 	}
 }

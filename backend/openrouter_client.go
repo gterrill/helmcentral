@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -290,7 +291,110 @@ type openRouterMessage struct {
 	// back into a request.
 	Annotations []openRouterAnnotation `json:"annotations,omitempty"`
 
+	// ReasoningDetails is the thinking a reasoning model returned with this
+	// message. OpenRouter wants it sent back unchanged on the assistant
+	// message in the next request of a tool-calling exchange, so a model's
+	// reasoning carries across tool rounds. Set from the stream by
+	// openRouterChatCompletion and echoed by MarshalJSON; absent when the
+	// model returned none.
+	ReasoningDetails []openRouterReasoningDetail `json:"reasoning_details,omitempty"`
+
 	contentBlocks []openRouterContentBlock
+}
+
+// openRouterReasoningDetail is one entry of a message's reasoning_details
+// (https://openrouter.ai/docs/use-cases/reasoning-tokens). The documented
+// types are reasoning.text (text, signature), reasoning.summary (summary)
+// and reasoning.encrypted (data), each with id, format and index. It is kept
+// as a generic object, not a struct, so any field a provider adds is sent
+// back exactly as received: the docs require the blocks returned unchanged.
+type openRouterReasoningDetail map[string]any
+
+// openRouterReasoningStreamKeys are the fields that arrive in pieces across
+// stream chunks and are joined in order when fragments are merged.
+var openRouterReasoningStreamKeys = []string{"text", "summary", "data"}
+
+// openRouterReasoningAccum merges streamed reasoning_details fragments with
+// the rule OpenRouter's own ai-sdk-provider uses (src/chat/index.ts,
+// doStream), because the docs say only that a stream's chunks are
+// concatenated in order. `index` is ignored; only the previous entry is ever
+// considered:
+//   - a reasoning.text fragment joins the previous entry if that is
+//     reasoning.text with no signature yet: text is appended, and signature and
+//     format are copied only if the entry has none. The signature therefore
+//     closes a block, and the next text starts a new entry.
+//   - a reasoning.summary fragment joins the previous entry if that is
+//     reasoning.summary: summary is appended, format copied only if unset.
+//   - reasoning.encrypted, any other type and a fragment with no type are
+//     always an entry of their own, kept as received.
+//
+// DeepSeek streams one text block as many single-token fragments
+// (testdata/openrouter_stream_text.txt); Gemini sends each encrypted block
+// whole (testdata/openrouter_stream_reasoning_toolcall.txt).
+type openRouterReasoningAccum struct {
+	details []openRouterReasoningDetail
+	// parts holds each entry's streamed pieces of the joinable keys, joined
+	// once by finish: a trace arrives a token at a time, and joining as it
+	// goes would copy the whole string again for every token.
+	parts []map[string][]string
+}
+
+func (a *openRouterReasoningAccum) add(fragment openRouterReasoningDetail) {
+	if n := len(a.details); n > 0 {
+		prev := a.details[n-1]
+		kind, _ := fragment["type"].(string)
+		prevKind, _ := prev["type"].(string)
+		switch {
+		case kind == "reasoning.text" && prevKind == kind && reasoningUnset(prev["signature"]):
+			a.join(n-1, fragment, "text")
+			a.fillUnset(n-1, fragment, "signature", "format")
+			return
+		case kind == "reasoning.summary" && prevKind == kind:
+			a.join(n-1, fragment, "summary")
+			a.fillUnset(n-1, fragment, "format")
+			return
+		}
+	}
+	a.details = append(a.details, openRouterReasoningDetail{})
+	a.parts = append(a.parts, map[string][]string{})
+	pos := len(a.details) - 1
+	for k, v := range fragment {
+		if next, ok := v.(string); ok && slices.Contains(openRouterReasoningStreamKeys, k) {
+			a.parts[pos][k] = append(a.parts[pos][k], next)
+		} else {
+			a.details[pos][k] = v
+		}
+	}
+}
+
+// join queues the fragment's piece of a joinable key onto entry pos.
+func (a *openRouterReasoningAccum) join(pos int, fragment openRouterReasoningDetail, key string) {
+	if next, ok := fragment[key].(string); ok {
+		a.parts[pos][key] = append(a.parts[pos][key], next)
+	}
+}
+
+// fillUnset copies the fragment's keys onto entry pos where it has none yet.
+func (a *openRouterReasoningAccum) fillUnset(pos int, fragment openRouterReasoningDetail, keys ...string) {
+	for _, k := range keys {
+		if v := fragment[k]; !reasoningUnset(v) && reasoningUnset(a.details[pos][k]) {
+			a.details[pos][k] = v
+		}
+	}
+}
+
+// reasoningUnset is the SDK's falsy test for a string field: absent, null
+// or empty.
+func reasoningUnset(v any) bool { return v == nil || v == "" }
+
+// finish joins the streamed pieces and returns the details, nil for none.
+func (a *openRouterReasoningAccum) finish() []openRouterReasoningDetail {
+	for i, parts := range a.parts {
+		for k, pieces := range parts {
+			a.details[i][k] = strings.Join(pieces, "")
+		}
+	}
+	return a.details
 }
 
 // openRouterAnnotationFileContentPart is one part of an
@@ -346,12 +450,13 @@ func openRouterUserMessage(blocks ...openRouterContentBlock) openRouterMessage {
 // model still encodes exactly as it always did.
 func (m openRouterMessage) MarshalJSON() ([]byte, error) {
 	type wire struct {
-		Role       string               `json:"role"`
-		Content    json.RawMessage      `json:"content,omitempty"`
-		ToolCalls  []openRouterToolCall `json:"tool_calls,omitempty"`
-		ToolCallID string               `json:"tool_call_id,omitempty"`
+		Role             string                      `json:"role"`
+		Content          json.RawMessage             `json:"content,omitempty"`
+		ToolCalls        []openRouterToolCall        `json:"tool_calls,omitempty"`
+		ToolCallID       string                      `json:"tool_call_id,omitempty"`
+		ReasoningDetails []openRouterReasoningDetail `json:"reasoning_details,omitempty"`
 	}
-	w := wire{Role: m.Role, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+	w := wire{Role: m.Role, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, ReasoningDetails: m.ReasoningDetails}
 
 	switch {
 	case len(m.contentBlocks) > 0:
@@ -496,6 +601,10 @@ type openRouterStreamChoice struct {
 		Role      string                          `json:"role"`
 		Content   openRouterContent               `json:"content"`
 		ToolCalls []openRouterStreamToolCallDelta `json:"tool_calls"`
+		// ReasoningDetails carries the structured reasoning fragments.
+		// The delta's plain "reasoning" string repeats the same text and
+		// is not read.
+		ReasoningDetails []openRouterReasoningDetail `json:"reasoning_details"`
 	} `json:"delta"`
 	FinishReason string `json:"finish_reason"`
 }
@@ -802,6 +911,7 @@ func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey s
 		sawDone         bool
 		toolOrder       []int
 		toolCalls       = map[int]*openRouterStreamToolCallAccum{}
+		reasoning       openRouterReasoningAccum
 	)
 
 	// Once a 2xx response is open, a failure may still have been charged for;
@@ -853,6 +963,9 @@ readLoop:
 					content.WriteString(fragment)
 					onContent(fragment)
 				}
+				for _, rd := range choice.Delta.ReasoningDetails {
+					reasoning.add(rd)
+				}
 				for _, tc := range choice.Delta.ToolCalls {
 					acc, ok := toolCalls[tc.Index]
 					if !ok {
@@ -895,7 +1008,7 @@ readLoop:
 	if role == "" {
 		role = "assistant"
 	}
-	msg := openRouterMessage{Role: role, Content: openRouterContent(content.String())}
+	msg := openRouterMessage{Role: role, Content: openRouterContent(content.String()), ReasoningDetails: reasoning.finish()}
 	if len(toolOrder) > 0 {
 		sort.Ints(toolOrder)
 		calls := make([]openRouterToolCall, 0, len(toolOrder))

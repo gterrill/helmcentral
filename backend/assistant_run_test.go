@@ -2329,3 +2329,30 @@ func TestAssistantRunner_RecordsToolCallsForTheReply(t *testing.T) {
 		t.Errorf("successful call must keep its result")
 	}
 }
+
+// A tool round's reasoning_details must go back, unchanged, on the assistant
+// message in the next request (OpenRouter's reasoning-preservation rule).
+func TestAssistantRunner_SendsReasoningDetailsBackOnToolRound(t *testing.T) {
+	round0 := openRouterFakeResponse(200, ""+
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_details":[{"type":"reasoning.text","text":"need ","index":0}]}}]}`+"\n\n"+
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.text","text":"wind","signature":"sig1","index":0}],"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"find_places","arguments":"{\"query\":\"x\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`+"\n\n"+
+		"data: [DONE]\n\n")
+	round1 := finalResponse(t, "done", "m", usage(1, 1, 0))
+	doer := &queuedChatDoer{responses: []*http.Response{round0, round1}, errs: []error{nil, nil}}
+	tools := &fakeToolExecutor{results: map[string]string{"find_places": `{}`}}
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system prompt", "", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.rawBodies) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(doer.rawBodies))
+	}
+	if strings.Contains(string(doer.rawBodies[0]), "reasoning_details") {
+		t.Fatalf("first request must carry no reasoning_details: %s", doer.rawBodies[0])
+	}
+	const want = `"reasoning_details":[{"index":0,"signature":"sig1","text":"need wind","type":"reasoning.text"}]`
+	if !strings.Contains(string(doer.rawBodies[1]), want) {
+		t.Fatalf("second request lacks merged reasoning_details %s:\n%s", want, doer.rawBodies[1])
+	}
+}
