@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,8 +92,30 @@ func createAssistantRunsSchema(db *sql.DB) error {
 	}
 	// check_trigger and check_draft arrived after the table did: the draft a
 	// correction round sent back. A row from before reads back empty.
-	for _, col := range []string{"check_trigger", "check_draft"} {
-		if err := addColumnIfMissing(db, "assistant_run_rounds", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+	for _, col := range []struct{ name, decl string }{
+		{"check_trigger", "TEXT NOT NULL DEFAULT ''"},
+		{"check_draft", "TEXT NOT NULL DEFAULT ''"},
+		// What the activity view shows (check_triggers is a JSON list). A row
+		// from before reads back as not recorded: '', 0, and NULL for thought_ms.
+		{"check_triggers", "TEXT NOT NULL DEFAULT ''"},
+		{"reasoning", "TEXT NOT NULL DEFAULT ''"},
+		{"reasoning_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"reasoning_bytes", "INTEGER NOT NULL DEFAULT 0"},
+		{"chatter", "TEXT NOT NULL DEFAULT ''"},
+		{"content_start_ms", "INTEGER"},
+	} {
+		if err := addColumnIfMissing(db, "assistant_run_rounds", col.name, col.decl); err != nil {
+			return err
+		}
+	}
+	// Worked out once when a run is saved, so reading one is a plain select.
+	// A run from before reads thought_ms NULL, 0 lookups and no reasoning kind.
+	for _, col := range []struct{ name, decl string }{
+		{"thought_ms", "INTEGER"},
+		{"lookup_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"reasoning_kind", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := addColumnIfMissing(db, "assistant_runs", col.name, col.decl); err != nil {
 			return err
 		}
 	}
@@ -108,6 +131,14 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 	if err != nil {
 		return assistantRunTrace{}, fmt.Errorf("encode run budget: %w", err)
 	}
+	// What is worked out from the rounds is set on the run before it is stored,
+	// so the run SaveRun returns holds what a later read will.
+	run.ThoughtMs = nil
+	if run.AnswerMessageID != nil {
+		run.ThoughtMs = assistantAnswerThought(run.Rounds)
+	}
+	run.LookupCount = assistantRunLookupCount(run.Rounds)
+	run.ReasoningKind = assistantRunReasoningKind(run.Rounds)
 	err = runTxUnderLock(lockAssistantSaveRun, &s.mu, s.db, time.Now, lockRecorder(), func(tx *sql.Tx) error {
 		return saveRunTx(tx, run, string(budget))
 	})
@@ -123,14 +154,16 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 		answer = sql.NullString{String: *run.AnswerMessageID, Valid: true}
 	}
 	if _, err := tx.Exec(`INSERT INTO assistant_runs
-		(id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.ConversationID, run.AfterSeq, answer, run.Model, run.StartedAt.UnixMilli(), run.DurationMs, run.StopReason, run.Error, budget); err != nil {
+		(id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget, thought_ms, lookup_count, reasoning_kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.ConversationID, run.AfterSeq, answer, run.Model, run.StartedAt.UnixMilli(), run.DurationMs, run.StopReason, run.Error, budget,
+		nullInt64(run.ThoughtMs), run.LookupCount, run.ReasoningKind); err != nil {
 		return fmt.Errorf("insert run: %w", err)
 	}
 	roundStmt, err := tx.Prepare(`INSERT INTO assistant_run_rounds
-		(run_id, idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(run_id, idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft,
+		 check_triggers, reasoning, reasoning_kind, reasoning_bytes, chatter, content_start_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert run round: %w", err)
 	}
@@ -143,7 +176,24 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 	}
 	defer callStmt.Close()
 	for _, r := range run.Rounds {
-		if _, err := roundStmt.Exec(run.ID, r.Index, r.Kind, r.StartOffsetMs, r.LatencyMs, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, boolToInt(r.ForcedFinal), boolToInt(r.Progress), r.Error, r.CheckTrigger, cutUTF8(r.CheckDraft, assistantToolCallMaxBytes)); err != nil {
+		// The list is the source: the JSON column holds it and the older
+		// check_trigger column holds it joined, for rows and readers that
+		// predate the list.
+		triggers := ""
+		legacyTrigger := strings.Join(r.CheckTriggers, " and ")
+		if len(r.CheckTriggers) == 0 {
+			// A round read back from before the list existed has only the
+			// joined text; keep it.
+			legacyTrigger = r.CheckTrigger
+		} else {
+			encoded, err := json.Marshal(r.CheckTriggers)
+			if err != nil {
+				return fmt.Errorf("encode check triggers of round %d: %w", r.Index, err)
+			}
+			triggers = string(encoded)
+		}
+		if _, err := roundStmt.Exec(run.ID, r.Index, r.Kind, r.StartOffsetMs, r.LatencyMs, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, boolToInt(r.ForcedFinal), boolToInt(r.Progress), r.Error, legacyTrigger, cutUTF8(r.CheckDraft, assistantToolCallMaxBytes),
+			triggers, cutUTF8(r.Reasoning, assistantReasoningMaxBytes), r.ReasoningKind, r.ReasoningBytes, cutUTF8(r.Chatter, assistantToolCallMaxBytes), nullInt64(r.ContentStartMs)); err != nil {
 			return fmt.Errorf("insert run round %d: %w", r.Index, err)
 		}
 		for _, c := range r.Calls {
@@ -161,8 +211,12 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 	return nil
 }
 
+// assistantRunColumns are a run's own columns and the number of its lookup
+// rounds. thought_ms, lookup_count and reasoning_kind were worked out when the
+// run was saved.
 const assistantRunColumns = `id, conversation_id, after_seq, answer_message_id, model, started_at, duration_ms, stop_reason, error, budget,
-	(SELECT COUNT(*) FROM assistant_run_rounds WHERE run_id = assistant_runs.id AND kind = 'lookups')`
+	(SELECT COUNT(*) FROM assistant_run_rounds WHERE run_id = assistant_runs.id AND kind = 'lookups'),
+	thought_ms, lookup_count, reasoning_kind`
 
 type assistantRunScanner interface {
 	Scan(dest ...any) error
@@ -173,8 +227,12 @@ func scanAssistantRun(row assistantRunScanner) (assistantRunTrace, error) {
 	var answer sql.NullString
 	var started int64
 	var budget string
-	if err := row.Scan(&run.ID, &run.ConversationID, &run.AfterSeq, &answer, &run.Model, &started, &run.DurationMs, &run.StopReason, &run.Error, &budget, &run.RoundCount); err != nil {
+	var thought sql.NullInt64
+	if err := row.Scan(&run.ID, &run.ConversationID, &run.AfterSeq, &answer, &run.Model, &started, &run.DurationMs, &run.StopReason, &run.Error, &budget, &run.RoundCount, &thought, &run.LookupCount, &run.ReasoningKind); err != nil {
 		return assistantRunTrace{}, err
+	}
+	if thought.Valid {
+		run.ThoughtMs = &thought.Int64
 	}
 	if err := json.Unmarshal([]byte(budget), &run.Budget); err != nil {
 		return assistantRunTrace{}, fmt.Errorf("decode budget of run %s: %w", run.ID, err)
@@ -235,7 +293,8 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 		return assistantRunTrace{}, false, fmt.Errorf("get run: %w", err)
 	}
 
-	roundRows, err := s.db.Query(`SELECT idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft
+	roundRows, err := s.db.Query(`SELECT idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft,
+		check_triggers, reasoning, reasoning_kind, reasoning_bytes, chatter, content_start_ms
 		FROM assistant_run_rounds WHERE run_id = ? ORDER BY idx`, id)
 	if err != nil {
 		return assistantRunTrace{}, false, fmt.Errorf("get run rounds: %w", err)
@@ -246,8 +305,19 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 	for roundRows.Next() {
 		var r assistantTraceRound
 		var forced, progress int
-		if err := roundRows.Scan(&r.Index, &r.Kind, &r.StartOffsetMs, &r.LatencyMs, &r.PromptTokens, &r.CompletionTokens, &r.CachedTokens, &r.CostUSD, &forced, &progress, &r.Error, &r.CheckTrigger, &r.CheckDraft); err != nil {
+		var triggers string
+		var contentStart sql.NullInt64
+		if err := roundRows.Scan(&r.Index, &r.Kind, &r.StartOffsetMs, &r.LatencyMs, &r.PromptTokens, &r.CompletionTokens, &r.CachedTokens, &r.CostUSD, &forced, &progress, &r.Error, &r.CheckTrigger, &r.CheckDraft, &triggers, &r.Reasoning, &r.ReasoningKind, &r.ReasoningBytes, &r.Chatter, &contentStart); err != nil {
 			return assistantRunTrace{}, false, fmt.Errorf("scan run round: %w", err)
+		}
+		if contentStart.Valid {
+			r.ContentStartMs = &contentStart.Int64
+		}
+		r.CheckTriggers = []string{}
+		if triggers != "" {
+			if err := json.Unmarshal([]byte(triggers), &r.CheckTriggers); err != nil {
+				return assistantRunTrace{}, false, fmt.Errorf("decode check triggers of round %d of run %s: %w", r.Index, id, err)
+			}
 		}
 		r.ForcedFinal, r.Progress = forced != 0, progress != 0
 		r.Calls = []assistantToolCall{}

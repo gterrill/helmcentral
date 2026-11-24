@@ -89,7 +89,7 @@ func TestCaptureOpenRouterReasoningRoundTrip_Live(t *testing.T) {
 	round1 := &teeOpenRouterDoer{t: t, dest: "testdata/openrouter_stream_reasoning_toolcall.txt"}
 	resp1, err := openRouterChatCompletion(context.Background(), round1, apiKey, openRouterChatRequest{
 		Model: model, Messages: messages, Tools: tools, Usage: &openRouterUsageOption{Include: true},
-	}, noopOnContent)
+	}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("round 1: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCaptureOpenRouterReasoningRoundTrip_Live(t *testing.T) {
 	messages = append(messages, choice, openRouterMessage{Role: "tool", ToolCallID: choice.ToolCalls[0].ID, Content: openRouterContent(`{"height_m":2.4}`)})
 	resp2, err := openRouterChatCompletion(context.Background(), openRouterHTTPClient, apiKey, openRouterChatRequest{
 		Model: model, Messages: messages, Tools: tools, Usage: &openRouterUsageOption{Include: true},
-	}, noopOnContent)
+	}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("round 2 (reasoning sent back) rejected: %v", err)
 	}

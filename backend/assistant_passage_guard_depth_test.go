@@ -67,7 +67,7 @@ func TestDepthGuardTrigger(t *testing.T) {
 		if results == nil {
 			results = okResults(tc.calls)
 		}
-		if got, _ := shelterDeps().checkDraft(tc.text, runOf(tc.calls, results)); got != tc.want {
+		if got, _ := joinedDraftTrigger(shelterDeps(), tc.text, runOf(tc.calls, results)); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -84,7 +84,7 @@ func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 	for name, reader := range map[string]func() *offlineCoastlineReader{"no coastline on this install": nil, "coastline switched off": off} {
 		d := shelterDeps()
 		d.offlineCoastline = reader
-		got, ins := d.checkDraft(text, nil)
+		got, ins := joinedDraftTrigger(d, text, nil)
 		if got != "anchorage depth" {
 			t.Errorf("%s: trigger = %q, want anchorage depth", name, got)
 		}
@@ -95,11 +95,11 @@ func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 			t.Errorf("%s: instruction = %q", name, ins)
 		}
 		// The shelter check stays disarmed: it can only be answered by the tool.
-		if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+		if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, nil); got != "" {
 			t.Errorf("%s: shelter trigger = %q, want none", name, got)
 		}
 		// A figure passed on in a call that ran still sources it.
-		if got, _ := d.checkDraft(text, runOf(depthCall("save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`), []string{`{"proposal":{}}`})); got != "" {
+		if got, _ := joinedDraftTrigger(d, text, runOf(depthCall("save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`), []string{`{"proposal":{}}`})); got != "" {
 			t.Errorf("%s: sourced depth trigger = %q, want none", name, got)
 		}
 	}
@@ -108,7 +108,7 @@ func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 // A depth_m of null is the model leaving the figure out, not the operator's depth.
 func TestDepthGuard_ANullDepthArgumentIsNotADepth(t *testing.T) {
 	calls := depthCall("anchorage_details", `{"lat":-20,"lon":149,"depth_m":null}`)
-	got, _ := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", runOf(calls, []string{unknownDepthResult}))
+	got, _ := joinedDraftTrigger(shelterDeps(), "Butterfly Bay is about 6 m deep on sand.", runOf(calls, []string{unknownDepthResult}))
 	if got != "anchorage depth" {
 		t.Errorf("trigger = %q, want anchorage depth", got)
 	}
@@ -130,14 +130,14 @@ func TestDepthGuard_FindsANumericDepthAnywhereInTheArguments(t *testing.T) {
 	}
 	for _, tc := range cases {
 		calls := depthCall(tc.tool, tc.args)
-		if got, _ := shelterDeps().checkDraft(text, runOf(calls, []string{`{"proposal":{}}`})); got != tc.want {
+		if got, _ := joinedDraftTrigger(shelterDeps(), text, runOf(calls, []string{`{"proposal":{}}`})); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
 func TestDepthGuard_InstructionSaysWhereADepthMayComeFrom(t *testing.T) {
-	_, ins := shelterDeps().checkDraft("Butterfly Bay is about 6 m deep on sand.", nil)
+	_, ins := joinedDraftTrigger(shelterDeps(), "Butterfly Bay is about 6 m deep on sand.", nil)
 	for _, want := range []string{"depth_m", "anchorage_details", "no charted depth", assistantCheckLabel} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
@@ -147,7 +147,7 @@ func TestDepthGuard_InstructionSaysWhereADepthMayComeFrom(t *testing.T) {
 
 func TestDepthGuard_SentTogetherWithTheShelterCorrection(t *testing.T) {
 	text := "The bay is 6 m deep and sheltered from the north."
-	trig, ins := shelterDeps().checkDraft(text, nil)
+	trig, ins := joinedDraftTrigger(shelterDeps(), text, nil)
 	if !strings.Contains(trig, "anchorage shelter") || !strings.Contains(trig, "anchorage depth") {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -191,11 +191,11 @@ func tileCall() []openRouterToolCall { return depthCall("show_tile", `{"tile":"d
 // The boat's own sounder, read this turn with no call about another place, is
 // the depth at the boat's position.
 func TestDepthGuard_TheBoatsOwnSounderIsASourceWhenNoOtherPlaceWasAskedAbout(t *testing.T) {
-	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(tileCall(), []string{sounderTileResult})); got != "" {
+	if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, runOf(tileCall(), []string{sounderTileResult})); got != "" {
 		t.Errorf("trace draft after the tile read: trigger = %q, want none", got)
 	}
 	// With no sounder read the same draft is still sent back.
-	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, nil); got != "anchorage depth" {
+	if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, nil); got != "anchorage depth" {
 		t.Errorf("trace draft with no source: trigger = %q, want anchorage depth", got)
 	}
 	// A tile with no depth, another tile, or an errored call is no sounder read.
@@ -204,7 +204,7 @@ func TestDepthGuard_TheBoatsOwnSounderIsASourceWhenNoOtherPlaceWasAskedAbout(t *
 		"errored":    ``,
 		"other tile": `{"tile":"wind","snapshot":{"depth_m":4.61}}`,
 	} {
-		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(tileCall(), []string{result})); got != "anchorage depth" {
+		if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, runOf(tileCall(), []string{result})); got != "anchorage depth" {
 			t.Errorf("%s: trigger = %q, want anchorage depth", name, got)
 		}
 	}
@@ -237,20 +237,20 @@ func TestDepthGuard_AnyCallAboutAnotherPlaceTakesTheSounderAway(t *testing.T) {
 		if tc.name == "anchorage_details" {
 			results[1] = unknownDepthResult
 		}
-		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, results)); got != "anchorage depth" {
+		if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, runOf(calls, results)); got != "anchorage depth" {
 			t.Errorf("%s: trigger = %q, want anchorage depth", tc.name, got)
 		}
 	}
 	// The same tools without coordinates read the boat's own position.
 	for _, tool := range []string{"get_tides", "get_wind_forecast"} {
 		calls := append(tileCall(), depthCall(tool, `{}`)...)
-		if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, []string{sounderTileResult, `{"summary":"ok"}`})); got != "" {
+		if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, runOf(calls, []string{sounderTileResult, `{"summary":"ok"}`})); got != "" {
 			t.Errorf("%s with no coordinates: trigger = %q, want none", tool, got)
 		}
 	}
 	// A place call that failed told Mate nothing about a place.
 	calls := append(tileCall(), depthCall("find_places", `{"query":"x"}`)...)
-	if got, _ := shelterDeps().checkDraft(sounderDepthDraft, runOf(calls, []string{sounderTileResult, ""})); got != "" {
+	if got, _ := joinedDraftTrigger(shelterDeps(), sounderDepthDraft, runOf(calls, []string{sounderTileResult, ""})); got != "" {
 		t.Errorf("errored find_places: trigger = %q, want none", got)
 	}
 }
@@ -269,7 +269,7 @@ func TestDepthGuard_AStatusReadCountsAsASounderRead(t *testing.T) {
 		{"no depth anywhere", "At anchor you have 12 m of water right now.", `{"surroundings":{"depth":{"missing":"no depth reading"}},"boat":{"anchor":{"low_water":{"status":"unknown","reason":"no_depth"}}}}`, "anchorage depth"},
 	}
 	for _, tc := range cases {
-		if got, _ := shelterDeps().checkDraft(tc.text, runOf(calls, []string{tc.result})); got != tc.want {
+		if got, _ := joinedDraftTrigger(shelterDeps(), tc.text, runOf(calls, []string{tc.result})); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}

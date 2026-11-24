@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -60,18 +61,18 @@ func openRouterFakeResponse(status int, body string) *http.Response {
 	}
 }
 
-// noopOnContent is what every test below passes when it has nothing of its
+// noStreamHooks is what every test below passes when it has nothing of its
 // own to do with streamed fragments - the same role a discard writer plays
 // elsewhere.
-func noopOnContent(string) {}
+var noStreamHooks = openRouterStreamHooks{}
 
-// collectingOnContent returns an onContent func that appends every fragment
+// collectingStreamHooks returns hooks whose Content appends every fragment
 // it is called with, in call order, to the returned slice - for tests that
 // need to assert on the fragments themselves (order, count, or that a
 // held-back marker never reached it).
-func collectingOnContent() (func(string), *[]string) {
+func collectingStreamHooks() (openRouterStreamHooks, *[]string) {
 	var got []string
-	return func(fragment string) { got = append(got, fragment) }, &got
+	return openRouterStreamHooks{Content: func(fragment string) { got = append(got, fragment) }}, &got
 }
 
 // ctxErrDoer simulates a transport that observes the request's context has
@@ -127,7 +128,7 @@ func TestOpenRouterChatCompletion_SendsExpectedRequestShape(t *testing.T) {
 		Usage: &openRouterUsageOption{Include: true},
 	}
 
-	onContent, fragments := collectingOnContent()
+	onContent, fragments := collectingStreamHooks()
 	resp, err := openRouterChatCompletion(context.Background(), doer, "sk-test", req, onContent)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
@@ -181,7 +182,7 @@ func TestOpenRouterChatCompletion_OmitsToolsAndUsageWhenUnset(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
 	req := openRouterChatRequest{Model: "m", Messages: []openRouterMessage{{Role: "user", Content: "hi"}}}
-	if _, err := openRouterChatCompletion(context.Background(), doer, "sk", req, noopOnContent); err != nil {
+	if _, err := openRouterChatCompletion(context.Background(), doer, "sk", req, noStreamHooks); err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
 
@@ -198,7 +199,7 @@ func TestOpenRouterChatCompletion_DecodesToolCallsWithStringArguments(t *testing
 	body := `data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_tides","arguments":"{\"lat\":-20.5}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" + `data: [DONE]` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestOpenRouterChatCompletion_DecodesArrayContentToJoinedText(t *testing.T) 
 	body := `data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":[{"type":"text","text":"Tongue Bay "},{"type":"text","text":"looks good."}]},"finish_reason":"stop"}]}` + "\n\n" + `data: [DONE]` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestOpenRouterChatCompletion_DecodesObjectArgumentsToCompactString(t *testi
 	body := `data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_tides","arguments":{"lat":-20.5,"lon":149.1}}}]},"finish_reason":"tool_calls"}]}` + "\n\n" + `data: [DONE]` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -250,7 +251,7 @@ func TestOpenRouterChatCompletion_DecodesObjectArgumentsToCompactString(t *testi
 func TestOpenRouterChatCompletion_401ReturnsUpstreamMessageAndStatus(t *testing.T) {
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(401, `{"error":{"message":"bad key"}}`)}}
 
-	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err == nil {
 		t.Fatalf("expected an error for a 401 response")
 	}
@@ -277,7 +278,7 @@ func TestOpenRouterChatCompletion_MidStreamErrorChunkIsAnError(t *testing.T) {
 		`data: {"error":{"message":"model not found"}}` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	onContent, fragments := collectingOnContent()
+	onContent, fragments := collectingStreamHooks()
 	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, onContent)
 	if err == nil {
 		t.Fatalf("expected an error when a stream chunk carries its own error object")
@@ -298,7 +299,7 @@ func TestOpenRouterChatCompletion_EOFBeforeDoneIsAnError(t *testing.T) {
 	body := `data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Tongue Bay"},"finish_reason":null}]}` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err == nil {
 		t.Fatalf("expected an error when the stream ends before [DONE] or a finish_reason")
 	}
@@ -311,7 +312,7 @@ func TestOpenRouterChatCompletion_ZeroChoicesIsAnError(t *testing.T) {
 	body := `data: [DONE]` + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err == nil {
 		t.Fatalf("expected an error for zero choices")
 	}
@@ -324,7 +325,7 @@ func TestOpenRouterChatCompletion_PropagatesContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := openRouterChatCompletion(ctx, ctxErrDoer{}, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	_, err := openRouterChatCompletion(ctx, ctxErrDoer{}, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled to propagate, got %v", err)
 	}
@@ -347,7 +348,7 @@ func TestOpenRouterChatCompletion_ContextCancelledMidBodyIsAnError(t *testing.T)
 		cancel()
 	}()
 
-	_, err := openRouterChatCompletion(ctx, doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	_, err := openRouterChatCompletion(ctx, doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled to propagate from a mid-body cancellation, got %v", err)
 	}
@@ -380,7 +381,7 @@ func TestOpenRouterChatCompletion_LongArgumentsLineDecodes(t *testing.T) {
 	}
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -402,7 +403,7 @@ func TestOpenRouterChatCompletion_OnContentCalledInOrder(t *testing.T) {
 	}, "\n\n") + "\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	onContent, fragments := collectingOnContent()
+	onContent, fragments := collectingStreamHooks()
 	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, onContent)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
@@ -433,7 +434,7 @@ func TestOpenRouterChatCompletion_CommentLinesAreIgnored(t *testing.T) {
 		"data: [DONE]\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
 
-	onContent, fragments := collectingOnContent()
+	onContent, fragments := collectingStreamHooks()
 	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, onContent)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
@@ -463,7 +464,7 @@ func TestOpenRouterChatCompletion_TextFixtureDecodesLiveCapturedShape(t *testing
 	}
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
 
-	onContent, fragments := collectingOnContent()
+	onContent, fragments := collectingStreamHooks()
 	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, onContent)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
@@ -529,7 +530,7 @@ func TestOpenRouterChatCompletion_GeminiReasoningToolCallRoundTrips(t *testing.T
 	}
 
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -575,7 +576,7 @@ func TestOpenRouterChatCompletion_ToolCallFixtureDecodesLiveCapturedShape(t *tes
 	}
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
 
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -1243,7 +1244,7 @@ func TestOpenRouterChatCompletion_UsageFixturesCarryPromptCacheDetails(t *testin
 			t.Fatalf("read fixture: %v", err)
 		}
 		doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
-		resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, nil)
+		resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, openRouterStreamHooks{})
 		if err != nil {
 			t.Fatalf("%s: %v", tc.file, err)
 		}
@@ -1262,7 +1263,7 @@ func TestOpenRouterChatCompletion_MergesReasoningDetailFragmentsByIndex(t *testi
 		t.Fatalf("read fixture: %v", err)
 	}
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}
@@ -1277,6 +1278,83 @@ func TestOpenRouterChatCompletion_MergesReasoningDetailFragmentsByIndex(t *testi
 	}
 	if d["type"] != "reasoning.text" || d["format"] != "unknown" || d["index"] != float64(0) {
 		t.Fatalf("expected type/format/index kept once, got %+v", d)
+	}
+}
+
+// The DeepSeek fixture carries the same thinking in delta.reasoning and in
+// reasoning_details. The Reasoning hook must see it once, from the details.
+func TestOpenRouterChatCompletion_ReasoningHookDoesNotDoubleText(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_stream_text.txt")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+	var seen strings.Builder
+	privates := 0
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, openRouterStreamHooks{
+		Reasoning: func(s string, _ bool) { seen.WriteString(s) },
+		Private:   func() { privates++ },
+	})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	want, _ := resp.Choices[0].Message.ReasoningDetails[0]["text"].(string)
+	if want == "" || seen.String() != want {
+		t.Fatalf("hook text differs from the merged detail (doubled or missing)\n got: %q\nwant: %q", seen.String(), want)
+	}
+	if privates != 0 {
+		t.Fatalf("a text-only stream fired Private %d times", privates)
+	}
+}
+
+// Gemini sends only an encrypted block: Private fires, Reasoning never does,
+// and the first delta of the tool call fires ToolCall once.
+func TestOpenRouterChatCompletion_EncryptedReasoningFiresPrivateAndToolCallOnce(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_stream_reasoning_toolcall.txt")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+	var texts []string
+	privates := 0
+	var toolIdx []int
+	_, err = openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, openRouterStreamHooks{
+		Reasoning: func(s string, _ bool) { texts = append(texts, s) },
+		Private:   func() { privates++ },
+		ToolCall:  func(i int) { toolIdx = append(toolIdx, i) },
+	})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	if len(texts) != 0 || privates != 1 || len(toolIdx) != 1 {
+		t.Fatalf("texts=%v privates=%d toolIdx=%v", texts, privates, toolIdx)
+	}
+}
+
+// SYNTHETIC (hand-written): newBlock is true on the first fragment of each
+// entry and false on a fragment that continues the previous one, and Opened
+// fires once before any fragment.
+func TestOpenRouterChatCompletion_ReasoningHookSaysWhenAnEntryStarts(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"One "}]}}]}`,
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"entry."}]}}]}`,
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"x"}]}}]}`,
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"Another."}]}}]}`,
+		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		`data: [DONE]`,
+	}, "\n\n") + "\n\n"
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+	var starts []bool
+	opened := 0
+	_, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, openRouterStreamHooks{
+		Opened:    func() { opened++ },
+		Reasoning: func(_ string, newBlock bool) { starts = append(starts, newBlock) },
+	})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletion: %v", err)
+	}
+	if want := []bool{true, false, true}; !slices.Equal(starts, want) || opened != 1 {
+		t.Fatalf("starts = %v (want %v), opened = %d", starts, want, opened)
 	}
 }
 
@@ -1412,7 +1490,7 @@ func TestOpenRouterChatCompletion_SyntheticReasoningDetailsStream(t *testing.T) 
 		`data: {"id":"g","model":"m","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"CD","index":1}]},"finish_reason":"stop"}]}` + "\n\n" +
 		"data: [DONE]\n\n"
 	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, sse)}}
-	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noopOnContent)
+	resp, err := openRouterChatCompletion(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"}, noStreamHooks)
 	if err != nil {
 		t.Fatalf("openRouterChatCompletion: %v", err)
 	}

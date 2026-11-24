@@ -31,7 +31,7 @@ func TestCheckDraft_EverySendBackCarriesTheNoticeOnce(t *testing.T) {
 		{"two triggers", pwToolDepsWithCoastline(passageLimits{}), "A northerly gives you a head sea, and the bay is sheltered from the north.", "relative wind and anchorage shelter"},
 	}
 	for _, tc := range cases {
-		trigger, ins := tc.deps.checkDraft(tc.text, nil)
+		trigger, ins := joinedDraftTrigger(tc.deps, tc.text, nil)
 		if trigger != tc.trigger {
 			t.Fatalf("%s: trigger = %q, want %q", tc.name, trigger, tc.trigger)
 		}
@@ -70,7 +70,7 @@ func TestCheckNotice_DoesNotCancelTheCorrection(t *testing.T) {
 }
 
 func TestCheckDraft_TheCorrectionNamesTheDraft(t *testing.T) {
-	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
+	_, ins := joinedDraftTrigger(shelterDeps(), thomasIslandAnswer, nil)
 	if !strings.HasPrefix(ins, assistantCheckLabel+"Your draft ") {
 		t.Errorf("the correction should talk about the draft, not an answer the operator got: %q", ins)
 	}
@@ -146,15 +146,15 @@ func TestThursdayExchange_ACorrectionThatMakesNoLookupsIsLoggedAndKept(t *testin
 			continue
 		}
 		found = true
-		if r.CheckTrigger != "anchorage shelter" || r.CheckDraft != thursdayDraft {
-			t.Errorf("correction round = trigger %q draft %q", r.CheckTrigger, r.CheckDraft)
+		if strings.Join(r.CheckTriggers, " and ") != "anchorage shelter" || r.CheckDraft != thursdayDraft {
+			t.Errorf("correction round = triggers %q draft %q", r.CheckTriggers, r.CheckDraft)
 		}
 	}
 	if !found {
 		t.Fatalf("no correction round in the trace: %+v", rounds)
 	}
 	for _, r := range rounds {
-		if r.Kind != assistantRoundCorrection && (r.CheckTrigger != "" || r.CheckDraft != "") {
+		if r.Kind != assistantRoundCorrection && (len(r.CheckTriggers) != 0 || r.CheckDraft != "") {
 			t.Errorf("only the correction round carries a draft: %+v", r)
 		}
 	}
@@ -214,8 +214,8 @@ func TestAssistantRunStore_KeepsTheRejectedDraftAndBoundsIt(t *testing.T) {
 	in := sampleRunTrace(conv.ID, 1, nil, assistantStopAnswered)
 	long := strings.Repeat("é", assistantToolCallMaxBytes) // two bytes each
 	in.Rounds = append(in.Rounds,
-		assistantTraceRound{Index: 2, Kind: assistantRoundCorrection, CheckTrigger: "anchorage shelter", CheckDraft: thursdayDraft},
-		assistantTraceRound{Index: 3, Kind: assistantRoundCorrection, CheckTrigger: "relative wind", CheckDraft: long},
+		assistantTraceRound{Index: 2, Kind: assistantRoundCorrection, CheckTriggers: []string{"anchorage shelter"}, CheckDraft: thursdayDraft},
+		assistantTraceRound{Index: 3, Kind: assistantRoundCorrection, CheckTriggers: []string{"relative wind"}, CheckDraft: long},
 	)
 	saved, err := store.SaveRun(in)
 	if err != nil {
