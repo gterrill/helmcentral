@@ -273,8 +273,17 @@ type tidalSample struct {
 	course float64
 }
 
-// tidalSamples dead-reckons n+1 evenly spaced samples along route, the boat
-// covering the polyline's length at a steady speed. The course is the bearing of
+// runFrac is how far along its route sample k of n+1 lies. A run of no length has
+// the one sample, at its start, not a 0/0.
+func runFrac(k, n int) float64 {
+	if n == 0 {
+		return 0
+	}
+	return float64(k) / float64(n)
+}
+
+// tidalSamples dead-reckons n+1 samples along route, evenly spaced in distance
+// (when the boat is at each is the run's timeline, not this). The course is the bearing of
 // the leg each sample is on (the last leg at the end), and a repeated point,
 // which makes a leg with no length and no bearing, takes the next leg's. A
 // longitude difference over 180 degrees is the short way round the antimeridian.
@@ -309,10 +318,10 @@ func tidalSamples(route []assistantLatLon, lat, lon, fallbackCourse float64, n i
 		return nil, fmt.Errorf("every route point is the same position, so the route has no direction; leave route out to use lat and lon")
 	}
 	for k := range out {
-		sLat, sLon, seg := walk.at(float64(k) / float64(n))
+		sLat, sLon, seg := walk.at(runFrac(k, n))
 		out[k] = tidalSample{
 			pos:    assistantLatLon{Lat: sLat, Lon: sLon},
-			distNm: float64(k) / float64(n) * walk.totalM / metersPerNauticalMile,
+			distNm: runFrac(k, n) * walk.totalM / metersPerNauticalMile,
 			cell:   roundToTidalGrid(sLat, sLon),
 			course: seg.bearing,
 		}
@@ -429,16 +438,17 @@ type alongRun struct {
 func (r alongRun) coveredFraction() float64 { return float64(r.covered) / float64(r.total) }
 
 // alongCourse projects the modelled total current at each sample's cell on that
-// sample's course, for a run leaving at dep. The peak is the sample of largest
-// size, with its sign.
-func alongCourse(cur tidalPointCurrents, samples []tidalSample, distNm []float64, dep time.Time, duration time.Duration) alongRun {
+// sample's course, for a run on the timeline tl. The samples lie evenly along the
+// route's distance, and each is read at the time the boat is there. The peak is
+// the sample of largest size, with its sign.
+func alongCourse(cur tidalPointCurrents, samples []tidalSample, distNm []float64, tl legTimeline) alongRun {
 	n := len(samples) - 1
 	sum, peak := 0.0, 0.0
 	fair := 0
 	covered := make([]bool, len(samples))
 	run := alongRun{total: len(samples)}
 	for k, s := range samples {
-		t := dep.Add(time.Duration(float64(duration) * float64(k) / float64(n)))
+		t := tl.timeAtStep(k, n)
 		e, nn, ok := cur.series[s.cell].at(t)
 		if !ok {
 			continue
@@ -513,7 +523,10 @@ func noModelDataReason(cur tidalPointCurrents, samples []tidalSample) string {
 }
 
 type tidalScored struct {
-	dep        time.Time
+	dep time.Time
+	// tl is the run's timeline, in whole minutes, from dep, which the ranking samples
+	// the current on. exact is the leg's own, which is carried out of the ranking.
+	tl, exact  legTimeline
 	mean, fair float64
 	run        alongRun
 	// ineligible departures are not best or worst: no data, or too little of the
@@ -624,7 +637,7 @@ func (args assistantTidalDepartureArgs) query(now time.Time) (tidalRankQuery, er
 		return tidalRankQuery{}, fmt.Errorf("the departure window may span at most %d hours", int(assistantTidalDepartureMaxWindow/time.Hour))
 	}
 	return tidalRankQuery{
-		Lat: lat, Lon: lon, CourseDeg: course, Hours: hours, Route: args.Route,
+		Lat: lat, Lon: lon, CourseDeg: course, Hours: hours, Pace: linearPace(hours), Route: args.Route,
 		FloodSetDeg: args.FloodSetDeg, FloodSetSource: args.FloodSetSource,
 		SlackOffset: time.Duration(offsetMin) * time.Minute,
 		Earliest:    earliest, Latest: latest, Now: now,

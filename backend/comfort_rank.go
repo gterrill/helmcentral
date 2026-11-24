@@ -408,10 +408,13 @@ func (ch *departureChoice) rank(ctx context.Context, rk *departureRanking, w *pl
 // one the leg's row shows for that departure, so the chip made from these hours is the
 // chip of the row.
 func (ch *departureChoice) judge(ctx context.Context, rk *departureRanking, w *planLegWork, i int) (in legComfortInput, hours []judgedHour, why string) {
-	span := w.spanFrom(ch.cands[i].Depart)
+	span, err := departureSpan(ch.cands[i].tl)
+	if err != nil {
+		return legComfortInput{}, nil, "No ETA: " + err.Error()
+	}
 	in = legComfortInput{
 		comfortSetup: rk.setup, as: rk.run.as, plan: w.plan, loc: w.fromLoc,
-		depart: span.depart, arrive: span.arrive, from: span.from,
+		from: span.from, tl: span.tl,
 	}
 	if ctx.Err() != nil {
 		return in, nil, comfortReasonOutOfTime

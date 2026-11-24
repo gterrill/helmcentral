@@ -183,9 +183,12 @@ func lcRunAll(t *testing.T, in lcIn) (*planLegComfort, []judgedHour, *shoreRayMe
 		setup = newComfortSetup(set, bands, helmPtr, nil, func() *coastlineLoader { return reader.newLoader() }, memo)
 		setup.onPredict = in.onPredict
 	}
+	tl, err := spanTimeline(paAt(14, 8, 0), paAt(14, 8, 0).Add(hoursDuration(hours)).Add(in.arriveAfter))
+	if err != nil {
+		t.Fatal(err)
+	}
 	input := legComfortInput{
-		comfortSetup: setup, as: as, plan: plan,
-		depart: paAt(14, 8, 0), arrive: paAt(14, 8, 0).Add(hoursDuration(hours)).Add(in.arriveAfter), from: from,
+		comfortSetup: setup, as: as, plan: plan, tl: tl, from: from,
 		underway: in.underway, loc: paLoc,
 	}
 	ctx := in.ctx
@@ -511,7 +514,7 @@ func TestLegComfort_ALegUnderWayIsReadFromNowAndSaysSo(t *testing.T) {
 	}
 	// Past its ETA the leg has no span left, and says so.
 	r := planComfortRun{env: planEnv{now: paAt(14, 13, 30)}, ready: func() (*comfortSetup, string) { return &comfortSetup{}, "" }}
-	c = r.leg(context.Background(), &planLegWork{underway: true, windReady: true, eta: paAt(14, 13, 0), hours: 5, fromLoc: paLoc})
+	c = r.leg(context.Background(), &planLegWork{underway: true, windReady: true, eta: paAt(14, 13, 0), pace: linearPace(5), fromLoc: paLoc})
 	if c == nil || c.Text != "The leg is under way and its ETA has passed." || len(c.Hours) != 0 {
 		t.Fatalf("ETA passed = %+v", c)
 	}
@@ -529,7 +532,11 @@ func TestWalkLegHours_ReckonsPositionOverTheRealSpanNotTheSpanLeft(t *testing.T)
 		as.cache[passagePointKey(pt)] = passagePointHours{hours: m, last: paAt(14, 12, 0).Unix()}
 	}
 	var got []legHour
-	err := as.walkLegHours(plan, paAt(14, 8, 0), paAt(14, 13, 0), paAt(14, 10, 30), paAt(14, 13, 0), func(h legHour) error {
+	tl, err := spanTimeline(paAt(14, 8, 0), paAt(14, 13, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = as.walkLegHours(plan, tl, paAt(14, 10, 30), paAt(14, 13, 0), func(h legHour) error {
 		got = append(got, h)
 		return nil
 	})
@@ -545,7 +552,7 @@ func TestWalkLegHours_ReckonsPositionOverTheRealSpanNotTheSpanLeft(t *testing.T)
 	}
 	// The cell's walk includes the stamp of the arrival: it asks for one hour past it.
 	got = nil
-	as.walkLegHours(plan, paAt(14, 8, 0), paAt(14, 13, 0), paAt(14, 8, 0), paAt(14, 14, 0), func(h legHour) error {
+	as.walkLegHours(plan, tl, paAt(14, 8, 0), paAt(14, 14, 0), func(h legHour) error {
 		got = append(got, h)
 		return nil
 	})
@@ -780,8 +787,12 @@ func BenchmarkLegComfortThreeLegs(b *testing.B) {
 	request := func(memo *shoreRayMemo) {
 		setup := newComfortSetup(set, bands, &helm, nil, func() *coastlineLoader { return reader.newLoader() }, memo)
 		for _, p := range plans {
+			tl, err := spanTimeline(paAt(14, 8, 0), paAt(14, 8, 0).Add(hoursDuration(p.hours)))
+			if err != nil {
+				b.Fatal(err)
+			}
 			c := legComfort(context.Background(), legComfortInput{
-				comfortSetup: setup, as: as, plan: p.plan, depart: paAt(14, 8, 0), arrive: paAt(14, 8, 0).Add(hoursDuration(p.hours)),
+				comfortSetup: setup, as: as, plan: p.plan, tl: tl,
 				from: paAt(14, 8, 0), loc: paLoc,
 			})
 			if c.Text == "" || len(c.Hours) == 0 {
@@ -870,10 +881,14 @@ func benchRank(b *testing.B, legs [][2]shorelinePoint) {
 		}
 		choice := &departureChoice{}
 		for d := paAt(14, 6, 0); !d.After(paAt(14, 17, 45)); d = d.Add(15 * time.Minute) {
-			choice.cands = append(choice.cands, tidalDeparture{Depart: d})
+			tl, err := plan.timeline(d)
+			if err != nil {
+				b.Fatal(err)
+			}
+			choice.cands = append(choice.cands, tidalDeparture{Depart: d, tl: tl})
 			choice.cells = append(choice.cells, passageWindowCell{State: "go"})
 		}
-		work = append(work, rankedLeg{&planLegWork{plan: plan, hours: legHours, fromLoc: paLoc}, choice})
+		work = append(work, rankedLeg{&planLegWork{plan: plan, fromLoc: paLoc}, choice})
 	}
 	newRanking := func(memo *shoreRayMemo) *departureRanking {
 		setup := newComfortSetup(set, bands, &helm, nil, func() *coastlineLoader { return reader.newLoader() }, memo)

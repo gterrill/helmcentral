@@ -236,8 +236,8 @@ func (d planAssessDeps) warmForecast(ctx context.Context, p plan, legs []planLeg
 		if leg.From < first || leg.From >= len(progress) || progress[leg.From] != "" || leg.Error != "" || len(leg.Route) < 2 || leg.DistanceNm <= 0 {
 			continue
 		}
-		// The points a leg is read at do not depend on its hours.
-		plans = append(plans, planLegPassage(leg.From, p.Stops[leg.From], p.Stops[leg.From+1], leg, 1))
+		// The points a leg is read at do not depend on its pace.
+		plans = append(plans, planLegPassage(leg.From, p.Stops[leg.From], p.Stops[leg.From+1], leg, linearPace(1)))
 	}
 	if len(plans) == 0 {
 		return

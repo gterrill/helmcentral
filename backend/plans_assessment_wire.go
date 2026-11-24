@@ -359,7 +359,7 @@ func (d assistantToolDeps) planDepartures(ctx context.Context, q planDepartureQu
 	ranking, err := d.rankTidalDepartures(ctx, tidalRankQuery{
 		Lat: start.Lat, Lon: start.Lon,
 		CourseDeg: bearingDeg(start.Lat, start.Lon, next.Lat, next.Lon),
-		Hours:     q.Hours,
+		Pace:      q.Pace,
 		Route:     q.Route,
 		Earliest:  q.Earliest, Latest: q.Latest,
 		Now: d.now(),
@@ -383,13 +383,25 @@ func (d assistantToolDeps) planCurrentAlong(ctx context.Context, q planDeparture
 		return planCurrentReading{Why: "the leg has no route"}, nil
 	}
 	start, next := q.Route[0], q.Route[1]
-	duration := tidalRunDuration(q.Hours)
-	n := int(math.Ceil(float64(duration) / float64(assistantTidalSampleStep)))
+	// The run on the timeline of this departure, in whole minutes so the arithmetic
+	// is exact.
+	if q.Pace == nil {
+		return planCurrentReading{}, errors.New("the leg has no pace")
+	}
+	tl, err := q.Pace(dep)
+	if err != nil {
+		return planCurrentReading{}, err
+	}
+	tl, err = tl.roundedTo(time.Minute)
+	if err != nil {
+		return planCurrentReading{}, err
+	}
+	n := int(math.Ceil(float64(tl.duration()) / float64(assistantTidalSampleStep)))
 	samples, err := tidalSamples(q.Route, start.Lat, start.Lon, bearingDeg(start.Lat, start.Lon, next.Lat, next.Lon), n)
 	if err != nil {
 		return planCurrentReading{}, err
 	}
-	cur, err := d.fetchTidalCurrents(ctx, samples, d.now(), dep.Add(duration))
+	cur, err := d.fetchTidalCurrents(ctx, samples, d.now(), tl.arrive())
 	if err != nil {
 		return planCurrentReading{}, err
 	}
@@ -397,5 +409,5 @@ func (d assistantToolDeps) planCurrentAlong(ctx context.Context, q planDeparture
 	for k, s := range samples {
 		distNm[k] = s.distNm
 	}
-	return currentReading(alongCourse(cur, samples, distNm, dep, duration), cur, samples), nil
+	return currentReading(alongCourse(cur, samples, distNm, tl), cur, samples), nil
 }
