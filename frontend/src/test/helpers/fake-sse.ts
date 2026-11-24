@@ -1,14 +1,24 @@
 import { vi } from 'vitest'
 
 // Fakes for Mate's streamed answers (ADR 0105). A send or a rejoin reads
-// status/delta/retract/message/error frames off a response body; these build
-// such bodies without a server.
+// round/lookup/delta/message/error frames (the set in lib/mate-events.ts) off a
+// response body; these build such bodies without a server.
 
 const encoder = new TextEncoder()
 
 /** One SSE frame, as the backend writes it. */
 export function sseFrame(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+/** The frame that opens a round: the model is being waited on. */
+export function roundFrame(round = 0, final = false): string {
+  return sseFrame('round', { round, at_ms: 0, final })
+}
+
+/** The frame that says a lookup has started, with the operator's wording of it. */
+export function lookupFrame(text: string, seq = 0, round = 0): string {
+  return sseFrame('lookup', { round, seq, at_ms: 10, text, skipped: '' })
 }
 
 /** A body that delivers every chunk at once and closes. */
@@ -46,7 +56,7 @@ export function controllableSseStream() {
 export function neverEndingStream(onCancel: () => void): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode('event: status\ndata: {"text":"first request working"}\n\n'))
+      controller.enqueue(encoder.encode(lookupFrame('first request working')))
     },
     cancel() {
       onCancel()

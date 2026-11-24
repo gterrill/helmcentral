@@ -7,6 +7,11 @@ Accepted. Amends ADR 0093 §5 and its "Token streaming in v1" rejection
 built there). Built on ADR 0104's React 19 / Tailwind v4 migration, which
 this feature is the reason for.
 
+Superseded in part by [ADR 0305](0305-mates-stream-sorts-a-rounds-text-into-chatter-or-the-answer.md):
+the `status` and `retract` events are gone, replaced by lanes and the
+`lookup`, `answer_withdrawn` and `draft_sent_back` events. The hold-back
+window, the run log and the rejoin behaviour below still stand.
+
 ## Context
 
 Mate already streamed progress: `status` events while a round of tool calls

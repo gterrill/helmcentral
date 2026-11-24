@@ -9,83 +9,6 @@ import (
 	"time"
 )
 
-// assistantRoundCapture is the one place a round's streamed text is observed.
-// Its hooks fill it as the stream arrives, so a round that fails mid-stream
-// still has what came before; finish copies it into the round's trace entry.
-// onContent receives the content fragments, for the live stream.
-type assistantRoundCapture struct {
-	onContent func(string)
-	runStart  time.Time
-
-	// The reasoning head is kept up to the cap; reasoningSize is its full
-	// size. Whether it is cut for storage is the store's business.
-	reasoningHead strings.Builder
-	reasoningSize int
-	private       bool
-
-	// opened says the completion got a 2xx response, so there was a stream to
-	// observe. Without it the round never reached the model's output and its
-	// reasoning kind is not recorded rather than "none". Only the Opened hook
-	// sets it.
-	opened bool
-
-	content      strings.Builder
-	contentStart *int64
-}
-
-func newAssistantRoundCapture(onContent func(string), runStart time.Time) *assistantRoundCapture {
-	return &assistantRoundCapture{onContent: onContent, runStart: runStart}
-}
-
-// assistantReasoningBlockBreak goes between two reasoning entries, so they do
-// not run together as one sentence.
-const assistantReasoningBlockBreak = "\n\n"
-
-func (c *assistantRoundCapture) hooks() openRouterStreamHooks {
-	return openRouterStreamHooks{
-		Opened: func() { c.opened = true },
-		Content: func(fragment string) {
-			// The run thought until the answer's first real text; a leading
-			// newline is not it.
-			if c.contentStart == nil && strings.TrimSpace(fragment) != "" {
-				ms := time.Since(c.runStart).Milliseconds()
-				c.contentStart = &ms
-			}
-			c.content.WriteString(fragment)
-			if c.onContent != nil {
-				c.onContent(fragment)
-			}
-		},
-		Reasoning: func(text string, newBlock bool) {
-			// The size is the model's own text; the break is not part of it.
-			if newBlock && c.reasoningSize > 0 {
-				c.reasoningHead.WriteString(assistantReasoningBlockBreak)
-			}
-			c.reasoningSize += len(text)
-			if c.reasoningHead.Len() < assistantReasoningMaxBytes {
-				c.reasoningHead.WriteString(text)
-			}
-		},
-		Private: func() { c.private = true },
-	}
-}
-
-// finish sets what the round streamed on its trace entry. The text is its
-// chatter; a branch that turns the text into something else (the answer, a
-// draft sent back) clears it.
-func (c *assistantRoundCapture) finish(tr *assistantTraceRound) {
-	tr.Reasoning, tr.ReasoningBytes = c.reasoningHead.String(), c.reasoningSize
-	tr.ReasoningKind = ""
-	if c.opened {
-		tr.ReasoningKind = assistantReasoningKind(c.reasoningSize, c.private)
-	}
-	tr.Chatter = ""
-	if text := c.content.String(); strings.TrimSpace(text) != "" {
-		tr.Chatter = text
-	}
-	tr.ContentStartMs = c.contentStart
-}
-
 // The record of how one Mate run went: its rounds, their timings and tool
 // calls, how the run ended and what it was allowed to spend (ADR 0240). A
 // run that answers keeps its answer in the conversation; one that fails keeps
@@ -300,14 +223,40 @@ type assistantRunRecorder struct {
 	stop   string
 	// model is the one that answered the latest completion.
 	model string
-	// startedAt is when the run began, on the same clock as the trace's
-	// StartedAt and DurationMs. Zero means the runner's own start is used.
+	// startedAt is when the run began: the instant just before the runner's
+	// first request to the model, the zero of every time the trace records and
+	// of the stream's at_ms. Zero until the runner has taken it.
 	startedAt time.Time
+	// onStart is told the run's start when the runner takes it, so the stream's
+	// clock counts from the same instant.
+	onStart func(time.Time)
 }
 
-// startOr is the run's start: the one the recorder was given, or fallback.
+// begin takes at as the run's start and tells onStart. It returns at, so a run
+// with no recorder still counts from it.
+func (r *assistantRunRecorder) begin(at time.Time) time.Time {
+	if r == nil {
+		return at
+	}
+	r.mu.Lock()
+	r.startedAt = at
+	onStart := r.onStart
+	r.mu.Unlock()
+	if onStart != nil {
+		onStart(at)
+	}
+	return at
+}
+
+// startOr is the run's start, or fallback when the runner never took one (it
+// failed before its first request).
 func (r *assistantRunRecorder) startOr(fallback time.Time) time.Time {
-	if r == nil || r.startedAt.IsZero() {
+	if r == nil {
+		return fallback
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.startedAt.IsZero() {
 		return fallback
 	}
 	return r.startedAt

@@ -51,7 +51,7 @@ var noCompressRoutePatterns = map[string]bool{
 	// token-streaming follow-up ADR 0093 §5 named (assistant_run.go's run)
 	// this route flushes a "delta" frame per streamed fragment of the
 	// model's answer, genuinely small and genuinely frequent, on top of its
-	// "status"/"retract"/"message"/"error" frames - not the whole-message-
+	// round/lookup/answer_withdrawn/message/error frames (ADR 0305) - not the whole-message-
 	// at-once shape this comment used to describe. The gzipResponseWriter.
 	// Flush() behaviour above should cover it identically, but that has not
 	// been exercised through the real middleware stack the way

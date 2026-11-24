@@ -498,8 +498,9 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
   const hasMessages = session.messages.length > 0
   // ADR 0105: the draft is the current round's answer text streaming in.
   // While it holds text, it is the thing on screen in place of the status
-  // marker below - a retract (the round turned into tool calls) clears it
-  // back to null and the marker returns, even though `sending` is still true.
+  // marker below - answer_withdrawn or draft_sent_back (the round turned into
+  // tool calls, or its draft went back to the model) clears it back to null
+  // and the marker returns, even though `sending` is still true.
   const showDraft = status.sending && Boolean(status.draft)
   const showStatusMarker = status.sending && !showDraft
   const waitingPhrase = useWaitingPhrase(showStatusMarker && status.statusText === null)

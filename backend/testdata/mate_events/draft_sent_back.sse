@@ -1,0 +1,3 @@
+event: draft_sent_back
+data: {"round":2,"at_ms":6400,"triggers":["shelter at the anchorage","depth at the anchorage"],"draft":"Tongue Bay is well sheltered and has 3 m at low water."}
+

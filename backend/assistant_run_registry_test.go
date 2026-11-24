@@ -42,7 +42,7 @@ func TestAssistantRun_StalledSubscriberDoesNotBlockAppends(t *testing.T) {
 	// Seed one event so the stalled subscriber's first snapshot read has
 	// something to write and gets stuck on that Write call, exactly like a
 	// client whose socket never drains.
-	run.append(mateStatusEvent{Text: "Thinking…"})
+	run.append(mateRoundEvent{})
 	go streamAssistantRun(subscriberCtx, run, 0, stalled)
 
 	// Give the stalled goroutine a moment to actually reach the blocking
@@ -76,7 +76,7 @@ func TestAssistantRun_StalledSubscriberDoesNotBlockAppends(t *testing.T) {
 // is called - after, not before, the final event is visible.
 func TestAssistantRun_ReplaysLogThenLiveEvents(t *testing.T) {
 	run := newAssistantRun(func() {})
-	run.append(mateStatusEvent{Text: "Thinking…"})
+	run.append(mateRoundEvent{})
 	run.append(mateDeltaEvent{Text: "Tongue "})
 
 	var sb strings.Builder
@@ -103,7 +103,7 @@ func TestAssistantRun_ReplaysLogThenLiveEvents(t *testing.T) {
 	}
 
 	body := w.String()
-	statusIdx := strings.Index(body, "event: status")
+	statusIdx := strings.Index(body, "event: round")
 	firstDeltaIdx := strings.Index(body, "\"text\":\"Tongue ")
 	secondDeltaIdx := strings.Index(body, "\"text\":\"Bay\"")
 	messageIdx := strings.Index(body, "event: message")

@@ -15,7 +15,10 @@ of the dashboard uses.
 The answer appears as Mate writes it, rather than after the whole reply is
 ready. While it's still looking something up, you see what it's doing
 ("Looking up Tongue Bay…"). That gives way to the words themselves as soon as
-there's an answer to show. While Mate is simply thinking, with nothing to
+there's an answer to show. Mate holds back its first paragraph until it knows
+whether those words are the answer or only something it said before going to
+look something up, so a short answer appears whole and a long one starts a
+moment after Mate begins writing. While Mate is simply thinking, with nothing to
 look up, the line shows a nautical phrase ("Coming about…", "Trimming the
 sails…") that changes every few seconds.
 

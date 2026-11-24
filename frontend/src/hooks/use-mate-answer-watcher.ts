@@ -56,7 +56,7 @@ async function checkAlreadyFinishedAnswer(
  * whatever it says into a toast, or silence. Mirrors `use-assistant-chat.ts`'s
  * `attach()` (same 204/status/delta/message/error shape), but this only ever
  * cares about the terminal `message`/`error` frame - there is no thread on
- * screen for a `status`/`delta` frame to usefully update.
+ * screen for a progress frame (`round`, `lookup`, `delta`...) to usefully update.
  */
 async function watchOneConversation(
   conversationId: string,
@@ -100,9 +100,18 @@ async function watchOneConversation(
         case 'error':
           errorText = event.error !== '' ? event.error : 'assistant error'
           break
-        case 'status':
+        // Progress frames: there is no thread on screen for them to update.
+        case 'clock':
+        case 'round':
+        case 'reasoning':
+        case 'chatter':
+        case 'lookup':
+        case 'lookup_done':
+        case 'answer_start':
         case 'delta':
-        case 'retract':
+        case 'answer_withdrawn':
+        case 'draft_sent_back':
+        case 'round_end':
           break
         default: {
           const unhandled: never = event

@@ -152,18 +152,19 @@ func TestPassageGuard_BadDraftIsSentBackOnceAndTheSecondAnswerWins(t *testing.T)
 	if reply.Content != guardGood {
 		t.Fatalf("reply = %q, want the second answer", reply.Content)
 	}
-	// Whatever of the draft streamed must be retracted before the new answer.
-	sawDelta, retracted := false, false
-	for _, e := range *events {
-		if e.event == "delta" && !retracted {
-			sawDelta = true
+	// The draft goes back as an event of its own, before the new answer
+	// opens: the browser takes whatever of it streamed out of the answer.
+	sentBack, answerStarts := -1, 0
+	for i, e := range *events {
+		if e.event == "draft_sent_back" && sentBack == -1 {
+			sentBack = i
 		}
-		if e.event == "retract" {
-			retracted = true
+		if e.event == "answer_start" && sentBack != -1 {
+			answerStarts++
 		}
 	}
-	if sawDelta && !retracted {
-		t.Fatal("the draft streamed to the operator and was not retracted")
+	if sentBack == -1 || answerStarts != 1 {
+		t.Fatalf("expected draft_sent_back and then one new answer_start, got %+v", *events)
 	}
 }
 

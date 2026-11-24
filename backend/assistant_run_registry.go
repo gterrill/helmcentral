@@ -24,7 +24,8 @@ import (
 // whatever is still going.
 
 // assistantRunEvent is one entry in a run's append-only event log: the
-// event name ("status", "delta", "retract", "message", "error") and its
+// event name ("round", "delta", "lookup", "message", "error" and the rest of
+// the set in assistant_run.go; never "clock", which is not stored) and its
 // already-marshalled JSON payload, so every subscriber replays the exact
 // bytes the run produced rather than re-encoding a shared value once per
 // reader.
@@ -61,13 +62,57 @@ type assistantRun struct {
 	// waits on it so Stop never hands the composer back while a new question
 	// would still get 409.
 	released chan struct{}
+	// started is the instant just before the runner's first request to the
+	// model: the zero of every at_ms on its stream, and the start its trace uses.
+	// It is zero until the runner takes it (setStarted), and guarded by mu.
+	// streamAssistantRun tells each subscriber how far in the server is
+	// (mateClockEvent) from it.
+	started time.Time
 }
+
+// assistantRunClock is the time the run's zero is taken from, and the time its
+// rounds' at_ms and a subscription's clock event read. A var so a test can fix
+// it.
+var assistantRunClock = time.Now
 
 // newAssistantRun builds a run already wired to cancelFn - the
 // context.CancelFunc for the context the runner will actually execute
 // against (see assistantRunRegistry.start).
 func newAssistantRun(cancelFn context.CancelFunc) *assistantRun {
 	return &assistantRun{cancelFn: cancelFn, changed: make(chan struct{}), released: make(chan struct{})}
+}
+
+// clock is the event that opens a subscription: how far into the run the
+// server is now. It is built fresh for each subscriber and never stored in the
+// log, so a reload replays the same events under a new clock. Until the runner
+// has started it reads 0; streamAssistantRun does not send it until the run has
+// started, the log holds an event, or the run is done, so the browser's zero is
+// not set early on a live run.
+func (r *assistantRun) clock() mateClockEvent {
+	ev, _ := r.clockIfStarted()
+	return ev
+}
+
+// clockIfStarted is the clock, and whether the runner has taken the start.
+func (r *assistantRun) clockIfStarted() (mateClockEvent, bool) {
+	r.mu.Lock()
+	started := r.started
+	r.mu.Unlock()
+	if started.IsZero() {
+		return mateClockEvent{}, false
+	}
+	return mateClockEvent{AtMs: assistantRunClock().Sub(started).Milliseconds()}, true
+}
+
+// setStarted records the instant the run's clock counts from and wakes the
+// subscribers waiting for it.
+func (r *assistantRun) setStarted(at time.Time) {
+	r.mu.Lock()
+	r.started = at
+	ch := r.changed
+	r.changed = make(chan struct{})
+	r.mu.Unlock()
+	close(ch)
 }
 
 // append adds one event to the log and wakes every current subscriber.
@@ -240,8 +285,34 @@ func streamAssistantRun(ctx context.Context, run *assistantRun, fromIndex int, w
 	keepalive := time.NewTicker(assistantRunStreamKeepalive)
 	defer keepalive.Stop()
 
+	// Every subscription opens with the clock, so the browser can place each
+	// event's at_ms on its own time. It is not in the log: a replay for a later
+	// subscriber gets the same events and a clock of its own. The browser takes
+	// its zero when the clock arrives, so the clock waits for the runner's start
+	// and goes out ahead of the first event (the round event is the first to
+	// carry an at_ms, and is only appended after the start). A run that ended
+	// without starting has no at_ms to place and sends the clock at 0.
+	clockSent := false
+
 	for {
 		events, done, changed := run.snapshot(i)
+		if !clockSent {
+			clock, started := run.clockIfStarted()
+			// The runner appends nothing before it has taken the start, so an
+			// event already in the log means the start is as set as it will be.
+			if started || done || len(events) > 0 {
+				clockData, err := json.Marshal(clock)
+				if err != nil {
+					log.Printf("assistant: marshal clock event: %v", err)
+					return
+				}
+				if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", clock.mateEventName(), clockData); err != nil {
+					return
+				}
+				w.Flush()
+				clockSent = true
+			}
+		}
 		for _, e := range events {
 			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Event, e.Payload); err != nil {
 				return

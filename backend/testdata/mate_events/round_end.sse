@@ -1,0 +1,3 @@
+event: round_end
+data: {"round":1,"at_ms":3070,"reasoning":"text","reasoning_bytes":2150,"prompt_tokens":1200,"completion_tokens":340,"cached_tokens":900,"cost_usd":0.0042}
+

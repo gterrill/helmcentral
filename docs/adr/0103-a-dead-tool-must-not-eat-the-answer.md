@@ -94,7 +94,7 @@ with the same `{"error": ...}` shape a real failure produces, carrying a
 message that says the tool has failed three times, is unavailable for the
 rest of this answer, must not be called again, and that the operator is to
 be told the lookup was unavailable. The withheld call is logged and emits
-its own status event, so a run that gave up on a tool reads differently in
+its own `lookup` event marked skipped, so a run that gave up on a tool reads differently in
 the log from one that never called it.
 
 This is not a fallback masking an upstream failure. The model is told
