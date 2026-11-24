@@ -166,8 +166,8 @@ choose it under Settings, SignalK, Roles, and then you get:
 
 Each charging source then adds its own part:
 
-- **Solar charge controllers:** The Solar tile, with a row per controller, and
-  the Solar card on Battery & Power.
+- **Solar charge controllers:** The Solar tile, with a slice of its bar per
+  controller, and the Solar card on Battery & Power.
 - **Alternators:** The Alternator tile, and the electrical footer on the Engine
   Cluster. The tile also needs the engine's rpm to know whether it's running.
 - **Shore charger:** The Shore line on Battery & Power.
