@@ -63,7 +63,10 @@ full routed path.
 
 - **A departure.** The operator's `HH:MM` when set, never changed. When not set,
   a suggestion, flagged `depart_suggested`.
-- **An ETA.** The leg's routed distance over the boat's cruising speed, which is
+- **An ETA.** Amended by [ADR 0304](0304-plan-legs-are-timed-by-learned-cruise-speed-and-slow-water.md):
+  a leg is now timed by a learned cruise speed and slow water, and a boat with no
+  rpm recorded under way has no ETA. What follows is the speed as first built.
+  The leg's routed distance over the boat's cruising speed, which is
   the median speed of the passages Helmcentral itself recorded: every visible
   passage that began in the last 12 months and ran at least 3 nm and 30 minutes
   under way, each taken as its distance over its time under way, from the figures
@@ -153,7 +156,9 @@ guessed:
 
 - **Not routed.** The leg failed to route.
 - **Date has passed.** The leg's day at its start is before today there.
-- **No ETA.** The boat has no recorded passage to take a speed from.
+- **No ETA.** The boat has no recorded passage to take a speed from. ADR 0304
+  adds two reasons: no engine rpm recorded under way, and a cruise speed not
+  learned yet.
 - **Overnight legs are not assessed yet.** More than 24 hours under way. ADR 0285
   keeps a leg to one day.
 - **No forecast yet.** The leg's day is more than ten days out (nothing is
@@ -198,13 +203,15 @@ forecast shows an unchanged `forecast_as_of`. There are no change marks yet.
 ### What the server keeps
 
 Every request recomputes the whole assessment. The server keeps two things
-between requests, both for ten minutes and neither one a failure:
+between requests, and neither one a failure:
 
-- **The forecast at each point.** A point is keyed by its provider, zone and
-  place, so an edit to one stop asks the provider again only for the places it
-  moved. A failed read is never kept.
-- **The cruising speed** from the recorded passages. Only its age invalidates
-  it, since no single place writes a passage.
+- **The forecast at each point,** for ten minutes. A point is keyed by its
+  provider, zone and place, so an edit to one stop asks the provider again only
+  for the places it moved. A failed read is never kept.
+- **The cruising speed** from the recorded passages. Since ADR 0304 it is a fit
+  held in memory, not a ten-minute read: a plan request fits again when a
+  passage has changed or the day has turned since the last fit, and otherwise
+  reuses it. A failed fit is not kept.
 
 Nothing keeps the assessment as a whole. A whole-plan memo would have to know
 everything a verdict depends on (the clock, the provider, the limits, the

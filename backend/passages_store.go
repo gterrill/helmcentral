@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -137,9 +138,16 @@ type passageStore struct {
 	coastStateKnown bool
 
 	// comfort owns the comfort model fitted from the recorded passages (ADR 0301).
-	// Its fit is kept in memory only. A change to a passage's track asks it for a
-	// fit with comfort.signal.
+	// Its fit is kept in memory only. A change to a passage's track asks every
+	// worker that learns from the passages for a fit with changed; a change only the
+	// comfort model reads (the sea it was judged on, the figures stored) asks it alone
+	// with comfort.signal.
 	comfort *comfortModelWorker
+
+	// pace keeps the cruise speed and slow water learned from the recorded passages
+	// (ADR 0304). A plan request fits it when changed (or a new passage) moved its
+	// counter; nothing fits in the background.
+	pace *legPaceCache
 
 	// figuresComputed counts the passages whose figures were worked out from their
 	// track, and figuresHook, when set, runs after the points are read and before
@@ -157,7 +165,23 @@ func newPassageStore(dbPath string) (*passageStore, error) {
 		db.Close()
 		return nil, err
 	}
-	return &passageStore{db: db, comfort: newComfortModelWorker()}, nil
+	s := &passageStore{db: db, comfort: newComfortModelWorker()}
+	s.pace = newLegPaceCache(func(ctx context.Context, now time.Time) (*legPaceModel, error) {
+		return learnLegPace(ctx, s, now)
+	})
+	return s, nil
+}
+
+// changed says that what the passages hold changed (a passage hidden, edited,
+// imported or given rpm): the comfort worker is asked for a fit, and the next plan
+// request fits the pace again.
+func (s *passageStore) changed() {
+	if s.comfort != nil {
+		s.comfort.signal()
+	}
+	if s.pace != nil {
+		s.pace.bump()
+	}
 }
 
 func (s *passageStore) close() error { return s.db.Close() }
@@ -496,6 +520,44 @@ func scanTrackPoint(r rowScanner) (recordedTrackPoint, error) {
 // TrackPointsBetween returns the points with from <= time <= to, oldest first.
 func (s *passageStore) TrackPointsBetween(from, to time.Time) ([]recordedTrackPoint, error) {
 	return s.trackPoints(from, to, "")
+}
+
+// paceTrackPoint is the part of a track point the leg pace is learned from: when
+// and where, which segment and source it belongs to (what makes two points a leg),
+// and the revs, 0 for none recorded.
+type paceTrackPoint struct {
+	At       time.Time
+	Segment  int
+	Source   string
+	Lat, Lon float64
+	RPM      float64
+}
+
+// PaceTrackPointsBetween returns the leg pace's part of the points with
+// from <= time <= to, oldest first, in the order TrackPointsBetween gives them.
+// It reads six columns where that reads them all.
+func (s *passageStore) PaceTrackPointsBetween(ctx context.Context, from, to time.Time) ([]paceTrackPoint, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT t_ms, segment, source, lat, lon, rpm_mean FROM track_points WHERE t_ms >= ? AND t_ms <= ? ORDER BY t_ms, id`,
+		from.UnixMilli(), to.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("query track points: %w", err)
+	}
+	defer rows.Close()
+	var out []paceTrackPoint
+	for rows.Next() {
+		var p paceTrackPoint
+		var ms int64
+		var rpm sql.NullFloat64
+		if err := rows.Scan(&ms, &p.Segment, &p.Source, &p.Lat, &p.Lon, &rpm); err != nil {
+			return nil, fmt.Errorf("scan track point: %w", err)
+		}
+		p.At = time.UnixMilli(ms).UTC()
+		if rpm.Valid && rpm.Float64 > 0 {
+			p.RPM = rpm.Float64
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // trackPoints reads a time range, optionally only one source.

@@ -143,9 +143,9 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 		return rec, err
 	}
 	if p.Hidden != nil {
-		// A hidden passage is left out of the comfort fit, so hiding or showing one
-		// changes what it learns from.
-		s.comfort.signal()
+		// A hidden passage is left out of the fits, so hiding or showing one
+		// changes what they learn from.
+		s.changed()
 	}
 	return rec, nil
 }
@@ -215,7 +215,7 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	if err = tx.Commit(); err != nil {
 		return
 	}
-	s.comfort.signal()
+	s.changed()
 	if join == "" && passageNamesWake != nil {
 		passageNamesWake()
 	}
@@ -322,7 +322,7 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 	if err := tx.Commit(); err != nil {
 		return m, err
 	}
-	s.comfort.signal()
+	s.changed()
 	if untitled && passageNamesWake != nil {
 		passageNamesWake()
 	}
@@ -369,7 +369,7 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	if err := tx.Commit(); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)
 	}
-	s.comfort.signal()
+	s.changed()
 	rec.Start, rec.End, rec.Edited = start, end, true
 	if (moveFrom || moveTo) && passageNamesWake != nil {
 		passageNamesWake()

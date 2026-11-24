@@ -93,9 +93,24 @@ page says the limits aren't set and shows no verdicts.
    When every time that
    day is a No-Go, it shows the least bad one, and the verdict says No-Go. To use
    another, choose **Change plan** and set **Leave at**. Helmcentral never moves
-   a time you set. The arrival comes from the speed your boat made on the
-   passages Helmcentral recorded over the last twelve months. With none recorded
-   yet, the row says there's no ETA.
+   a time you set. The arrival comes from how your boat has run on the
+   passages Helmcentral recorded over the last twelve months: the speed it makes
+   at its usual cruising revs, slowed through any stretch where it has been
+   seen crawling on low revs, such as a berth, a fairway or a lock. A small
+   line under the times says what the arrival was worked out on, for example
+   "Cruise 10.3 kn, 40 min in slow water." When the leg has no slow water, it
+   says "Cruise 10.3 kn." Current isn't in the arrival yet.
+   When Helmcentral can't work out an arrival, the row says "No ETA" and why:
+   - No recorded passages yet: record a passage first.
+   - No passages recorded in the last twelve months: Helmcentral only learns
+     from the last year, so record a passage under engine.
+   - No engine rpm recorded under way: none of your recorded passages has engine
+     revs, which is true of sailing, imported tracks and passages from before
+     revs were recorded. Record a passage under engine with the engine feed on.
+   - Cruise speed not learned yet: Helmcentral needs 2 hours at cruising revs
+     over 3 passages, and the row says how many it has. Record more passages
+     under engine.
+   Helmcentral doesn't make up a speed to fill the gap.
 3. If the row says "No daylight window", no departure fits the leg's daylight.
    When your passage limits ask for a daylight arrival, Helmcentral looks from
    first light to the last departure that still arrives in daylight. When they

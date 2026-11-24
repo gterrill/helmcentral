@@ -49,7 +49,7 @@ const comfort = (over: Partial<PlanLegComfort> = {}): PlanLegComfort => ({
 
 const legAssessment = (over: Partial<PlanLegAssessment> = {}): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: "go", limiting: "", note: "", noteKind: "",
-  depart: "2026-11-14T08:00:00+10:00", departSuggested: false, departBasis: null, arrive: "2026-11-14T13:00:00+10:00",
+  depart: "2026-11-14T08:00:00+10:00", departSuggested: false, departBasis: null, arrive: "2026-11-14T13:00:00+10:00", etaBasis: null,
   hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [],
   windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
@@ -133,7 +133,7 @@ describe("mapAssessment comfort", () => {
   const raw = (comfortWire: unknown) => ({
     as_of: "x", forecast_as_of: "", problem: "", warnings_error: "", night_winds: [], stops: [],
     legs: [{
-      leg: 0, date: "2026-11-14", verdict: "go", limiting: "", note: "", note_kind: "", depart: "", depart_suggested: false, depart_basis: null, arrive: "",
+      leg: 0, date: "2026-11-14", verdict: "go", limiting: "", note: "", note_kind: "", depart: "", depart_suggested: false, depart_basis: null, arrive: "", eta_basis: null,
       hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [], wind_changes: { changes: [], not_checked: "" },
       comfort: comfortWire,
     }],

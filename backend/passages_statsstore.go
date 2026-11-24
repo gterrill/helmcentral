@@ -454,7 +454,7 @@ func startPassageFiguresWith(ctx context.Context, store *passageStore, settingsP
 	if ctx.Err() != nil {
 		return
 	}
-	// The start-up fit is the worker's, asked for here so it follows the recompute.
+	// The comfort fit is the worker's, asked for here so it follows the recompute.
 	// The sweeps start without waiting for it, and a first pass that stores
 	// something asks for one more.
 	store.comfort.signal()

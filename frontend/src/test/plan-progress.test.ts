@@ -17,7 +17,7 @@ import {
 
 const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "A → B|2026-11-14", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "",
-  depart: null, departSuggested: false, departBasis: null, arrive: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
+  depart: null, departSuggested: false, departBasis: null, arrive: null, etaBasis: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
   windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
 

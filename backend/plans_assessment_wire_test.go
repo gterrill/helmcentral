@@ -344,56 +344,6 @@ func TestPlanCurrentAlong_AFailedRequestIsAnError(t *testing.T) {
 	}
 }
 
-// ── the ETA speed comes from the passages Helmcentral recorded ───────────
-
-// recordPassage stores a passage that began daysAgo days before now and covered
-// nm nautical miles in underwayHours hours under way.
-func recordPassage(t *testing.T, store *passageStore, now time.Time, daysAgo int, nm, underwayHours float64, hidden bool) {
-	t.Helper()
-	start := now.AddDate(0, 0, -daysAgo)
-	rec, err := store.InsertPassage(passageRecord{Start: start, End: start.Add(time.Duration(underwayHours * float64(time.Hour))), Title: "t", Hidden: hidden})
-	if err != nil {
-		t.Fatal(err)
-	}
-	figures := passageFigures{Stats: passageStats{DistanceNM: nm, UnderwaySeconds: underwayHours * 3600}}
-	if _, err := store.storeFigures(rec, figures, 0); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRecordedCruisingSpeed_IsTheMedianOfTheLastTwelveMonthsOfPassages(t *testing.T) {
-	store := newTestPassageStore(t)
-	now := time.Date(2026, 11, 14, 4, 30, 0, 0, time.UTC)
-	recordPassage(t, store, now, 10, 30, 5, false) // 6 kn
-	recordPassage(t, store, now, 40, 35, 5, false) // 7 kn
-	recordPassage(t, store, now, 90, 40, 5, false) // 8 kn
-	// Outside the window, or not a passage worth counting: none of these count.
-	recordPassage(t, store, now, 400, 120, 5, false) // 24 kn, 13 months ago
-	recordPassage(t, store, now, 20, 1, 0.2, false)  // a marina move
-	recordPassage(t, store, now, 25, 100, 5, true)   // hidden by the operator
-	got, err := recordedCruisingSpeed(context.Background(), store, now)
-	if err != nil || got != 7 {
-		t.Fatalf("speed = %v, %v; want 7 kn, the median of 6, 7 and 8", got, err)
-	}
-}
-
-func TestRecordedCruisingSpeed_NoPassagesIsAnErrorNotADefault(t *testing.T) {
-	store := newTestPassageStore(t)
-	now := time.Date(2026, 11, 14, 4, 30, 0, 0, time.UTC)
-	recordPassage(t, store, now, 400, 30, 5, false)
-	recordPassage(t, store, now, 5, 0.5, 0.1, false)
-	got, err := recordedCruisingSpeed(context.Background(), store, now)
-	if err == nil || !strings.Contains(err.Error(), "no recorded passages yet") {
-		t.Fatalf("speed = %v, err = %v; want the no-recorded-passages error", got, err)
-	}
-}
-
-func TestRecordedCruisingSpeed_NoPassageStoreIsAnError(t *testing.T) {
-	if _, err := recordedCruisingSpeed(context.Background(), nil, time.Now()); err == nil {
-		t.Fatal("no store, no speed")
-	}
-}
-
 // Wall time of one assessment of a four-leg plan when every provider call takes
 // 200 ms (forecast per point, ranking per leg, warnings per place), cold and
 // then with the point forecasts kept. Skipped under -short: it sleeps.
@@ -437,20 +387,5 @@ func TestPlanAssessmentLatency_ColdAndWarm(t *testing.T) {
 		start := time.Now()
 		out := assessPlan(context.Background(), p, legs, d, planAssessOptions{})
 		t.Logf("%s: %s for %d legs (%d forecast reads so far)", run, time.Since(start).Round(10*time.Millisecond), len(out.Legs), f.fetches)
-	}
-}
-
-// A request that is over stops the walk through the passages: no speed, and the
-// error is the context's.
-func TestRecordedCruisingSpeed_ACancelledContextStopsTheLoop(t *testing.T) {
-	store := newTestPassageStore(t)
-	now := time.Date(2026, 11, 14, 4, 30, 0, 0, time.UTC)
-	recordPassage(t, store, now, 10, 30, 5, false)
-	recordPassage(t, store, now, 40, 35, 5, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	got, err := recordedCruisingSpeed(ctx, store, now)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("speed = %v, err = %v; want the context's error", got, err)
 	}
 }

@@ -42,7 +42,7 @@ const leg = (from: number): PlanLeg => ({
 });
 
 const legAssessment = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
-  leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, departBasis: null, arrive: null,
+  leg: 0, date: "2026-11-14", key: "k0", progress: "", stillInPort: false, verdict: null, limiting: "", note: "", noteKind: "", depart: null, departSuggested: false, departBasis: null, arrive: null, etaBasis: null,
   hours: 5, speedKn: 6, currentKn: null, currentNote: "", notChecked: [],
   windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
@@ -151,6 +151,37 @@ describe("PlanTable verdicts", () => {
     // The tooltip is the general account, not the line shown again.
     expect(time.getAttribute("title")).toMatch(/the calmest ride, then the fairest stream\.$/);
     expect(time.getAttribute("title")).not.toContain(basis);
+  });
+
+  it("says under the times what the ETA was worked out on, wrapped", () => {
+    const etaBasis = "Cruise 10.3 kn, 40 min in slow water.";
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T06:30:00+10:00", arrive: "2026-11-14T11:30:00+10:00", etaBasis,
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+      }),
+    );
+    const line = within(rows()[0]).getByText(etaBasis);
+    expect(line).toHaveClass("text-muted-foreground", "break-words");
+    expect(line).not.toHaveClass("truncate");
+  });
+
+  it("shows no ETA line when the server gives no ETA basis", () => {
+    show(
+      assessment({
+        legs: [
+          legAssessment({
+            verdict: "go", depart: "2026-11-14T06:30:00+10:00", arrive: "2026-11-14T11:30:00+10:00", etaBasis: null,
+          }),
+          legAssessment({ leg: 1, date: "2026-11-16" }),
+        ],
+      }),
+    );
+    expect(rows()[0]).not.toHaveTextContent("Cruise");
   });
 
   it("keeps the fixed account of a suggested time when the server gives no basis", () => {

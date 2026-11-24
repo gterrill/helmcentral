@@ -334,13 +334,20 @@ Current or Verdict:
   differs from the boat's, a note at the top of the forecast, above its heading,
   says so once you've opened it.
 - **Depart and ETA.** A passage row shows when you leave and when you should
-  arrive. The arrival comes from the speed your boat has actually made. That's
-  the middle value of the passages Helmcentral recorded over the last twelve
-  months. It leaves out any passage shorter than 3 nautical miles or 30 minutes
-  under way, such as a move inside a marina. The speed comes from your recorded
+  arrive. The arrival comes from how your boat has actually run. Helmcentral
+  learns the engine revs you cruise at from the passages it recorded over the
+  last twelve months, and the speed over the ground you make at those revs. It
+  runs each leg at that speed, except through stretches where your record shows
+  the boat crawling on low revs, such as a berth, a fairway or a lock, which it
+  runs at the speed you made there. A small line under the times says what it
+  used, for example "Cruise 10.3 kn, 40 min in slow water." A river running
+  against you at cruising revs isn't treated as slow water, and the modelled
+  current isn't in the arrival yet. The speed comes from your recorded
   passages, not the engine log, so it's a different source from the speed Mate
-  uses for its own estimate. If no recorded passage qualifies yet, the row says
-  "No ETA: no recorded passages yet" and shows no arrival and no verdict.
+  uses for its own estimate. A boat with no engine revs recorded under way, such
+  as one that has only sailed, has no arrival until a passage is recorded under
+  engine. The same goes for fewer than 3 passages or 2 hours at cruising revs.
+  The row then says "No ETA" with the reason and shows no arrival and no verdict.
   Helmcentral doesn't make up a speed. If you set **Leave at** on a leg, the row
   shows that time and Helmcentral never changes it.
 - **A suggested departure.** If you didn't set a time, Helmcentral suggests one

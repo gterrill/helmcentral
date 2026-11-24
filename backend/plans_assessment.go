@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -101,7 +103,12 @@ type planLegAssessment struct {
 	DepartSuggested bool     `json:"depart_suggested"`
 	Arrive          string   `json:"arrive"`
 	Hours           *float64 `json:"hours"`
-	SpeedKn         *float64 `json:"speed_kn"`
+	// SpeedKn is the average speed the hours were worked out at (the leg's distance
+	// over Hours), so Hours times SpeedKn is the distance. EtaBasis says in a
+	// sentence what the hours were worked out from: the learned cruise speed, and any
+	// minutes in slow water. Both always on the wire, null when the leg has no ETA.
+	SpeedKn  *float64 `json:"speed_kn"`
+	EtaBasis *string  `json:"eta_basis"`
 	// CurrentKn is the modelled current along the course at the departure, in
 	// knots: positive helps the boat, negative hinders it. Nil when it could not
 	// be read, and CurrentNote says why.
@@ -197,8 +204,9 @@ type planAssessDeps struct {
 	now     func() time.Time
 	limits  func() (passageLimits, error)
 	sources func(zone func() (string, error), now time.Time) (passageSources, error)
-	// speed is the boat's cruising speed in knots, from the passages it recorded.
-	speed func(ctx context.Context) (float64, error)
+	// speed is the boat's cruise speed and slow water, learned from the passages it
+	// recorded, or why it has none.
+	speed func(ctx context.Context) (*legPaceModel, error)
 	sun   func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)
 	dawn  func(date time.Time, lat, lon float64) (time.Time, bool)
 	// departures ranks every departure in the query's window by the modelled
@@ -237,8 +245,10 @@ type planEnv struct {
 	limitsErr     error
 	limitsProblem string
 	// problem is the plan's one problem from the limits or the speed, "" when none.
-	problem  string
-	speed    float64
+	problem string
+	// pace is what was learned of the boat's cruise speed and slow water, or
+	// speedErr is why nothing was.
+	pace     *legPaceModel
 	speedErr error
 }
 
@@ -253,10 +263,13 @@ type planLegWork struct {
 	// pace is the leg's timeline for any departure. tl is the timeline of the
 	// departure the row shows (the operator's, the one chosen, or a reference until
 	// one is), which the wire's hours are read from.
-	pace  legPace
-	tl    legTimeline
-	query planDepartureQuery
-	plan  passageLegPlan
+	pace legPace
+	// profile is the leg walked once for the learned pace, nil until setPace has
+	// run; the pace and the words on the wire are read from it.
+	profile *legPaceProfile
+	tl      legTimeline
+	query   planDepartureQuery
+	plan    passageLegPlan
 	// course is the leg's course in degrees true, which a wind change is placed
 	// against.
 	course float64
@@ -298,10 +311,21 @@ func (w *planLegWork) markProgress(progress string) {
 	w.assessable = false
 }
 
-// setPace gives a routed leg its pace: today one speed over the whole leg, its
-// distance at the boat's recorded speed.
-func (w *planLegWork) setPace(leg planLeg, speed float64) {
-	w.pace = linearPace(leg.DistanceNm / speed)
+// setPace gives a routed leg its pace: the boat's cruise speed along the route,
+// slower through the cells it has learned are slow water. The route is walked once
+// for the leg, the first time any step asks (setHours, or prepareUnderway for a leg
+// whose hours were not worked out), and each departure's pace is worked out over
+// that walk.
+func (w *planLegWork) setPace(leg planLeg, m *legPaceModel) error {
+	if w.profile == nil {
+		p, err := m.profile(leg)
+		if err != nil {
+			return err
+		}
+		w.profile = p
+	}
+	w.pace = w.profile.pace
+	return nil
 }
 
 // setDeparture shows the departure the ranking chose, on the timeline it was ranked on.
@@ -310,6 +334,30 @@ func (w *planLegWork) setDeparture(c tidalDeparture, suggested bool) {
 	w.res.DepartSuggested = suggested
 	w.tl = c.tl
 	w.putArrive(c.tl.arrive())
+}
+
+// putEtaBasis words what the hours shown were worked out on, as depart_basis words
+// what the departure was chosen on. It is put once, when the row is finished, on a
+// leg that shows an arrival still ahead. The pace does not
+// yet depend on the departure, so the words are the same whichever one is shown;
+// the current of the chosen hour is what will change them.
+func (w *planLegWork) putEtaBasis() {
+	if w.profile == nil {
+		return // a leg with no pace has no hours to give a basis to
+	}
+	text := etaBasisText(w.profile.cruiseKn, hoursDuration(w.profile.slowHours()))
+	w.res.EtaBasis = &text
+}
+
+// etaBasisText is the sentence a leg's hours were worked out on: the cruise speed,
+// and the time in slow water rounded to five minutes, left out when it rounds to
+// none.
+func etaBasisText(cruiseKn float64, slow time.Duration) string {
+	text := fmt.Sprintf("Cruise %.1f kn", cruiseKn)
+	if m := int(math.Round(slow.Minutes()/5)) * 5; m > 0 {
+		text += ", " + durationText(time.Duration(m)*time.Minute) + " in slow water"
+	}
+	return text + "."
 }
 
 // putDepart and putArrive set the departure and arrival the row shows, in their
@@ -449,6 +497,17 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		if tl := work[i].tl; tl.known() {
 			hours := tl.hours()
 			l.Hours = &hours
+			// The basis words an ETA the row shows, so only a leg with an arrival on
+			// its row has one, and a leg under way only while its ETA is still ahead.
+			if l.Arrive != "" && (!work[i].underway || work[i].eta.After(env.now)) {
+				work[i].putEtaBasis()
+			}
+			// The average speed the hours were worked out at, so hours times speed_kn
+			// is the leg's distance. The cruise speed is in eta_basis.
+			if d := byFrom[i].DistanceNm; d > 0 && hours > 0 {
+				speed := d / hours
+				l.SpeedKn = &speed
+			}
 		}
 	}
 	// A leg no forecast was read for says why its wind changes were not either.
@@ -477,7 +536,7 @@ func (d planAssessDeps) readEnv(ctx context.Context, now time.Time, anyLeg bool)
 	env.limits, env.limitsErr = limits, err
 	env.problem = env.limitsProblem
 	if anyLeg {
-		env.speed, env.speedErr = d.speed(ctx)
+		env.pace, env.speedErr = d.speed(ctx)
 		if env.speedErr != nil && env.problem == "" {
 			env.problem = "No ETA: " + env.speedErr.Error()
 		}
@@ -532,7 +591,9 @@ func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv) string {
 		if env.speedErr != nil {
 			return "No ETA: " + env.speedErr.Error()
 		}
-		w.setPace(leg, env.speed)
+		if err := w.setPace(leg, env.pace); err != nil {
+			return "No ETA: " + err.Error()
+		}
 		w.plan = planLegPassage(w.i, w.from, w.to, leg, w.pace)
 		w.course = float64(leg.CourseDeg)
 	}
@@ -553,6 +614,11 @@ func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv) string {
 		return "No ETA: " + err.Error()
 	}
 	w.eta = tl.arrive()
+	// A leg whose own steps stopped short of the hours (its departure has passed)
+	// still has the ETA the boat is held to, so it shows the hours.
+	if !w.tl.known() {
+		w.tl = tl
+	}
 	w.windReady = true
 	return ""
 }
@@ -604,7 +670,7 @@ func (w *planLegWork) setOperatorDeparture(now time.Time) (planNoteKind, string)
 	return planKindNone, ""
 }
 
-// setHours works out the time under way at the boat's recorded speed, and the
+// setHours works out the time under way at the boat's learned pace, and the
 // arrival at the operator's time.
 func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) {
 	if env.speedErr != nil {
@@ -614,12 +680,14 @@ func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) 
 	if ref.IsZero() {
 		ref = env.now
 	}
-	w.setPace(leg, env.speed)
+	if err := w.setPace(leg, env.pace); err != nil {
+		return planKindOther, "No ETA: " + err.Error()
+	}
 	tl, err := w.pace(ref)
 	if err != nil {
 		return planKindOther, "No ETA: " + err.Error()
 	}
-	w.tl, w.res.SpeedKn = tl, &env.speed
+	w.tl = tl
 	// The arrival is known from the timeline of the operator's departure, so it
 	// shows even for a leg that is not judged.
 	if !w.depart.IsZero() {

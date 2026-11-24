@@ -36,6 +36,9 @@ func runPassageDetection(store *passageStore) error {
 		if !inserted {
 			continue
 		}
+		// The pace learns from the passages, so the next plan request fits it
+		// again. Comfort is asked once the figures are stored, not here.
+		store.pace.bump()
 		store.PassageStatsFor(rec) // warm the stored figures
 		announcePassageSpan(rec)
 	}
