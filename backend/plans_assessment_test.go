@@ -45,18 +45,22 @@ func paPlan(t *testing.T, first string, nights ...int) (plan, []planLeg) {
 	return d, legs
 }
 
-// paFake records what the plan assessment asked of the ranking, the current and
-// the warnings.
+// paFake records what the plan assessment asked of the current and the warnings.
 type paFake struct {
-	mu       sync.Mutex
-	rankings []planDepartureQuery
-	// departures answers a ranking; the default is one departure an hour into the
-	// window with a helping current.
-	departures func(q planDepartureQuery) ([]tidalDeparture, error)
-	// noTimelines leaves the candidates without the timeline the ranking carries.
-	noTimelines   bool
-	currentCalls  []time.Time
-	current       func(q planDepartureQuery, dep time.Time) (planCurrentReading, error)
+	mu sync.Mutex
+	// reads counts the current reads made, one for each leg that is read.
+	reads int
+	// departures answers a leg's current read: the departures it lists are the ones
+	// the model has a current for, each with its mean along the track, and the leg
+	// is run on the pace. A leg is asked for it on every read, so it can fail or
+	// take time. The default is one departure an hour after first light (6.15 AM)
+	// with a helping current.
+	departures func() ([]tidalDeparture, error)
+	// current is the reading the model gives for the departures at those times of
+	// day, which an operator's time is.
+	current map[int]planCurrentReading
+	// currentErr fails every current read.
+	currentErr    error
 	fetches       int
 	warnings      func(lat, lon float64) (forecastWarningsBundle, error)
 	warningsOpen  int
@@ -79,6 +83,10 @@ type paFake struct {
 	position func() (float64, float64, error)
 	// store keeps the day's first suggestion between assessments; nil keeps none.
 	store *documentStore
+	// currents, when set, answers a leg's current read in place of the stubs
+	// above; run replaces how a leg is run from a departure.
+	currents func(p *legPaceProfile) (legCurrentField, error)
+	run      func(p *legPaceProfile, depart time.Time, f legCurrentField) (legRun, error)
 }
 
 func paDeps(f *paFake) planAssessDeps {
@@ -121,7 +129,7 @@ func paDeps(f *paFake) planAssessDeps {
 			return &legPaceModel{CruiseKn: f.speed}, nil
 		},
 		progress: func(context.Context, plan) ([]string, error) { return f.progress, f.progressErr },
-		underway: func(context.Context) (*planUnderway, error) { return f.underway, f.underwayErr },
+		underway: func(context.Context, time.Time) (*planUnderway, error) { return f.underway, f.underwayErr },
 		position: func() (float64, float64, error) {
 			if f.position != nil {
 				return f.position()
@@ -140,40 +148,10 @@ func paDeps(f *paFake) planAssessDeps {
 			y, m, d := date.Date()
 			return time.Date(y, m, d, 5, 15, 0, 0, date.Location()), true
 		},
-		departures: func(ctx context.Context, q planDepartureQuery) ([]tidalDeparture, error) {
-			f.mu.Lock()
-			f.rankings = append(f.rankings, q)
-			f.mu.Unlock()
-			cands := []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}}}
-			if f.departures != nil {
-				var err error
-				if cands, err = f.departures(q); err != nil {
-					return nil, err
-				}
-			}
-			// The real ranking hands each departure the timeline it scored it on; a
-			// candidate a test gave one keeps it.
-			for i := range cands {
-				if f.noTimelines || cands[i].tl.known() {
-					continue
-				}
-				tl, err := q.Pace(cands[i].Depart)
-				if err != nil {
-					return nil, err
-				}
-				cands[i].tl = tl
-			}
-			return cands, nil
+		legCurrents: func(ctx context.Context, p *legPaceProfile) (legCurrentField, error) {
+			return f.readCurrents(p)
 		},
-		currentAlong: func(ctx context.Context, q planDepartureQuery, dep time.Time) (planCurrentReading, error) {
-			f.mu.Lock()
-			f.currentCalls = append(f.currentCalls, dep)
-			f.mu.Unlock()
-			if f.current != nil {
-				return f.current(q, dep)
-			}
-			return planCurrentReading{}, nil
-		},
+		run: f.run,
 		warnings: func(now time.Time) (planWarningsReader, error) {
 			f.mu.Lock()
 			f.warningsOpen++
@@ -194,6 +172,13 @@ func paDeps(f *paFake) planAssessDeps {
 func paAssess(t *testing.T, p plan, legs []planLeg, f *paFake) planAssessment {
 	t.Helper()
 	return assessPlan(context.Background(), p, legs, paDeps(f), planAssessOptions{})
+}
+
+// paUnderwayFrom is a passage that began at the plan's first stop at start and whose
+// latest fix, at fixAt, is 0.3 nm past it.
+func paUnderwayFrom(p plan, start, fixAt time.Time) *planUnderway {
+	s := p.Stops[0]
+	return &planUnderway{Lat: s.Lat, Lon: s.Lon, Start: start, FixLat: s.Lat + 0.3/60, FixLon: s.Lon, FixAt: fixAt}
 }
 
 func paParse(t *testing.T, s string) time.Time {
@@ -268,7 +253,7 @@ func TestAssessPlan_MarginalIsFromSeventyPercentOfNoGo(t *testing.T) {
 
 func TestAssessPlan_ASuggestedDepartureIsMarkedAndAssessedAtItsTime(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(9, 30, 0.6)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -278,50 +263,61 @@ func TestAssessPlan_ASuggestedDepartureIsMarkedAndAssessedAtItsTime(t *testing.T
 	if l.Verdict != "go" {
 		t.Fatalf("verdict = %q", l.Verdict)
 	}
-	if len(f.rankings) != 1 {
-		t.Fatalf("ranking asked %d times", len(f.rankings))
-	}
-	q := f.rankings[0]
-	if tl, err := q.Pace(q.Earliest); err != nil || tl.hours() != 5 || len(q.Route) != 2 {
-		t.Fatalf("query = %+v", q)
-	}
-	// First light is 5.15 AM; with no daylight arrival limit the last departure
-	// is still in daylight, at sunset 5.32 PM.
-	if !q.Earliest.Equal(paAt(14, 5, 15)) || !q.Latest.Equal(paAt(14, 17, 30)) {
-		t.Fatalf("window %s to %s", q.Earliest, q.Latest)
+	if f.reads != 1 {
+		t.Fatalf("%d current reads, want one for the leg", f.reads)
 	}
 }
 
-func TestAssessPlan_ASuggestedRowArrivesWhenTheCarriedTimelineSays(t *testing.T) {
+// First light is 5.15 AM; with no daylight arrival limit the last departure is
+// still in daylight, at sunset 5.32 PM.
+func TestAssessPlan_TheWindowRunsFromFirstLightToSunset(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
-	// The pace is 5 hours; the ranking's timeline for this departure is 2.5.
-	carried, err := linearTimeline(paAt(14, 9, 30), 2.5)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name       string
+		listed     []tidalDeparture
+		wantDepart time.Time
+	}{
+		{"first light", []tidalDeparture{paDeparture(5, 0, 0.99), paDeparture(5, 15, 0.5)}, paAt(14, 5, 15)},
+		{"sunset", []tidalDeparture{paDeparture(17, 30, 0.5), paDeparture(17, 45, 0.99)}, paAt(14, 17, 30)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &paFake{departures: func() ([]tidalDeparture, error) { return tc.listed, nil }}
+			l := paAssess(t, p, legs, f).Legs[0]
+			if !paParse(t, l.Depart).Equal(tc.wantDepart) {
+				t.Fatalf("depart = %s, want %s: the fairer current outside the window is not a candidate", l.Depart, tc.wantDepart)
+			}
+		})
 	}
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
-		d := paDeparture(9, 30, 0.6)
-		d.tl = carried
-		return []tidalDeparture{d}, nil
-	}}
+}
+
+func TestAssessPlan_ASuggestedRowArrivesWhenTheRunsTimelineSays(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	// The pace is 5 hours; the run's timeline for this departure is 2.5.
+	f := &paFake{
+		run: crRun(func(time.Time) float64 { return 2.5 }),
+		departures: func() ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(9, 30, 0.6)}, nil
+		},
+	}
 	l := paAssess(t, p, legs, f).Legs[0]
 	if !paParse(t, l.Arrive).Equal(paAt(14, 12, 0)) {
-		t.Fatalf("arrive = %s, want the carried timeline's 12.00", l.Arrive)
+		t.Fatalf("arrive = %s, want the run's timeline's 12.00", l.Arrive)
 	}
 }
 
-func TestAssessPlan_ADepartureWithNoTimelineIsNotSuggestedAndSaysSo(t *testing.T) {
+func TestAssessPlan_ADepartureThatCannotBeRunIsNotSuggestedAndSaysSo(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
-	f := &paFake{noTimelines: true, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
-		// The ranking's instants are UTC; the row speaks on the stop's clock.
-		d := paDeparture(9, 30, 0.6)
-		d.Depart = d.Depart.UTC()
-		return []tidalDeparture{d}, nil
-	}}
+	f := &paFake{
+		run: func(p *legPaceProfile, dep time.Time, f legCurrentField) (legRun, error) {
+			return legRun{}, errors.New("the pace gave no timeline for " + fmtLeg(dep, paLoc))
+		},
+		departures: func() ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(9, 30, 0.6)}, nil
+		},
+	}
 	l := paAssess(t, p, legs, f).Legs[0]
-	want := "No departure suggested: the ranking gave no timeline for the departure at " + fmtLeg(paAt(14, 9, 30), paLoc)
-	if l.Note != want {
-		t.Fatalf("note = %q, want %q", l.Note, want)
+	if l.Note != "No departure suggested: the leg's timeline could not be worked out" || l.Depart != "" || l.Verdict != "" {
+		t.Fatalf("leg = %+v", l)
 	}
 }
 
@@ -335,7 +331,7 @@ func TestAssessPlan_TheSuggestionSkipsDeparturesThatAreNoGo(t *testing.T) {
 		return 10
 	})
 	// The fairest current is at 8.00, which runs into the 25 kn; 11.00 does too.
-	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(8, 0, 0.9), paDeparture(11, 0, 0.5), paDeparture(13, 0, 0.3)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -345,8 +341,8 @@ func TestAssessPlan_TheSuggestionSkipsDeparturesThatAreNoGo(t *testing.T) {
 	if l.CurrentKn == nil || *l.CurrentKn != 0.3 {
 		t.Fatalf("the current is the one read for the chosen departure: %v", l.CurrentKn)
 	}
-	if len(f.currentCalls) != 0 {
-		t.Fatalf("a suggested leg reads its current with the ranking, not again: %v", f.currentCalls)
+	if f.reads != 2 {
+		t.Fatalf("%d current reads: a suggested leg reads its current once, with its departures, not again", f.reads)
 	}
 }
 
@@ -359,7 +355,7 @@ func TestAssessPlan_TheSuggestionPrefersGoToMarginalEvenOnAWorseCurrent(t *testi
 		}
 		return 8
 	})
-	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(8, 0, 1.0), paDeparture(13, 0, 0.1)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -370,7 +366,7 @@ func TestAssessPlan_TheSuggestionPrefersGoToMarginalEvenOnAWorseCurrent(t *testi
 
 func TestAssessPlan_TheSuggestionTakesTheFairestCurrentAmongEqualVerdicts(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(9, 0, 0.9), paDeparture(13, 0, 0.1)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -387,7 +383,7 @@ func TestAssessPlan_AMarginalSuggestionBeatsANoGoOne(t *testing.T) {
 		}
 		return 16
 	})
-	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(8, 0, 0.9), paDeparture(13, 0, 0.1)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -406,7 +402,7 @@ func TestAssessPlan_WhenEveryDepartureIsNoGoTheLeastBadIsShownAsNoGo(t *testing.
 		}
 		return 22
 	})
-	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(8, 0, 0.9), paDeparture(13, 0, 0.1)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -434,7 +430,7 @@ func TestAssessPlan_ANoGoBeatsADepartureThatRunsPastTheForecast(t *testing.T) {
 	}}
 	// The 8.00 departure is judged a No-Go; the 9.00 PM one would arrive at 2 AM,
 	// past the last forecast hour, and cannot be judged yet.
-	f := &paFake{fc: fc, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		return []tidalDeparture{paDeparture(8, 0, 0.5), paDeparture(21, 0, 0.9)}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -447,32 +443,36 @@ func TestAssessPlan_TheRankingsFirstWindowIsOneDeparturePerQuarterHourAndOneCall
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	f := &paFake{}
 	paAssess(t, p, legs, f)
-	if len(f.rankings) != 2 {
-		t.Fatalf("two legs, two rankings, got %d", len(f.rankings))
+	if f.reads != 2 {
+		t.Fatalf("two legs, two current reads, got %d", f.reads)
 	}
 }
 
 func TestAssessPlan_ADepartureInThePastIsNotSuggested(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
-	f := &paFake{}
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
+		return []tidalDeparture{paDeparture(8, 0, 0.9), paDeparture(8, 15, 0.5)}, nil
+	}}
 	d := paDeps(f)
 	d.now = func() time.Time { return paAt(14, 8, 7) }
-	assessPlan(context.Background(), p, legs, d, planAssessOptions{})
-	if len(f.rankings) != 1 || !f.rankings[0].Earliest.Equal(paAt(14, 8, 15)) {
-		t.Fatalf("window = %+v: no earlier than the next quarter hour", f.rankings)
+	l := assessPlan(context.Background(), p, legs, d, planAssessOptions{}).Legs[0]
+	if !paParse(t, l.Depart).Equal(paAt(14, 8, 15)) {
+		t.Fatalf("depart = %s: no earlier than the next quarter hour, though 8.00 has the fairer current", l.Depart)
 	}
 }
 
 func TestAssessPlan_TheWindowEndsWhereArrivalStillMakesDaylight(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
-	f := &paFake{limits: func() passageLimits { l := pwLimitsAll(); l.DaylightArrival = true; return l }()}
-	paAssess(t, p, legs, f)
-	if len(f.rankings) != 1 {
-		t.Fatalf("ranking asked %d times", len(f.rankings))
+	f := &paFake{
+		limits: func() passageLimits { l := pwLimitsAll(); l.DaylightArrival = true; return l }(),
+		departures: func() ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(12, 30, 0.5), paDeparture(12, 45, 0.9)}, nil
+		},
 	}
+	l := paAssess(t, p, legs, f).Legs[0]
 	// Sunset 5.32 PM less 5 hours is 12.32 PM, taken down to the quarter hour.
-	if want := paAt(14, 12, 30); !f.rankings[0].Latest.Equal(want) {
-		t.Fatalf("latest = %s, want %s", f.rankings[0].Latest, want)
+	if want := paAt(14, 12, 30); !paParse(t, l.Depart).Equal(want) {
+		t.Fatalf("depart = %s, want the last that arrives in daylight, %s", l.Depart, want)
 	}
 }
 
@@ -484,8 +484,8 @@ func TestAssessPlan_NoDaylightWindowHasNoTimeAndNoVerdict(t *testing.T) {
 	if l.Note != "No daylight window" || l.NoteKind != planKindNoWindow || l.Depart != "" || l.Verdict != "" || l.DepartSuggested {
 		t.Fatalf("leg = %+v", l)
 	}
-	if len(f.rankings) != 0 {
-		t.Fatal("nothing to rank when no departure fits")
+	if l.WindChanges.NotChecked == "" {
+		t.Fatalf("a leg with no window says its wind changes were not read: %+v", l.WindChanges)
 	}
 }
 
@@ -498,8 +498,8 @@ func TestAssessPlan_ADaylightWindowThatHasGoneTodaySaysSoNotThatThereWasNone(t *
 	if l.Note != "Today's window has passed" || l.NoteKind != planKindWindowPassed || l.Depart != "" || l.Verdict != "" || l.DepartSuggested {
 		t.Fatalf("leg = %+v", l)
 	}
-	if len(f.rankings) != 0 {
-		t.Fatal("nothing to rank when the window has gone")
+	if l.WindChanges.NotChecked == "" {
+		t.Fatalf("a leg whose window has gone says its wind changes were not read: %+v", l.WindChanges)
 	}
 }
 
@@ -508,8 +508,8 @@ func TestAssessPlan_AnOperatorTimeIsNeverReplaced(t *testing.T) {
 	p.Stops[0].DepartTime = "14:00" // arrives 7 PM, after sunset: judged, never moved
 	f := &paFake{limits: func() passageLimits { l := pwLimitsAll(); l.DaylightArrival = true; return l }()}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if len(f.rankings) != 0 || l.DepartSuggested || !paParse(t, l.Depart).Equal(paAt(14, 14, 0)) {
-		t.Fatalf("leg = %+v, asked %d", l, len(f.rankings))
+	if f.reads != 1 || l.DepartSuggested || !paParse(t, l.Depart).Equal(paAt(14, 14, 0)) {
+		t.Fatalf("leg = %+v, read %d times", l, f.reads)
 	}
 	if l.Verdict != "no_go" || !strings.Contains(l.Limiting, "sunset") {
 		t.Fatalf("arriving at 3 AM is a no-go on daylight: %+v", l)
@@ -518,7 +518,7 @@ func TestAssessPlan_AnOperatorTimeIsNeverReplaced(t *testing.T) {
 
 func TestAssessPlan_ARankingThatFailsSaysSoAndGivesNoTime(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
 		return nil, errors.New("no current and no flood set")
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -529,7 +529,7 @@ func TestAssessPlan_ARankingThatFailsSaysSoAndGivesNoTime(t *testing.T) {
 
 func TestAssessPlan_ARankingWithNoDepartureSaysSo(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) { return nil, nil }}
+	f := &paFake{departures: func() ([]tidalDeparture, error) { return nil, nil }}
 	l := paAssess(t, p, legs, f).Legs[0]
 	if !strings.HasPrefix(l.Note, "No departure suggested") || l.Depart != "" || l.Verdict != "" {
 		t.Fatalf("leg = %+v", l)
@@ -545,8 +545,8 @@ func TestAssessPlan_ALegBeyondTheForecastHasNoForecastAndNoVerdict(t *testing.T)
 	if l.Note != "No forecast yet" || l.NoteKind != planKindNoForecast || l.Verdict != "" {
 		t.Fatalf("leg = %+v", l)
 	}
-	if f.fetches != 0 || len(f.rankings) != 0 || len(f.currentCalls) != 0 {
-		t.Fatalf("fetched %d, ranked %d: a day past the horizon buys nothing", f.fetches, len(f.rankings))
+	if f.fetches != 0 || f.reads != 0 {
+		t.Fatalf("fetched %d, read %d: a day past the horizon buys nothing", f.fetches, f.reads)
 	}
 	if !paParse(t, l.Depart).Equal(time.Date(2026, 11, 30, 8, 0, 0, 0, paLoc)) {
 		t.Fatalf("the operator's time still shows: %s", l.Depart)
@@ -568,10 +568,12 @@ func TestAssessPlan_ArrivalPastTheLastForecastHourIsNoForecastYet(t *testing.T) 
 // has no forecast yet: it shows no suggested time and no current either.
 func TestAssessPlan_ASuggestedLegWithNoForecastShowsNoDepartureAndNoCurrent(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	// At 3 kn the leg takes 10 hours: the 2.00 PM departure arrives at midnight.
 	f := &paFake{
-		fc: pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
-		departures: func(planDepartureQuery) ([]tidalDeparture, error) {
-			return []tidalDeparture{paDeparture(21, 0, 0.4)}, nil
+		speed: 3,
+		fc:    pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
+		departures: func() ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(14, 0, 0.4)}, nil
 		},
 	}
 	l := paAssess(t, p, legs, f).Legs[0]
@@ -592,7 +594,7 @@ func TestAssessPlan_AnUnreadableDepartureTimeIsSaidNotTakenAsMidnight(t *testing
 	if l.Verdict != "" || l.Note != "Departure time not readable: soon" {
 		t.Fatalf("leg = %+v", l)
 	}
-	if l.Depart != "" || len(f.currentCalls) != 0 {
+	if l.Depart != "" || f.reads != 1 {
 		t.Fatalf("nothing is judged at a time that was never set: %+v", l)
 	}
 }
@@ -635,30 +637,23 @@ func TestAssessPlan_APointWithNoHoursIsAGapNotBeyondTheForecast(t *testing.T) {
 func TestAssessPlan_CurrentIsTheReadingAtTheDepartureUsed(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	p.Stops[0].DepartTime = "08:00"
-	var sawDep time.Time
-	f := &paFake{current: func(q planDepartureQuery, dep time.Time) (planCurrentReading, error) {
-		sawDep = dep
-		return planCurrentReading{Have: true, MeanKn: -0.8}, nil
-	}}
+	// The model has a current for a departure at 8.00 and for no other time.
+	f := &paFake{current: paCurrentAt(8, 0, planCurrentReading{Have: true, MeanKn: -0.8})}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if l.CurrentKn == nil || *l.CurrentKn != -0.8 || !sawDep.Equal(paAt(14, 8, 0)) {
-		t.Fatalf("current %v at %s", l.CurrentKn, sawDep)
+	if l.CurrentKn == nil || *l.CurrentKn != -0.8 {
+		t.Fatalf("current %v at the departure of 8.00", l.CurrentKn)
 	}
 }
 
 func TestAssessPlan_NoCurrentReadingIsNilWithItsReasonNeverZero(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	p.Stops[0].DepartTime = "08:00"
-	f := &paFake{current: func(planDepartureQuery, time.Time) (planCurrentReading, error) {
-		return planCurrentReading{Why: "the model has no current near shore"}, nil
-	}}
+	f := &paFake{current: paCurrentAt(8, 0, planCurrentReading{Why: "the model has no current near shore"})}
 	l := paAssess(t, p, legs, f).Legs[0]
 	if l.CurrentKn != nil || l.CurrentNote != "the model has no current near shore" {
 		t.Fatalf("leg = %+v", l)
 	}
-	f = &paFake{current: func(planDepartureQuery, time.Time) (planCurrentReading, error) {
-		return planCurrentReading{}, errors.New("the Open-Meteo current request failed")
-	}}
+	f = &paFake{currentErr: errors.New("the Open-Meteo current request failed")}
 	l = paAssess(t, p, legs, f).Legs[0]
 	if l.CurrentKn != nil || !strings.Contains(l.CurrentNote, "request failed") {
 		t.Fatalf("leg = %+v", l)
@@ -668,13 +663,27 @@ func TestAssessPlan_NoCurrentReadingIsNilWithItsReasonNeverZero(t *testing.T) {
 	}
 }
 
-func TestAssessPlan_ASuggestedLegWithNoModelCurrentHasNoCurrentAndTheReason(t *testing.T) {
+func TestAssessPlan_ASuggestedLegWithNoModelCurrentHasNoDepartureAndTheReason(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
-		return []tidalDeparture{{Depart: paAt(14, 9, 0), Current: planCurrentReading{Why: "the model has a current for only 30% of the leg"}}}, nil
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
+		return []tidalDeparture{{Depart: paAt(14, 9, 0), Current: planCurrentReading{Why: "the model has no current near shore"}}}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if l.CurrentKn != nil || l.CurrentNote != "the model has a current for only 30% of the leg" || l.Verdict != "go" {
+	if l.CurrentKn != nil || l.NoteKind != planKindNoDeparture || !strings.HasSuffix(l.Note, "the model has no current near shore") || l.Verdict != "" {
+		t.Fatalf("leg = %+v", l)
+	}
+}
+
+// A leg the model has a current for over only part of it shows the mean over that
+// part, and is still given a departure: the figure is the one the row has.
+func TestAssessPlan_ASuggestedLegWithAPartlyModelledCurrentShowsTheFigureOverWhatIsModelled(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
+	f := &paFake{currents: func(p *legPaceProfile) (legCurrentField, error) {
+		n := len(p.steps)
+		return crField{along: func(k int, _ time.Time) (float64, bool) { return 0.5, k < n*3/10 }}, nil
+	}}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if l.CurrentKn == nil || *l.CurrentKn != 0.5 || l.Verdict != "go" || !l.DepartSuggested {
 		t.Fatalf("leg = %+v", l)
 	}
 }
@@ -696,7 +705,7 @@ func TestAssessPlan_NoRecordedPassagesMeansNoEtaAndNoVerdictButTheTimeStays(t *t
 	if !paParse(t, l.Depart).Equal(paAt(14, 8, 0)) {
 		t.Fatalf("depart = %q", l.Depart)
 	}
-	if len(f.rankings) != 0 || len(f.currentCalls) != 0 || f.fetches != 0 {
+	if f.reads != 0 || f.fetches != 0 {
 		t.Fatal("nothing is asked for a leg with no ETA")
 	}
 }
@@ -712,8 +721,8 @@ func TestAssessPlan_LimitsNotSetIsAProblemNotAGuess(t *testing.T) {
 	if !strings.Contains(got.Problem, "Passage limits") || l.Verdict != "" || !strings.Contains(l.Note, "Passage limits") || l.NoteKind != planKindProblem {
 		t.Fatalf("got %+v", got)
 	}
-	if len(f.currentCalls) != 1 {
-		t.Fatalf("the current is still read for the operator's time: %v", f.currentCalls)
+	if f.reads != 1 {
+		t.Fatalf("%d current reads: the current is still read for the operator's time", f.reads)
 	}
 	if f.fetches != 0 {
 		t.Fatal("no forecast is read when there are no limits to judge it by")
@@ -792,8 +801,8 @@ func TestAssessPlan_ALeaveAtTimeEarlierTodayThatHasPassedIsNotJudged(t *testing.
 	if l.Note != "Departure time has passed" || l.NoteKind != planKindPast || l.Verdict != "" {
 		t.Fatalf("leg = %+v", l)
 	}
-	if len(f.currentCalls) != 0 || f.fetches != 0 || len(f.rankings) != 0 {
-		t.Fatalf("a time that has gone buys nothing: current %d, fetched %d, ranked %d", len(f.currentCalls), f.fetches, len(f.rankings))
+	if f.reads != 0 || f.fetches != 0 {
+		t.Fatalf("a time that has gone buys nothing: %d current reads, fetched %d", f.reads, f.fetches)
 	}
 	if !paParse(t, l.Depart).Equal(paAt(14, 4, 0)) {
 		t.Fatalf("the operator's time still shows: %s", l.Depart)
@@ -855,7 +864,7 @@ func TestAssessPlan_LegsAreRankedThreeAtATime(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 1, 1, 0)
 	var mu sync.Mutex
 	running, most := 0, 0
-	f := &paFake{departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
 		mu.Lock()
 		running++
 		if running > most {
@@ -866,11 +875,11 @@ func TestAssessPlan_LegsAreRankedThreeAtATime(t *testing.T) {
 		mu.Lock()
 		running--
 		mu.Unlock()
-		return []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.2}}}, nil
+		return []tidalDeparture{paDeparture(6, 15, 0.2)}, nil
 	}}
 	got := paAssess(t, p, legs, f)
-	if len(got.Legs) != 4 || len(f.rankings) != 4 {
-		t.Fatalf("%d legs, %d rankings", len(got.Legs), len(f.rankings))
+	if len(got.Legs) != 4 || f.reads != 4 {
+		t.Fatalf("%d legs, %d current reads", len(got.Legs), f.reads)
 	}
 	if most != planLegWorkers {
 		t.Fatalf("%d rankings ran at once, want the pool of %d filled and not passed", most, planLegWorkers)
@@ -893,9 +902,9 @@ func TestAssessPlan_TheForecastIsFetchedWhileTheRankingRuns(t *testing.T) {
 		}
 		return inner.Fetch(ctx, lat, lon)
 	}}
-	f := &paFake{fc: fc, departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		once.Do(func() { close(rankStarted) })
-		return []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.2}}}, nil
+		return []tidalDeparture{paDeparture(6, 15, 0.2)}, nil
 	}}
 	paAssess(t, p, legs, f)
 	if !fetchSawRanking.Load() {

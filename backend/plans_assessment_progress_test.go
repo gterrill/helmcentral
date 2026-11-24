@@ -23,8 +23,8 @@ func TestAssessPlan_ADoneLegHasNoVerdictNoSuggestionAndIsNotRead(t *testing.T) {
 	if got.Legs[1].Verdict == "" || got.Legs[1].Progress != "" {
 		t.Fatalf("the leg after it is still judged: %+v", got.Legs[1])
 	}
-	if len(f.rankings) != 1 {
-		t.Fatalf("a done leg is not ranked: %d rankings", len(f.rankings))
+	if f.reads != 1 {
+		t.Fatalf("a done leg is not read: %d current reads", f.reads)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestAssessPlan_ABehindPlanStatesHowFarBehindAndWhetherItIsLate(t *testing.T
 func TestAssessPlan_ALegUnderWayIsNotCountedBehind(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0) // leg 0 leaves on the 14th, leg 1 on the 15th
 	p.Stops[2].ArriveBy = "2026-11-17T17:00"
-	d := paDeps(&paFake{underway: &planUnderway{Lat: p.Stops[0].Lat, Lon: p.Stops[0].Lon}})
+	d := paDeps(&paFake{underway: paUnderwayFrom(p, paAt(15, 7, 0), paAt(15, 7, 10))})
 	d.now = func() time.Time { return paAt(15, 8, 0) }
 	got := assessPlan(t.Context(), p, legs, d, planAssessOptions{})
 	if got.Slack == nil || got.Slack.BehindDays != 0 || got.Slack.Days != 2 {
@@ -219,11 +219,12 @@ func TestAssessPlan_ASuggestedLegCountsFromTheDaysFirstSuggestionAcrossARestart(
 	}
 	// After a restart, at 7.30 AM the ranking suggests a time after now, but the
 	// day's first suggestion was an hour and a quarter ago.
-	if l := stillAt(t, paAt(14, 7, 30), &paFake{store: open()}, ""); !l.StillInPort {
+	later := func() ([]tidalDeparture, error) { return []tidalDeparture{paDeparture(8, 30, 0.4)}, nil }
+	if l := stillAt(t, paAt(14, 7, 30), &paFake{store: open(), departures: later}, ""); !l.StillInPort {
 		t.Fatalf("an hour past the day's first suggestion: %+v", l)
 	}
 	// A box that never saw the morning has no reference and no prompt yet.
-	if l := stillAt(t, paAt(14, 7, 30), &paFake{store: newTestDocumentStore(t)}, ""); l.StillInPort {
+	if l := stillAt(t, paAt(14, 7, 30), &paFake{store: newTestDocumentStore(t), departures: later}, ""); l.StillInPort {
 		t.Fatalf("no first suggestion remembered: %+v", l)
 	}
 }

@@ -66,19 +66,6 @@ type planCurrentReading struct {
 	Why    string
 }
 
-// currentReading is what a run's modelled current says: the mean along the
-// course, positive with the boat. A run the model covers less than half of has no
-// reading, and a run it covers none of is not 0 kn.
-func currentReading(run alongRun, cur tidalPointCurrents, samples []tidalSample) planCurrentReading {
-	switch {
-	case run.covered == 0:
-		return planCurrentReading{Why: noModelDataReason(cur, samples)}
-	case run.coveredFraction() < assistantTidalMinCoveredFraction:
-		return planCurrentReading{Why: fmt.Sprintf("the model has a current for only %d%% of the leg", int(math.Round(run.coveredFraction()*100)))}
-	}
-	return planCurrentReading{Have: true, MeanKn: roundTo2(run.meanKn)}
-}
-
 // errTidalNothingToRank is a ranking that has no current from the model and no
 // flood direction to time the tide by.
 type errTidalNothingToRank struct{ reason string }
@@ -126,8 +113,14 @@ func (d assistantToolDeps) rankTidalDepartures(ctx context.Context, q tidalRankQ
 		if err != nil {
 			return nil, err
 		}
+		// The ranking samples every departure at the same fractions of one duration,
+		// so it is for a pace that does not depend on when the boat leaves.
+		if len(r.scored) > 0 && tl.duration() != duration {
+			return nil, fmt.Errorf("the departures do not all take the same time under way (%s at %s, %s at %s), and the ranking takes one duration for the run",
+				duration, r.scored[0].dep.Format(time.RFC3339), tl.duration(), dep.Format(time.RFC3339))
+		}
 		r.scored = append(r.scored, tidalScored{dep: dep, tl: tl, exact: exact})
-		duration = max(duration, tl.duration())
+		duration = tl.duration()
 		if tl.arrive().After(need) {
 			need = tl.arrive()
 		}
@@ -306,35 +299,13 @@ func (r *tidalRanking) worst() tidalScored {
 }
 
 // tidalDeparture is one departure a plan may take, with the modelled current
-// along the run at that time.
+// along the run at that time (orderDepartures makes them; Mate's ranking does not).
 type tidalDeparture struct {
 	Depart time.Time
 	// tl is the leg's own timeline from Depart, which every arrival the plan shows is
 	// read from (the ranking scored it on this rounded to whole minutes).
 	tl      legTimeline
 	Current planCurrentReading
-}
-
-// departures is every departure the model had a current for, fairest stream first
-// and earlier first among equals. It is the ranking in knots, so it needs the
-// model's current: a ranking made from the tide has no current to report, and
-// that is an error.
-func (r *tidalRanking) departures() ([]tidalDeparture, error) {
-	if r.basis != assistantTidalBasisModel {
-		return nil, fmt.Errorf("the departures were ranked from the tide, which gives no current in knots")
-	}
-	var out []tidalDeparture
-	order := make([]tidalScored, 0, len(r.scored))
-	for _, sc := range r.scored {
-		if !sc.ineligible {
-			order = append(order, sc)
-		}
-	}
-	sort.SliceStable(order, func(i, j int) bool { return order[i].mean > order[j].mean })
-	for _, sc := range order {
-		out = append(out, tidalDeparture{Depart: sc.dep, tl: sc.exact, Current: currentReading(sc.run, r.currents, r.samples)})
-	}
-	return out, nil
 }
 
 // candidate is one departure as plan_tidal_departure's result gives it.

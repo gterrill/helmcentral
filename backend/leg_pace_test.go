@@ -856,11 +856,6 @@ func TestLegPace_APaceShiftsWithTheDepartureAndKeepsItsShape(t *testing.T) {
 		if a.duration() != c.duration() || len(a.knots) != len(c.knots) {
 			t.Fatalf("the shape changed with the departure: %v vs %v", a.duration(), c.duration())
 		}
-		// A leg under way arrives by the same pace from the operator's departure.
-		under, err := c.endingAt(a.arrive())
-		if err != nil || !under.arrive().Equal(a.arrive()) || under.duration() != a.duration() {
-			t.Errorf("endingAt: %v %v", under.duration(), err)
-		}
 	})
 }
 
@@ -1063,26 +1058,23 @@ func TestLegPace_TheNarrowReadStopsOnACancelledContext(t *testing.T) {
 
 // ── on the wire ──────────────────────────────────────────────────────────────
 
-// A leg under way that is not assessable shows no arrival on its row, so its hours
-// and speed stay (as on main) but no basis is worded for an ETA the row does not show.
-func TestLegPace_AnUnderwayLegShowingNoArrivalHasNoBasisButKeepsItsHoursAndSpeed(t *testing.T) {
+// A leg under way that is not assessable shows the arrival from its fix, with the
+// basis, and its hours and speed are those of the same timeline.
+func TestLegPace_AnUnderwayLegShowsItsArrivalWithItsBasisAndKeepsItsHoursAndSpeed(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	p.Stops[0].DepartTime = "03:00" // before now (04:30) at the stop: past, so the leg is not assessable
 	b := lpBoats[0]
 	f := &paFake{
 		pace:     &legPaceModel{CruiseKn: b.cruiseKn},
-		underway: &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon},
+		underway: paUnderwayFrom(p, paAt(14, 3, 0), paAt(14, 4, 20)),
 	}
 	out := assessPlan(context.Background(), p, legs, paDeps(f), planAssessOptions{})
 	l := out.Legs[0]
 	if l.NoteKind != planKindPast {
 		t.Fatalf("setup: leg 0 should be past its departure, got note %q (%v)", l.Note, l.NoteKind)
 	}
-	if l.Arrive != "" {
-		t.Fatalf("setup: the row should show no arrival, got %q", l.Arrive)
-	}
-	if l.EtaBasis != nil {
-		t.Fatalf("a row with no arrival has a basis: %q", *l.EtaBasis)
+	if l.Arrive == "" || l.EtaBasis == nil {
+		t.Fatalf("the row shows the arrival from the fix and its basis, got %q and %v", l.Arrive, l.EtaBasis)
 	}
 	if l.Hours == nil || l.SpeedKn == nil || math.Abs(*l.Hours**l.SpeedKn-legs[0].DistanceNm) > 1e-6 {
 		t.Errorf("hours %v x speed_kn %v should be the distance %v", l.Hours, l.SpeedKn, legs[0].DistanceNm)
@@ -1094,9 +1086,11 @@ func TestLegPace_AnUnderwayLegWhoseETAHasPassedHasNoBasis(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	p.Stops[0].DepartTime = "00:00" // now is 04:30: depart plus the leg's hours is long past
 	b := lpBoats[0]
+	end := p.Stops[1]
 	f := &paFake{
-		pace:     &legPaceModel{CruiseKn: b.cruiseKn},
-		underway: &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon},
+		pace: &legPaceModel{CruiseKn: b.cruiseKn},
+		// The latest fix is at the end of the leg, 10 minutes ago.
+		underway: &planUnderway{Lat: p.Stops[0].Lat, Lon: p.Stops[0].Lon, Start: paAt(14, 0, 0), FixLat: end.Lat, FixLon: end.Lon, FixAt: paAt(14, 4, 20)},
 	}
 	l := assessPlan(context.Background(), p, legs, paDeps(f), planAssessOptions{}).Legs[0]
 	if l.Hours == nil || *l.Hours >= 4.5 {
@@ -1152,9 +1146,10 @@ func TestLegPace_TheAssessmentCarriesEtaBasisAndNullWithoutAnETA(t *testing.T) {
 func TestLegPace_ALegWithNoArrivalHasNoBasis(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	f := &paFake{
-		fc: pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
-		departures: func(planDepartureQuery) ([]tidalDeparture, error) {
-			return []tidalDeparture{paDeparture(21, 0, 0.4)}, nil
+		speed: 3, // 10 hours: the 2.00 PM departure arrives at midnight, past the forecast
+		fc:    pwUniform(10, 190, 12, nil, 0, paAt(14, 0, 0), paAt(14, 23, 0)),
+		departures: func() ([]tidalDeparture, error) {
+			return []tidalDeparture{paDeparture(14, 0, 0.4)}, nil
 		},
 	}
 	l := paAssess(t, p, legs, f).Legs[0]

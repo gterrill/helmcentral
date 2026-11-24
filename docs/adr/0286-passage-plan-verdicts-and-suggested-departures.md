@@ -89,7 +89,9 @@ full routed path.
   the boat. When the model has nothing, `current_kn` is null and `current_note`
   says why. For a suggested departure the ranking has already read it, so the
   chosen departure's figure is the one shown and the model is not asked again. A
-  departure the operator set needs its own read, through `planCurrentAlong`.
+  departure the operator set reads the same one request for the leg. The figure
+  is now the mean over the departure's open-water steps, as ADR 0304's amendment
+  says; the coverage rule above is kept only for choosing among departures.
 
 ### Suggested departure
 

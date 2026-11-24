@@ -177,7 +177,7 @@ func TestPlanComfortRun_ReadsTheModelBandsAndHelmHeightOnlyWhenALegNeedsThem(t *
 		t.Fatalf("a leg with no comfort read %d readers and gave %+v", reads, got)
 	}
 	for range 2 {
-		run.leg(context.Background(), &planLegWork{res: &planLegAssessment{}, underway: true, windReady: true, eta: paAt(14, 7, 0), pace: linearPace(2), fromLoc: paLoc})
+		run.leg(context.Background(), &planLegWork{res: &planLegAssessment{}, underway: true, windReady: true, eta: paAt(14, 7, 0), fromLoc: paLoc})
 	}
 	if reads != 3 {
 		t.Fatalf("readers read %d times, want once each for two legs", reads)

@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ import (
 // rules Mate's assess_passage_window uses (passageAssessor.cell, ADR 0191 and
 // 0194) against the operator's passage limits, at the departure the operator
 // set or, with none set, the best one inside the day's daylight: not a No-Go,
-// Go before Marginal, then the fairest current (rankTidalDepartures). When the
+// Go before Marginal, then the fairest current (departureCandidates). When the
 // plan page asks for comfort, the departures of the best verdict are then ranked
 // by how the leg is forecast to feel, the current breaking ties (ADR 0303). No
 // verdict asks a model: a figure that cannot be had is left out with its reason,
@@ -48,6 +49,7 @@ const (
 	planNoteDepartPast   = "Departure time has passed"
 	planNoteOvernight    = "Overnight legs are not assessed yet"
 	planNoteGap          = "Forecast missing for part of the leg"
+	planNoteNoTimeline   = "No departure suggested: the leg's timeline could not be worked out"
 )
 
 // planNoteKind says what sort of note a leg carries, so the table does not read
@@ -67,8 +69,6 @@ const (
 	planKindGap          planNoteKind = "gap"           // the forecast has a hole in the leg
 	planKindOther        planNoteKind = "other"
 )
-
-var errNoDepartureRanked = errors.New("no departure in the window could be ranked")
 
 // planAssessmentDeadline bounds the whole assessment request.
 var planAssessmentDeadline = 90 * time.Second
@@ -104,7 +104,9 @@ type planLegAssessment struct {
 	Arrive          string   `json:"arrive"`
 	Hours           *float64 `json:"hours"`
 	// SpeedKn is the average speed the hours were worked out at (the leg's distance
-	// over Hours), so Hours times SpeedKn is the distance. EtaBasis says in a
+	// over Hours), so Hours times SpeedKn is the distance. For the leg under way the
+	// hours are those of its shown timeline, the start of the passage to the ETA, so
+	// it is an average beside the cruise speed, not the pace of the rest. EtaBasis says in a
 	// sentence what the hours were worked out from: the learned cruise speed, and any
 	// minutes in slow water. Both always on the wire, null when the leg has no ETA.
 	SpeedKn  *float64 `json:"speed_kn"`
@@ -185,16 +187,6 @@ type planAssessOptions struct {
 	Comfort bool
 }
 
-// planDepartureQuery is a leg as the ranking and the current read it: the routed
-// path, its pace (the timeline for any departure, required), and the window a
-// departure may fall in.
-type planDepartureQuery struct {
-	Route    []assistantLatLon
-	Pace     legPace
-	Earliest time.Time
-	Latest   time.Time
-}
-
 // planWarningsReader reads the official warnings at a place.
 type planWarningsReader func(lat, lon float64) (forecastWarningsBundle, error)
 
@@ -209,18 +201,18 @@ type planAssessDeps struct {
 	speed func(ctx context.Context) (*legPaceModel, error)
 	sun   func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)
 	dawn  func(date time.Time, lat, lon float64) (time.Time, bool)
-	// departures ranks every departure in the query's window by the modelled
-	// current, fairest first.
-	departures func(ctx context.Context, q planDepartureQuery) ([]tidalDeparture, error)
-	// currentAlong reads the modelled current for a departure the operator set.
-	currentAlong func(ctx context.Context, q planDepartureQuery, dep time.Time) (planCurrentReading, error)
+	// legCurrents reads the modelled current along a leg, once for the leg.
+	legCurrents func(ctx context.Context, p *legPaceProfile) (legCurrentField, error)
+	// run, when set, works out a leg's run from a departure in place of the
+	// profile's own, so a test can give a departure a pace of its own.
+	run func(p *legPaceProfile, depart time.Time, f legCurrentField) (legRun, error)
 	// warnings resolves the warnings provider once for an assessment made at now.
 	warnings func(now time.Time) (planWarningsReader, error)
 	// progress is each leg's progress from the recorded passages ("" to do).
 	progress func(ctx context.Context, p plan) ([]string, error)
-	// underway is where the passage being recorded now began, nil when none is
-	// under way. Nil reads none.
-	underway func(ctx context.Context) (*planUnderway, error)
+	// underway is where the passage being recorded now began and its latest fix,
+	// nil when none is under way. Nil reads none.
+	underway func(ctx context.Context, now time.Time) (*planUnderway, error)
 	// position is the boat's own trusted fix, or why there is none.
 	position func() (lat, lon float64, err error)
 	// suggested keeps the first departure suggested for a leg on a day and returns
@@ -260,16 +252,28 @@ type planLegWork struct {
 	fromLoc, toLoc *time.Location
 	// depart is the operator's time, zero when none is set.
 	depart time.Time
-	// pace is the leg's timeline for any departure. tl is the timeline of the
-	// departure the row shows (the operator's, the one chosen, or a reference until
-	// one is), which the wire's hours are read from.
-	pace legPace
 	// profile is the leg walked once for the learned pace, nil until setPace has
-	// run; the pace and the words on the wire are read from it.
+	// run: the leg's pace for any departure, and the words on the wire, are read from
+	// it. tl is the timeline of the departure the row shows (the operator's, the one
+	// chosen, or a reference until one is), which the wire's hours are read from.
 	profile *legPaceProfile
 	tl      legTimeline
-	query   planDepartureQuery
-	plan    passageLegPlan
+	// routed is true once the leg has its route and passes every check before the
+	// departures: only such a leg is read for its current.
+	routed bool
+	// grid is the departures a suggestion is looked for among, the quarter hours from
+	// first light to the latest that could still be in the window, and arriveBy is
+	// the arrival the daylight limit asks for, zero when there is none. Which of them
+	// are in the window is a matter of each one's own arrival (departureCandidates).
+	grid     []time.Time
+	arriveBy time.Time
+	plan     passageLegPlan
+	// fix is where the leg under way has the boat, nil for any other leg and for one
+	// whose fix is not known; readLeg runs the ETA from it.
+	fix *underwayFix
+	// underTl is the progress of the leg under way, from the start of the passage
+	// through the latest fix to the arrival.
+	underTl legTimeline
 	// course is the leg's course in degrees true, which a wind change is placed
 	// against.
 	course float64
@@ -298,6 +302,15 @@ type planLegWork struct {
 	choice  *departureChoice
 }
 
+// underwayFix is the boat's latest fix placed on the leg under way: when the passage
+// began and the fix was taken, and the step of the leg the fix is on, with the share
+// of that step still ahead of it.
+type underwayFix struct {
+	start, at time.Time
+	step      int
+	left      float64
+}
+
 // fail leaves the leg without a verdict and says why.
 func (w *planLegWork) fail(kind planNoteKind, note string) {
 	w.res.Note, w.res.NoteKind = note, kind
@@ -324,7 +337,6 @@ func (w *planLegWork) setPace(leg planLeg, m *legPaceModel) error {
 		}
 		w.profile = p
 	}
-	w.pace = w.profile.pace
 	return nil
 }
 
@@ -474,10 +486,8 @@ func assessPlan(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, o
 		d.prepareLeg(work[i], byFrom[i], env)
 		if i == underwayLeg {
 			// With no limits to judge by the leg says so below; nothing is read for it.
-			why := work[i].prepareUnderway(byFrom[i], env)
-			work[i].etaWhy = why
-			if env.limitsProblem == "" && why != "" {
-				out.Legs[i].WindChanges.NotChecked, work[i].changesRead = why, true
+			if why := work[i].prepareUnderway(byFrom[i], env, underway); why != "" {
+				work[i].noEta(why, env)
 			}
 		}
 	}
@@ -574,14 +584,18 @@ func (d planAssessDeps) prepareLeg(w *planLegWork, leg planLeg, env planEnv) {
 	w.assessable = true
 }
 
-// prepareUnderway works out what the wind changes on the leg the boat is on need,
-// beyond what prepareLeg did: its route and hours when it was not assessable (its
-// departure has passed), and its ETA from the operator's departure time. It
-// touches nothing the verdicts or the current read. It returns why the ETA is not
-// known, "" when it is.
-func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv) string {
+// prepareUnderway makes the leg the boat is on a leg under way: it is given no
+// suggested departure, ranking or new verdict, since its passage has begun. Its row
+// shows when the passage began and, once readLeg has run the rest of the route from
+// the boat's latest fix, the ETA that gives. Beyond what prepareLeg did it works out
+// the route and hours when the leg was not assessable (its departure has passed), and
+// places the latest fix on the route. It returns why the ETA is not known, "" when the
+// fix is placed.
+func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv, under *planUnderway) string {
 	w.underway = true
-	if !w.assessable {
+	prepared := w.assessable
+	w.assessable = false
+	if !prepared {
 		if _, note := w.checkRouted(leg); note != "" {
 			return note
 		}
@@ -594,33 +608,62 @@ func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv) string {
 		if err := w.setPace(leg, env.pace); err != nil {
 			return "No ETA: " + err.Error()
 		}
-		w.plan = planLegPassage(w.i, w.from, w.to, leg, w.pace)
+		w.plan = planLegPassage(w.i, w.from, w.to, leg, w.profile.pace)
 		w.course = float64(leg.CourseDeg)
 	}
-	if w.from.DepartTime == "" {
-		return "The leg is under way and has no departure time set, so its ETA isn't known."
+	// The row shows the boat's own departure, when the passage began, and no ETA
+	// until one is worked out from the fix.
+	w.tl = legTimeline{}
+	w.res.DepartSuggested = false
+	w.chosenArrive, w.res.Arrive = time.Time{}, ""
+	if under != nil && !under.Start.IsZero() {
+		w.putDepart(under.Start)
 	}
-	h, m, ok := passageClock(w.from.DepartTime)
-	if !ok {
-		return "Departure time not readable: " + w.from.DepartTime
+	if under == nil || under.FixAt.IsZero() {
+		return "No ETA: the boat's latest position fix is not known"
 	}
-	day, err := dayStart(w.from.Depart, w.fromLoc)
-	if err != nil {
-		return "The date is not readable: " + err.Error()
+	if age := env.now.Sub(under.FixAt); age > legFixMaxAge {
+		return "No ETA: the latest position is " + durationText(age) + " old"
 	}
-	y, mo, d := day.Date()
-	tl, err := w.pace(time.Date(y, mo, d, h, m, 0, 0, w.fromLoc))
-	if err != nil {
-		return "No ETA: " + err.Error()
+	at := w.profile.place(under.FixLat, under.FixLon, under.FixAt.Sub(under.Start))
+	if at.offNm > legFixOffRouteNm {
+		return fmt.Sprintf("No ETA: the boat is %.1f nm off the planned route", at.offNm)
 	}
-	w.eta = tl.arrive()
-	// A leg whose own steps stopped short of the hours (its departure has passed)
-	// still has the ETA the boat is held to, so it shows the hours.
-	if !w.tl.known() {
-		w.tl = tl
-	}
-	w.windReady = true
+	w.fix = &underwayFix{start: under.Start, at: under.FixAt, step: at.step, left: at.left}
 	return ""
+}
+
+// noEta says why a leg under way has no readable ETA, and that its wind changes are
+// not read for it.
+func (w *planLegWork) noEta(why string, env planEnv) {
+	w.etaWhy = why
+	if env.limitsProblem == "" {
+		w.res.WindChanges.NotChecked, w.changesRead = why, true
+	}
+}
+
+// readUnderway runs the leg under way from its fix, at the time of the fix, with the
+// current the leg read, nil when it read none (readErr says why). The row's current
+// is the run's figure over the open water still ahead.
+func (w *planLegWork) readUnderway(env planEnv, f legCurrentField, readErr error) {
+	r, err := w.profile.runFrom(w.fix.start, w.fix.at, w.fix.step, w.fix.left, f)
+	if err != nil {
+		log.Printf("plans: ETA for %s to %s not worked out from the latest fix: %v", w.from.Name, w.to.Name, err)
+		w.noEta("No ETA: the ETA from the latest position could not be worked out", env)
+		return
+	}
+	// The row's times are the passage's: it began at the start and arrives at the ETA
+	// from the fix, so the hours are the ones between them.
+	w.underTl = r.tl
+	w.eta = r.tl.arrive()
+	w.tl = r.tl
+	w.putArrive(w.eta)
+	w.windReady = true
+	if readErr != nil {
+		w.setCurrent(planCurrentReading{}, readErr)
+		return
+	}
+	w.setCurrent(runReading(r, f), nil)
 }
 
 func (w *planLegWork) checkRouted(leg planLeg) (planNoteKind, string) {
@@ -683,7 +726,7 @@ func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) 
 	if err := w.setPace(leg, env.pace); err != nil {
 		return planKindOther, "No ETA: " + err.Error()
 	}
-	tl, err := w.pace(ref)
+	tl, err := w.profile.pace(ref)
 	if err != nil {
 		return planKindOther, "No ETA: " + err.Error()
 	}
@@ -709,17 +752,12 @@ func (w *planLegWork) checkHorizon(now time.Time) (planNoteKind, string) {
 	return planKindNone, ""
 }
 
-// setRoute converts the leg's route once, for the ranking and the current and for
-// the wind check. The wind check keeps no more points than
-// passageWindowMaxRoutePoints (planPassageLeg).
+// setRoute lays the leg's route out for the wind check, which keeps no more points
+// than passageWindowMaxRoutePoints (planPassageLeg), and marks the leg routed.
 func (w *planLegWork) setRoute(leg planLeg) (planNoteKind, string) {
-	latLon := make([]assistantLatLon, len(leg.Route))
-	for i, pt := range leg.Route {
-		latLon[i] = assistantLatLon{Lat: pt[0], Lon: pt[1]}
-	}
-	w.query = planDepartureQuery{Route: latLon, Pace: w.pace}
-	w.plan = planLegPassage(w.i, w.from, w.to, leg, w.pace)
+	w.plan = planLegPassage(w.i, w.from, w.to, leg, w.profile.pace)
 	w.course = float64(leg.CourseDeg)
+	w.routed = true
 	return planKindNone, ""
 }
 
@@ -735,115 +773,107 @@ func planLegPassage(i int, from, to planStop, leg planLeg, pace legPace) passage
 	return p
 }
 
-// setSuggestionWindow is the span a departure may be suggested in, for a leg the
-// operator set no time for: from first light at the leg's start to the latest
-// departure that still arrives in daylight when the operator wants that, else the
-// last one that leaves in it. The arrival rule is the assessor's own
-// (legEndSun). None fits: no daylight window.
+// setSuggestionWindow lays out the departures a suggestion is looked for among, for a
+// leg the operator set no time for: the quarter hours from first light at the leg's
+// start to an outer bound, sunset at the leg's start, or with the daylight-arrival
+// limit sunset at its stop, since a departure after that cannot arrive before it. It
+// is only the bound: which departures are in the window depends on when each one
+// arrives, which is known once each is run (departureCandidates). The sun's times not
+// known, or an outer bound before first light: no daylight window.
 func (d planAssessDeps) setSuggestionWindow(w *planLegWork, env planEnv) (planNoteKind, string) {
 	if !w.depart.IsZero() {
 		return planKindNone, ""
 	}
-	earliest, latest, state, err := d.departureWindow(w, env)
+	fromDay, err := dayStart(w.from.Depart, w.fromLoc)
 	if err != nil {
-		return planKindOther, "No ETA: " + err.Error()
-	}
-	switch state {
-	case windowNone:
 		return planKindNoWindow, planNoteNoWindow
-	case windowPassed:
-		return planKindWindowPassed, planNoteWindowPassed
 	}
-	w.query.Earliest, w.query.Latest = earliest, latest
+	dawn, ok := d.dawn(fromDay, w.from.Lat, w.from.Lon)
+	if !ok {
+		return planKindNoWindow, planNoteNoWindow
+	}
+	var bound time.Time
+	if env.limits.DaylightArrival {
+		toDay, err := dayStart(w.from.Depart, w.toLoc)
+		if err != nil {
+			return planKindNoWindow, planNoteNoWindow
+		}
+		_, set, ok := legEndSun(d.sun, w.plan, toDay, w.toLoc)
+		if !ok {
+			return planKindNoWindow, planNoteNoWindow
+		}
+		bound, w.arriveBy = set, set
+	} else {
+		_, set, ok := d.sun(fromDay, w.from.Lat, w.from.Lon)
+		if !ok {
+			return planKindNoWindow, planNoteNoWindow
+		}
+		bound = set
+	}
+	earliest, latest := ceilToStep(dawn, planDepartureStep), bound.Truncate(planDepartureStep)
+	if latest.Before(earliest) {
+		return planKindNoWindow, planNoteNoWindow // the day never had a window
+	}
+	for dep := earliest; !dep.After(latest); dep = dep.Add(planDepartureStep) {
+		w.grid = append(w.grid, dep)
+	}
 	return planKindNone, ""
 }
 
-// windowState says whether a leg's day has a departure window: it fits (the
-// zero value is not used), the day never had one, or it had one and now is past it.
-type windowState int
-
-const (
-	windowFits windowState = iota + 1
-	windowNone
-	windowPassed
-)
-
-// departureWindow is the span a departure may be suggested in. Its error is a
-// pace that gave no timeline; a day with no window is a state, not an error.
-func (d planAssessDeps) departureWindow(w *planLegWork, env planEnv) (time.Time, time.Time, windowState, error) {
-	fromDay, err := dayStart(w.from.Depart, w.fromLoc)
-	if err != nil {
-		return time.Time{}, time.Time{}, windowNone, nil
-	}
-	dawn, okDawn := d.dawn(fromDay, w.from.Lat, w.from.Lon)
-	if !okDawn {
-		return time.Time{}, time.Time{}, windowNone, nil
-	}
-	latest, err := d.latestDeparture(w, env, fromDay)
-	if err != nil {
-		return time.Time{}, time.Time{}, windowNone, err
-	}
-	if latest.IsZero() {
-		return time.Time{}, time.Time{}, windowNone, nil
-	}
-	earliest := ceilToStep(dawn, planDepartureStep)
-	latest = latest.Truncate(planDepartureStep)
-	if latest.Before(earliest) {
-		return time.Time{}, time.Time{}, windowNone, nil // the day never had a window
-	}
-	if soonest := ceilToStep(env.now, planDepartureStep); soonest.After(earliest) {
-		earliest = soonest
-	}
-	if latest.Before(earliest) {
-		return earliest, latest, windowPassed, nil
-	}
-	return earliest, latest, windowFits, nil
-}
-
-// latestDeparture is the last time a leg may leave: sunset at its start, or with
-// the daylight-arrival limit the departure whose timeline ends at sunset at its
-// stop. The zero time says the sun's times are not known.
-func (d planAssessDeps) latestDeparture(w *planLegWork, env planEnv, fromDay time.Time) (time.Time, error) {
-	if !env.limits.DaylightArrival {
-		_, set, ok := d.sun(fromDay, w.from.Lat, w.from.Lon)
-		if !ok {
-			return time.Time{}, nil
-		}
-		return set, nil
-	}
-	toDay, err := dayStart(w.from.Depart, w.toLoc)
-	if err != nil {
-		return time.Time{}, nil
-	}
-	_, set, ok := legEndSun(d.sun, w.plan, toDay, w.toLoc)
-	if !ok {
-		return time.Time{}, nil
-	}
-	tl, err := w.pace(set)
-	if err != nil {
-		return time.Time{}, err
-	}
-	ending, err := tl.endingAt(set)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return ending.depart(), nil
-}
-
-// readAndJudge reads what the verdicts need from the providers, all at once: the
-// forecast along every assessable leg, each leg's ranking or current (three legs
-// at a time) and the stops' warnings. Then it judges each leg.
+// readAndJudge reads what the verdicts need from the providers and judges each leg.
+// Each leg's current and departure runs come first (three legs at a time, beside the
+// stops' warnings), because they decide which legs need a forecast at all: a leg with
+// no window, or one that has passed, never reads one. Then the forecast is read along
+// the legs still to be judged and the one the boat is on.
 func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLegWork, env planEnv, out *planAssessment) {
-	var assessable []*planLegWork
+	var wg sync.WaitGroup
+	if !env.verdictsOnly {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.readWarnings(p, env.now, out)
+		}()
+	}
+	var prepared []*planLegWork
 	for _, w := range work {
+		if w.assessable {
+			prepared = append(prepared, w)
+		}
+	}
+	var legs sync.WaitGroup
+	sem := make(chan struct{}, planLegWorkers)
+	for _, w := range work {
+		// A leg is read for its current and for the departures its verdict is chosen
+		// from, and a leg under way for its ETA from the fix.
+		if !w.readsCurrent(env) && w.fix == nil {
+			continue
+		}
+		sem <- struct{}{}
+		legs.Add(1)
+		go func(w *planLegWork) {
+			defer legs.Done()
+			defer func() { <-sem }()
+			d.readLeg(ctx, w, env)
+		}(w)
+	}
+	legs.Wait()
+
+	// The legs still to be judged. A leg readLeg gave a note (no window, window
+	// passed, no timeline) needs no forecast and has had its wind changes left unread;
+	// one whose ranking failed has no departure, and its wind changes are read over the
+	// day.
+	var assessable, windLegs []*planLegWork
+	for _, w := range prepared {
 		if w.assessable {
 			assessable = append(assessable, w)
 		}
+		if w.assessable || !w.changesRead {
+			windLegs = append(windLegs, w)
+		}
 	}
-	// The wind changes are read along the legs judged and the one the boat is on.
-	windLegs := slices.Clone(assessable)
+	// The one the boat is on is read too, when its ETA is known.
 	for _, w := range work {
-		if w.windReady && !w.assessable && env.limitsProblem == "" {
+		if w.windReady && env.limitsProblem == "" {
 			windLegs = append(windLegs, w)
 		}
 	}
@@ -865,42 +895,14 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 		}
 	}
 	var (
-		wg          sync.WaitGroup
 		as          *passageAssessor
 		forecastErr error
 		stops       stopForecasts
 	)
 	if len(windLegs) > 0 || len(stopPoints) > 0 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			as, forecastErr, stops = d.fetchForecast(ctx, p, windLegs, stopPoints, env)
-		}()
+		as, forecastErr, stops = d.fetchForecast(ctx, p, windLegs, stopPoints, env)
 	}
-	if !env.verdictsOnly {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			d.readWarnings(p, env.now, out)
-		}()
-	}
-	sem := make(chan struct{}, planLegWorkers)
-	for _, w := range work {
-		// A leg with a departure set is read for its current alone, which a
-		// verdicts-only assessment leaves out; one without is read for the ranking
-		// its verdict is chosen from.
-		if w.query.Route == nil || (w.depart.IsZero() && !w.assessable) || (!w.depart.IsZero() && env.verdictsOnly) {
-			continue
-		}
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(w *planLegWork) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			d.readLeg(ctx, w)
-		}(w)
-	}
-	wg.Wait()
+	wg.Wait() // the warnings
 
 	if forecastErr != nil {
 		log.Printf("plans: forecast failed: %v", forecastErr)
@@ -1085,16 +1087,12 @@ func legSpan(w *planLegWork, env planEnv) (legSpanOf, string) {
 		if !w.eta.After(env.now) {
 			return legSpanOf{}, planETAPassed
 		}
-		// The timeline is the leg's, shifted to end at its ETA.
-		tl, err := w.pace(w.eta)
-		if err != nil {
-			return legSpanOf{}, "No ETA: " + err.Error()
+		// The timeline is the leg's progress from the start of the passage through
+		// the latest fix to the ETA.
+		if !w.underTl.known() {
+			return legSpanOf{}, "No ETA: the leg has no timeline"
 		}
-		ending, err := tl.endingAt(w.eta)
-		if err != nil {
-			return legSpanOf{}, "No ETA: " + err.Error()
-		}
-		return legSpanOf{tl: ending, from: env.now}, ""
+		return legSpanOf{tl: w.underTl, from: env.now}, ""
 	}
 	if w.chosenDepart.IsZero() {
 		return legSpanOf{}, "" // an ETA with no departure is no span
@@ -1120,8 +1118,9 @@ func (w *planLegWork) arrival() (time.Time, bool) {
 	return w.chosenArrive, !w.chosenArrive.IsZero()
 }
 
-// judgeLegs judges every leg whose forecast was fetched, or fails them all with
-// the reason the forecast was not.
+// judgeLegs judges every leg that waits for its forecast, or fails them all with
+// the reason the forecast was not read. A leg readLeg already decided (no window,
+// window passed) is not among them, so a failed forecast is not its problem.
 func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, forecastErr error, assessable []*planLegWork, out *planAssessment) {
 	if len(assessable) == 0 {
 		return
@@ -1132,9 +1131,7 @@ func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, fore
 			out.Problem = note
 		}
 		for _, w := range assessable {
-			if w.assessable {
-				w.fail(planKindOther, note)
-			}
+			w.fail(planKindOther, note)
 		}
 		return
 	}
@@ -1142,9 +1139,7 @@ func (d planAssessDeps) judgeLegs(ctx context.Context, as *passageAssessor, fore
 		out.ForecastAsOf = as.fetchedAt.UTC().Format(time.RFC3339)
 	}
 	for _, w := range assessable {
-		if w.assessable {
-			d.judgeLeg(ctx, as, w)
-		}
+		d.judgeLeg(ctx, as, w)
 	}
 }
 
@@ -1202,26 +1197,115 @@ func (d planAssessDeps) fetchForecast(ctx context.Context, p plan, legs []*planL
 	return as, legsErr, stopFetch
 }
 
-// readLeg reads one leg's current: at the operator's departure, or, with none
-// set, along every departure the ranking tries, to be chosen among once the
-// forecast is in.
-func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork) {
-	if !w.depart.IsZero() {
-		reading, err := d.currentAlong(ctx, w.query, w.depart)
-		w.setCurrent(reading, err)
-		return
+// runReading is the run's current as the row shows it: one figure, the mean along
+// the track over the open water the model has a current for, or the reason the
+// model had none.
+func runReading(r legRun, f legCurrentField) planCurrentReading {
+	switch {
+	case r.modelledNm > 0:
+		return planCurrentReading{Have: true, MeanKn: r.figure()}
+	case r.openNm() <= 0:
+		return planCurrentReading{} // no open water: nothing to say of a current
 	}
-	cands, err := d.departures(ctx, w.query)
-	if err == nil && len(cands) == 0 {
-		err = errNoDepartureRanked
+	return planCurrentReading{Why: noCurrentWhy(f)}
+}
+
+// readsCurrent says the leg is read for its current: the leg is routed, is not under
+// way, and is either suggested a departure, which its verdict is then chosen from, or
+// has the operator's, which a verdicts-only assessment leaves out.
+func (w *planLegWork) readsCurrent(env planEnv) bool {
+	if !w.routed || w.underway {
+		return false // a leg under way is timed from its fix, and is given no departure
 	}
-	if err == nil {
-		for _, c := range cands {
-			if !c.tl.known() {
-				err = errors.New("the ranking gave no timeline for the departure at " + fmtLeg(c.Depart, w.fromLoc))
-				break
+	if w.depart.IsZero() {
+		return w.assessable
+	}
+	return !env.verdictsOnly
+}
+
+// departureRun is the leg run from one departure of its grid.
+type departureRun struct {
+	dep time.Time
+	run legRun
+	err error
+}
+
+// readLeg reads one leg's current once, first, because every run needs it, then runs
+// each departure once with it: the operator's alone, or the grid a suggestion is
+// looked for among. The leg under way is run from its fix. A failed read leaves the
+// runs on the pace alone and the figure blank.
+func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork, env planEnv) {
+	reads := w.readsCurrent(env)
+	var field legCurrentField
+	var readErr error
+	// The leg under way reads the current too, for its run from the fix.
+	if reads || w.fix != nil {
+		if field, readErr = d.legCurrents(ctx, w.profile); readErr != nil {
+			field = nil
+			if !reads {
+				log.Printf("plans: current not read for %s to %s: %v", w.from.Name, w.to.Name, readErr)
 			}
 		}
+	}
+	if w.fix != nil {
+		w.readUnderway(env, field, readErr)
+	}
+	if !reads {
+		return
+	}
+	deps := w.grid
+	if !w.depart.IsZero() {
+		deps = []time.Time{w.depart}
+	}
+	// A departure before now only says whether the day had a window, so it is run
+	// without the current.
+	soonest := ceilToStep(env.now, planDepartureStep)
+	runs := make([]departureRun, len(deps))
+	for i, dep := range deps {
+		runs[i] = departureRun{dep: dep}
+		f := field
+		if w.depart.IsZero() && dep.Before(soonest) {
+			f = nil
+		}
+		runs[i].run, runs[i].err = d.runDeparture(w.profile, dep, f)
+	}
+	if !w.depart.IsZero() {
+		// The operator's departure is the one run; its timeline is the one the row
+		// shows and the verdict is judged on.
+		r := runs[0]
+		if r.err == nil {
+			w.tl = r.run.tl
+		}
+		switch {
+		case readErr != nil:
+			w.setCurrent(planCurrentReading{}, readErr)
+		case r.err != nil:
+			w.setCurrent(planCurrentReading{}, r.err)
+		default:
+			w.setCurrent(runReading(r.run, field), nil)
+		}
+		return
+	}
+	failed := 0
+	for _, r := range runs {
+		if r.err != nil {
+			if failed++; failed == 1 {
+				log.Printf("plans: leg %s to %s could not be run from %s: %v", w.from.Name, w.to.Name, r.dep.Format(time.RFC3339), r.err)
+			}
+		}
+	}
+	if failed > 1 {
+		log.Printf("plans: leg %s to %s: %d of %d departures could not be run", w.from.Name, w.to.Name, failed, len(runs))
+	}
+	fits, kind, note := departureCandidates(runs, env.now, w.arriveBy)
+	if kind != planKindNone {
+		w.noDeparture(kind, note, env)
+		return
+	}
+	var cands []tidalDeparture
+	err := readErr
+	if err == nil {
+		cands, err = orderDepartures(fits, field)
 	}
 	if err != nil {
 		log.Printf("plans: no departure ranked for %s to %s: %v", w.from.Name, w.to.Name, err)
@@ -1229,6 +1313,113 @@ func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork) {
 		return
 	}
 	w.cands = cands
+}
+
+// runDeparture runs the leg from a departure with the current.
+func (d planAssessDeps) runDeparture(p *legPaceProfile, dep time.Time, f legCurrentField) (legRun, error) {
+	if d.run != nil {
+		return d.run(p, dep, f)
+	}
+	return p.run(dep, f)
+}
+
+// noDeparture leaves a suggested leg with no window, or one that has passed. A leg
+// that is not under way has no wind changes either: it is left as one that was never
+// assessed, and its changes are not read.
+func (w *planLegWork) noDeparture(kind planNoteKind, note string, env planEnv) {
+	w.fail(kind, note)
+	if w.fix == nil {
+		// A verdicts-only assessment carries no wind changes at all: the leg keeps
+		// the empty ones every leg starts with.
+		if !env.verdictsOnly {
+			w.res.WindChanges = unassessedWindChanges(*w.res, env, false)
+		}
+		w.changesRead = true
+	}
+}
+
+// departureCandidates are the runs of the leg's grid that are in the window: one is
+// in it when its own arrival makes the daylight the operator asked for (arriveBy,
+// zero for none). A pace that depends on the time of day is not assumed to run later
+// departures later, so every one is judged on its own run. A departure that cannot
+// be run is never in the window, past or to come: it has no arrival to fit. The ones
+// before now say only whether the day had a window: when none from now on is in it
+// the kind is the window having passed, or there never having been one, with the
+// note to say so; when every departure from now on failed to run, the note says the
+// timeline could not be worked out. A kind of planKindNone says the leg has
+// candidates.
+func departureCandidates(runs []departureRun, now, arriveBy time.Time) (fits []departureRun, kind planNoteKind, note string) {
+	soonest := ceilToStep(now, planDepartureStep)
+	hadWindow := false
+	ahead, failedAhead := 0, 0
+	for _, r := range runs {
+		if !r.dep.Before(soonest) {
+			ahead++
+		}
+		if r.err != nil {
+			if !r.dep.Before(soonest) {
+				failedAhead++
+			}
+			continue
+		}
+		if !arriveBy.IsZero() && r.run.tl.arrive().After(arriveBy) {
+			continue
+		}
+		hadWindow = true
+		if !r.dep.Before(soonest) {
+			fits = append(fits, r)
+		}
+	}
+	switch {
+	case len(fits) > 0:
+		return fits, planKindNone, ""
+	case ahead > 0 && failedAhead == ahead:
+		return nil, planKindNoDeparture, planNoteNoTimeline
+	case hadWindow:
+		return nil, planKindWindowPassed, planNoteWindowPassed
+	}
+	return nil, planKindNoWindow, planNoteNoWindow
+}
+
+// orderDepartures orders the runs by their current, the fairest mean current along
+// the track first and the earlier first among equals. A departure the model covers
+// less than half of is left out when another is covered better, and one with no
+// current is left out. The runs are ones that ran (departureCandidates leaves the
+// rest out). With no current for any departure there is no ranking, and that is the
+// error.
+func orderDepartures(runs []departureRun, field legCurrentField) ([]tidalDeparture, error) {
+	var got []departureRun
+	wellCovered, openWater := false, false
+	for _, r := range runs {
+		if r.run.openNm() > 0 {
+			openWater = true
+		}
+	}
+	for _, r := range runs {
+		if !openWater {
+			// A leg wholly in slow water has no current to rank by: its departures keep
+			// the grid's order and say nothing of a current.
+			got = append(got, r)
+			continue
+		}
+		if r.run.modelledNm <= 0 {
+			continue
+		}
+		wellCovered = wellCovered || r.run.covered() >= assistantTidalMinCoveredFraction
+		got = append(got, r)
+	}
+	var out []tidalDeparture
+	sort.SliceStable(got, func(i, j int) bool { return got[i].run.alongKn > got[j].run.alongKn })
+	for _, g := range got {
+		if wellCovered && g.run.covered() < assistantTidalMinCoveredFraction {
+			continue
+		}
+		out = append(out, tidalDeparture{Depart: g.dep, tl: g.run.tl, Current: runReading(g.run, field)})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("the Open-Meteo model has no current for the run: %s", noCurrentWhy(field))
+	}
+	return out, nil
 }
 
 // judgeLeg judges a leg at the operator's departure, or at the best departure the
@@ -1248,7 +1439,8 @@ func (d planAssessDeps) judgeLeg(ctx context.Context, as *passageAssessor, w *pl
 			cell = choice.cells[choice.best]
 		}
 	} else {
-		cell, err = as.cell(ctx, w.i, w.plan, w.depart, w.toLoc)
+		// The operator's departure is run once, for the timeline the row shows.
+		cell, err = as.cellOn(ctx, w.i, w.plan, w.tl, w.toLoc)
 	}
 	if err != nil {
 		log.Printf("plans: leg %s to %s could not be judged: %v", w.from.Name, w.to.Name, err)
@@ -1323,10 +1515,10 @@ func (w *planLegWork) settle(chosen tidalDeparture, cell passageWindowCell, beyo
 // out: it is neither chosen nor ranked.
 const cellUnjudged = "unjudged"
 
-// departureCell judges the leg at one departure. It is a variable so a test can make
-// one departure fail.
-var departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, depart time.Time) (passageWindowCell, error) {
-	return as.cell(ctx, w.i, w.plan, depart, w.toLoc)
+// departureCell judges the leg at one departure, on the timeline that departure was
+// run on. It is a variable so a test can make one departure fail.
+var departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, c tidalDeparture) (passageWindowCell, error) {
+	return as.cellOn(ctx, w.i, w.plan, c.tl, w.toLoc)
 }
 
 // chooseDeparture judges the ranked departures, fairest current first, and finds
@@ -1335,10 +1527,10 @@ var departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWor
 // verdict says No-Go. It stops at the first Go, unless the leg's ranking ranks: then
 // every departure is judged, for comfort to choose among.
 func chooseDeparture(ctx context.Context, as *passageAssessor, w *planLegWork) (*departureChoice, error) {
-	ch := &departureChoice{cands: w.cands}
+	ch := &departureChoice{cands: w.cands, best: -1}
 	foundGo := false
 	for i, c := range w.cands {
-		cell, err := departureCell(ctx, as, w, c.Depart)
+		cell, err := departureCell(ctx, as, w, c)
 		if err != nil {
 			// Without ranking the leg would have stopped at the first Go and never
 			// judged this one. A departure after a Go that cannot be judged is left
@@ -1359,15 +1551,19 @@ func chooseDeparture(ctx context.Context, as *passageAssessor, w *planLegWork) (
 		}
 		ch.cells = append(ch.cells, cell)
 		foundGo = foundGo || cell.State == "go"
-		best := ch.cells[ch.best]
-		if i > 0 && (departureOrder(cell) < departureOrder(best) ||
-			(cell.State == "no_go" && best.State == "no_go" && cell.ratio < best.ratio)) {
+		if ch.best < 0 {
+			ch.best = i
+		} else if best := ch.cells[ch.best]; departureOrder(cell) < departureOrder(best) ||
+			(cell.State == "no_go" && best.State == "no_go" && cell.ratio < best.ratio) {
 			ch.best = i
 		}
 		if cell.State == "go" && !w.ranking.ranks() {
 			// The candidates are in order of current, so the first Go is the best.
 			break
 		}
+	}
+	if ch.best < 0 {
+		return nil, errors.New("no departure could be judged")
 	}
 	return ch, nil
 }

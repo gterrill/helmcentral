@@ -154,13 +154,6 @@ func (tl legTimeline) mapTimes(f func(time.Time) time.Time) (legTimeline, error)
 	return newLegTimeline(knots)
 }
 
-// endingAt is the same progress shifted to arrive at arrive: the timeline of a
-// leg already under way, known by its ETA.
-func (tl legTimeline) endingAt(arrive time.Time) (legTimeline, error) {
-	shift := arrive.Sub(tl.arrive())
-	return tl.mapTimes(func(t time.Time) time.Time { return t.Add(shift) })
-}
-
 // roundedTo is the same progress with every knot's time since the departure
 // rounded to a multiple of step, which keeps a run's arithmetic exact. A leg of
 // one steady pace shorter than half a step rounds to a leg of no length.

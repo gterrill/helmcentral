@@ -99,7 +99,11 @@ page says the limits aren't set and shows no verdicts.
    seen crawling on low revs, such as a berth, a fairway or a lock. A small
    line under the times says what the arrival was worked out on, for example
    "Cruise 10.3 kn, 40 min in slow water." When the leg has no slow water, it
-   says "Cruise 10.3 kn." Current isn't in the arrival yet.
+   says "Cruise 10.3 kn." Current isn't in the arrival yet. For the leg you're
+   on, the row shows when the boat left and an arrival timed from where the boat
+   is now, using your latest recorded position, and not from the time you set.
+   If that position is more than 15 minutes old or is more than a mile
+   off the route, the row says "No ETA" and why.
    When Helmcentral can't work out an arrival, the row says "No ETA" and why:
    - No recorded passages yet: record a passage first.
    - No passages recorded in the last twelve months: Helmcentral only learns
@@ -117,8 +121,8 @@ page says the limits aren't set and shows no verdicts.
    don't, it looks to sunset where you leave. Set a **Leave at** if you want to
    see how the leg judges at a time you pick.
 4. Look at **Current**. "0.8 kn hindering" means the modelled current runs
-   against you at that time. A dash means the model has no figure for the leg,
-   and hovering over it says why.
+   against you, on average, over the open water of the leg. A dash means the
+   model has no figure for the leg, and hovering over it says why.
 5. Read the **Comfort** line under the passage row. It says how the leg should
    feel at the time the verdict is judged for, hour by hour, in stretches such
    as "Lively for the first 2 h: roll, swell 0.6 m 4 s on the port bow. Then

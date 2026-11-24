@@ -124,7 +124,7 @@ func TestAssessPlan_ALegWithNoDepartureTimeReadsTheWholeDay(t *testing.T) {
 	}{{paAt(14, 23, 0), 1}, {paAt(14, 8, 0), 1}, {paAt(15, 1, 0), 0}} {
 		f := &paFake{
 			fc: pwcStep(tc.at, 0, 12, 135, 18),
-			departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+			departures: func() ([]tidalDeparture, error) {
 				return nil, context.DeadlineExceeded
 			},
 		}
@@ -389,7 +389,7 @@ func TestAssessPlan_TheLegUnderWayReadsFromNowToItsETA(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p, legs := paPlan(t, "2026-11-14", 0, 0)
 			p.Stops[0].DepartTime = "04:00"
-			f := &paFake{fc: pwcStep(tc.at, 0, 12, 135, 18), underway: &planUnderway{Lat: p.Stops[0].Lat, Lon: p.Stops[0].Lon}}
+			f := &paFake{fc: pwcStep(tc.at, 0, 12, 135, 18), underway: paUnderwayFrom(p, paAt(14, 4, 0), paAt(14, 4, 20))}
 			l := paAssess(t, p, legs, f).Legs[0]
 			if len(l.WindChanges.Changes) != tc.want || l.WindChanges.NotChecked != "" {
 				t.Fatalf("wind changes = %+v, want %d", l.WindChanges, tc.want)
@@ -401,11 +401,22 @@ func TestAssessPlan_TheLegUnderWayReadsFromNowToItsETA(t *testing.T) {
 	}
 }
 
-func TestAssessPlan_TheLegUnderWayWithNoDepartureTimeSaysItsETAIsUnknown(t *testing.T) {
+func TestAssessPlan_TheLegUnderWayWithNoFixSaysItsETAIsUnknown(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	f := &paFake{fc: pwcStep(paAt(14, 7, 0), 0, 12, 135, 18), underway: &planUnderway{Lat: p.Stops[0].Lat, Lon: p.Stops[0].Lon}}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if !strings.Contains(l.WindChanges.NotChecked, "no departure time") || len(l.WindChanges.Changes) != 0 {
+	if !strings.Contains(l.WindChanges.NotChecked, "latest position fix") || len(l.WindChanges.Changes) != 0 {
+		t.Fatalf("wind changes = %+v", l.WindChanges)
+	}
+}
+
+// The ETA comes from where the boat is, so a leg under way with no departure time set
+// has one.
+func TestAssessPlan_TheLegUnderWayNeedsNoDepartureTimeForItsETA(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	f := &paFake{fc: pwcStep(paAt(14, 7, 0), 0, 12, 135, 18), underway: paUnderwayFrom(p, paAt(14, 4, 0), paAt(14, 4, 20))}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if len(l.WindChanges.Changes) != 1 || l.WindChanges.NotChecked != "" {
 		t.Fatalf("wind changes = %+v", l.WindChanges)
 	}
 }
