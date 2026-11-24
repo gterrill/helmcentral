@@ -7,6 +7,7 @@ import {
   GRID_ROW_HEIGHT,
   POI_MAP_SPLIT_MIN_W,
   POI_MAP_WIDGET_CONSTRAINTS,
+  SOLAR_TILE_H,
   WIDGET_CONSTRAINTS,
   gaugeWidgetConstraints,
   CLUSTER_DEFAULT_SIZE,
@@ -18,6 +19,7 @@ import {
 import { CLUSTER_H } from '@/lib/engine-cluster-layout'
 import { NARROW_STRIP_FOLD_PX } from '@/lib/displays'
 import { TILE_INSET_H, rowsForHeight } from '@/lib/grid-metrics'
+import { DASHBOARD_WIDGET_DEFAULT_SIZE } from '@/lib/dashboard-widgets'
 
 /**
  * A widget's minimum row count is the only thing standing between an operator
@@ -207,5 +209,20 @@ describe('liftTodayNowHeight', () => {
   test('keeps a taller one, and leaves other tiles alone', () => {
     expect(liftTodayNowHeight('today-now', min + 2)).toBe(min + 2)
     expect(liftTodayNowHeight('depth-tide', 4)).toBe(4)
+  })
+})
+
+/**
+ * The Solar tile was held at six rows while it stacked a card per array. Its
+ * floor now comes from the measured height of the bar layout.
+ */
+describe('the Solar tile floor', () => {
+  test('five rows hold its measured height on the board', () => {
+    expect(rowsForHeight(SOLAR_TILE_H)).toBe(5)
+    expect(WIDGET_CONSTRAINTS.solar!.minH).toBe(5)
+  })
+
+  test('new Solar tiles start at the floor', () => {
+    expect(DASHBOARD_WIDGET_DEFAULT_SIZE.solar.h).toBe(WIDGET_CONSTRAINTS.solar!.minH)
   })
 })

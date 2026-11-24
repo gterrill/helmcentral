@@ -203,14 +203,14 @@ export const SolarTile = memo(function SolarTile({
     >
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Now</p>
+          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Now</p>
           <p className="font-display text-3xl leading-none text-gauge-secondary tabular-nums">
             <span>{w(currentW)}</span>
             <span className="ml-1 text-base text-muted-foreground">W</span>
           </p>
         </div>
         <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Peak Today</p>
+          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Peak Today</p>
           <p className="font-display text-3xl leading-none text-gauge-primary tabular-nums">
             <span>{w(peakTodayW)}</span>
             <span className="ml-1 text-base text-muted-foreground">W</span>
@@ -220,14 +220,14 @@ export const SolarTile = memo(function SolarTile({
 
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Today</p>
+          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Today</p>
           <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
             <span>{kwh(todayKWh)}</span>
             <span className="ml-1 text-xs text-muted-foreground">kWh</span>
           </p>
         </div>
         <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Yesterday</p>
+          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Yesterday</p>
           <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
             <span>{kwh(yesterdayKWh)}</span>
             <span className="ml-1 text-xs text-muted-foreground">kWh</span>

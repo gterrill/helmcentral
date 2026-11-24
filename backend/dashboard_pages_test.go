@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -3890,5 +3891,27 @@ func TestValidateLampStripRejectsUnknownIcon(t *testing.T) {
 	cfg.Lamps[0].Icon = "not-an-icon"
 	if msg := validateLampStripConfig(cfg, "ribbon"); msg == "" {
 		t.Fatal("expected an unknown icon to be rejected")
+	}
+}
+
+// The fresh-install page starts Solar at the same five rows as a Solar tile
+// added later, and Solar's column stacks with no blank rows.
+func TestDefaultDashboardLayout_SolarFiveRowsNoGaps(t *testing.T) {
+	column := []dashboardLayoutItem{}
+	for _, w := range defaultDashboardLayout {
+		if w.ID == "solar" && w.H != 5 {
+			t.Fatalf("solar default H = %d, want 5", w.H)
+		}
+		if w.X == 8 {
+			column = append(column, w)
+		}
+	}
+	sort.Slice(column, func(i, j int) bool { return column[i].Y < column[j].Y })
+	nextY := -1
+	for _, w := range column {
+		if nextY >= 0 && w.Y != nextY {
+			t.Fatalf("%s at Y=%d, want %d (no gap above it)", w.ID, w.Y, nextY)
+		}
+		nextY = w.Y + w.H
 	}
 }

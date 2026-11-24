@@ -194,7 +194,7 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   'route': { w: 4, h: 4 },
   'nearby-vessels': { w: 4, h: 5 },
   'battery-power': { w: 4, h: 12 },
-  'solar': { w: 4, h: 6 },
+  'solar': { w: 4, h: 5 },
   'alternator': { w: 4, h: 6 },
   'generator': { w: 4, h: 5 },
   'czone-switches': { w: 4, h: 6 },

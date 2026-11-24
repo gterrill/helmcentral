@@ -126,12 +126,19 @@ export function liftTodayNowHeight(id: string, h: number): number {
   return id === 'today-now' ? Math.max(h, WIDGET_CONSTRAINTS['today-now']?.minH ?? h) : h
 }
 
+/**
+ * The Solar tile's height with its top inset, measured in Chromium at 380px
+ * wide: two rows of figures, the array bar and one status line. On a wall page
+ * (8px between rows) five rows are 192px and do not hold it.
+ */
+export const SOLAR_TILE_H = 212
+
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
   'wind': { minW: 3, minH: 6 },
   'anchor-watch': { minW: 3, minH: 6 },
   'battery-power': { minW: 3, minH: 6 },
-  'solar': { minW: 3, minH: 6 },
+  'solar': { minW: 3, minH: rowsForHeight(SOLAR_TILE_H) },
   'depth-tide': { minW: 2, minH: 4 },
   'position': { minW: 2, minH: 3 },
   // Five rows: the barometer row sits below the weather row, and four rows
