@@ -953,6 +953,17 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	// that fails some other way still reports it.
 	lastSubmitError := ""
 	var forcedExtra []openRouterMessage
+	// The Thinking setting goes on every round of the run. Blank sends no
+	// reasoning key, so the model keeps its own default.
+	var reasoning *openRouterReasoningOption
+	if effort := r.options.ReasoningEffort; effort != "" {
+		// A hand-edited bad value in settings.yaml fails only the runs that
+		// use it, before anything is sent.
+		if !validReasoningEffort(effort) {
+			return assistantReply{}, fmt.Errorf("Thinking setting %q in settings.yaml is not Model default, low, medium or high; choose one in Settings → Mate", effort)
+		}
+		reasoning = &openRouterReasoningOption{Effort: effort}
+	}
 forcedLoop:
 	for round := 0; ; round++ {
 		// Nothing is sent on a run that has already been stopped.
@@ -979,6 +990,7 @@ forcedLoop:
 		if plugin := autoRouterPluginForModel(r.model, r.options); plugin != nil {
 			req.Plugins = []openRouterPlugin{*plugin}
 		}
+		req.Reasoning = reasoning
 		if forcedFinal {
 			log.Printf("assistant: run %s: %s after %d tool rounds, forcing a final answer with no tool machinery on the wire", runID, assistantForcedReasonText(forced, budget), toolRounds)
 			// No Tools and no ToolChoice at all - tool_choice "none" plus

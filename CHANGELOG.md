@@ -35,6 +35,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **You can now choose how hard Mate thinks.** Settings → Mate → Chat has a new
+  **Thinking** choice next to the model: Model default, Low, Medium or High.
+  Model default leaves it to the model, as before. Low, Medium and High ask the
+  model to think that hard before every reply, which is slower and costs more.
+  The choice also applies to the reviews Mate writes for watch reports and
+  alarms.
 - **A leg on a passage plan now says how the ride should feel, hour by hour.**
   Under a leg with a verdict, a new Comfort line reads like "Lively for the first
   2 h: roll, swell 0.6 m 4 s on the port bow. Then Comfortable." A second line gives

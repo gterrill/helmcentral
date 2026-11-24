@@ -240,6 +240,38 @@ describe('AssistantSection', () => {
     vi.unstubAllGlobals()
   })
 
+  it('offers Thinking beside the model, whichever model is chosen, and saves the choice', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
+    const { latestDraft } = renderSection({ assistantModel: 'anthropic/claude-sonnet-4.5' })
+
+    const thinking = screen.getByLabelText('Mate thinking')
+    expect(screen.getByText('Thinking')).toBeInTheDocument()
+    expect(thinking).toHaveTextContent('Model default')
+    expect(screen.getByLabelText('Mate model').compareDocumentPosition(thinking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(thinking)
+    const option = await screen.findByRole('option', { name: 'High' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+
+    expect(latestDraft().assistantReasoningEffort).toBe('high')
+    expect(buildRegularSettingsPatch(latestDraft()).assistant?.reasoning_effort).toBe('high')
+    expect(screen.getByLabelText('Mate thinking')).toHaveTextContent('High')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('shows Thinking with OpenRouter Auto too, and hydrates it from settings', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
+    renderSection({ assistantModel: 'openrouter/auto', assistantReasoningEffort: 'low' })
+    expect(screen.getByLabelText('Mate thinking')).toHaveTextContent('Low')
+    expect(hydrateDraftFromSettings({ assistant: { reasoning_effort: 'medium' } }).assistantReasoningEffort).toBe('medium')
+    expect(hydrateDraftFromSettings({}).assistantReasoningEffort).toBe('')
+    expect(hydrateDraftFromSettings({ assistant: { reasoning_effort: 'bogus' } }).assistantReasoningEffort).toBe('')
+    vi.unstubAllGlobals()
+  })
+
   it('capitalises the selected cost cap label', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }))
     renderSection({
@@ -394,6 +426,7 @@ describe('assistant settings-draft plumbing', () => {
       verbose_run_log: false,
       web_search: false,
       web_search_model: 'google/gemini-2.5-flash-lite',
+      reasoning_effort: '',
       passage_limits: expect.objectContaining({ daylight_arrival: false }),
     })
   })

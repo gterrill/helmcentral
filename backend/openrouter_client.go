@@ -523,6 +523,24 @@ type openRouterChatRequest struct {
 	// omitted (OpenRouter defaults to non-streaming either way, but B4's
 	// non-streaming call is deliberate, not an accident of a zero value).
 	Stream bool `json:"stream"`
+	// Reasoning carries the Thinking setting. Nil leaves the key off the wire,
+	// so the model keeps its own default. Only Mate's runs set it.
+	Reasoning *openRouterReasoningOption `json:"reasoning,omitempty"`
+}
+
+// openRouterReasoningOption is OpenRouter's "reasoning" request object.
+type openRouterReasoningOption struct {
+	Effort string `json:"effort"`
+}
+
+// validReasoningEffort reports whether effort is a Thinking choice: blank
+// (model default), low, medium or high.
+func validReasoningEffort(effort string) bool {
+	switch effort {
+	case "", "low", "medium", "high":
+		return true
+	}
+	return false
 }
 
 type openRouterChoice struct {

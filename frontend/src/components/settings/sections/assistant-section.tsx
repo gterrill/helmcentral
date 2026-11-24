@@ -4,6 +4,7 @@ import { useSetupFocus } from '@/hooks/use-setup-focus'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import {
   defaultWebSearchModel,
+  normalizeAssistantReasoningEffort,
   passageLimitErrors,
   type PassageLimitsDraft,
   type RegularSettingsDraft,
@@ -30,6 +31,8 @@ const recentDocumentModelStorageKey = 'assistant.recent-document-models'
 const recentWebSearchModelStorageKey = 'assistant.recent-web-search-models'
 // Keep in step with defaultDocumentModel in backend/assistant_settings.go.
 const defaultDocumentModel = 'google/gemini-2.5-flash'
+const modelDefaultThinkingValue = '__model_default__'
+const thinkingLabels: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 const costTierLabels: Record<string, string> = {
   low: 'Low',
   medium: 'Medium',
@@ -276,6 +279,32 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                   dialogDescription="Tool-capable models with server-side sorting and pagination."
                 />
               ) : null}
+
+              <Field>
+                <FieldLabel htmlFor="assistant-thinking">Thinking</FieldLabel>
+                <Select
+                  value={draft.assistantReasoningEffort === '' ? modelDefaultThinkingValue : draft.assistantReasoningEffort}
+                  onValueChange={(value) =>
+                    onChange({
+                      assistantReasoningEffort: normalizeAssistantReasoningEffort(value === modelDefaultThinkingValue ? '' : value),
+                    })
+                  }
+                >
+                  <SelectTrigger id="assistant-thinking" aria-label="Mate thinking">
+                    <SelectValue>{(value: string) => (value === modelDefaultThinkingValue ? 'Model default' : (thinkingLabels[value] ?? value))}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value={modelDefaultThinkingValue}>Model default</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                  </SelectPopup>
+                </Select>
+                <FieldDescription>
+                  How hard Mate thinks before answering. Higher is slower and costs more. Model default leaves it to the
+                  model. Watch and alarm reviews follow this too.
+                </FieldDescription>
+              </Field>
             </FieldGroup>
           </FormSection>
 

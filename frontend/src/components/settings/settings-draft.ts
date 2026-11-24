@@ -8,6 +8,7 @@ export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
 export type ScopeMethod = 'catenary' | 'ratio'
 
+export type AssistantReasoningEffort = '' | 'low' | 'medium' | 'high'
 export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** A sector's no-go figures while editing: strings, so partial typing survives. '' is unset. */
@@ -133,6 +134,14 @@ function normalizeAssistantCostTier(value: string | undefined): AssistantCostTie
   }
   return ''
 }
+
+const reasoningEfforts: readonly AssistantReasoningEffort[] = ['', 'low', 'medium', 'high']
+
+/** Narrows a Thinking select value to a choice; anything else is Model default. */
+export function normalizeAssistantReasoningEffort(value: string | null | undefined): AssistantReasoningEffort {
+  return reasoningEfforts.find((option) => option === value) ?? ''
+}
+
 
 const parseNumber = (value: string, fallback: number) => {
   const parsed = Number.parseFloat(value)
@@ -326,6 +335,8 @@ const draftFields = {
     read: (raw) => normalizeAssistantCostTier(typeof raw === 'string' ? raw : undefined),
     write: normalizeAssistantCostTier,
   }),
+  // The Thinking setting: '' is Model default. Anything else reads as ''.
+  assistantReasoningEffort: choice<AssistantReasoningEffort>(['assistant', 'reasoning_effort'], '', reasoningEfforts),
   // Voice phase (ADR 0093): all three default false, same as assistantEnabled.
   assistantVoiceInput: flag(['assistant', 'voice_input'], false),
   assistantReadAloud: flag(['assistant', 'read_aloud'], false),
