@@ -8,6 +8,7 @@ import {
   POI_MAP_SPLIT_MIN_W,
   POI_MAP_WIDGET_CONSTRAINTS,
   SOLAR_TILE_H,
+  DEPTH_TIDE_TILE_H,
   BATTERY_POWER_TILE_H,
   ALTERNATOR_TILE_H,
   GENERATOR_TILE_H,
@@ -212,7 +213,7 @@ describe('liftToFloor', () => {
 
   test('keeps a taller one, and leaves other tiles alone', () => {
     expect(liftToFloor('today-now', min + 2)).toBe(min + 2)
-    expect(liftToFloor('depth-tide', 4)).toBe(4)
+    expect(liftToFloor('position', 2)).toBe(2)
   })
 
   test('raises a saved power tile to the floor that now holds it', () => {
@@ -253,5 +254,13 @@ describe('the power tile floors', () => {
     expect(rowsForHeight(measured)).toBe(rows)
     expect(WIDGET_CONSTRAINTS[id]).toEqual({ minW: cols, minH: rows })
     expect(DASHBOARD_WIDGET_DEFAULT_SIZE[id].h).toBeGreaterThanOrEqual(rows)
+  })
+})
+
+describe('the Depth & Tide floor', () => {
+  test('holds its tallest measured content and saved tiles are lifted to it', () => {
+    expect(WIDGET_CONSTRAINTS['depth-tide']).toEqual({ minW: 3, minH: rowsForHeight(DEPTH_TIDE_TILE_H) })
+    expect(DASHBOARD_WIDGET_DEFAULT_SIZE['depth-tide'].h).toBeGreaterThanOrEqual(WIDGET_CONSTRAINTS['depth-tide']!.minH!)
+    expect(liftToFloor('depth-tide', 4)).toBe(WIDGET_CONSTRAINTS['depth-tide']!.minH)
   })
 })

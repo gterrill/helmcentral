@@ -71,14 +71,14 @@ export const DepthTideTile = memo(function DepthTideTile({
           : undefined
       }
     >
-      <Tile title="Depth & Tide" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
+      <Tile title="Depth & Tide" className="@container" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
         <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
           <div className="mt-1 flex items-center gap-4">
             <div className="shrink-0">
-              <p className="font-display text-4xl text-gauge-secondary">
+              <p className="whitespace-nowrap font-display text-4xl text-gauge-secondary @max-2xs:text-2xl">
                 {depthValue}
-                <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
+                <span className="ml-2 align-baseline text-xl text-muted-foreground @max-2xs:ml-1 @max-2xs:text-xs">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
               </p>
               {estimatedExtremeDepth !== null && (
                 <p className="mt-1 text-xs text-foreground">
@@ -96,36 +96,35 @@ export const DepthTideTile = memo(function DepthTideTile({
                 since={depthTrend.since}
                 tideType={depthTrend.tideType}
                 tideDepthM={depthTrend.tideDepthM}
-                className="min-w-0 flex-1"
+                className="min-w-0 flex-1 @max-2xs:hidden"
                 timeZone={timeZone}
               />
             )}
           </div>
         </div>
         <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+          <p className="truncate text-xs uppercase tracking-[0.16em] text-muted-foreground" title={tide.station_name ?? undefined}>
             Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
           </p>
           {isMeanSeaLevel(tide.height_datum) && (
             <p data-testid="tide-datum-label" className="text-xs text-muted-foreground">Heights {MEAN_SEA_LEVEL_LABEL}</p>
           )}
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-display text-4xl leading-none text-gauge-secondary">
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-display text-4xl leading-none text-gauge-secondary @max-2xs:text-2xl">
               {tide.current_tide_height_ft !== null ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
             </span>
-            <span className="text-lg text-muted-foreground">{tideUnit}</span>
+            <span className="text-lg text-muted-foreground @max-2xs:text-xs">{tideUnit}</span>
             <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-gauge-secondary">
               {tide.tide_direction === 'Falling' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
               {tide.tide_direction}
             </span>
           </div>
-          {/* The High/Low pair fits on one line everywhere except md–lg, where the
-              fixed sidebar leaves the two-column dashboard ~240px per tile and the
-              second entry was running past the edge. Stacking them there keeps both
-              readings whole rather than clipping a tide time. */}
-          <div className="mt-2 flex flex-row items-center justify-between gap-x-2 md:flex-col md:items-start md:gap-y-1 lg:flex-row lg:items-center">
+          {/* High and Low share a line on a tile wider than 24rem; below that
+              the second entry ran past the edge, so they stack and both
+              readings stay whole rather than clipping a tide time. */}
+          <div className="mt-2 flex flex-row items-center justify-between gap-x-2 @max-sm:flex-col @max-sm:items-start @max-sm:gap-y-1">
             {tideExtremes.map((extreme) => (
-              <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-foreground">
+              <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex flex-wrap items-center gap-x-1.5 text-xs text-foreground">
                 {extreme.isHigh ? (
                   <ArrowUp className="h-3.5 w-3.5 text-gauge-secondary" />
                 ) : (
@@ -138,8 +137,8 @@ export const DepthTideTile = memo(function DepthTideTile({
                     here - including a genuine negative low, which must still
                     show its figure rather than being read as "no data" the
                     way the -1 sentinel once was. */}
-                <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
-                {' '}{formatTimeOfDay(extreme.time, timeZone)}
+                <span className="whitespace-nowrap text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
+                {' '}<span className="whitespace-nowrap">{formatTimeOfDay(extreme.time, timeZone)}</span>
               </p>
             ))}
           </div>
