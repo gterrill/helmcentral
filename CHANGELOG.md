@@ -181,7 +181,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   has gone quiet shows as a hatched slice. Under the bar, a line reads "4 arrays
   · no faults", or names an array with a controller error or one that has gone
   quiet, for example "Array 290 · error 38". Tap the bar to see each array's
-  power now, yield today and yesterday, and mode.
+  power now, yield today and yesterday, and mode. The tile now fits in five rows
+  instead of six, though a wall page still needs six. A Solar tile already on a
+  page keeps its height until you drag it shorter in layout edit mode.
 
 - **A suggested departure on a passage plan now goes to the calmest ride, then
   the fairest stream.** Among the Go times for a leg, or the Marginal ones when
