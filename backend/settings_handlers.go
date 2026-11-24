@@ -160,6 +160,10 @@ type settingsPayload struct {
 		// while WebSearch is on: a blank value is rejected on save and never
 		// replaced by the default at search time.
 		WebSearchModel string `json:"web_search_model"`
+		// ReasoningEffort is the Thinking setting: "" leaves reasoning to the
+		// model (nothing extra is sent), otherwise "low", "medium" or "high".
+		// Mate's chat and its unattended reviews both send it.
+		ReasoningEffort string `json:"reasoning_effort"`
 		// PassageLimits are the operator's go/no-go thresholds for Mate's
 		// passage assessment (ADR 0191). No defaults: every value is unset
 		// until the operator enters it.
@@ -263,6 +267,13 @@ func updateSettingsHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
 	}
+	normalized := normalizeSettingsPayload(req)
+	if effort := normalized.Assistant.ReasoningEffort; !validReasoningEffort(effort) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"field": "assistant.reasoning_effort",
+			"error": fmt.Sprintf("Thinking must be Model default, Low, Medium or High, not %q", effort),
+		})
+	}
 
 	settingsWriteMu.Lock()
 	defer settingsWriteMu.Unlock()
@@ -273,7 +284,6 @@ func updateSettingsHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
 	}
 
-	normalized := normalizeSettingsPayload(req)
 	current := buildSettingsPayload(settings)
 	// A roles block that cannot be read is treated as nothing saved, so a save
 	// that sets the roles again repairs it.
@@ -406,6 +416,11 @@ func updateSettingsHandler(c echo.Context) error {
 		"verbose_run_log":      normalized.Assistant.VerboseRunLog,
 		"web_search":           normalized.Assistant.WebSearch,
 		"web_search_model":     normalized.Assistant.WebSearchModel,
+	}
+	// Model default: the key stays out of settings.yaml altogether. The whole
+	// assistant block is replaced on save, so an earlier value is dropped.
+	if normalized.Assistant.ReasoningEffort != "" {
+		settings["assistant"].(map[string]any)["reasoning_effort"] = normalized.Assistant.ReasoningEffort
 	}
 	// No limit set: the key stays out of settings.yaml altogether.
 	if normalized.Assistant.PassageLimits != (passageLimits{}) {
@@ -837,6 +852,13 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["verbose_run_log"].(bool); ok {
 			payload.Assistant.VerboseRunLog = v
 		}
+		// Absent means Model default. A stored value is read as written, so a
+		// hand-edited bad value fails when a run reads it, not here.
+		// A non-string (YAML `1` or `true`) is carried as text, so it stays
+		// invalid rather than reading as Model default.
+		if raw, ok := assistantMap["reasoning_effort"]; ok && raw != nil {
+			payload.Assistant.ReasoningEffort = strings.TrimSpace(fmt.Sprint(raw))
+		}
 		if raw, ok := assistantMap["web_search_model"]; ok {
 			payload.Assistant.WebSearchModel = strings.TrimSpace(coerceString(raw))
 		}
@@ -1009,6 +1031,9 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.VerboseRunLog = req.Assistant.VerboseRunLog
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
+	// Trimmed only. updateSettingsHandler rejects an unknown value with a 400,
+	// never coerces it to a nearby one.
+	normalized.Assistant.ReasoningEffort = strings.TrimSpace(req.Assistant.ReasoningEffort)
 	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits
 
 	normalized.OfflineCoastline.Enabled = req.OfflineCoastline.Enabled

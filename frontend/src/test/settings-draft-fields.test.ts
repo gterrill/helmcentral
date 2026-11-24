@@ -5,6 +5,7 @@ import {
   draftsEqual,
   hydrateDraftFromSettings,
   initialRegularSettingsDraft,
+  normalizeAssistantReasoningEffort,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
 import { emptyVesselRoles } from '@/lib/vessel-settings'
@@ -52,6 +53,7 @@ const changed: RegularSettingsDraft = {
   assistantVerboseRunLog: true,
   assistantWebSearch: true,
   assistantWebSearchModel: 'test/search',
+  assistantReasoningEffort: 'medium',
   assistantPassageLimits: {
     ahead: { wind: '20', wave: '2' },
     abeam: { wind: '25', wave: '2.5' },
@@ -140,6 +142,7 @@ describe('settings draft fields', () => {
     assistantVerboseRunLog: false,
     assistantWebSearch: true,
     assistantWebSearchModel: ' s ',
+    assistantReasoningEffort: 'high',
     assistantPassageLimits: {
       ahead: { wind: ' 12,5 ', wave: 'x' },
       abeam: { wind: '', wave: '2' },
@@ -185,6 +188,7 @@ describe('settings draft fields', () => {
       verbose_run_log: false,
       web_search: true,
       web_search_model: 's',
+      reasoning_effort: 'high',
       passage_limits: {
         ahead: { wind_kn_no_go: 12.5, wave_m_no_go: null },
         abeam: { wind_kn_no_go: null, wave_m_no_go: 2 },
@@ -245,5 +249,18 @@ describe('settings draft fields', () => {
     expect(draft.tideStationId).toBe(' id ')
     expect(draft.distanceUnits).toBe('metric')
     expect(draft.authMode).toBe('none')
+  })
+
+  it('narrows a Thinking select value to a choice, and reads anything else as Model default', () => {
+    expect(normalizeAssistantReasoningEffort('high')).toBe('high')
+    expect(normalizeAssistantReasoningEffort('low')).toBe('low')
+    expect(normalizeAssistantReasoningEffort('')).toBe('')
+    expect(normalizeAssistantReasoningEffort(null)).toBe('')
+    expect(normalizeAssistantReasoningEffort('HIGH')).toBe('')
+    expect(normalizeAssistantReasoningEffort('__model_default__')).toBe('')
+  })
+
+  it('shows a hand-edited bad Thinking value as Model default', () => {
+    expect(hydrateDraftFromSettings({ assistant: { reasoning_effort: 'HIGH' } }).assistantReasoningEffort).toBe('')
   })
 })

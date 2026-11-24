@@ -90,6 +90,7 @@ export type SettingsPayload = {
     verbose_run_log?: boolean
     web_search?: boolean
     web_search_model?: string
+    reasoning_effort?: string
     passage_limits?: PassageLimitsPayload
   }
   // The on-board coastline Mate's shelter estimate reads. Off by default.

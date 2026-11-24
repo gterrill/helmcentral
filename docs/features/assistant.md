@@ -1315,6 +1315,19 @@ Settings offers two routing modes:
 Auto routing only applies when the model is set to OpenRouter Auto. For any
 other model ID, those routing constraints are ignored.
 
+Next to the model, Settings → Mate → Chat has a **Thinking** choice. It sets how
+hard Mate thinks before it answers:
+
+- **Model default:** Mate asks for nothing extra, so each model thinks the way it
+  does on its own. This is the setting until you change it.
+- **Low, Medium or High:** Mate asks the model to think that hard before every
+  reply, including each step where it looks something up. Higher is slower and
+  costs more, because the model writes more before it answers.
+
+The choice applies to your questions and also to the reviews Mate writes for
+[watch](watches.md) reports and for alarms. Mate's other jobs, such as reading
+documents and searching the web, keep their own settings.
+
 Documents are read and labelled by a separate model, set under Settings → Mate →
 Document indexing. You pick it the same way as the Mate model: from a list of
 recent choices, or from the catalogue, which here shows only models that can

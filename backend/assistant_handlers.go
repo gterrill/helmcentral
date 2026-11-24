@@ -131,6 +131,9 @@ type assistantRunnerOptions struct {
 	// forced final answer keeps that tool and no other, so a run that ran out
 	// of rounds can still file with what it has.
 	SubmitTool string
+	// ReasoningEffort is the Thinking setting: "", "low", "medium" or "high".
+	// Blank sends no reasoning key at all.
+	ReasoningEffort string
 }
 
 type assistantModelOption struct {
@@ -1137,6 +1140,8 @@ func assistantTurnParamsFromSettings(settingsPath string, readiness assistantRea
 			ExcludedModels: settingsPayload.Assistant.ExcludedModels,
 			CostTier:       settingsPayload.Assistant.CostTier,
 			VerboseRunLog:  settingsPayload.Assistant.VerboseRunLog,
+			// Chat and the unattended reviews both read their options here.
+			ReasoningEffort: settingsPayload.Assistant.ReasoningEffort,
 		},
 	}, nil
 }
