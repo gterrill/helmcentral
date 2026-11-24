@@ -203,7 +203,7 @@ func legWindChanges(as *passageAssessor, w *planLegWork, env planEnv) planWindCh
 	}
 	// The window starts where the reading does: the departure, or now for a leg under way.
 	course := w.course
-	return rowWindChanges(passageHoursAsWeather(point.hours), legChangeWindow(day, span.from, span.arrive, w.fromLoc),
+	return rowWindChanges(passageHoursAsWeather(point.hours), legChangeWindow(day, span.from, span.arrive(), w.fromLoc),
 		day, env.now, w.fromLoc, env.limits, env.limitsErr, &course)
 }
 

@@ -19,7 +19,7 @@ import (
 func southboundQuery(hours float64) planDepartureQuery {
 	return planDepartureQuery{
 		Route: []assistantLatLon{{Lat: -27.0, Lon: 153.0}, {Lat: -27.3, Lon: 153.0}},
-		Hours: hours,
+		Pace:  linearPace(hours),
 	}
 }
 
@@ -201,6 +201,53 @@ func TestPlanDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *test
 	}
 }
 
+// A leg whose hours are not whole minutes (12.3 nm at 5.7 kn is 129 min 28 s) has
+// one arrival per departure: the ranking scores on whole minutes, but the timeline
+// it hands on is the pace's own.
+func TestPlanDepartures_CarriesThePacesOwnTimelineNotTheMinuteRoundedOne(t *testing.T) {
+	hours := 12.3 / 5.7
+	deps := tidalDepsWithProvider(steadyCurrent(180))
+	q := southboundQuery(hours)
+	q.Earliest = time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
+	q.Latest = time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC)
+	got, err := deps.planDepartures(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no departures")
+	}
+	for _, c := range got {
+		if want := c.Depart.Add(hoursDuration(hours)); !c.tl.arrive().Equal(want) {
+			t.Fatalf("departure %s arrives %s, want %s", c.Depart, c.tl.arrive(), want)
+		}
+	}
+}
+
+func TestAssessPlan_ASuggestedDepartureArrivesWhenThePaceSaysNotAtTheMinute(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	legs[0].DistanceNm = 12.3
+	cur := steadyCurrent(180)
+	cur.from = paAt(13, 0, 0)
+	ranking := tidalDepsWithProvider(cur)
+	ranking.now = func() time.Time { return paNow }
+	f := &paFake{speed: 5.7}
+	d := paDeps(f)
+	d.departures = ranking.planDepartures
+	l := assessPlan(context.Background(), p, legs, d, planAssessOptions{}).Legs[0]
+	if !l.DepartSuggested {
+		t.Fatalf("leg = %+v", l)
+	}
+	hours := 12.3 / 5.7
+	want := paParse(t, l.Depart).Add(hoursDuration(hours)).Truncate(time.Second)
+	if got := paParse(t, l.Arrive); !got.Equal(want) {
+		t.Fatalf("arrive %s, want %s (the pace's, not the minute-rounded 2h09m)", got, want)
+	}
+	if l.Hours == nil || math.Abs(*l.Hours-hours) > 1e-6 {
+		t.Fatalf("hours = %v, want %v", l.Hours, hours)
+	}
+}
+
 func TestPlanDepartures_ARankingThatCannotBeDoneIsItsError(t *testing.T) {
 	// No current at any point and no flood direction: the ranking has nothing to
 	// go by, and the plan says so in its own words. Nothing is made up.
@@ -266,6 +313,17 @@ func TestPlanCurrentAlong_HelpingIsPositiveAndHinderingNegative(t *testing.T) {
 	got, err = north.planCurrentAlong(context.Background(), southboundQuery(3), dep)
 	if err != nil || !got.Have || math.Abs(got.MeanKn+kn) > 0.05 {
 		t.Fatalf("against the current: %+v %v, want about -%.2f", got, err, kn)
+	}
+}
+
+// A leg under half a minute rounds to a run of no length, with one sample at its
+// start: it reads the current there, and does not divide by its no samples.
+func TestPlanCurrentAlong_ALegUnderHalfAMinuteReadsTheCurrentAtItsStart(t *testing.T) {
+	const kn = 0.5 * 1.943844
+	dep := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
+	got, err := tidalDepsWithProvider(steadyCurrent(180)).planCurrentAlong(context.Background(), southboundQuery(20.0/3600), dep)
+	if err != nil || !got.Have || math.Abs(got.MeanKn-kn) > 0.05 {
+		t.Fatalf("got %+v %v, want about %.2f", got, err, kn)
 	}
 }
 

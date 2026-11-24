@@ -221,7 +221,7 @@ func TestSquareLinesCache_FollowsTheStateOfTheSquare(t *testing.T) {
 // reason, never "ETA has passed".
 func TestPlanComfortRun_ALegUnderWayWithNoETAReadsWhyNotThatItsETAPassed(t *testing.T) {
 	r := planComfortRun{env: planEnv{now: paAt(14, 13, 30)}, ready: func() (*comfortSetup, string) { return &comfortSetup{}, "" }}
-	w := &planLegWork{underway: true, windReady: false, fromLoc: paLoc, hours: 5,
+	w := &planLegWork{underway: true, windReady: false, fromLoc: paLoc, pace: linearPace(5),
 		etaWhy:       "The leg is under way and has no departure time set, so its ETA isn't known.",
 		chosenDepart: paAt(14, 8, 0), chosenArrive: paAt(14, 13, 0)}
 	w.res = &planLegAssessment{Verdict: "ok"}

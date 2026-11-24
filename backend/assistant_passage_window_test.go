@@ -181,6 +181,16 @@ func TestAssessItinerary_ViaAtAHeadlandChangesSectorMidLeg(t *testing.T) {
 	}
 }
 
+// A speed_kn leg whose route points coincide is a leg of no length: it runs, with its
+// arrival at its departure, as it always has.
+func TestAssessItinerary_ALegOfNoLengthRunsAndArrivesWhenItDeparts(t *testing.T) {
+	leg := passageLegArgs{Route: []passageRoutePoint{{Lat: -19, Lon: 147, Name: "Alpha"}, {Lat: -19, Lon: 147, Name: "Alpha"}}, SpeedKn: pwF(6)}
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", leg), pwLimitsAll(), pwWeek(5, 180)))
+	if c.Depart == "" || c.Arrive != c.Depart {
+		t.Fatalf("depart %q arrive %q", c.Depart, c.Arrive)
+	}
+}
+
 func TestAssessItinerary_UnnamedPointsFallBackToTheLegName(t *testing.T) {
 	leg := passageLegArgs{Route: []passageRoutePoint{{Lat: -19, Lon: 147, Name: "Alpha"}, {Lat: -18, Lon: 147}}, SpeedKn: pwF(6)}
 	p := pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", leg), pwLimitsAll(), pwWeek(25, 0))
@@ -709,8 +719,9 @@ func TestAssessPassageWindowTool_BothHoursAndSpeedUseTheHoursAndSayTheSpeedWasIg
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan := planPassageLeg(0, args.Legs[0]); plan.hours != 10 {
-		t.Fatalf("passage_hours must win over speed_kn, plan hours = %v", plan.hours)
+	plan := planPassageLeg(0, args.Legs[0])
+	if tl, err := plan.timeline(paAt(14, 8, 0)); err != nil || tl.hours() != 10 {
+		t.Fatalf("passage_hours must win over speed_kn, plan hours = %v (%v)", tl.hours(), err)
 	}
 	if strings.Contains(pwToolResultWithoutBoth(t, d), "was ignored") {
 		t.Fatalf("a leg with one field has nothing to note")

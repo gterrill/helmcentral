@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -19,11 +20,14 @@ import (
 // try every assistantTidalDepartureStep. Its values are already checked.
 type tidalRankQuery struct {
 	Lat, Lon, CourseDeg float64
-	Hours               float64
-	Route               []assistantLatLon
-	FloodSetDeg         *float64
-	FloodSetSource      string
-	SlackOffset         time.Duration
+	// Pace is the run's timeline for a departure, and is required. Hours is the
+	// figure the Mate was given, which only the tool's answer repeats.
+	Hours          float64
+	Pace           legPace
+	Route          []assistantLatLon
+	FloodSetDeg    *float64
+	FloodSetSource string
+	SlackOffset    time.Duration
 	// Earliest and Latest bound the departures, both included.
 	Earliest, Latest time.Time
 	// Now is when the ranking is made, which sets how far ahead the current model
@@ -34,9 +38,8 @@ type tidalRankQuery struct {
 // tidalRanking is every departure in the window with its score, and what is
 // needed to say how they were ranked.
 type tidalRanking struct {
-	q        tidalRankQuery
-	basis    string
-	duration time.Duration
+	q     tidalRankQuery
+	basis string
 	// noData says what lacked data when the model could not rank the run; empty
 	// when it did.
 	noData string
@@ -76,12 +79,6 @@ func currentReading(run alongRun, cur tidalPointCurrents, samples []tidalSample)
 	return planCurrentReading{Have: true, MeanKn: roundTo2(run.meanKn)}
 }
 
-// tidalRunDuration is how long a run of hours takes, in whole minutes so the
-// arithmetic is exact (6.2 h is 372 min, not 372 min less a float rounding error).
-func tidalRunDuration(hours float64) time.Duration {
-	return time.Duration(math.Round(hours*60)) * time.Minute
-}
-
 // errTidalNothingToRank is a ranking that has no current from the model and no
 // flood direction to time the tide by.
 type errTidalNothingToRank struct{ reason string }
@@ -96,10 +93,10 @@ func (e errTidalNothingToRank) Error() string {
 // the flood direction in the query, and fails without it.
 func (d assistantToolDeps) rankTidalDepartures(ctx context.Context, q tidalRankQuery) (*tidalRanking, error) {
 	route := q.Route
-	// Whole minutes keep the arithmetic exact.
-	duration := tidalRunDuration(q.Hours)
-	need := q.Latest.Add(duration)
-	r := &tidalRanking{q: q, duration: duration}
+	if q.Pace == nil {
+		return nil, errors.New("the ranking needs the leg's pace")
+	}
+	r := &tidalRanking{q: q}
 
 	// The route may start in open water off the creek or berth the boat is in, so
 	// a start away from lat/lon is said, not refused, until it is a different passage.
@@ -111,6 +108,28 @@ func (d assistantToolDeps) rankTidalDepartures(ctx context.Context, q tidalRankQ
 		}
 		if off > assistantTidalRouteNoteNm {
 			r.notes = append(r.notes, fmt.Sprintf("The route starts %.1f nm from lat/lon, which is not on it. The stream was read along the route.", off))
+		}
+	}
+
+	// Each departure on the grid runs on a timeline of its own, in whole minutes so
+	// the arithmetic is exact. The samples are as many as the longest run needs, and
+	// the current is read as far ahead as the latest arrival.
+	var duration time.Duration
+	need := q.Latest
+	r.scored = make([]tidalScored, 0, max(0, int(q.Latest.Sub(q.Earliest)/assistantTidalDepartureStep)+1))
+	for dep := q.Earliest; !dep.After(q.Latest); dep = dep.Add(assistantTidalDepartureStep) {
+		exact, err := q.Pace(dep)
+		if err != nil {
+			return nil, err
+		}
+		tl, err := exact.roundedTo(time.Minute)
+		if err != nil {
+			return nil, err
+		}
+		r.scored = append(r.scored, tidalScored{dep: dep, tl: tl, exact: exact})
+		duration = max(duration, tl.duration())
+		if tl.arrive().After(need) {
+			need = tl.arrive()
 		}
 	}
 
@@ -139,13 +158,12 @@ func (d assistantToolDeps) rankTidalDepartures(ctx context.Context, q tidalRankQ
 		distNm[k] = s.distNm
 	}
 	anyData := false
-	for dep := q.Earliest; !dep.After(q.Latest); dep = dep.Add(assistantTidalDepartureStep) {
-		var run alongRun
-		if noData == "" {
-			run = alongCourse(r.currents, samples, distNm, dep, duration)
-			anyData = anyData || run.covered > 0
+	if noData == "" {
+		for i := range r.scored {
+			sc := &r.scored[i]
+			sc.run = alongCourse(r.currents, samples, distNm, sc.tl)
+			anyData = anyData || sc.run.covered > 0
 		}
-		r.scored = append(r.scored, tidalScored{dep: dep, run: run})
 	}
 	r.basis = assistantTidalBasisModel
 	if !anyData {
@@ -213,7 +231,7 @@ func (d assistantToolDeps) rankTidalDepartures(ctx context.Context, q tidalRankQ
 		}
 		sum, fair := 0.0, 0
 		for k := 0; k <= n; k++ {
-			t := sc.dep.Add(time.Duration(float64(duration) * float64(k) / float64(n)))
+			t := sc.tl.timeAtStep(k, n)
 			a := tidalAssist(r.cycles, t, alongFactor[k])
 			sum += a
 			if a > 0 {
@@ -290,7 +308,10 @@ func (r *tidalRanking) worst() tidalScored {
 // tidalDeparture is one departure a plan may take, with the modelled current
 // along the run at that time.
 type tidalDeparture struct {
-	Depart  time.Time
+	Depart time.Time
+	// tl is the leg's own timeline from Depart, which every arrival the plan shows is
+	// read from (the ranking scored it on this rounded to whole minutes).
+	tl      legTimeline
 	Current planCurrentReading
 }
 
@@ -311,14 +332,14 @@ func (r *tidalRanking) departures() ([]tidalDeparture, error) {
 	}
 	sort.SliceStable(order, func(i, j int) bool { return order[i].mean > order[j].mean })
 	for _, sc := range order {
-		out = append(out, tidalDeparture{Depart: sc.dep, Current: currentReading(sc.run, r.currents, r.samples)})
+		out = append(out, tidalDeparture{Depart: sc.dep, tl: sc.exact, Current: currentReading(sc.run, r.currents, r.samples)})
 	}
 	return out, nil
 }
 
 // candidate is one departure as plan_tidal_departure's result gives it.
 func (r *tidalRanking) candidate(c tidalScored) assistantTidalCandidate {
-	arr := c.dep.Add(r.duration)
+	arr := c.tl.arrive()
 	cand := assistantTidalCandidate{
 		Departure:    boatDayClock(c.dep, r.loc),
 		DepartureISO: c.dep.UTC().Format(time.RFC3339),

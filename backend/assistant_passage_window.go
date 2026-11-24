@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -373,11 +374,13 @@ type passageSegment struct {
 }
 
 type passageLegPlan struct {
-	name     string
-	args     passageLegArgs
-	segs     []passageSegment
-	totalM   float64
-	hours    float64
+	name   string
+	args   passageLegArgs
+	segs   []passageSegment
+	totalM float64
+	// pace is the leg's timeline for a departure, which says how long it takes and
+	// where it is at any time. Every plan has one.
+	pace     legPace
 	samples  []passageRoutePoint
 	dailyEnd passageRoutePoint
 }
@@ -440,10 +443,32 @@ func hoursDuration(hours float64) time.Duration {
 	return time.Duration(hours * float64(time.Hour))
 }
 
-// planPassageLeg lays out a leg: its segments, the points the forecast is read
-// at, and its hours. A route over passageWindowMaxRoutePoints is thinned to that
-// many points first, so every caller gives the wind check the same bound.
+// planPassageLeg lays out a leg of the Mate's own tools: its segments, the points
+// the forecast is read at, and its hours, which it holds at one steady pace.
 func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
+	p := layOutPassageLeg(i, l)
+	var hours float64
+	if l.PassageHours != nil {
+		hours = *l.PassageHours
+	} else {
+		hours = p.totalM / metersPerNauticalMile / *l.SpeedKn
+	}
+	p.pace = linearPace(hours)
+	return p
+}
+
+// timeline is the plan's timeline for a departure at depart.
+func (p passageLegPlan) timeline(depart time.Time) (legTimeline, error) {
+	if p.pace == nil {
+		return legTimeline{}, errors.New("the leg has no pace")
+	}
+	return p.pace(depart)
+}
+
+// layOutPassageLeg lays out a leg's segments and the points the forecast is read
+// at, with no pace yet. A route over passageWindowMaxRoutePoints is thinned to that
+// many points first, so every caller gives the wind check the same bound.
+func layOutPassageLeg(i int, l passageLegArgs) passageLegPlan {
 	l.Route = capRoutePoints(l.Route, passageWindowMaxRoutePoints)
 	first, last := l.Route[0], l.Route[len(l.Route)-1]
 	name := strings.TrimSpace(l.Name)
@@ -469,11 +494,6 @@ func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
 		}
 	}
 	p.samples = append(p.samples, last)
-	if l.PassageHours != nil {
-		p.hours = *l.PassageHours
-	} else {
-		p.hours = p.totalM / metersPerNauticalMile / *l.SpeedKn
-	}
 	return p
 }
 
@@ -803,15 +823,11 @@ type legHour struct {
 }
 
 // walkLegHours yields each hourly stamp from the hour containing from up to, and
-// not including, until, with the leg's position at that stamp reckoned over the
-// real span legDepart to legArrive.
-func (as *passageAssessor) walkLegHours(plan passageLegPlan, legDepart, legArrive, from, until time.Time, yield func(legHour) error) error {
+// not including, until, with the leg's position at that stamp read off the leg's
+// timeline over its real span.
+func (as *passageAssessor) walkLegHours(plan passageLegPlan, tl legTimeline, from, until time.Time, yield func(legHour) error) error {
 	for t := from.Truncate(time.Hour); t.Before(until); t = t.Add(time.Hour) {
-		frac := 0.0
-		if legArrive.After(legDepart) {
-			frac = float64(t.Sub(legDepart)) / float64(legArrive.Sub(legDepart))
-		}
-		lat, lon, seg := plan.at(frac)
+		lat, lon, seg := plan.at(tl.fracAt(t))
 		point, err := as.hoursAt(plan.nearestSample(lat, lon))
 		if err != nil {
 			return err
@@ -827,7 +843,11 @@ func (as *passageAssessor) walkLegHours(plan passageLegPlan, legDepart, legArriv
 // cell judges one leg leaving at depart, reading its days in loc. Its errors
 // carry no tool name; the caller adds its own.
 func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time, loc *time.Location) (passageWindowCell, error) {
-	arrive := depart.Add(hoursDuration(plan.hours))
+	tl, err := plan.timeline(depart)
+	if err != nil {
+		return passageWindowCell{}, fmt.Errorf("%s: %w", plan.name, err)
+	}
+	arrive := tl.arrive()
 	cell := passageWindowCell{
 		Leg: idx, Date: depart.Format("2006-01-02"),
 		Depart: depart.Format(time.RFC3339), Arrive: arrive.Format(time.RFC3339),
@@ -842,7 +862,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 	}
 	missing, gap := false, false
 	anyGust := false
-	tally := newPassageWindTally(plan.hours, len(plan.segs))
+	tally := newPassageWindTally(tl.hours(), len(plan.segs))
 
 	// Wind against tide: only for a leg with a known flood set and a band, and
 	// never when the assessor was told to leave it out.
@@ -873,7 +893,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 	if lastStamp.Before(arrive) {
 		lastStamp = lastStamp.Add(time.Hour)
 	}
-	walkErr := as.walkLegHours(plan, depart, arrive, depart, lastStamp.Add(time.Hour), func(lh legHour) error {
+	walkErr := as.walkLegHours(plan, tl, depart, lastStamp.Add(time.Hour), func(lh legHour) error {
 		t, seg, point, h, ok := lh.t, lh.seg, lh.point, lh.hour, lh.have
 		if !ok {
 			// An hour past the last the forecast has is a leg further ahead than
@@ -1087,7 +1107,11 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 			if i+1 == len(plans) {
 				break
 			}
-			arrive := depart.Add(hoursDuration(plan.hours))
+			tl, err := plan.timeline(depart)
+			if err != nil {
+				return passageWindowPayload{}, fmt.Errorf("assess_passage_window: %w", err)
+			}
+			arrive := tl.arrive()
 			ay, am, ad := arrive.Date()
 			if n := args.StaysNights[i]; n > 0 {
 				depart = departAt(time.Date(ay, am, ad+n, 0, 0, 0, 0, loc), clockFor(i+1))

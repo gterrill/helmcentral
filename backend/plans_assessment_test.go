@@ -52,7 +52,9 @@ type paFake struct {
 	rankings []planDepartureQuery
 	// departures answers a ranking; the default is one departure an hour into the
 	// window with a helping current.
-	departures    func(q planDepartureQuery) ([]tidalDeparture, error)
+	departures func(q planDepartureQuery) ([]tidalDeparture, error)
+	// noTimelines leaves the candidates without the timeline the ranking carries.
+	noTimelines   bool
 	currentCalls  []time.Time
 	current       func(q planDepartureQuery, dep time.Time) (planCurrentReading, error)
 	fetches       int
@@ -133,10 +135,26 @@ func paDeps(f *paFake) planAssessDeps {
 			f.mu.Lock()
 			f.rankings = append(f.rankings, q)
 			f.mu.Unlock()
+			cands := []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}}}
 			if f.departures != nil {
-				return f.departures(q)
+				var err error
+				if cands, err = f.departures(q); err != nil {
+					return nil, err
+				}
 			}
-			return []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}}}, nil
+			// The real ranking hands each departure the timeline it scored it on; a
+			// candidate a test gave one keeps it.
+			for i := range cands {
+				if f.noTimelines || cands[i].tl.known() {
+					continue
+				}
+				tl, err := q.Pace(cands[i].Depart)
+				if err != nil {
+					return nil, err
+				}
+				cands[i].tl = tl
+			}
+			return cands, nil
 		},
 		currentAlong: func(ctx context.Context, q planDepartureQuery, dep time.Time) (planCurrentReading, error) {
 			f.mu.Lock()
@@ -255,13 +273,46 @@ func TestAssessPlan_ASuggestedDepartureIsMarkedAndAssessedAtItsTime(t *testing.T
 		t.Fatalf("ranking asked %d times", len(f.rankings))
 	}
 	q := f.rankings[0]
-	if q.Hours != 5 || len(q.Route) != 2 {
+	if tl, err := q.Pace(q.Earliest); err != nil || tl.hours() != 5 || len(q.Route) != 2 {
 		t.Fatalf("query = %+v", q)
 	}
 	// First light is 5.15 AM; with no daylight arrival limit the last departure
 	// is still in daylight, at sunset 5.32 PM.
 	if !q.Earliest.Equal(paAt(14, 5, 15)) || !q.Latest.Equal(paAt(14, 17, 30)) {
 		t.Fatalf("window %s to %s", q.Earliest, q.Latest)
+	}
+}
+
+func TestAssessPlan_ASuggestedRowArrivesWhenTheCarriedTimelineSays(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	// The pace is 5 hours; the ranking's timeline for this departure is 2.5.
+	carried, err := linearTimeline(paAt(14, 9, 30), 2.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &paFake{departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+		d := paDeparture(9, 30, 0.6)
+		d.tl = carried
+		return []tidalDeparture{d}, nil
+	}}
+	l := paAssess(t, p, legs, f).Legs[0]
+	if !paParse(t, l.Arrive).Equal(paAt(14, 12, 0)) {
+		t.Fatalf("arrive = %s, want the carried timeline's 12.00", l.Arrive)
+	}
+}
+
+func TestAssessPlan_ADepartureWithNoTimelineIsNotSuggestedAndSaysSo(t *testing.T) {
+	p, legs := paPlan(t, "2026-11-14", 0, 0)
+	f := &paFake{noTimelines: true, departures: func(planDepartureQuery) ([]tidalDeparture, error) {
+		// The ranking's instants are UTC; the row speaks on the stop's clock.
+		d := paDeparture(9, 30, 0.6)
+		d.Depart = d.Depart.UTC()
+		return []tidalDeparture{d}, nil
+	}}
+	l := paAssess(t, p, legs, f).Legs[0]
+	want := "No departure suggested: the ranking gave no timeline for the departure at " + fmtLeg(paAt(14, 9, 30), paLoc)
+	if l.Note != want {
+		t.Fatalf("note = %q, want %q", l.Note, want)
 	}
 }
 

@@ -134,14 +134,14 @@ type planLegComfort struct {
 	Hours  []planComfortHour `json:"hours"`
 }
 
-// legComfortInput is one leg to judge. depart and arrive are the real span of the
-// leg; from is where the walk starts, the departure or, for the leg under way, now.
+// legComfortInput is one leg to judge. tl is the leg's progress over its real span,
+// from its departure to its arrival; from is where the walk starts, the departure
+// or, for the leg under way, now.
 type legComfortInput struct {
 	*comfortSetup
 	as       *passageAssessor
 	plan     passageLegPlan
-	depart   time.Time
-	arrive   time.Time
+	tl       legTimeline
 	from     time.Time
 	underway bool
 	loc      *time.Location
@@ -490,7 +490,7 @@ func legModels(lhs []legHour) []waveModelRef {
 // the same hours the chip is made from.
 func (in legComfortInput) judgedHours(ctx context.Context) (hours []judgedHour, blocked string) {
 	var lhs []legHour
-	if err := in.as.walkLegHours(in.plan, in.depart, in.arrive, in.from, in.arrive, func(lh legHour) error {
+	if err := in.as.walkLegHours(in.plan, in.tl, in.from, in.tl.arrive(), func(lh legHour) error {
 		lhs = append(lhs, lh)
 		return nil
 	}); err != nil {
@@ -522,7 +522,7 @@ func (in legComfortInput) judge(ctx context.Context, lhs []legHour) []judgedHour
 // before they were judged.
 func (in legComfortInput) outOfTime(t time.Time) []judgedHour {
 	var hours []judgedHour
-	for ; t.Before(in.arrive); t = t.Add(time.Hour) {
+	for ; t.Before(in.tl.arrive()); t = t.Add(time.Hour) {
 		hours = append(hours, in.gapHour(t, comfortReasonOutOfTime))
 	}
 	return hours
@@ -535,8 +535,8 @@ func (in legComfortInput) hourFrom(t time.Time) judgedHour {
 	if h.start.Before(in.from) {
 		h.start = in.from
 	}
-	if h.end.After(in.arrive) {
-		h.end = in.arrive
+	if arrive := in.tl.arrive(); h.end.After(arrive) {
+		h.end = arrive
 	}
 	return h
 }
