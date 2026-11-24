@@ -12,7 +12,10 @@
 # that exited non-zero reads FAIL whatever its output looked like. Pass counts
 # and failure lines are read from the logs for the reader's benefit and never
 # decide pass or fail, so a filter that matches nothing cannot turn a failure
-# into a pass. Exits 1 if any step failed.
+# into a pass. The npm-test step reruns failed test files alone and labels them
+# after a final marker line in its log, which the summary shows, but its exit
+# code is always the first run's.
+# Exits 1 if any step failed.
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
@@ -45,8 +48,12 @@ counts() {
 		echo "   $(grep -c '^ok' "$log") package(s) ok"
 		;;
 	npm-test)
-		found=$(grep -E '^ +(Test Files|Tests) |^vitest load cap:' "$log" | sed 's/^ */   /')
+		# Counts come from the first run only, the lines before check-npm-test.sh's
+		# "== rerun:" marker, so a rerun's "Test Files  1 passed (1)" never shows.
+		found=$(sed '/^== rerun:/,$d' "$log" | grep -E '^ +(Test Files|Tests) |^vitest load cap:' | sed 's/^ */   /')
 		echo "${found:-   (no pass counts found in the log)}"
+		# The labels check-npm-test.sh prints after its final marker line.
+		sh "$PWD/scripts/check-npm-test.sh" --labels "$log" | sed 's/^ */   /'
 		;;
 	backend | frontend)
 		# The nested run's own summary block, from its "== summary" line on.
@@ -117,7 +124,7 @@ backend)
 frontend)
 	step deps . make --no-print-directory check-frontend-deps
 	if [ "$code" -eq 0 ]; then
-		step npm-test frontend npm test
+		step npm-test frontend sh ../scripts/check-npm-test.sh
 		step npm-lint frontend npm run lint
 		step knip-deps frontend npm run knip:deps
 		step npm-build frontend npm run build
@@ -135,6 +142,7 @@ all)
 	step hook-tests-stash . sh scripts/hooks/refuse-git-stash-test.sh
 	step lock-tests . sh scripts/check-lock-test.sh
 	step await-check-tests . sh scripts/await-check-test.sh
+	step npm-test-rerun-tests . sh scripts/check-npm-test-test.sh
 	;;
 esac
 
