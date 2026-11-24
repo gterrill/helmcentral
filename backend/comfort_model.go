@@ -472,6 +472,29 @@ func weightedMedian(values, weights []float64) float64 {
 	return 0
 }
 
+// weightedQuantile is the value at which the weight at or below it first reaches q
+// of the whole. It differs from weightedMedian in the even split: where the
+// quantile falls exactly between two values it returns the lower, never their mean,
+// because the leg pace reports a value the boat was recorded at and not one between
+// two records. The comfort model keeps the mean, so weightedMedian does not call it.
+func weightedQuantile(vals, weights []float64, q float64) float64 {
+	idx := make([]int, len(vals))
+	total := 0.0
+	for i := range idx {
+		idx[i] = i
+		total += weights[i]
+	}
+	sort.Slice(idx, func(a, b int) bool { return vals[idx[a]] < vals[idx[b]] })
+	target, cum := q*total, 0.0
+	for _, i := range idx {
+		cum += weights[i]
+		if cum >= target {
+			return vals[i]
+		}
+	}
+	return vals[idx[len(idx)-1]]
+}
+
 func skillReason(skill float64, passages int) string {
 	if skill >= comfortMinSkill {
 		return ""

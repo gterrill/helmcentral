@@ -11,7 +11,7 @@ const reply = (body: unknown, ok = true, status = 200) => ({ ok, status, json: a
 
 const leg = (over: Partial<PlanLegAssessment>): PlanLegAssessment => ({
   leg: 0, date: "2026-11-14", key: "A → B|2026-11-14", progress: "", stillInPort: false, verdict: "marginal", limiting: "", note: "", noteKind: "",
-  depart: null, departSuggested: false, departBasis: null, arrive: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
+  depart: null, departSuggested: false, departBasis: null, arrive: null, etaBasis: null, hours: null, speedKn: null, currentKn: null, currentNote: "", notChecked: [],
   windChanges: { changes: [], notChecked: null }, comfort: null, ...over,
 });
 
@@ -150,7 +150,7 @@ describe("usePlanChangeMarks", () => {
     } as never);
     const wireLeg = (i: number, key: string, verdict: string) => ({
       leg: i, date: "2026-11-14", key, progress: "", still_in_port: false, verdict, limiting: "", note: "", note_kind: "",
-      depart: "", depart_suggested: false, depart_basis: null, arrive: "", hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
+      depart: "", depart_suggested: false, depart_basis: null, arrive: "", eta_basis: null, hours: 5, speed_kn: 6, current_kn: null, current_note: "", not_checked: [],
       wind_changes: { changes: [], not_checked: "" },
     });
     const assessment = (verdictA: string) => ({

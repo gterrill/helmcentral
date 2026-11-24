@@ -326,7 +326,12 @@ func TestSlipPlan_LimitsAndSpeedAreReadOnceForAllTheSlips(t *testing.T) {
 	limits, speeds := 0, 0
 	innerLimits, innerSpeed := d.limits, d.speed
 	d.limits = func() (passageLimits, error) { mu.Lock(); limits++; mu.Unlock(); return innerLimits() }
-	d.speed = func(ctx context.Context) (float64, error) { mu.Lock(); speeds++; mu.Unlock(); return innerSpeed(ctx) }
+	d.speed = func(ctx context.Context) (*legPaceModel, error) {
+		mu.Lock()
+		speeds++
+		mu.Unlock()
+		return innerSpeed(ctx)
+	}
 	got := slipsOf(context.Background(), p, legs, d)
 	if len(got.Slips) != 6 {
 		t.Fatalf("slips = %d", len(got.Slips))

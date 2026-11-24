@@ -167,6 +167,8 @@ export interface PlanLegAssessment {
    */
   departBasis: string | null;
   arrive: string | null;
+  /** What the ETA was worked out on, worded by the server (ADR 0304); null when there is no ETA. */
+  etaBasis: string | null;
   hours: number | null;
   speedKn: number | null;
   currentKn: number | null;

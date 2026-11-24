@@ -475,6 +475,11 @@ function DepartEtaCell({
           {basis}
         </span>
       )}
+      {a?.etaBasis != null && (
+        <span className="block break-words text-xs not-italic text-muted-foreground">
+          {a.etaBasis}
+        </span>
+      )}
     </Cell>
   );
 }

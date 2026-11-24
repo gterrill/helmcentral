@@ -63,9 +63,12 @@ type paFake struct {
 	warningsReads int
 	limits        passageLimits
 	speed         float64
-	speedErr      error
-	speedReads    int
-	fc            forecastSource
+	// pace, when set, is the learned pace model the leg is timed by, in place of
+	// the plain cruise speed above.
+	pace       *legPaceModel
+	speedErr   error
+	speedReads int
+	fc         forecastSource
 	// progress answers the plan's per-leg progress; nil is nothing done.
 	progress    []string
 	progressErr error
@@ -105,11 +108,17 @@ func paDeps(f *paFake) planAssessDeps {
 		sources: func(zone func() (string, error), now time.Time) (passageSources, error) {
 			return passageSources{fc: f.fc, tides: pwNoTides, fallbackModel: func() string { return "" }}, nil
 		},
-		speed: func(context.Context) (float64, error) {
+		speed: func(context.Context) (*legPaceModel, error) {
 			f.mu.Lock()
 			f.speedReads++
 			f.mu.Unlock()
-			return f.speed, f.speedErr
+			if f.speedErr != nil {
+				return nil, f.speedErr
+			}
+			if f.pace != nil {
+				return f.pace, nil
+			}
+			return &legPaceModel{CruiseKn: f.speed}, nil
 		},
 		progress: func(context.Context, plan) ([]string, error) { return f.progress, f.progressErr },
 		underway: func(context.Context) (*planUnderway, error) { return f.underway, f.underwayErr },

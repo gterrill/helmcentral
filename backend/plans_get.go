@@ -76,6 +76,8 @@ type planReportLeg struct {
 	Arrive      string   `json:"arrive,omitempty"`
 	Hours       *float64 `json:"hours,omitempty"`
 	SpeedKn     *float64 `json:"speed_kn,omitempty"`
+	// EtaBasis is what the hours were worked out from, worded as the page shows it.
+	EtaBasis    *string  `json:"eta_basis,omitempty"`
 	CurrentKn   *float64 `json:"current_kn,omitempty"`
 	CurrentNote string   `json:"current_note,omitempty"`
 	NotChecked  []string `json:"not_checked,omitempty"`
@@ -364,7 +366,7 @@ func planReportLegOf(p plan, l planLegAssessment, routed planLeg) (planReportLeg
 	out := planReportLeg{
 		From: p.Stops[l.Leg].Name, To: p.Stops[l.Leg+1].Name, Date: l.Date, DateLabel: date,
 		Progress: l.Progress, StillInPort: l.StillInPort, Verdict: l.Verdict, Limiting: l.Limiting, Note: l.Note,
-		Depart: depart, DepartSuggested: l.DepartSuggested, Arrive: arrive, Hours: l.Hours, SpeedKn: l.SpeedKn,
+		Depart: depart, DepartSuggested: l.DepartSuggested, Arrive: arrive, Hours: l.Hours, SpeedKn: l.SpeedKn, EtaBasis: l.EtaBasis,
 		CurrentKn: l.CurrentKn, CurrentNote: l.CurrentNote, NotChecked: l.NotChecked, WindChanges: l.WindChanges,
 	}
 	// A leg with no Go or Marginal time was chosen closest to its limit, not by the

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -139,11 +138,11 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 			src.fc = planForecastPoints.wrap(src.fc, zoneName, now)
 			return src, nil
 		},
-		speed: func(ctx context.Context) (float64, error) {
-			now := d.now()
-			return planCruisingSpeed.get(now, struct{}{}, func() (float64, error) {
-				return recordedCruisingSpeed(ctx, globalPassageStore, now)
-			})
+		speed: func(ctx context.Context) (*legPaceModel, error) {
+			if globalPassageStore == nil {
+				return nil, errors.New("the passage record is not available")
+			}
+			return globalPassageStore.pace.model(ctx, d.now())
 		},
 		progress: func(ctx context.Context, p plan) ([]string, error) {
 			first, err := time.Parse(planDateLayout, p.Stops[0].Arrive)
@@ -236,23 +235,12 @@ func planWarningsFrom(provider forecastWarningsProvider, id string, now time.Tim
 	}
 }
 
-const (
-	// The ETA speed is the median of the passages Helmcentral recorded in the last
-	// planSpeedMonths months. A passage under planSpeedMinNm or planSpeedMinUnderway
-	// is a marina move or a drift, not a cruise, and is left out.
-	planSpeedMonths      = 12
-	planSpeedMinNm       = 3.0
-	planSpeedMinUnderway = 30 * time.Minute
-)
-
 // planReadTTL is how long a read of the passage record is reused. It moves only
 // when a passage is recorded or edited, and a few minutes' lag is harmless. The
 // passage writes are many and scattered, so the lag is bounded by this alone.
 const planReadTTL = 10 * time.Minute
 
 var (
-	// planCruisingSpeed is the recorded speed the plan assessment reads.
-	planCruisingSpeed planReadCache[struct{}, float64]
 	// planPassageEnds is where the recorded passages ended, by the day they are
 	// read since.
 	planPassageEnds planReadCache[string, []planPassageEnd]
@@ -302,48 +290,6 @@ func (c *planReadCache[K, V]) drop() {
 	c.mu.Lock()
 	c.m = nil
 	c.mu.Unlock()
-}
-
-// recordedCruisingSpeed is the speed a plan's ETA is worked out at: the median,
-// over the visible passages that began in the last twelve months and ran at least
-// 3 nm and 30 minutes under way, of each passage's distance over its time under
-// way. It reads Helmcentral's own passage record, not the engine history. With
-// no such passage there is no speed, and no default is made up.
-func recordedCruisingSpeed(ctx context.Context, store *passageStore, now time.Time) (float64, error) {
-	since := now.AddDate(0, -planSpeedMonths, 0)
-	records, err := visiblePassagesSince(ctx, store, since)
-	if err != nil {
-		return 0, err
-	}
-	var speeds []float64
-	for _, r := range records {
-		if r.Start.Before(since) || r.Start.After(now) {
-			continue
-		}
-		// A passage with no stored figures is worked out from its track, which is
-		// slow: stop once the request is over.
-		if err := ctx.Err(); err != nil {
-			return 0, fmt.Errorf("the passage record was not read: %w", err)
-		}
-		stats, err := store.PassageStatsFor(r)
-		if err != nil {
-			return 0, fmt.Errorf("the passage record could not be read: %w", err)
-		}
-		underway := time.Duration(stats.UnderwaySeconds * float64(time.Second))
-		if stats.DistanceNM < planSpeedMinNm || underway < planSpeedMinUnderway {
-			continue
-		}
-		speeds = append(speeds, stats.DistanceNM/underway.Hours())
-	}
-	if len(speeds) == 0 {
-		return 0, fmt.Errorf("no recorded passages yet")
-	}
-	sort.Float64s(speeds)
-	mid := len(speeds) / 2
-	if len(speeds)%2 == 1 {
-		return speeds[mid], nil
-	}
-	return (speeds[mid-1] + speeds[mid]) / 2, nil
 }
 
 // planDepartures ranks the departures in a leg's window as plan_tidal_departure

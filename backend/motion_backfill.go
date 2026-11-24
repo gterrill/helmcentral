@@ -714,7 +714,7 @@ func backfillMotionSpan(ctx context.Context, store *passageStore, in normalInflu
 		return spanResult{}, fmt.Errorf("commit: %w", err)
 	}
 	if !filledFrom.IsZero() {
-		store.comfort.signal()
+		store.changed()
 	}
 	return res, nil
 }

@@ -164,6 +164,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A passage plan's arrival time now uses the speed your boat makes at its
+  usual cruising revs, and slows for water where it has been seen crawling.**
+  Helmcentral learns your cruising revs and speed from your recorded passages,
+  and runs a leg at that speed except through a berth, a fairway or a lock where
+  the record shows you slow. Under the times, a line says what it used, such as
+  "Cruise 10.3 kn, 40 min in slow water." The old figure was one average for every
+  leg, which put arrivals out at both harbour ends. The ETA needs engine revs on
+  your recorded passages, with 2 hours at cruising revs over 3 passages. A boat
+  that has only sailed, or whose passages have no revs, now shows "No ETA" with
+  the reason, where it showed an arrival before. Nothing needs doing to keep the
+  rest of the plan. To get the ETA back, record a passage under engine with the
+  engine feed on. The current isn't in the arrival yet.
 - **A suggested departure on a passage plan now goes to the calmest ride, then
   the fairest stream.** Among the Go times for a leg, or the Marginal ones when
   none is Go, Helmcentral works out how each would feel and picks the time whose

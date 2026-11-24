@@ -34,6 +34,8 @@ interface PlanLegAssessmentApi extends LegResultApi {
   /** Null when the leg's departure is not suggested, or has no ranking to explain. */
   depart_basis: string | null;
   arrive: string;
+  /** What the ETA was worked out on; null when there is no ETA. */
+  eta_basis: string | null;
   hours: number | null;
   speed_kn: number | null;
   current_kn: number | null;
@@ -125,6 +127,7 @@ function mapLegAssessment(l: PlanLegAssessmentApi): PlanLegAssessment {
     departSuggested: l.depart_suggested,
     departBasis: l.depart_basis,
     arrive: l.arrive === "" ? null : l.arrive,
+    etaBasis: l.eta_basis,
     hours: l.hours,
     speedKn: l.speed_kn,
     currentKn: l.current_kn,
