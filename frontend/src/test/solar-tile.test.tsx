@@ -251,3 +251,12 @@ test('greys a single stale controller while the rest keep reporting', async () =
   expect(within(rows[2]).getAllByText('—')).toHaveLength(4)
   expect(rows[1]).toHaveTextContent('890')
 })
+
+test('a narrow tile gives each figure its own row instead of two by two', () => {
+  const { container } = render(<SolarTile {...base} controllers={[ctl('0', 'Port')]} />)
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const figures = screen.getByText('Now').closest('div')!.parentElement!
+  expect(figures.className).toContain('grid-cols-2')
+  expect(figures.className).toContain('@max-2xs:grid-cols-1')
+  expect(screen.getByText('Yesterday').closest('div')!.className).toContain('@max-2xs:flex')
+})

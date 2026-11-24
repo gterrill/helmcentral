@@ -21,7 +21,7 @@ function ListTile({ id, needRows }: { id: string; needRows: number }) {
 const widgets: DashboardLayoutItem[] = [
   { id: 'wind', x: 0, y: 0, w: 4, h: 6 },
   { id: 'nearby-vessels', x: 4, y: 0, w: 4, h: 9 },
-  { id: 'solar', x: 0, y: 6, w: 4, h: 4 },
+  { id: 'tanks', x: 0, y: 6, w: 4, h: 4 },
 ]
 
 function renderGrid(opts: { editing?: boolean; widgets?: DashboardLayoutItem[]; onLayoutSettle?: () => void } = {}) {
@@ -61,9 +61,9 @@ describe('at helm width', () => {
     // nearby-vessels has nothing under it: 9 rows down to what its card plus
     // the top inset needs.
     expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(shrunkRows)}px`)
-    // solar is bottom of its column too; with the inset it needs all 4 of its rows.
-    expect(itemHeight(container, 'solar')).toBe(`${gridPixelHeight(shrunkRows)}px`)
-    // wind has solar beneath it, so it keeps all six.
+    // tanks is bottom of its column too; with the inset it needs all 4 of its rows.
+    expect(itemHeight(container, 'tanks')).toBe(`${gridPixelHeight(shrunkRows)}px`)
+    // wind has tanks beneath it, so it keeps all six.
     expect(itemHeight(container, 'wind')).toBe(`${gridPixelHeight(6)}px`)
   })
 
@@ -71,7 +71,7 @@ describe('at helm width', () => {
     setViewportWidth(1280)
     const { container } = renderGrid({ editing: true })
     expect(itemHeight(container, 'nearby-vessels')).toBe(`${gridPixelHeight(9)}px`)
-    expect(itemHeight(container, 'solar')).toBe(`${gridPixelHeight(4)}px`)
+    expect(itemHeight(container, 'tanks')).toBe(`${gridPixelHeight(4)}px`)
   })
 
   it('commits the saved height, not the shrunk one, from an edit-mode move', () => {
@@ -81,7 +81,7 @@ describe('at helm width', () => {
     fireEvent.keyDown(getByLabelText(/Drag handle for the Nearby Vessels tile/i), { key: 'ArrowRight' })
     const [next] = onLayoutSettle.mock.calls[0] as [DashboardLayoutItem[]]
     expect(next.find((w) => w.id === 'nearby-vessels')).toMatchObject({ x: 5, h: 9 })
-    expect(next.find((w) => w.id === 'solar')).toMatchObject({ h: 4 })
+    expect(next.find((w) => w.id === 'tanks')).toMatchObject({ h: 4 })
   })
 
   it('restores the full height when edit mode is entered', () => {
@@ -107,10 +107,10 @@ describe('at phone width', () => {
     setViewportWidth(375)
     const { container } = renderGrid()
     const floor = (id: string) => container.querySelector<HTMLElement>(`[data-testid="widget-${id}"]`)!.closest<HTMLElement>('.bento-stack-cell')!.style.minHeight
-    // Stack order is (y, x): wind, nearby-vessels, solar. Solar is last.
+    // Stack order is (y, x): wind, nearby-vessels, tanks. Tanks is last.
     expect(floor('wind')).toBe(`${gridPixelHeight(6)}px`)
     expect(floor('nearby-vessels')).toBe(`${gridPixelHeight(9)}px`)
-    expect(floor('solar')).toBe(`${gridPixelHeight(shrunkRows)}px`)
+    expect(floor('tanks')).toBe(`${gridPixelHeight(shrunkRows)}px`)
   })
 })
 

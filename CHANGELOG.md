@@ -183,7 +183,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   quiet, for example "Array 290 · error 38". Tap the bar to see each array's
   power now, yield today and yesterday, and mode. The tile now fits in five rows
   instead of six, though a wall page still needs six. A Solar tile already on a
-  page keeps its height until you drag it shorter in layout edit mode.
+  page keeps its height until you drag it shorter in layout edit mode. On a
+  narrow tile the four figures sit one to a row instead of running out of their
+  boxes.
 
 - **The words Mate writes while it looks things up no longer show up in the
   answer and then disappear.** When Mate says "Let me check the tide" and goes
@@ -236,6 +238,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   credit showed as white text on a white bar, so it looked empty. It's now
   white text on a dark pill, and folds down to its small icon when the map has
   loaded.
+- **A narrow Battery & Power, Alternator, Generator or Hot Water tile no longer
+  runs its figures out of their boxes.** When the tile is narrow, the figures
+  sit one to a row, and the Hot Water buttons sit two by two. On a narrow
+  Alternator tile, amps, volts and temperature become lines under the output.
+- **Battery & Power, Alternator, Generator and Hot Water can no longer be made
+  too short to show everything.** Each tile's smallest size now holds its
+  tallest content: 10 rows for Battery & Power, 7 for Alternator, 7 for
+  Generator, and 4 rows by 3 columns for Hot Water. A tile already saved
+  shorter grows to that size by itself, and the tiles under it move down.
 
 ## [0.68.0] - 2026-11-19
 

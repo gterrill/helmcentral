@@ -683,3 +683,14 @@ test('a house bank whose item lost its SignalK source says to choose it again, n
   fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
   expect(onOpenRoles).toHaveBeenCalledTimes(1)
 })
+
+test('a narrow tile gives Net, Solar and Loads a row each instead of two by two', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} />)
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const pair = screen.getByText('Net').closest('div')!.parentElement!
+  expect(pair.className).toContain('grid-cols-2')
+  expect(pair.className).toContain('@max-2xs:grid-cols-1')
+  for (const label of ['Net', 'Solar', 'Loads']) {
+    expect(screen.getByText(label).closest('div')!.className).toContain('@max-2xs:flex')
+  }
+})

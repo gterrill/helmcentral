@@ -95,3 +95,18 @@ test('sizes the Amps and Volts KPI labels at the micro-label tier, not the map-a
     expect(label).not.toHaveClass('text-[9px]')
   }
 })
+
+test('a narrow tile stacks Port over Starboard and folds Amps, Volts and Temp into Output', () => {
+  const { container } = render(<AlternatorTile port={mockPort} starboard={mockStarboard} enginesRunning={true} />)
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const columns = screen.getByText('Port').closest('div')!.parentElement!
+  expect(columns.className).toContain('grid-cols-2')
+  expect(columns.className).toContain('@max-2xs:grid-cols-1')
+  const pair = screen.getAllByText('Amps')[0].closest('div')!.parentElement!
+  expect(pair.className).toContain('@max-2xs:hidden')
+  const output = screen.getAllByText('Output')[0].closest('div')!
+  const lines = output.querySelector('.\\@max-2xs\\:block')!
+  expect(lines.className).toContain('hidden')
+  expect(lines).toHaveTextContent(`${mockPort.currentA!.toFixed(1)} A`)
+  expect(lines).toHaveTextContent(`${mockPort.voltageV!.toFixed(1)} V`)
+})

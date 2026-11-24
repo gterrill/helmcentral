@@ -1,6 +1,7 @@
 import { ChevronDown, Sun } from 'lucide-react'
 import { Fragment, memo } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { FigureBox } from '@/components/ui/figure-box'
 import { Tile } from '@/components/ui/tile'
 import { useSolarState, type SolarController } from '@/hooks/use-solar-state'
 import { formatDataAge, isStale } from '@/lib/staleness'
@@ -178,6 +179,13 @@ function SolarArrays({ controllers, feedStale }: { controllers: SolarController[
   )
 }
 
+/*
+ * Solar's figures (FigureBox) sit two by two while the tile has room. A three-column tile on a
+ * 1024-1280px board is 172-243px wide. Two five-digit wattages side by side
+ * need a tile (the @container, padding included) wider than 18rem, @max-2xs, so
+ * below that they take a row each: the label on the left gives way, the figure
+ * on the right keeps the whole row.
+ */
 export const SolarTile = memo(function SolarTile({
   currentW,
   todayKWh,
@@ -197,42 +205,16 @@ export const SolarTile = memo(function SolarTile({
   return (
     <Tile
       title="Solar"
+      className="@container"
       icon={<Sun className="h-3.5 w-3.5 text-gauge-secondary" />}
       stale={feedStale}
       staleLabel={formatDataAge(lastUpdateAgeS)}
     >
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Now</p>
-          <p className="font-display text-3xl leading-none text-gauge-secondary tabular-nums">
-            <span>{w(currentW)}</span>
-            <span className="ml-1 text-base text-muted-foreground">W</span>
-          </p>
-        </div>
-        <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Peak Today</p>
-          <p className="font-display text-3xl leading-none text-gauge-primary tabular-nums">
-            <span>{w(peakTodayW)}</span>
-            <span className="ml-1 text-base text-muted-foreground">W</span>
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Today</p>
-          <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
-            <span>{kwh(todayKWh)}</span>
-            <span className="ml-1 text-xs text-muted-foreground">kWh</span>
-          </p>
-        </div>
-        <div className="rounded-md border bg-background/60 px-3 py-2 min-w-0">
-          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Yesterday</p>
-          <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
-            <span>{kwh(yesterdayKWh)}</span>
-            <span className="ml-1 text-xs text-muted-foreground">kWh</span>
-          </p>
-        </div>
+      <div className="grid grid-cols-2 gap-2 @max-2xs:grid-cols-1 @max-2xs:gap-1">
+        <FigureBox label="Now" value={w(currentW)} unit="W" valueClassName="text-gauge-secondary" />
+        <FigureBox label="Peak Today" value={w(peakTodayW)} unit="W" valueClassName="text-gauge-primary" />
+        <FigureBox label="Today" value={kwh(todayKWh)} unit="kWh" valueClassName="text-2xl text-gauge-primary" unitClassName="text-xs" />
+        <FigureBox label="Yesterday" value={kwh(yesterdayKWh)} unit="kWh" valueClassName="text-2xl text-gauge-primary" unitClassName="text-xs" />
       </div>
 
       <div className="mt-2 space-y-1.5">

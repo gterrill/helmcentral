@@ -3915,3 +3915,14 @@ func TestDefaultDashboardLayout_SolarFiveRowsNoGaps(t *testing.T) {
 		nextY = w.Y + w.H
 	}
 }
+
+// The fresh-install page starts each power tile at a height that holds it,
+// the same as the frontend's default sizes.
+func TestDefaultDashboardLayout_PowerTileHeights(t *testing.T) {
+	want := map[string]int{"battery-power": 12, "alternator": 7, "generator": 7, "hot-water": 4}
+	for _, w := range defaultDashboardLayout {
+		if h, ok := want[w.ID]; ok && w.H != h {
+			t.Errorf("%s default H = %d, want %d", w.ID, w.H, h)
+		}
+	}
+}

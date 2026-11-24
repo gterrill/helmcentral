@@ -8,11 +8,15 @@ import {
   POI_MAP_SPLIT_MIN_W,
   POI_MAP_WIDGET_CONSTRAINTS,
   SOLAR_TILE_H,
+  BATTERY_POWER_TILE_H,
+  ALTERNATOR_TILE_H,
+  GENERATOR_TILE_H,
+  HOT_WATER_TILE_H,
   WIDGET_CONSTRAINTS,
   gaugeWidgetConstraints,
   CLUSTER_DEFAULT_SIZE,
   liftClusterBox,
-  liftTodayNowHeight,
+  liftToFloor,
   raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
@@ -199,16 +203,24 @@ describe('a new engine cluster tile', () => {
  * tile four rows tall would be drawn four rows tall and clip the barometer row.
  * Its height is lifted to the minimum when drawn.
  */
-describe('liftTodayNowHeight', () => {
+describe('liftToFloor', () => {
   const min = WIDGET_CONSTRAINTS['today-now']!.minH!
 
   test('raises a saved Today & Now tile that is too short', () => {
-    expect(liftTodayNowHeight('today-now', 4)).toBe(min)
+    expect(liftToFloor('today-now', 4)).toBe(min)
   })
 
   test('keeps a taller one, and leaves other tiles alone', () => {
-    expect(liftTodayNowHeight('today-now', min + 2)).toBe(min + 2)
-    expect(liftTodayNowHeight('depth-tide', 4)).toBe(4)
+    expect(liftToFloor('today-now', min + 2)).toBe(min + 2)
+    expect(liftToFloor('depth-tide', 4)).toBe(4)
+  })
+
+  test('raises a saved power tile to the floor that now holds it', () => {
+    expect(liftToFloor('generator', 5)).toBe(WIDGET_CONSTRAINTS.generator!.minH)
+    expect(liftToFloor('alternator', 6)).toBe(WIDGET_CONSTRAINTS.alternator!.minH)
+    expect(liftToFloor('battery-power', 9)).toBe(WIDGET_CONSTRAINTS['battery-power']!.minH)
+    expect(liftToFloor('hot-water', 2)).toBe(WIDGET_CONSTRAINTS['hot-water']!.minH)
+    expect(liftToFloor('solar', 4)).toBe(WIDGET_CONSTRAINTS.solar!.minH)
   })
 })
 
@@ -224,5 +236,22 @@ describe('the Solar tile floor', () => {
 
   test('new Solar tiles start at the floor', () => {
     expect(DASHBOARD_WIDGET_DEFAULT_SIZE.solar.h).toBe(WIDGET_CONSTRAINTS.solar!.minH)
+  })
+})
+
+/**
+ * The power tiles' floors come from their tallest measured content at their
+ * narrowest allowed width (Chromium, large figures, every optional line shown).
+ */
+describe('the power tile floors', () => {
+  test.each([
+    ['battery-power', BATTERY_POWER_TILE_H, 10, 3],
+    ['alternator', ALTERNATOR_TILE_H, 7, 2],
+    ['generator', GENERATOR_TILE_H, 7, 2],
+    ['hot-water', HOT_WATER_TILE_H, 4, 3],
+  ] as const)('%s: %ipx needs %i rows, at least %i columns wide', (id, measured, rows, cols) => {
+    expect(rowsForHeight(measured)).toBe(rows)
+    expect(WIDGET_CONSTRAINTS[id]).toEqual({ minW: cols, minH: rows })
+    expect(DASHBOARD_WIDGET_DEFAULT_SIZE[id].h).toBeGreaterThanOrEqual(rows)
   })
 })

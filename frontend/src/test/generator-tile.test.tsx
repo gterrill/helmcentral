@@ -223,3 +223,15 @@ test('the not-set-up message offers a button to Roles when the tile can open it'
   fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
   expect(onOpenRoles).toHaveBeenCalledTimes(1)
 })
+
+test('a narrow tile keeps Power and Runtime one to a row with smaller figures', () => {
+  const { container } = render(
+    <GeneratorTile {...baseProps} batterySocPercent={null} batteryRatePercentPerHour={null} />,
+  )
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const pair = screen.getByText('Power').closest('div')!.parentElement!
+  expect(pair.className).toContain('grid-cols-1')
+  expect(pair.className).toContain('md:@2xs:grid-cols-2')
+  expect(pair.classList.contains('md:grid-cols-2')).toBe(false)
+  expect(screen.getByText('Runtime').closest('div')!.className).toContain('@max-2xs:px-2')
+})

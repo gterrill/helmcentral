@@ -1,6 +1,7 @@
 import { memo, useCallback, useState, type ComponentProps } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { FigureBox } from '@/components/ui/figure-box'
 import { Tile } from '@/components/ui/tile'
 import { apiRequest } from '@/lib/api-query'
 import { useElectricalFields, useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
@@ -161,21 +162,26 @@ export const GeneratorTile = memo(function GeneratorTile({
   }
 
   return (
-    <Tile title="Generator">
-      <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-2">
-        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-gauge-secondary/30' : ''}`}>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
-          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-gauge-secondary' : 'text-muted-foreground'}`}>
-            {powerLabel}{powerLabel !== '--' && <span className="ml-1 text-base text-muted-foreground">W</span>}
-          </p>
-        </div>
+    <Tile title="Generator" className="@container">
+      {/* Side by side from the md breakpoint only while the tile is 18rem wide or
+          more; a two-column tile (112-155px) holds one figure per row at text-lg. */}
+      <div className="mt-2 grid grid-cols-1 gap-2 text-center md:@2xs:grid-cols-2">
+        <FigureBox
+          label="Power"
+          value={powerLabel}
+          unit={powerLabel !== '--' ? 'W' : undefined}
+          narrow="stack"
+          className={`px-2 ${isRunning ? 'border-gauge-secondary/30' : ''}`}
+          valueClassName={`text-2xl leading-8 ${isRunning ? 'text-gauge-secondary' : 'text-muted-foreground'}`}
+        />
 
-        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-muted/40' : ''}`}>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Runtime</p>
-          <p className="font-display text-2xl tabular-nums text-gauge-secondary">
-            {formatRuntime(generatorRuntime)}
-          </p>
-        </div>
+        <FigureBox
+          label="Runtime"
+          value={formatRuntime(generatorRuntime)}
+          narrow="stack"
+          className={`px-2 ${isRunning ? 'border-muted/40' : ''}`}
+          valueClassName="text-2xl leading-8 text-gauge-secondary @max-[10rem]:text-base"
+        />
       </div>
 
       {runReason && (

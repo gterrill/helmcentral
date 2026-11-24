@@ -1,6 +1,7 @@
 import { Zap } from 'lucide-react'
 import { memo } from 'react'
 
+import { FigureBox } from '@/components/ui/figure-box'
 import { Tile } from '@/components/ui/tile'
 import { useElectricalFields } from '@/hooks/use-electrical-state'
 import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
@@ -38,45 +39,61 @@ function AlternatorColumn({ label, data }: { label?: string; data: AlternatorDat
   const tempLabel = data.temperatureC !== null ? `${Math.round(data.temperatureC)}°` : null
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-2">
       {label && <p className="text-[10px] uppercase tracking-[0.20em] text-muted-foreground">{label}</p>}
 
       {/* Power */}
-      <div className="rounded-md border bg-background/60 px-3 py-3">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
-        <div className="flex items-baseline gap-1">
-          <span className="font-display text-4xl tabular-nums leading-none text-gauge-secondary">{powerLabel}</span>
-          <span className="text-xs leading-none text-muted-foreground">W</span>
-        </div>
-      </div>
+      <FigureBox
+        label="Output"
+        value={powerLabel}
+        unit="W"
+        narrow="stack"
+        className="py-3 @max-2xs:py-1"
+        valueClassName="text-4xl text-gauge-secondary @max-2xs:text-2xl"
+        unitClassName="text-xs"
+        // Below 18rem the readings under Output would stack four boxes per
+        // alternator, twelve rows for two. They become lines in Output's box.
+        subClassName="hidden @max-2xs:block"
+        sub={
+          <>
+            <span className="block">{currentLabel} A</span>
+            <span className="block">{voltageLabel} V</span>
+            {tempLabel !== null && <span className={`block ${tempClass(data.temperatureC)}`}>{tempLabel}C</span>}
+          </>
+        }
+      />
 
-      {/* Current + Voltage */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border bg-background/60 px-2 py-2">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Amps</p>
-          <div className="flex items-baseline gap-0.5">
-            <span className="font-display text-lg tabular-nums leading-none text-foreground">{currentLabel}</span>
-            <span className="text-xs leading-none text-muted-foreground">A</span>
-          </div>
-        </div>
-        <div className="rounded-md border bg-background/60 px-2 py-2">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Volts</p>
-          <div className="flex items-baseline gap-0.5">
-            <span className="font-display text-lg tabular-nums leading-none text-foreground">{voltageLabel}</span>
-            <span className="text-xs leading-none text-muted-foreground">V</span>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 gap-2 @max-2xs:hidden">
+        <FigureBox
+          label="Amps"
+          value={currentLabel}
+          unit="A"
+          className="px-2"
+          labelClassName="tracking-[0.14em]"
+          valueClassName="text-lg text-foreground"
+          unitClassName="ml-0.5 text-xs"
+        />
+        <FigureBox
+          label="Volts"
+          value={voltageLabel}
+          unit="V"
+          className="px-2"
+          labelClassName="tracking-[0.14em]"
+          valueClassName="text-lg text-foreground"
+          unitClassName="ml-0.5 text-xs"
+        />
       </div>
 
       {/* Temperature — only when available */}
       {tempLabel !== null && (
-        <div className="rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Temp</p>
-          <div className="flex items-baseline gap-0.5">
-            <span className={`font-display text-xl tabular-nums leading-none ${tempClass(data.temperatureC)}`}>{tempLabel}</span>
-            <span className="text-xs leading-none text-muted-foreground">C</span>
-          </div>
-        </div>
+        <FigureBox
+          className="@max-2xs:hidden"
+          label="Temp"
+          value={tempLabel}
+          unit="C"
+          valueClassName={`text-xl ${tempClass(data.temperatureC)}`}
+          unitClassName="ml-0.5 text-xs"
+        />
       )}
     </div>
   )
@@ -89,7 +106,7 @@ export const AlternatorTile = memo(function AlternatorTile({ port, starboard, en
   const singleData = hasPort ? port : starboard
 
   return (
-    <Tile title={isSingleAlternator ? 'Alternator' : 'Alternators'} icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
+    <Tile title={isSingleAlternator ? 'Alternator' : 'Alternators'} className="@container" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       {enginesRunning === null ? (
         <div className="mt-1 flex h-24 items-center justify-center rounded-md border bg-background/60">
           <p className="text-sm text-muted-foreground">--</p>
@@ -100,7 +117,7 @@ export const AlternatorTile = memo(function AlternatorTile({ port, starboard, en
             <AlternatorColumn data={singleData} />
           </div>
         ) : (
-          <div className="mt-1 grid grid-cols-2 gap-4">
+          <div className="mt-1 grid grid-cols-2 gap-4 @max-2xs:grid-cols-1">
             <AlternatorColumn label="Port" data={port} />
             <AlternatorColumn label="Starboard" data={starboard} />
           </div>
