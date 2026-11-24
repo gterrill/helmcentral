@@ -1,6 +1,7 @@
 import { memo, type ComponentProps } from 'react'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
+import { FigureBox } from '@/components/ui/figure-box'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
@@ -324,6 +325,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
   return (
     <Tile
       title="Battery & Power"
+      className="@container"
       // The tile edge carries the same SoC band the numeral and bar already
       // colour (ADR 0081): warn and alarm map straight across; in band or
       // with no rule configured, the tile carries no state.
@@ -349,16 +351,18 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
             </>
           ) : (
             <>
-              <div className="flex items-start justify-between gap-2">
+              {/* Below 18rem the numeral and "To full" no longer fit side by side: the
+                  numeral shrinks a step and the time to go drops under it. */}
+              <div className="flex items-start justify-between gap-2 @max-2xs:flex-wrap">
                 <div className="flex min-w-0 items-baseline gap-1">
-                  <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl ${socClass}`}>
+                  <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl @max-2xs:text-5xl ${socClass}`}>
                     {socLabel}
                   </span>
                   <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl md:leading-7 lg:text-2xl lg:leading-8">
                     %
                   </span>
                 </div>
-                <div className="min-w-0 shrink-0 text-right">
+                <div className="min-w-0 shrink-0 text-right @max-2xs:w-full @max-2xs:text-left">
                   <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     {timeToGoLabel}
                   </p>
@@ -442,39 +446,42 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
           )}
         </div>
 
-        <div className={`grid gap-2 ${noBank ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {/* Below 18rem of tile width (the @container on the Tile) the three
+            figures take a row each, as on the Solar tile: two 4xl wattages
+            side by side do not fit a three-column tile. */}
+        <div className={`grid gap-2 ${noBank ? 'grid-cols-1' : 'grid-cols-2 @max-2xs:grid-cols-1'}`}>
           {!noBank && (
-            <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Net</p>
-              <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
-                {chargingPowerLabel}
-                <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
-              </p>
-              <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
-                <span className={readoutClass}>{chargingCurrentLabel}</span>
-                <span className="ml-1 font-display text-muted-foreground">A</span>
-              </p>
-            </div>
+            <FigureBox
+              label="Net"
+              value={chargingPowerLabel}
+              unit="W"
+              valueClassName={`mt-1 truncate text-4xl md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}
+              unitClassName="text-xl md:text-sm lg:text-xl"
+              sub={(
+                <>
+                  <span className={readoutClass}>{chargingCurrentLabel}</span>
+                  <span className="ml-1 font-display text-muted-foreground">A</span>
+                </>
+              )}
+            />
           )}
-          <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
-              {solarOutputLabel}
-              <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
-            </p>
-          </div>
+          <FigureBox
+            label="Solar"
+            value={solarOutputLabel}
+            unit="W"
+            valueClassName={`mt-1 truncate text-4xl md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}
+            unitClassName="text-xl md:text-sm lg:text-xl"
+          />
         </div>
 
-        <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Loads</p>
-          <p className="mt-1 truncate font-display text-4xl leading-none tabular-nums text-foreground md:text-xl md:leading-7 lg:text-4xl lg:leading-10">
-            {loadsTotalLabel}
-            <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
-          </p>
-          <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
-            {`AC ${acOutputLabel} · DC ${dc12vPowerLabel}`}
-          </p>
-        </div>
+        <FigureBox
+          label="Loads"
+          value={loadsTotalLabel}
+          unit="W"
+          valueClassName="mt-1 truncate text-4xl text-foreground md:text-xl md:leading-7 lg:text-4xl lg:leading-10"
+          unitClassName="text-xl md:text-sm lg:text-xl"
+          sub={`AC ${acOutputLabel} · DC ${dc12vPowerLabel}`}
+        />
 
         {shoreVisible && (
           <div className="flex items-center justify-between gap-2 rounded-md border bg-background/60 px-3 py-2">

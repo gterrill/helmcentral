@@ -115,15 +115,18 @@ export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
 
 /**
  * The minimum height for Today & Now rose when the barometer row was added,
- * and react-grid-layout applies minH only while an operator resizes, so a page
- * saved at the old height would clip the row. The height is lifted to the
- * minimum when drawn (and saved with the next layout change). A taller tile is
- * left as saved, and other tiles deliberately keep their saved heights. The
- * phone and tablet cell uses minHeight and grows with its content, so it needs
- * no lift.
+ * and the power tiles' floors rose to their measured content, but
+ * react-grid-layout applies minH only while an operator resizes, so a page
+ * saved at an old height would clip. These tiles are lifted to their minimum
+ * when drawn (and saved with the next layout change). A taller tile is left as
+ * saved, and other tiles deliberately keep their saved heights. The phone and
+ * tablet cell uses minHeight and grows with its content, so it needs no lift.
  */
-export function liftTodayNowHeight(id: string, h: number): number {
-  return id === 'today-now' ? Math.max(h, WIDGET_CONSTRAINTS['today-now']?.minH ?? h) : h
+const LIFTED_TO_FLOOR: ReadonlySet<string> = new Set(['today-now', 'battery-power', 'solar', 'alternator', 'generator', 'hot-water'])
+
+export function liftToFloor(id: string, h: number): number {
+  const floor = LIFTED_TO_FLOOR.has(id) ? WIDGET_CONSTRAINTS[id as BuiltinWidgetId]?.minH : undefined
+  return floor === undefined ? h : Math.max(h, floor)
 }
 
 /**
@@ -133,11 +136,22 @@ export function liftTodayNowHeight(id: string, h: number): number {
  */
 export const SOLAR_TILE_H = 212
 
+/*
+ * The power tiles' tallest content at their narrowest allowed width, measured
+ * in Chromium with the top inset, large figures and every optional line shown:
+ * Battery & Power with the dawn line (tallest wide), two alternators at 112px, a
+ * running generator with its timer at 112px, Hot Water at 176px.
+ */
+export const BATTERY_POWER_TILE_H = 464
+export const ALTERNATOR_TILE_H = 310
+export const GENERATOR_TILE_H = 297
+export const HOT_WATER_TILE_H = 176
+
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
   'wind': { minW: 3, minH: 6 },
   'anchor-watch': { minW: 3, minH: 6 },
-  'battery-power': { minW: 3, minH: 6 },
+  'battery-power': { minW: 3, minH: rowsForHeight(BATTERY_POWER_TILE_H) },
   'solar': { minW: 3, minH: rowsForHeight(SOLAR_TILE_H) },
   'depth-tide': { minW: 2, minH: 4 },
   'position': { minW: 2, minH: 3 },
@@ -147,9 +161,11 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'tanks': { minW: 2, minH: 3 },
   'route': { minW: 2, minH: 3 },
   'nearby-vessels': { minW: 2, minH: 3 },
-  'alternator': { minW: 2, minH: 4 },
-  'generator': { minW: 2, minH: 4 },
+  'alternator': { minW: 2, minH: rowsForHeight(ALTERNATOR_TILE_H) },
+  'generator': { minW: 2, minH: rowsForHeight(GENERATOR_TILE_H) },
   'czone-switches': { minW: 2, minH: 3 },
+  // Three columns: at two (112-155px) the four buttons need a row each.
+  'hot-water': { minW: 3, minH: rowsForHeight(HOT_WATER_TILE_H) },
   // The control pad needs finger-sized hold-to-confirm targets (ADR 0041).
   'autopilot': { minW: 4, minH: 6 },
   // Wall-display tiles (ADR 0092, ADR 0125). Sizes come from what each
@@ -272,7 +288,7 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
         x: box.x,
         y: w.y,
         w: box.w,
-        h: liftTodayNowHeight(w.id, rows[w.id] ?? w.h),
+        h: liftToFloor(w.id, rows[w.id] ?? w.h),
         ...(drop ? { x: drop.x, y: drop.y, w: drop.w, h: drop.h } : {}),
         // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
         // compaction skips `static` items entirely (they neither move nor get
@@ -318,7 +334,7 @@ export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, ed
     const nextX = Math.min(Math.max(w.x + dx, 0), Math.max(0, GRID_COLUMNS - w.w))
     const nextY = Math.max(w.y + dy, 0)
     if (nextX === w.x && nextY === w.y) return
-    commit([{ i: w.id, x: nextX, y: nextY, w: w.w, h: liftTodayNowHeight(w.id, w.h) }])
+    commit([{ i: w.id, x: nextX, y: nextY, w: w.w, h: liftToFloor(w.id, w.h) }])
   }, [commit])
 
   const handleHandleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>, w: DashboardLayoutItem) => {

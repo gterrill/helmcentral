@@ -195,10 +195,10 @@ export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number;
   'nearby-vessels': { w: 4, h: 5 },
   'battery-power': { w: 4, h: 12 },
   'solar': { w: 4, h: 5 },
-  'alternator': { w: 4, h: 6 },
-  'generator': { w: 4, h: 5 },
+  'alternator': { w: 4, h: 7 },
+  'generator': { w: 4, h: 7 },
   'czone-switches': { w: 4, h: 6 },
-  'hot-water': { w: 4, h: 6 },
+  'hot-water': { w: 4, h: 4 },
   // Uncertain: no backend precedent. Estimated from the heading/target
   // readout, mode strip and three button grids (adjust, dodge, tack/gybe)
   // plus the hold-to-confirm engage bar — check against a live pilot.

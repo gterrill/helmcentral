@@ -12,3 +12,11 @@ test('renders the Hot Water tile with its static controls', () => {
   expect(screen.getByRole('button', { name: '2 HR' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'ON' })).toBeInTheDocument()
 })
+
+test('a narrow tile puts the four buttons two by two', () => {
+  const { container } = render(<HotWaterTile />)
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const buttons = screen.getByRole('button', { name: '1 HR' }).parentElement!
+  expect(buttons.className).toContain('grid-cols-4')
+  expect(buttons.className).toContain('@max-2xs:grid-cols-2')
+})
