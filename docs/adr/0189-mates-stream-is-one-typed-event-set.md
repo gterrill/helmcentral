@@ -8,6 +8,14 @@ Accepted (2026-10-17). Builds on
 [ADR 0183](0183-one-mate-session-on-the-client.md). The wire bytes and the
 event names are unchanged.
 
+*Amended by [ADR 0305](0305-mates-stream-sorts-a-rounds-text-into-chatter-or-the-answer.md):
+`status` and `retract` are gone and ten events are added (`round`, `reasoning`,
+`chatter`, `lookup`, `lookup_done`, `answer_start`, `answer_withdrawn`,
+`draft_sent_back`, `round_end`, `clock`). The set is still closed, typed and
+checked against golden frames, and the decoder still throws on an unknown
+event. The rest of this record describes the five-event set it was written
+for.*
+
 ## Context
 
 A Mate run reaches the browser as server-sent events: `status`, `delta`,

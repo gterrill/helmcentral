@@ -82,11 +82,13 @@ async function readErrorMessage(response: Response): Promise<string> {
  * (ADR 0093, streamed per ADR 0105, detached per ADR 0105's "the answer
  * outlives the page").
  *
- * `send` posts one message and reads the reply back as SSE: zero or more
- * `status` frames while the assistant works, zero or more `delta` frames
- * carrying the current round's answer text as it is written, an optional
- * `retract` when a round that streamed text turned into tool calls
- * instead, then exactly one `message` or `error` frame. `attach` rejoins
+ * `send` posts one message and reads the reply back as SSE (the event set in
+ * lib/mate-events.ts, ADR 0305): a `round` frame as each round opens and a
+ * `lookup` frame as each lookup starts, `delta` frames carrying the answer
+ * text as it is written, an `answer_withdrawn` or `draft_sent_back` when text
+ * already shown turns out not to be the answer, then exactly one `message` or
+ * `error` frame. Reasoning, chatter and timing frames are decoded and left for
+ * the activity view. `attach` rejoins
  * whatever reply is already being written server-side - after a navigation
  * away and back, a reload, or an iPad's screen lock having killed the
  * original `send`'s fetch outright - by reading the same event shape off
@@ -140,7 +142,7 @@ export function useAssistantChat() {
   }, [])
 
   // Discards whatever draft text has been shown (or buffered) so far: used
-  // when a round is retracted, when the authoritative message arrives, and
+  // when the answer is withdrawn or sent back, when the authoritative message arrives, and
   // on error/abort/a superseding send or attach - every case where the
   // streamed draft must not linger.
   const clearDraft = useCallback(() => {
@@ -162,7 +164,7 @@ export function useAssistantChat() {
 
   // Reads one SSE body - a send()'s POST response or an attach()'s GET
   // response, the two only differ in how `body` was obtained - through the
-  // same status/delta/retract/message/error handling. `controller` is the
+  // same event handling. `controller` is the
   // AbortController this particular call owns; events are ignored once a
   // later send()/attach() has superseded it (abortRef.current !== controller).
   const consumeStream = useCallback(async (
@@ -175,13 +177,33 @@ export function useAssistantChat() {
     let resolved: AssistantMessage | null = null
     let streamKey = nextDraftKey()
     setDraftKey(streamKey)
+    // The lookups announced and not yet done, by seq, in announcement order.
+    const running = new Map<number, string>()
 
     await readMateEvents(body, (event) => {
       if (!isCurrent()) return
 
       switch (event.type) {
-        case 'status':
-          setStatusText('text' in event ? event.text : null)
+        case 'round':
+          // A round opens: the model is being waited on, no lookup running.
+          running.clear()
+          setStatusText(null)
+          break
+        case 'lookup':
+          // The line shows the lookup Mate is doing now. A call that is not run
+          // is not doing anything, so it is never added and leaves the line as it was.
+          if (event.skipped === '') {
+            running.set(event.seq, event.text)
+            setStatusText(event.text)
+          }
+          break
+        case 'lookup_done':
+          // However it ended, the lookup is no longer running. The line shows the
+          // latest one still running, or nothing when none are.
+          if (running.delete(event.seq)) {
+            const remaining = [...running.values()]
+            setStatusText(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+          }
           break
         case 'delta':
           if (event.text !== '') {
@@ -189,10 +211,22 @@ export function useAssistantChat() {
             scheduleDraftFlush()
           }
           break
-        case 'retract':
-          // The round that produced this draft turned into tool calls
-          // instead of an answer (ADR 0093 §2/ADR 0105) - discard it.
+        case 'answer_withdrawn':
+        case 'draft_sent_back':
+          // Text already shown as the answer was not it: the round went on to
+          // lookups, was cut off, or its draft failed Helmcentral's check and
+          // went back to the model (ADR 0093 §2, ADR 0305). The draft holds
+          // only the current round's answer, so removing it removes exactly
+          // that text.
           clearDraft()
+          break
+        case 'clock':
+        case 'reasoning':
+        case 'chatter':
+        case 'answer_start':
+        case 'round_end':
+          // The activity view reads these (a failed, skipped or cut-off lookup
+          // included); the thread does not yet.
           break
         case 'message':
           resolved = { ...mapMessage(event.message), clientKey: streamKey }
@@ -375,7 +409,7 @@ export function useAssistantChat() {
   // (ADR 0105): GETs .../run, which answers 204 when nothing is in flight
   // (this resolves to null and touches no state at all - the caller already
   // has the finished answer, if any, from GET the conversation itself) or
-  // streams the same status/delta/retract/message/error shape send() reads,
+  // streams the same event shape send() reads,
   // starting with whatever the run has already produced and continuing live
   // from there. A second attach()/send() supersedes this one exactly the
   // same way a second send() supersedes an earlier one.

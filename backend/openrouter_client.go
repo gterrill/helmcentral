@@ -1032,6 +1032,18 @@ readLoop:
 				if choice.Delta.Role != "" {
 					role = choice.Delta.Role
 				}
+				// A new tool call is announced before this chunk's text, so text
+				// that arrives with the first call is settled as written
+				// alongside tool calls (chatter), not promoted and taken back.
+				for _, tc := range choice.Delta.ToolCalls {
+					if _, ok := toolCalls[tc.Index]; !ok {
+						toolCalls[tc.Index] = &openRouterStreamToolCallAccum{}
+						toolOrder = append(toolOrder, tc.Index)
+						if hooks.ToolCall != nil {
+							hooks.ToolCall(tc.Index)
+						}
+					}
+				}
 				if fragment := string(choice.Delta.Content); fragment != "" {
 					content.WriteString(fragment)
 					if hooks.Content != nil {
@@ -1042,15 +1054,7 @@ readLoop:
 					hooks.noteReasoning(rd, reasoning.add(rd), &pendingBlock)
 				}
 				for _, tc := range choice.Delta.ToolCalls {
-					acc, ok := toolCalls[tc.Index]
-					if !ok {
-						acc = &openRouterStreamToolCallAccum{}
-						toolCalls[tc.Index] = acc
-						toolOrder = append(toolOrder, tc.Index)
-						if hooks.ToolCall != nil {
-							hooks.ToolCall(tc.Index)
-						}
-					}
+					acc := toolCalls[tc.Index]
 					if tc.ID != "" {
 						acc.id = tc.ID
 					}

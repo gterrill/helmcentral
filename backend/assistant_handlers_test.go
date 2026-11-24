@@ -53,7 +53,7 @@ func writeAssistantSettingsFixture(t *testing.T, enabled bool, model string) str
 }
 
 // fakeAssistantRunner is a whole-run assistantRunnerFace test double: it
-// emits one status event (proving the handler wires emit through to
+// emits one round event (proving the handler wires emit through to
 // whatever newAssistantRunner returns), then one "delta" event per string
 // in deltas (if any - proving the handler forwards whatever run() emits,
 // token streaming included, ahead of its own "message" event), and then
@@ -79,7 +79,7 @@ func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive 
 	if f.gotStable != nil {
 		*f.gotStable = systemStable
 	}
-	f.emit(mateStatusEvent{Text: "Thinking…"})
+	f.emit(mateRoundEvent{})
 	if len(f.calls) > 0 {
 		assistantRunRecorderFrom(ctx).addRound(assistantTraceRound{Calls: f.calls})
 	}
@@ -125,7 +125,7 @@ func (c *cancelAwareAssistantRunner) run(ctx context.Context, systemStable, syst
 }
 
 // scriptedAssistantRunner is a whole-run test double for ADR 0105's GET
-// .../run replay-then-live test: it emits one status event, signals
+// .../run replay-then-live test: it emits one round event, signals
 // started, then blocks on proceed before emitting a live delta and
 // returning the final reply - letting a test attach a GET .../run
 // subscriber in the gap between the two and observe both the replayed
@@ -138,7 +138,7 @@ type scriptedAssistantRunner struct {
 }
 
 func (s *scriptedAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
-	s.emit(mateStatusEvent{Text: "Thinking…"})
+	s.emit(mateRoundEvent{})
 	close(s.started)
 	<-s.proceed
 	s.emit(mateDeltaEvent{Text: "Tongue Bay first."})
@@ -1354,17 +1354,28 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: status`+"\n"+`data: {"text":`) {
-		t.Fatalf("expected a status frame, got:\n%s", body)
+	if !strings.HasPrefix(body, "event: clock\ndata: {\"at_ms\":") {
+		t.Fatalf("expected the stream to open with the clock, got:\n%s", body)
+	}
+	if !strings.Contains(body, `event: round`+"\n"+`data: {"round":0,`) {
+		t.Fatalf("expected a round frame, got:\n%s", body)
 	}
 
 	data := extractSSEEventData(t, body, "message")
 	var frame struct {
 		Message      assistantMessage      `json:"message"`
 		Conversation assistantConversation `json:"conversation"`
+		Run          *mateRunRef           `json:"run"`
 	}
 	if err := json.Unmarshal([]byte(data), &frame); err != nil {
 		t.Fatalf("unmarshal message frame: %v", err)
+	}
+	// The reply names its stored trace, so the browser can fetch it later.
+	if frame.Run == nil || frame.Run.ID == "" {
+		t.Fatalf("expected the message to name its run, got %s", data)
+	}
+	if stored, ok, err := store.GetRun(frame.Run.ID); err != nil || !ok || stored.AnswerMessageID == nil || *stored.AnswerMessageID != frame.Message.ID {
+		t.Fatalf("the run the message names is not the stored trace of this answer: ok=%v err=%v %+v", ok, err, stored)
 	}
 	if frame.Message.Role != "assistant" {
 		t.Fatalf("expected assistant role, got %q", frame.Message.Role)
@@ -1605,12 +1616,17 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 	data := extractSSEEventData(t, body, "error")
 	var errFrame struct {
 		Error string `json:"error"`
+		RunID string `json:"run_id"`
 	}
 	if err := json.Unmarshal([]byte(data), &errFrame); err != nil {
 		t.Fatalf("unmarshal error frame: %v", err)
 	}
 	if !strings.Contains(errFrame.Error, "invalid api key") {
 		t.Fatalf("expected the upstream error text, got %q", errFrame.Error)
+	}
+	// A failed run keeps its trace, and the error names it.
+	if stored, ok, err := store.GetRun(errFrame.RunID); errFrame.RunID == "" || err != nil || !ok || stored.AnswerMessageID != nil {
+		t.Fatalf("expected the error to name the stored trace of the failed run, got %q (ok=%v err=%v)", errFrame.RunID, ok, err)
 	}
 
 	messages, err := store.ListMessages(conv.ID)
@@ -1816,7 +1832,7 @@ func TestGetAssistantRunHandler_NoRunInFlightReturns204(t *testing.T) {
 
 // TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage proves the
 // replay-then-live contract end to end over a real SSE connection: a GET
-// .../run that attaches after a run has already emitted a status event
+// .../run that attaches after a run has already emitted a round event
 // sees that event replayed, then sees the run's later delta and message
 // events live, in that order.
 func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T) {
@@ -1889,7 +1905,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 
 	// The replayed backlog: "status" was emitted before this GET ever
 	// attached.
-	waitForBodyContains(t, collector, "event: status", 2*time.Second)
+	waitForBodyContains(t, collector, "event: round", 2*time.Second)
 
 	close(attach) // let the runner continue: it emits a live delta, then returns
 
@@ -1897,7 +1913,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 	waitForBodyContains(t, collector, "event: message", 2*time.Second)
 
 	body := collector.String()
-	statusIdx := strings.Index(body, "event: status")
+	statusIdx := strings.Index(body, "event: round")
 	deltaIdx := strings.Index(body, "event: delta")
 	messageIdx := strings.Index(body, "event: message")
 	if !(statusIdx >= 0 && statusIdx < deltaIdx && deltaIdx < messageIdx) {

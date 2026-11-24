@@ -3,10 +3,11 @@ import { renderHook, act } from '@testing-library/react'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import { getMateWatchSnapshot, removeMateWatch } from '@/lib/mate-watch-store'
-import { controllableSseStream, flushMicrotasks, installFakeRaf, neverEndingStream, sseStream } from './helpers/fake-sse'
+import { controllableSseStream, flushMicrotasks, installFakeRaf, lookupFrame, neverEndingStream, roundFrame, sseFrame, sseStream } from './helpers/fake-sse'
 
 // ADR 0093: send() posts one message and reads the reply back as SSE
-// (status/message/error frames) over the response body's ReadableStream,
+// (lookup/delta/message/error frames and the rest of the set in
+// lib/mate-events.ts) over the response body's ReadableStream,
 // since the browser's EventSource can't POST. What a Mate session does with
 // a reply is covered in use-mate-session.test.ts; this file keeps the
 // streaming internals the session does not expose.
@@ -110,7 +111,7 @@ describe('useAssistantChat', () => {
     expect(result.current.error).toBe('HTTP 500')
   })
 
-  it('updates statusText from status frames then resolves with the mapped message', async () => {
+  it('shows a lookup\'s text as the status line then resolves with the mapped message', async () => {
     const { stream, push, close } = controllableSseStream()
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream })
     vi.stubGlobal('fetch', fetchMock)
@@ -123,7 +124,7 @@ describe('useAssistantChat', () => {
     })
 
     await act(async () => {
-      push('event: status\ndata: {"text":"Looking up Tongue Bay…"}\n\n')
+      push(lookupFrame('Looking up Tongue Bay…'))
       await flushMicrotasks()
     })
 
@@ -156,6 +157,69 @@ describe('useAssistantChat', () => {
     // statusText clears once the send settles.
     expect(result.current.statusText).toBeNull()
     expect(result.current.sending).toBe(false)
+  })
+
+  describe('the status line shows only the lookup that is running', () => {
+    async function statusAfter(frames: string[]): Promise<string | null> {
+      const { stream, push } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
+      const { result } = renderHook(() => useAssistantChat())
+      act(() => {
+        void result.current.send('c1', 'hello')
+      })
+      for (const frame of frames) {
+        await act(async () => {
+          push(frame)
+          await flushMicrotasks()
+        })
+      }
+      return result.current.statusText
+    }
+    const lookup = (seq: number, text: string, skipped: string) => sseFrame('lookup', { round: 0, seq, at_ms: 10, text, skipped })
+
+    it('shows the lookup that is running', async () => {
+      const status = await statusAfter([lookup(0, 'Looking up the tide…', '')])
+      expect(status).toBe('Looking up the tide…')
+    })
+
+    const done = (seq: number, extra: object = {}) => sseFrame('lookup_done', { round: 0, seq, at_ms: 20, error: '', ...extra })
+
+    it('clears the line when the only running lookup fails, is cut off or finishes cleanly', async () => {
+      for (const extra of [{ error: 'station offline' }, { cut: true }, {}]) {
+        const status = await statusAfter([lookup(0, 'Looking up the tide…', ''), done(0, extra)])
+        expect(status).toBeNull()
+      }
+    })
+
+    it('falls back to the lookup still running when the one shown finishes', async () => {
+      const status = await statusAfter([
+        lookup(0, 'Looking up the tide…', ''),
+        lookup(1, 'Looking up the wind…', ''),
+        done(1),
+      ])
+      expect(status).toBe('Looking up the tide…')
+    })
+
+    it('keeps the line when a lookup that is not the one shown finishes, then clears it', async () => {
+      expect(await statusAfter([
+        lookup(0, 'Looking up the tide…', ''),
+        lookup(1, 'Looking up the wind…', ''),
+        done(0),
+      ])).toBe('Looking up the wind…')
+      expect(await statusAfter([
+        lookup(0, 'Looking up the tide…', ''),
+        lookup(1, 'Looking up the wind…', ''),
+        done(0),
+        done(1, { cut: true }),
+      ])).toBeNull()
+    })
+
+    it('leaves the status line alone for a lookup that is not run', async () => {
+      for (const skipped of ['withheld', 'round_full']) {
+        const status = await statusAfter([lookup(0, 'Looking up the tide…', ''), lookup(1, 'Looking up the wind…', skipped)])
+        expect(status).toBe('Looking up the tide…')
+      }
+    })
   })
 
   it('maps a reply\'s filled-in form so its card shows without a reload', async () => {
@@ -242,7 +306,7 @@ describe('useAssistantChat', () => {
   // only when the caller actually passes them - an ordinary panel send (no
   // options) must not grow a `spoken: false` or `screen: undefined` key the
   // backend was never asked for.
-  // ADR 0105: delta/retract/message/error frames drive `draft`, rAF-batched.
+  // ADR 0105: delta/answer_withdrawn/draft_sent_back/message/error frames drive `draft`, rAF-batched.
   describe('draft (ADR 0105 token streaming)', () => {
     it('accumulates delta text into draft, flushed at most once per animation frame', async () => {
       const raf = installFakeRaf()
@@ -286,7 +350,10 @@ describe('useAssistantChat', () => {
       expect(result.current.draft).toBeNull()
     })
 
-    it('retract clears the draft and cancels a pending flush', async () => {
+    it.each([
+      ['answer_withdrawn', sseFrame('answer_withdrawn', { round: 0, at_ms: 900, reason: 'lookups' })],
+      ['draft_sent_back', sseFrame('draft_sent_back', { round: 0, at_ms: 900, triggers: ['depth at the anchorage'], draft: 'Let me check that, and then the rest.' })],
+    ])('%s removes the shown text from the draft and cancels a pending flush', async (_name, frame) => {
       const raf = installFakeRaf()
       const { stream, push, close } = controllableSseStream()
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
@@ -305,11 +372,19 @@ describe('useAssistantChat', () => {
       expect(raf.pending()).toBe(true)
 
       await act(async () => {
-        push('event: retract\ndata: {}\n\n')
+        push(frame)
         await flushMicrotasks()
       })
       expect(result.current.draft).toBeNull()
       expect(raf.pending()).toBe(false)
+
+      // The next answer builds a fresh draft, not one on top of the removed text.
+      await act(async () => {
+        push('event: delta\ndata: {"text":"Cairns is 40 nm north."}\n\n')
+        await flushMicrotasks()
+      })
+      act(() => raf.flush())
+      expect(result.current.draft).toBe('Cairns is 40 nm north.')
 
       await act(async () => {
         push(`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`)
@@ -318,6 +393,40 @@ describe('useAssistantChat', () => {
       })
       await sendPromise
       expect(result.current.draft).toBeNull()
+    })
+
+    it('decodes reasoning, chatter, answer_start, lookup_done, round_end and clock and leaves the thread alone', async () => {
+      const raf = installFakeRaf()
+      const { stream, push, close } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
+
+      const { result } = renderHook(() => useAssistantChat())
+
+      let sendPromise!: Promise<unknown>
+      act(() => {
+        sendPromise = result.current.send('c1', 'Find Cairns')
+      })
+
+      await act(async () => {
+        push(sseFrame('clock', { at_ms: 1200 }))
+        push(sseFrame('reasoning', { round: 0, text: 'Cairns is north.' }))
+        push(sseFrame('chatter', { round: 0, text: 'Let me look.' }))
+        push(sseFrame('lookup_done', { round: 0, seq: 0, at_ms: 500, error: '' }))
+        push(sseFrame('answer_start', { round: 1, at_ms: 900 }))
+        push(sseFrame('round_end', { round: 0, at_ms: 600, reasoning: 'text', reasoning_bytes: 0, prompt_tokens: 1, completion_tokens: 1, cached_tokens: 0, cost_usd: 0 }))
+        await flushMicrotasks()
+      })
+      expect(result.current.error).toBeNull()
+      expect(result.current.draft).toBeNull()
+      expect(raf.pending()).toBe(false)
+      expect(result.current.statusText).toBeNull()
+
+      await act(async () => {
+        push(`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`)
+        close()
+        await flushMicrotasks()
+      })
+      await sendPromise
     })
 
     it('message clears the draft even when a flush was still pending', async () => {
@@ -584,7 +693,7 @@ describe('useAssistantChat', () => {
         sendPromise = result.current.send('c1', 'hello')
       })
       await act(async () => {
-        first.push('event: status\ndata: {"text":"Looking up Deal Island…"}\n\n')
+        first.push(lookupFrame('Looking up Deal Island…'))
         first.push('event: delta\ndata: {"text":"Refuge Cove is"}\n\n')
         await flushMicrotasks()
         raf.flush()
@@ -638,15 +747,15 @@ describe('useAssistantChat', () => {
       })
 
       await act(async () => {
-        push('event: status\ndata: {"text":"Looking up Tongue Bay…"}\n\n')
+        push(lookupFrame('Looking up Tongue Bay…'))
         await flushMicrotasks()
       })
       expect(result.current.sending).toBe(true)
       expect(result.current.statusText).toBe('Looking up Tongue Bay…')
 
-      // A bare waiting status clears the text so the thread can show its own phrase.
+      // A round opening clears the text so the thread can show its own waiting phrase.
       await act(async () => {
-        push('event: status\ndata: {"kind":"waiting"}\n\n')
+        push(roundFrame(1))
         await flushMicrotasks()
       })
       expect(result.current.statusText).toBeNull()

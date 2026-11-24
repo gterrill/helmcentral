@@ -13,6 +13,12 @@ Amended by ADR 0105, which replaces §5's whole-message delivery with
 token-by-token streaming (`delta`/`retract` events) and reverses the
 "Token streaming in v1" rejection below.
 
+§2 superseded in part by
+[ADR 0305](0305-mates-stream-sorts-a-rounds-text-into-chatter-or-the-answer.md):
+a failed tool call is no longer a status line but a `lookup_done` event
+carrying its error, and a round's text alongside tool calls is chatter, not an
+answer that is shown and then retracted.
+
 ## Context
 
 At Hook Reef the crew wanted to know whether to visit Tongue Bay first, to

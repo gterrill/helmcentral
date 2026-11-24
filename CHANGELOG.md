@@ -185,6 +185,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   instead of six, though a wall page still needs six. A Solar tile already on a
   page keeps its height until you drag it shorter in layout edit mode.
 
+- **The words Mate writes while it looks things up no longer show up in the
+  answer and then disappear.** When Mate says "Let me check the tide" and goes
+  off to look, those words used to appear as if they were the answer and vanish
+  a second later. Mate now holds its first paragraph back until it knows
+  whether it's the answer, so a long answer starts a moment later than before and
+  a short one appears whole. A draft Mate sends back for a second look is still
+  removed from the answer area, as before. Nothing to do on upgrade.
 - **A suggested departure on a passage plan now goes to the calmest ride, then
   the fairest stream.** Among the Go times for a leg, or the Marginal ones when
   none is Go, Helmcentral works out how each would feel and picks the time whose

@@ -453,7 +453,7 @@ func TestAssistantBudget_AnswerAlreadyStreamingWhenTheToolPhaseEndsIsLetFinish(t
 		t.Fatalf("requests = %d: an answer already streaming must not be cut off and redone", doer.requests)
 	}
 	for _, ev := range *events {
-		if ev.event == "retract" {
+		if ev.event == "answer_withdrawn" || ev.event == "draft_sent_back" {
 			t.Fatal("the streamed text was withdrawn")
 		}
 	}

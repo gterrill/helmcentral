@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 
 import { AssistantDrawer } from '@/components/assistant-drawer'
-import { controllableSseStream, flushMicrotasks as flush, recordingBody } from './helpers/fake-sse'
+import { controllableSseStream, flushMicrotasks as flush, lookupFrame, recordingBody } from './helpers/fake-sse'
 
 // ADR 0093: the assistant panel owns its own hooks (status, conversations,
 // chat), each of which calls fetch directly - so these tests drive it the
@@ -401,7 +401,7 @@ describe('AssistantDrawer', () => {
     await waitFor(() => expect(sent).toEqual({ content: 'What about the wind tomorrow?' }))
   })
 
-  it('shows the status line while a status frame is pending, then resolves', async () => {
+  it('shows the status line while a lookup frame is pending, then resolves', async () => {
     const stream = controllableSseStream()
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
@@ -416,7 +416,7 @@ describe('AssistantDrawer', () => {
     act(() => { fireEvent.keyDown(textarea, { key: 'Enter' }) })
 
     await act(async () => {
-      stream.push('event: status\ndata: {"text":"Fetching wind forecast for Tongue Bay…"}\n\n')
+      stream.push(lookupFrame('Fetching wind forecast for Tongue Bay…'))
       await flush()
     })
 

@@ -341,13 +341,11 @@ func (o *orderedDelayToolExecutor) execute(ctx context.Context, name string, arg
 	return "{}", assistantToolOutcome{}, nil
 }
 
-// recordedEvent is one call a recordingEmitter captured, with "text"
-// extracted from the {"text": ...} payload shape every status event carries
-// (assistant_run.go's assistantStatus).
+// recordedEvent is one call a recordingEmitter captured, with "text" taken
+// from the events that carry some (a lookup's wording, a delta, chatter).
 type recordedEvent struct {
 	event string
 	text  string
-	kind  string
 }
 
 func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
@@ -355,11 +353,11 @@ func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
 	emit := func(ev mateEvent) {
 		rec := recordedEvent{event: ev.mateEventName()}
 		switch e := ev.(type) {
-		case mateStatusEvent:
+		case mateLookupEvent:
 			rec.text = e.Text
-		case mateWaitingEvent:
-			rec.kind = e.Kind
 		case mateDeltaEvent:
+			rec.text = e.Text
+		case mateChatterEvent:
 			rec.text = e.Text
 		}
 		events = append(events, rec)
@@ -586,7 +584,7 @@ func TestAssistantRunner_NonAutoModelOmitsAutoRouterPlugin(t *testing.T) {
 	}
 }
 
-func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
+func TestAssistantRunner_EmitsLookupEventsInOrder(t *testing.T) {
 	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
 		Choices: []openRouterChoice{{
 			Message: openRouterMessage{
@@ -609,28 +607,37 @@ func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	// The two calls run concurrently, but their "about to call" status
-	// events are still emitted in call order from the outer sequential
-	// loop (assistant_run.go's runToolRound), not from inside the
-	// goroutines that do the actual work - so this stays deterministic. The
-	// final "delta" event is round 1's whole content ("done", 4 bytes) -
-	// short enough to stay entirely inside the hold-back window during
-	// streaming, so it never appears mid-round and is flushed whole once
-	// the round ends clean (assistant_run.go's run).
+	// The two calls run concurrently, but their "lookup" events are still
+	// emitted in call order from the outer sequential loop (assistant_run.go's
+	// runToolRound), not from inside the goroutines that do the actual work -
+	// so this stays deterministic. Their "lookup_done" events come from those
+	// goroutines, in whatever order the calls finish, so they are left out of
+	// the order here. The final "delta" event is round 1's whole content
+	// ("done", 4 bytes) - short enough to stay entirely inside the hold-back
+	// window during streaming, so it never appears mid-round and is flushed
+	// whole once the round ends clean (assistant_run.go's run).
 	want := []recordedEvent{
-		{event: "status", kind: "waiting"},
-		{event: "status", text: "Looking up Tongue Bay…"},
-		{event: "status", text: "Fetching wind forecast for 1.0000,2.0000…"},
-		{event: "status", kind: "waiting"},
+		{event: "round"},
+		{event: "lookup", text: "Looking up Tongue Bay…"},
+		{event: "lookup", text: "Fetching wind forecast for 1.0000,2.0000…"},
+		{event: "round_end"},
+		{event: "round"},
+		{event: "answer_start"},
 		{event: "delta", text: "done"},
+		{event: "round_end"},
 	}
-	if len(*events) != len(want) {
-		t.Fatalf("expected %d events, got %d: %+v", len(want), len(*events), *events)
+	var got []recordedEvent
+	for _, e := range *events {
+		if e.event != "lookup_done" {
+			got = append(got, e)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d events, got %d: %+v", len(want), len(got), got)
 	}
 	for i, w := range want {
-		got := (*events)[i]
-		if got.event != w.event || got.text != w.text || got.kind != w.kind {
-			t.Fatalf("event %d: got {%q %q %q}, want {%q %q %q}", i, got.event, got.text, got.kind, w.event, w.text, w.kind)
+		if got[i] != w {
+			t.Fatalf("event %d: got %+v, want %+v", i, got[i], w)
 		}
 	}
 }
@@ -677,14 +684,16 @@ func TestAssistantRunner_ToolExecutorErrorBecomesErrorJSONAndContinues(t *testin
 		t.Fatalf("expected the tool error trimmed to one line, got %q", toolMsg.Content)
 	}
 
-	foundFailureStatus := false
+	// The failure itself is on the stream as a lookup_done carrying the
+	// one-line reason (see TestEvents_LookupsCarryTheOperatorsWordsAndAreClosed).
+	foundDone := false
 	for _, e := range *events {
-		if e.event == "status" && e.text == "get_tides failed: tide station offline" {
-			foundFailureStatus = true
+		if e.event == "lookup_done" {
+			foundDone = true
 		}
 	}
-	if !foundFailureStatus {
-		t.Fatalf("expected a status event reporting the tool failure, got %+v", *events)
+	if !foundDone {
+		t.Fatalf("expected a lookup_done event closing the failed call, got %+v", *events)
 	}
 }
 
@@ -2041,14 +2050,14 @@ func TestAssistantRunner_NonAnthropicModelRequestHasNoCacheControl(t *testing.T)
 	}
 }
 
-// ── token streaming: delta/retract events (backend token streaming) ────────
+// ── token streaming: delta and chatter events (backend token streaming) ────
 //
-// run's onContent (assistant_run.go) turns openRouterChatCompletion's
-// streamed content fragments into "delta" SSE events, held back by
-// assistantSafeStreamLen's window so a text tool-call marker
-// (assistantTextToolCallMarker, ADR 0103) can never be revealed one
-// fragment at a time, and retracted with a "retract" event if the round
-// that streamed them turned out to end in tool calls rather than a final
+// run's round capture (assistant_round_capture.go) turns
+// openRouterChatCompletion's streamed content fragments into "delta" SSE
+// events, held back by assistantSafeStreamLen's window so a text tool-call
+// marker (assistantTextToolCallMarker, ADR 0103) can never be revealed one
+// fragment at a time, and into "chatter" events if the round
+// turned out to end in tool calls rather than a final
 // answer (ADR 0093 §2: text alongside tool calls is thinking aloud, not
 // the answer). These tests exercise that machinery directly against
 // runner.run, the same way every other test in this file does.
@@ -2082,10 +2091,9 @@ func TestAssistantRunner_DeltaEventsConcatenateToFinalContent(t *testing.T) {
 		t.Fatalf("unexpected content: %q", reply.Content)
 	}
 
+	// A short answer with no paragraph break is held until the round ends
+	// (ADR 0305), then sent whole.
 	fragments := deltaTexts(*events)
-	if len(fragments) < 2 {
-		t.Fatalf("expected the long answer to stream as more than one delta fragment, got %+v", fragments)
-	}
 	if got := strings.Join(fragments, ""); got != want {
 		t.Fatalf("expected delta fragments to concatenate to the final content, got %q, want %q", got, want)
 	}
@@ -2125,12 +2133,12 @@ func TestAssistantRunner_ForcedFinalRoundStreamsDeltas(t *testing.T) {
 	}
 }
 
-// TestAssistantRunner_RetractEmittedAfterTextAndToolCallRound builds a
+// TestAssistantRunner_ChatterEmittedForTextAndToolCallRound builds a
 // round whose message carries both thinking-aloud content and a tool call
-// in the same response - the shape ADR 0093 §2 describes - and checks a
-// "retract" event follows the streamed text, before the tool round's own
-// status events start.
-func TestAssistantRunner_RetractEmittedAfterTextAndToolCallRound(t *testing.T) {
+// in the same response - the shape ADR 0093 §2 describes - and checks the
+// text is chatter (ADR 0305), sent before the round's own lookup events and
+// never as part of the answer.
+func TestAssistantRunner_ChatterEmittedForTextAndToolCallRound(t *testing.T) {
 	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
 		Choices: []openRouterChoice{{
 			Message: openRouterMessage{
@@ -2153,37 +2161,40 @@ func TestAssistantRunner_RetractEmittedAfterTextAndToolCallRound(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	retractIdx := -1
-	toolStatusIdx := -1
+	chatterIdx := -1
+	lookupIdx := -1
 	for i, e := range *events {
-		if e.event == "retract" && retractIdx == -1 {
-			retractIdx = i
+		if e.event == "chatter" && chatterIdx == -1 {
+			chatterIdx = i
 		}
-		if e.event == "status" && strings.Contains(e.text, "wind forecast") && toolStatusIdx == -1 {
-			toolStatusIdx = i
+		if e.event == "lookup" && strings.Contains(e.text, "wind forecast") && lookupIdx == -1 {
+			lookupIdx = i
+		}
+		if e.event == "answer_withdrawn" {
+			t.Fatalf("short text before a tool call is chatter and is never taken back: %+v", *events)
 		}
 	}
-	if retractIdx == -1 {
-		t.Fatalf("expected a retract event after a round that streamed text and ended in a tool call, got %+v", *events)
+	if chatterIdx == -1 {
+		t.Fatalf("expected a chatter event for text that came with a tool call, got %+v", *events)
 	}
-	if toolStatusIdx == -1 {
-		t.Fatalf("expected a tool-call status event, got %+v", *events)
+	if lookupIdx == -1 {
+		t.Fatalf("expected a lookup event, got %+v", *events)
 	}
-	if retractIdx >= toolStatusIdx {
-		t.Fatalf("expected retract (%d) to precede the tool call's status event (%d)", retractIdx, toolStatusIdx)
+	if chatterIdx >= lookupIdx {
+		t.Fatalf("expected chatter (%d) to precede the lookup event (%d)", chatterIdx, lookupIdx)
 	}
 
-	fragments := deltaTexts(*events)
-	if len(fragments) == 0 {
-		t.Fatalf("expected the round's thinking-aloud text to have streamed as delta events before being retracted, got %+v", *events)
+	// None of the thinking aloud reached the answer.
+	if got := strings.Join(deltaTexts(*events), ""); got != "Looks comfortable overnight." {
+		t.Fatalf("deltas = %q, want only the final answer", got)
 	}
 }
 
-// TestAssistantRunner_NoRetractAfterToolOnlyRound is the negative case: a
+// TestAssistantRunner_NoChatterAfterToolOnlyRound is the negative case: a
 // round with tool calls and no content at all (toolCallResponse, exactly
-// like every other tool-only round elsewhere in this file) never emitted a
-// delta, so there is nothing to retract - and none is emitted.
-func TestAssistantRunner_NoRetractAfterToolOnlyRound(t *testing.T) {
+// like every other tool-only round elsewhere in this file) has no text to be
+// chatter, and nothing to withdraw.
+func TestAssistantRunner_NoChatterAfterToolOnlyRound(t *testing.T) {
 	round0 := toolCallResponse(t, "call_1", "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{})
 	round1 := finalResponse(t, "No tides needed after all.", "m", openRouterUsage{})
 
@@ -2197,8 +2208,8 @@ func TestAssistantRunner_NoRetractAfterToolOnlyRound(t *testing.T) {
 	}
 
 	for _, e := range *events {
-		if e.event == "retract" {
-			t.Fatalf("expected no retract event after a tool-only round with no streamed text, got %+v", *events)
+		if e.event == "answer_withdrawn" || e.event == "chatter" {
+			t.Fatalf("expected no chatter or withdrawal after a tool-only round with no streamed text, got %+v", *events)
 		}
 	}
 }

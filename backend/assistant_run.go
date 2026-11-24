@@ -9,7 +9,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -117,6 +116,16 @@ const assistantRoundFullError = assistantNotRunPrefix + " round already at the c
 // assistantToolWithheldError is the error recorded on a call to a tool that is
 // withheld after repeated failures.
 const assistantToolWithheldError = assistantNotRunPrefix + " tool withheld after repeated failures"
+
+// assistantToolCutError is the error recorded on a call that was still running
+// when the tool phase's time ran out. It did run, so the run's lookup count
+// includes it; it carries no assistantNotRunPrefix.
+const assistantToolCutError = "cut off: the tool phase ran out of time"
+
+// assistantLookupStoppedText is what a lookup still running when the operator
+// pressed Stop says on the stream. Stop is not the tool phase's time limit, so
+// it is an error, not a cut.
+const assistantLookupStoppedText = "stopped"
 
 // assistantToolPhaseTimeout bounds the tool phase of one reply: when it passes,
 // no tool round starts and one in flight is abandoned (ADR 0240). A var so a
@@ -339,64 +348,193 @@ func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry, for
 }
 
 // mateEvent is one event on Mate's browser stream. The set is closed: only
-// the five types below implement it, and the frontend decodes exactly these
+// the types below implement it, and the frontend decodes exactly these
 // (frontend/src/lib/mate-events.ts). testdata/mate_events holds the bytes
-// each one puts on the wire, shared by both sides' tests (ADR 0189).
+// each one puts on the wire, shared by both sides' tests (ADR 0189, ADR 0305).
 type mateEvent interface {
 	mateEventName() string
 }
 
-// mateStatusEvent says what the run is doing: a tool call, a skipped call.
-// Text is always on the wire, even when empty.
-type mateStatusEvent struct {
-	Text string `json:"text"`
-}
-
-// mateWaitingEvent is the status for "waiting on the model, no tool running".
-// It carries a kind and no text, so the browser chooses the words. It is a
-// "status" on the wire, distinct from mateStatusEvent so the two shapes can
-// never mix.
-type mateWaitingEvent struct {
-	Kind string `json:"kind"`
-}
-
-// mateWaitingStatus builds the waiting status.
-func mateWaitingStatus() mateWaitingEvent { return mateWaitingEvent{Kind: "waiting"} }
-
-// mateDeltaEvent is one fragment of the round's answer text as it streams in.
+// mateDeltaEvent is one fragment of the answer as it streams in. Only text
+// taken for the answer is ever a delta (see assistantRoundCapture).
 type mateDeltaEvent struct {
 	Text string `json:"text"`
 }
 
-// mateRetractEvent tells the browser to discard the delta text it has shown
-// for the round just finished (the round ended in a tool call).
-type mateRetractEvent struct{}
+// mateRoundEvent opens one round: one completion the model is asked for. Final
+// is true on the round that has the tools withdrawn to get an answer. AtMs is
+// milliseconds from the run's start, as on every event that carries it.
+type mateRoundEvent struct {
+	Round int   `json:"round"`
+	AtMs  int64 `json:"at_ms"`
+	Final bool  `json:"final"`
+}
+
+// mateReasoningEvent is a fragment of the reasoning the model chose to show.
+// Reasoning arrives coalesced (assistantRoundCapture), so one event carries
+// the fragments of about a tenth of a second.
+type mateReasoningEvent struct {
+	Round int    `json:"round"`
+	Text  string `json:"text"`
+}
+
+// mateChatterEvent is a fragment of the text a round wrote alongside its tool
+// calls: thinking aloud, never the answer. Coalesced like reasoning.
+type mateChatterEvent struct {
+	Round int    `json:"round"`
+	Text  string `json:"text"`
+}
+
+// What a lookup event says about a call that was not run.
+const (
+	mateSkippedWithheld  = "withheld"
+	mateSkippedRoundFull = "round_full"
+)
+
+// mateLookupEvent says a tool call is starting. Text is the operator's wording
+// of it (describeAssistantToolCall), never the tool's name. Skipped is "" for
+// a call that runs, and names why for one that was refused or withheld; such a
+// call gets no lookup_done. Seq is the call's place in its round.
+type mateLookupEvent struct {
+	Round   int    `json:"round"`
+	Seq     int    `json:"seq"`
+	AtMs    int64  `json:"at_ms"`
+	Text    string `json:"text"`
+	Skipped string `json:"skipped"`
+}
+
+// mateLookupDoneEvent says a lookup finished. Error is the one-line reason
+// when it failed, and empty when it succeeded. Cut says the lookup was
+// abandoned at the tool phase's time limit: it did not fail, it was not let
+// finish. A cut lookup has no Error. The field is left out when false, so every
+// other frame keeps its bytes.
+type mateLookupDoneEvent struct {
+	Round int    `json:"round"`
+	Seq   int    `json:"seq"`
+	AtMs  int64  `json:"at_ms"`
+	Error string `json:"error"`
+	Cut   bool   `json:"cut,omitempty"`
+}
+
+// mateAnswerStartEvent says a round's text has been taken for the answer: the
+// deltas that follow are it. AtMs is when the answer began.
+type mateAnswerStartEvent struct {
+	Round int   `json:"round"`
+	AtMs  int64 `json:"at_ms"`
+}
+
+// Why text taken for the answer was taken back. "lookups": the round went on to
+// ask for tools. "cut_off": the tool phase ended while the round was writing.
+// "failed": the round's completion failed or its text could not be used.
+const (
+	mateWithdrawnLookups = "lookups"
+	mateWithdrawnCutOff  = "cut_off"
+	mateWithdrawnFailed  = "failed"
+)
+
+// mateAnswerWithdrawnEvent says the text already shown as the answer was not
+// it after all, and is the round's chatter instead.
+type mateAnswerWithdrawnEvent struct {
+	Round  int    `json:"round"`
+	AtMs   int64  `json:"at_ms"`
+	Reason string `json:"reason"`
+}
+
+// mateDraftSentBackEvent says the draft failed Helmcentral's own check and the
+// model was asked to look again. Draft is the whole of it, including the bytes
+// the stream was still holding back; the browser takes it out of the answer.
+type mateDraftSentBackEvent struct {
+	Round    int      `json:"round"`
+	AtMs     int64    `json:"at_ms"`
+	Triggers []string `json:"triggers"`
+	Draft    string   `json:"draft"`
+}
+
+// mateRoundEndEvent closes a round. Reasoning is what the model gave of it:
+// "text", "private", "none", or "" when the round never reached the model's
+// output (its request failed first). ReasoningBytes is the size of all the
+// reasoning text the model gave, which is more than the reasoning events carry
+// when the round ran past assistantReasoningMaxBytes.
+type mateRoundEndEvent struct {
+	Round            int     `json:"round"`
+	AtMs             int64   `json:"at_ms"`
+	Reasoning        string  `json:"reasoning"`
+	ReasoningBytes   int     `json:"reasoning_bytes"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CachedTokens     int     `json:"cached_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+}
+
+// mateClockEvent tells a subscriber how far into the run the server is, so the
+// browser can place every at_ms on its own clock. It is written at the start of
+// each subscription and never kept in the run's log.
+type mateClockEvent struct {
+	AtMs int64 `json:"at_ms"`
+}
+
+// mateRunRef is the stored trace of the run that produced a reply.
+type mateRunRef struct {
+	ID        string `json:"id"`
+	ThoughtMs *int64 `json:"thought_ms"`
+	Lookups   int    `json:"lookups"`
+}
 
 // mateMessageEvent is the stored reply and its conversation, sent once when
 // the run succeeds. Conversation is declared first to keep the key order the
-// wire has always had.
+// wire has always had. Run is absent when the run's trace could not be kept.
 type mateMessageEvent struct {
 	Conversation assistantConversation `json:"conversation"`
 	Message      assistantMessage      `json:"message"`
+	Run          *mateRunRef           `json:"run,omitempty"`
 }
 
-// mateErrorEvent ends a run that failed or was stopped.
+// mateErrorEvent ends a run that failed or was stopped. RunID names the stored
+// trace, and is absent when none was kept.
 type mateErrorEvent struct {
 	Error string `json:"error"`
+	RunID string `json:"run_id,omitempty"`
 }
 
-func (mateStatusEvent) mateEventName() string  { return "status" }
-func (mateWaitingEvent) mateEventName() string { return "status" }
+// mateErrorFor builds the error event for a run whose trace is ref (nil when
+// none was kept).
+func mateErrorFor(message string, ref *mateRunRef) mateErrorEvent {
+	ev := mateErrorEvent{Error: message}
+	if ref != nil {
+		ev.RunID = ref.ID
+	}
+	return ev
+}
+
 func (mateDeltaEvent) mateEventName() string   { return "delta" }
-func (mateRetractEvent) mateEventName() string { return "retract" }
 func (mateMessageEvent) mateEventName() string { return "message" }
 func (mateErrorEvent) mateEventName() string   { return "error" }
 
+func (mateRoundEvent) mateEventName() string           { return "round" }
+func (mateReasoningEvent) mateEventName() string       { return "reasoning" }
+func (mateChatterEvent) mateEventName() string         { return "chatter" }
+func (mateLookupEvent) mateEventName() string          { return "lookup" }
+func (mateLookupDoneEvent) mateEventName() string      { return "lookup_done" }
+func (mateAnswerStartEvent) mateEventName() string     { return "answer_start" }
+func (mateAnswerWithdrawnEvent) mateEventName() string { return "answer_withdrawn" }
+func (mateDraftSentBackEvent) mateEventName() string   { return "draft_sent_back" }
+func (mateRoundEndEvent) mateEventName() string        { return "round_end" }
+func (mateClockEvent) mateEventName() string           { return "clock" }
+
 // assistantEmitter pushes one progress event to the SSE stream a caller is
-// writing (assistant_handlers.go). The runner emits status, delta and
-// retract; "message" and "error" are the handler's own, sent once run has
-// returned.
+// writing (assistant_handlers.go). The runner emits the round, reasoning,
+// chatter, lookup and answer events; "message" and "error" are the handler's
+// own, sent once run has returned.
 type assistantEmitter func(mateEvent)
+
+// sender is how the runner puts an event on the stream: the emitter, or nothing
+// that sends nothing for an unattended run, which nobody is watching.
+func (r *assistantRunner) sender() assistantEmitter {
+	if r.options.Unattended || r.emit == nil {
+		return func(mateEvent) {}
+	}
+	return r.emit
+}
 
 // assistantToolExecutor is the minimal seam the loop needs from its tool
 // dependencies. assistantToolDeps (assistant_tools.go) satisfies it in
@@ -477,8 +615,8 @@ var assistantTextToolCallMarkers = []string{
 // search_documents now put arbitrary uploaded document text in front of
 // the model, and an operator asking what a document about LLM tooling says
 // can get a marker like "<tool_call>" quoted straight back at them (M-3
-// finding). This function stays a pure substring probe regardless - run's
-// onContent needs to react to a marker's mere presence, live, before
+// finding). This function stays a pure substring probe regardless -
+// assistantRoundCapture.advance needs to react to a marker's mere presence, live, before
 // enough of the round has arrived to judge anything more (the streaming
 // hold-back window, assistantSafeStreamLen, has to err toward caution) -
 // but the decision that actually rejects a reply as a broken tool call
@@ -572,8 +710,8 @@ func assistantMarkerIsQuoted(content string, idx int) bool {
 }
 
 // assistantTextToolCallMarkerMaxLen is the byte length of the longest
-// marker in assistantTextToolCallMarkers. run's onContent uses it to size
-// the streaming hold-back window (assistantSafeStreamLen below): as long as
+// marker in assistantTextToolCallMarkers. assistantRoundCapture.advance uses it
+// to size the streaming hold-back window (assistantSafeStreamLen below): as long as
 // a round's whole accumulated-so-far text has been scanned for a marker and
 // none was found, withholding its trailing assistantTextToolCallMarkerMaxLen-1
 // bytes at every point guarantees no marker can ever be revealed one
@@ -711,32 +849,27 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // of assistantFinalReserve, so the whole call is bounded by
 // assistantRunCeiling; cancelling ctx ends it at once.
 //
-// Each round's text streams live to the operator as "delta" events, built
-// from the onContent callback openRouterChatCompletion invokes once per
-// content fragment as OpenRouter sends it (this is the follow-up ADR 0093
-// §5 recorded as out of scope for v1). onContent is only ever called from
-// here, synchronously, inside this same call to openRouterChatCompletion -
-// never from a goroutine - so it can call r.emit directly with no locking
-// of its own; runToolRound's own goroutines, which do need r.emit's calls
-// serialised through their local mu, only start after this round's
-// completion call has already returned.
+// Each round's output streams live to the operator through the round's
+// assistantRoundCapture, whose hooks openRouterChatCompletion calls once per
+// fragment as OpenRouter sends it (the follow-up ADR 0093 §5 recorded as out
+// of scope for v1). The hooks run synchronously inside that call, never from a
+// goroutine, so the capture emits with no locking of its own; runToolRound's
+// own goroutines, which do need their emits serialised through their local mu,
+// only start after the round's completion has returned.
 //
-// A round's text is never forwarded to the browser blindly, for two
-// reasons layered on top of each other. First (ADR 0093 §2's "text
-// alongside tool calls is thinking aloud, not the answer"): a round that
-// ends with tool calls was never going to keep its streamed text as the
-// final reply, so if any of it reached the operator it has to be visibly
-// taken back - see the retract event below. Second, and the reason
-// forwarding is held back rather than sent immediately and retracted
-// later (ADR 0103's text-tool-call-markup rejection): a model can emit its
-// tool call as raw text markup instead of a real answer, and that markup
-// must never be shown even for the instant before a retract could arrive.
+// A round's text is never forwarded blindly, for two reasons layered on top of
+// each other. First (ADR 0093 §2's "text alongside tool calls is thinking
+// aloud, not the answer", as ADR 0305 now keeps it): text is held briefly, and
+// is chatter if a tool call begins, the answer if it does not; the rare
+// opening that was promoted to the answer and then ended in tools is taken
+// back with an answer_withdrawn event. Second (ADR 0103's text-tool-call-markup
+// rejection): a model can emit its tool call as raw text markup instead of a
+// real answer, and that markup must never be shown, in any lane.
 // assistantSafeStreamLen's hold-back window means a marker can never be
 // forwarded one streamed fragment at a time regardless of where OpenRouter
-// happens to split it across chunks - see that function's own doc comment
-// for the proof - and once assistantTextToolCallMarker finds a marker in
-// the round's accumulated text, no further delta is emitted for the rest
-// of the round at all.
+// happens to split it across chunks - see that function's own doc comment for
+// the proof - and once assistantTextToolCallMarker finds a marker in the
+// round's accumulated text, nothing more of it is forwarded.
 // assistantCostMeter keeps what a run has been charged so far, so a caller can
 // read it even when the run fails and returns no reply. A watch review (ADR
 // 0227) needs it to show what the review cost. A request that failed after OpenRouter
@@ -872,6 +1005,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	started := time.Now()
 	meter := assistantCostMeterFrom(ctx)
 	recorder := assistantRunRecorderFrom(ctx)
+	// runStart is the clock every at_ms on the stream and every time in the
+	// trace counts from. It is taken just before the first request to the model,
+	// so only the model's own work is timed.
+	var runStart time.Time
 	verbose := r.options.VerboseRunLog
 	runID := assistantConversationIDFrom(ctx)
 
@@ -986,7 +1123,16 @@ forcedLoop:
 			forced = budgetReason(toolRounds)
 		}
 		forcedFinal := forced != ""
-		r.emit(mateWaitingStatus())
+
+		// The capture is where this round's stream is observed and sorted into
+		// the lanes the operator sees (assistantRoundCapture): reasoning, chatter,
+		// the answer. It owns the round's text; the runner decides, once the
+		// round is over, what the text turned out to be.
+		if round == 0 {
+			runStart = recorder.begin(assistantRunClock())
+		}
+		capture := newAssistantRoundCapture(r.sender(), runStart, round, forcedFinal)
+		startMs := capture.begin()
 
 		// session_id makes OpenRouter keep this conversation on one
 		// provider, so its prompt cache is reused. Without it the routing
@@ -1050,8 +1196,9 @@ forcedLoop:
 
 		// tr is this round's entry in the run's trace; commit files it, with
 		// a one-line log when the operator has asked for the verbose log.
-		tr := assistantTraceRound{Index: round, StartOffsetMs: time.Since(started).Milliseconds(), ForcedFinal: forcedFinal}
+		tr := assistantTraceRound{Index: round, StartOffsetMs: startMs, ForcedFinal: forcedFinal}
 		commit := func(state string) {
+			defer capture.end(&tr)
 			switch state {
 			case "progress", "no progress":
 				tr.Kind = assistantRoundLookups
@@ -1081,46 +1228,6 @@ forcedLoop:
 			}
 		}
 
-		// roundText mirrors, fragment by fragment, the content
-		// openRouterChatCompletion is assembling for this round - kept here
-		// too (rather than only reading the final resp.Choices[0].Message.
-		// Content once the round ends) because the marker scan and the
-		// hold-back window both need to run live, as each fragment arrives,
-		// not only once the whole round is in hand. emittedLen is how many
-		// of roundText's bytes have already gone out as delta events;
-		// markerFound latches once assistantTextToolCallMarker finds a
-		// marker in roundText, after which onContent stops doing anything
-		// at all for the rest of the round.
-		var (
-			roundText    strings.Builder
-			emittedLen   int
-			markerFound  bool
-			deltaEmitted bool
-			textStarted  atomic.Bool
-		)
-		onContent := func(fragment string) {
-			if markerFound {
-				return
-			}
-			textStarted.Store(true)
-			roundText.WriteString(fragment)
-			text := roundText.String()
-			if _, found := assistantTextToolCallMarker(text); found {
-				markerFound = true
-				return
-			}
-			safeLen := assistantSafeStreamLen(text)
-			if safeLen <= emittedLen {
-				return
-			}
-			r.emit(mateDeltaEvent{Text: text[emittedLen:safeLen]})
-			emittedLen = safeLen
-			deltaEmitted = true
-		}
-
-		// The capture is where this round's stream is observed: what the trace
-		// keeps beyond the calls, and the live text forwarded to onContent.
-		capture := newAssistantRoundCapture(onContent, recorder.startOr(started))
 		hooks := capture.hooks()
 
 		// The forced final completion starts its own clock, so it never
@@ -1147,7 +1254,7 @@ forcedLoop:
 		stopAtToolEnd := func() bool { return false }
 		if !forcedFinal {
 			stopAtToolEnd = context.AfterFunc(toolCtx, func() {
-				if !textStarted.Load() {
+				if !capture.textStarted.Load() {
 					cancelCompletion()
 				}
 			})
@@ -1176,13 +1283,12 @@ forcedLoop:
 			// The tool phase ran out of time during this completion: take back
 			// what it had shown and go to the final answer.
 			if toolPhaseOver {
+				capture.resolve(assistantRoundOutcome{kind: roundCutOff}, &tr)
 				commit("cut off by time")
-				if deltaEmitted {
-					r.emit(mateRetractEvent{})
-				}
 				forced = assistantStopTimeCeiling
 				continue
 			}
+			capture.resolve(assistantRoundOutcome{kind: roundFailed}, &tr)
 			commit("completion failed")
 			return assistantReply{}, err
 		}
@@ -1208,6 +1314,7 @@ forcedLoop:
 			if marker, found := assistantTextToolCallMarkerIsGenuine(content); found {
 				ferr := fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
 				tr.Error = firstErrorLine(ferr)
+				capture.resolve(assistantRoundOutcome{kind: roundFailed}, &tr)
 				commit("tool call written as text")
 				return assistantReply{}, ferr
 			}
@@ -1222,6 +1329,7 @@ forcedLoop:
 			if forcedFinal && strings.TrimSpace(content) == "" {
 				ferr := fmt.Errorf("the assistant did not produce an answer after %d tool rounds (the final round returned no text)", toolRounds)
 				tr.Error = firstErrorLine(ferr)
+				capture.resolve(assistantRoundOutcome{kind: roundFailed}, &tr)
 				commit("empty final answer")
 				return assistantReply{}, ferr
 			}
@@ -1248,35 +1356,23 @@ forcedLoop:
 				// The correction was sent and the draft still fails the
 				// check. Accept the answer, but say so in the log.
 				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
-				tr.CheckTriggers = triggers
 			case budgetReason(toolRounds) == "":
 				sentBackTrigger, callsAtSendBack = trigger, len(record)
-				// The draft is held in CheckDraft, so it is not also chatter.
-				tr.CheckTriggers, tr.CheckDraft, tr.Chatter = triggers, content, ""
 				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
-				// The draft already streamed in part is withdrawn the same
-				// way a tool round's thinking aloud is.
-				if deltaEmitted {
-					r.emit(mateRetractEvent{})
-				}
+				capture.resolve(assistantRoundOutcome{kind: roundSentBack, triggers: triggers}, &tr)
 				messages = append(messages, choice, openRouterMessage{Role: "user", Content: openRouterContent(instruction)})
 				commit("draft sent back")
 				continue
 			default:
 				// No round left to send it back in.
 				log.Printf("assistant: draft check: draft has a %s; accepted as is (budget used up)", trigger)
-				tr.CheckTriggers = triggers
 			}
-			// The round ended clean: flush whatever the hold-back window
-			// was still withholding, so the operator sees the reply in
-			// full rather than missing its last few bytes.
-			if tail := content[emittedLen:]; tail != "" {
-				r.emit(mateDeltaEvent{Text: tail})
-			}
+			// The round ended clean: the text is the answer, and whatever the
+			// hold-back window was still withholding goes out, so the operator
+			// sees the reply in full rather than missing its last few bytes.
+			capture.resolve(assistantRoundOutcome{kind: roundAnswered, triggers: triggers}, &tr)
 			reply.Content = content
 			reply.ToolRounds = toolRounds
-			// The answer is not chatter.
-			tr.Chatter = ""
 			commit("answer")
 			return reply, nil
 		}
@@ -1285,7 +1381,11 @@ forcedLoop:
 			// An unattended run files its result with its submit tool, which the
 			// forced final answer keeps: that call is run, and the run is done.
 			if r.options.SubmitTool != "" && onlyToolCalls(choice.ToolCalls, r.options.SubmitTool) {
-				filedMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
+				// The round asked for a tool, so its text was not given as an
+				// answer: the stream and the trace settle it as they do any round
+				// that asked for one, whether the filing works or not.
+				capture.resolve(assistantRoundOutcome{kind: roundAskedForTools}, &tr)
+				filedMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures, capture)
 				for i := range calls {
 					calls[i].Round = round
 				}
@@ -1326,6 +1426,7 @@ forcedLoop:
 			}
 			ferr := fmt.Errorf("the assistant did not produce an answer after %d tool rounds (it kept calling tools when asked to answer)", toolRounds)
 			tr.Error = firstErrorLine(ferr)
+			capture.resolve(assistantRoundOutcome{kind: roundFailed}, &tr)
 			commit("tool calls on the final round")
 			return assistantReply{}, ferr
 		}
@@ -1334,9 +1435,7 @@ forcedLoop:
 		// began text and then asked for tools is not run. Its text is withdrawn
 		// and the final answer follows.
 		if toolCtx.Err() != nil {
-			if deltaEmitted {
-				r.emit(mateRetractEvent{})
-			}
+			capture.resolve(assistantRoundOutcome{kind: roundCutOff}, &tr)
 			forced = assistantStopTimeCeiling
 			commit("cut off by time")
 			continue
@@ -1344,15 +1443,12 @@ forcedLoop:
 
 		messages = append(messages, choice)
 
-		// This round's text (if any reached the operator at all) was never
-		// going to be the final answer - it ended in tool calls, so
-		// whatever was shown has to be visibly withdrawn before the tool
-		// statuses below start arriving (ADR 0093 §2).
-		if deltaEmitted {
-			r.emit(mateRetractEvent{})
-		}
+		// This round's text was never going to be the final answer - it ended
+		// in tool calls (ADR 0093 §2). It is chatter; if any of it was already
+		// taken for the answer, it is taken back before the lookups start.
+		capture.resolve(assistantRoundOutcome{kind: roundAskedForTools}, &tr)
 
-		toolMessages, calls, terr := r.runToolRound(toolCtx, choice.ToolCalls, failures)
+		toolMessages, calls, terr := r.runToolRound(toolCtx, choice.ToolCalls, failures, capture)
 		record.addRound(choice.ToolCalls, toolMessages, calls)
 		// collectResults lifts each call's result into the reply and the
 		// forced-final log. finishedOnly skips the calls a round cut short
@@ -1509,13 +1605,14 @@ func assistantForcedReasonText(forced string, b assistantRunBudget) string {
 // via assistantExcessToolCallResult, checked first - a call beyond the cap
 // is refused regardless of whether its own tool has ever failed.
 //
-// The "about to call" status event for each dispatched call is emitted
-// here in the outer, sequential loop, before that call's goroutine is even
-// started, so the SSE stream still announces tool calls in the order the
-// model asked for them - only the actual work (and a failure's status
-// event) happens concurrently. r.emit itself is not safe for concurrent use
-// (it writes SSE frames straight to the HTTP response), so every call to it
-// from inside a goroutine below is serialised through mu.
+// The lookup event for each dispatched call is emitted here in the outer,
+// sequential loop, before that call's goroutine is even started, so the SSE
+// stream still announces tool calls in the order the model asked for them -
+// only the actual work (and its lookup_done event) happens concurrently. The
+// capture is not safe for concurrent use: its pending reasoning and chatter
+// buffer and its send path (which flushes that buffer before each event) are
+// plain state. So mu guards every call to the capture from the goroutines
+// below, and the events keep one order.
 //
 // All of a round's calls run concurrently (semaphore of 4, at most 20 calls
 // per round), so a tool that writes must be safe under concurrency by
@@ -1541,7 +1638,7 @@ func assistantForcedReasonText(forced string, b assistantRunBudget) string {
 //
 // Whoever adds a tool that mutates shared state must make it safe on its own
 // (its own lock or an idempotency rule) and name it here.
-func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, []assistantToolCall, error) {
+func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures, capture *assistantRoundCapture) ([]openRouterMessage, []assistantToolCall, error) {
 	for _, call := range calls {
 		if call.ID == "" {
 			return nil, nil, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
@@ -1557,6 +1654,9 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 	var mu sync.Mutex
 	var firstErr error
 	abandoned := false
+	// running marks the calls announced with a lookup event and not yet closed
+	// with a lookup_done, so every announced call is closed whatever ends it.
+	running := make([]bool, len(calls))
 
 	for i, call := range calls {
 		args := json.RawMessage(call.Function.Arguments)
@@ -1580,7 +1680,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			}
 			log.Printf("assistant: tool %s REFUSED, round already at the %d-call limit", call.Function.Name, assistantMaxToolCallsPerRound)
 			mu.Lock()
-			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)})
+			capture.lookup(i, call, args, mateSkippedRoundFull)
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
 			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: assistantRoundFullError}
@@ -1606,7 +1706,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			}
 			log.Printf("assistant: tool %s WITHHELD, already failed %d times", call.Function.Name, assistantMaxToolFailures)
 			mu.Lock()
-			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)})
+			capture.lookup(i, call, args, mateSkippedWithheld)
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
 			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: assistantToolWithheldError}
@@ -1630,7 +1730,8 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 		}
 
 		mu.Lock()
-		r.emit(mateStatusEvent{Text: describeAssistantToolCall(call.Function.Name, args)})
+		capture.lookup(i, call, args, "")
+		running[i] = true
 		mu.Unlock()
 		log.Printf("assistant: tool %s %s", call.Function.Name, compactAssistantToolArgs(args))
 
@@ -1653,27 +1754,50 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 					if firstErr == nil {
 						firstErr = fmt.Errorf("marshal tool error for %q: %w", call.Function.Name, merr)
 					}
+					// The call is stored with the failure before it is closed, as
+					// on every other path, so the trace and the stream agree.
+					if !abandoned {
+						rec.Error = oneLine
+						records[i] = rec
+						results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(oneLine), ToolCallID: call.ID}
+						if running[i] {
+							running[i] = false
+							capture.lookupDone(i, "the lookup failed and its error could not be recorded")
+						}
+					}
 					mu.Unlock()
 					return
 				}
 				result = string(errBody)
 				rec.Error = oneLine
-				mu.Lock()
-				if !abandoned {
-					r.emit(mateStatusEvent{Text: fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)})
-				}
-				mu.Unlock()
 			} else {
 				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))
 			}
-
+			// A tool that stopped because the tool phase's own time ran out was
+			// cut off, not failed.
+			// One that stopped because the run's context was cancelled (the
+			// operator pressed Stop) was stopped.
+			toolEnded := terr != nil && (errors.Is(terr, context.DeadlineExceeded) || errors.Is(terr, context.Canceled))
+			timedOut := toolEnded && errors.Is(ctx.Err(), context.DeadlineExceeded)
+			stopped := toolEnded && errors.Is(ctx.Err(), context.Canceled)
 			rec.Result, rec.ResultBytes = result, len(result)
-			// Under mu: a round abandoned at the end of the tool phase has
-			// already taken its copy of the slots, and what a straggler writes
-			// here afterwards is discarded.
+			// One critical section stores the call and says it is done, the
+			// record first: a round abandoned at the end of the tool phase has
+			// taken both or neither, so the stream and the trace agree. What a
+			// straggler writes after the abandonment is discarded.
 			mu.Lock()
 			records[i] = rec
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(result), ToolCallID: call.ID}
+			if !abandoned && running[i] {
+				running[i] = false
+				if timedOut {
+					capture.lookupCut(i)
+				} else if stopped {
+					capture.lookupDone(i, assistantLookupStoppedText)
+				} else {
+					capture.lookupDone(i, rec.Error)
+				}
+			}
 			mu.Unlock()
 		}(i, call, args)
 	}
@@ -1699,6 +1823,25 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 	default:
 		mu.Lock()
 		abandoned = true
+		// Only the tool phase's own time limit is a cut. When the run's context
+		// was cancelled (Stop) the lookup is closed as stopped. Either way the
+		// call is in the trace, as one that ran.
+		timeLimit := errors.Is(ctx.Err(), context.DeadlineExceeded)
+		for i, open := range running {
+			if !open {
+				continue
+			}
+			running[i] = false
+			rec := assistantToolCall{Seq: i, Name: calls[i].Function.Name, Args: string(calls[i].Function.Arguments)}
+			if timeLimit {
+				rec.Error = assistantToolCutError
+				capture.lookupCut(i)
+			} else {
+				rec.Error = assistantLookupStoppedText
+				capture.lookupDone(i, assistantLookupStoppedText)
+			}
+			records[i] = rec
+		}
 		heldResults := append([]openRouterMessage(nil), results...)
 		heldRecords := append([]assistantToolCall(nil), records...)
 		err := firstErr

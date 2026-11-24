@@ -1204,10 +1204,10 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	runCtx = withSkipperMessage(runCtx, skipperMessage(messages))
 	// The run's trace (ADR 0240): the runner records its rounds here and the
 	// goroutine below stores it however the run ends.
-	// The recorder carries the start so the rounds' timings and the run's
-	// duration share one clock.
-	runStarted := time.Now()
-	recorder := &assistantRunRecorder{startedAt: runStarted}
+	// The runner takes the run's start just before its first request to the
+	// model and tells the recorder, which tells the run: the trace, the rounds'
+	// timings and the stream's clock all count from that one instant.
+	recorder := &assistantRunRecorder{onStart: run.setStarted}
 	runCtx = withAssistantRunRecorder(runCtx, recorder)
 	afterSeq := 0
 	if len(messages) > 0 {
@@ -1215,12 +1215,17 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	}
 	// saveTrace stores the run (ADR 0240). answerID is empty when it gave no
 	// answer. A failure to store is logged and does not undo the answer saved.
+	// It returns what the stream tells the browser about the stored run, nil
+	// when none was kept; a second call returns the first call's.
 	saved := false
-	saveTrace := func(answerID, model string, runErr error) {
+	var savedRef *mateRunRef
+	saveTrace := func(answerID, model string, runErr error) *mateRunRef {
 		if saved {
-			return
+			return savedRef
 		}
 		saved = true
+		// A run that failed before its first request never took a start.
+		runStarted := recorder.startOr(assistantRunClock())
 		rounds, stop := recorder.result()
 		if stop == "" {
 			// The runner never said (a test double, or a crash before it could).
@@ -1246,9 +1251,13 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		if runErr != nil {
 			trace.Error = firstErrorLine(runErr)
 		}
-		if _, err := store.SaveRun(trace); err != nil {
+		stored, err := store.SaveRun(trace)
+		if err != nil {
 			log.Printf("assistant: store the trace of the run for conversation %s: %v", id, err)
+			return nil
 		}
+		savedRef = &mateRunRef{ID: stored.ID, ThoughtMs: stored.ThoughtMs, Lookups: stored.LookupCount}
+		return savedRef
 	}
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
@@ -1267,21 +1276,21 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("assistant: run for conversation %s panicked: %v\n%s", id, r, debug.Stack())
-				saveTrace("", "", fmt.Errorf("the assistant run crashed: %v", r))
-				run.append(mateErrorEvent{Error: fmt.Sprintf("the assistant run crashed: %v", r)})
+				ref := saveTrace("", "", fmt.Errorf("the assistant run crashed: %v", r))
+				run.append(mateErrorFor(fmt.Sprintf("the assistant run crashed: %v", r), ref))
 				run.finish()
 			}
 		}()
 
 		reply, runErr := runner.run(runCtx, systemStable, systemLive, history)
 		if runErr != nil {
-			saveTrace("", reply.Model, runErr)
+			ref := saveTrace("", reply.Model, runErr)
 			if run.wasCancelled() {
 				log.Printf("assistant: run for conversation %s stopped by the operator", id)
-				run.append(mateErrorEvent{Error: "stopped"})
+				run.append(mateErrorFor("stopped", ref))
 			} else {
 				log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
-				run.append(mateErrorEvent{Error: firstErrorLine(runErr)})
+				run.append(mateErrorFor(firstErrorLine(runErr), ref))
 			}
 			run.finish()
 			return
@@ -1292,8 +1301,8 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
 			if err := store.SetTitle(id, summaryTitle); err != nil {
 				log.Printf("assistant: update conversation summary title for %s: %v", id, err)
-				saveTrace("", reply.Model, err)
-				run.append(mateErrorEvent{Error: firstErrorLine(err)})
+				ref := saveTrace("", reply.Model, err)
+				run.append(mateErrorFor(firstErrorLine(err), ref))
 				run.finish()
 				return
 			}
@@ -1320,23 +1329,23 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)
-			saveTrace("", reply.Model, err)
-			run.append(mateErrorEvent{Error: firstErrorLine(err)})
+			ref := saveTrace("", reply.Model, err)
+			run.append(mateErrorFor(firstErrorLine(err), ref))
 			run.finish()
 			return
 		}
 
-		saveTrace(assistantRow.ID, reply.Model, nil)
+		ref := saveTrace(assistantRow.ID, reply.Model, nil)
 
 		updatedConv, ok, err := store.GetConversation(id)
 		if err != nil || !ok {
 			log.Printf("assistant: reload conversation %s after reply: ok=%v err=%v", id, ok, err)
-			run.append(mateErrorEvent{Error: "failed to reload the conversation after the reply"})
+			run.append(mateErrorFor("failed to reload the conversation after the reply", ref))
 			run.finish()
 			return
 		}
 
-		run.append(mateMessageEvent{Message: assistantRow, Conversation: updatedConv})
+		run.append(mateMessageEvent{Message: assistantRow, Conversation: updatedConv, Run: ref})
 		run.finish()
 	}()
 	return nil

@@ -160,7 +160,7 @@ func TestActivity_SeparateReasoningEntriesAreKeptApartAndOneEntryIsNot(t *testin
 }
 
 func TestActivity_AnAnswerThatStartsWithWhitespaceStampsTheFirstRealText(t *testing.T) {
-	c := newAssistantRoundCapture(func(string) {}, time.Now())
+	c := newAssistantRoundCapture(func(mateEvent) {}, time.Now(), 0, false)
 	hooks := c.hooks()
 	hooks.Content("\n")
 	time.Sleep(40 * time.Millisecond)
@@ -661,23 +661,8 @@ func TestActivity_ThoughtTimeIsStoredOnlyForASavedAnswer(t *testing.T) {
 	}
 }
 
-func TestActivity_ContentStartIsMeasuredFromTheRunsOwnStart(t *testing.T) {
-	doer := queued(activityResponse(activityChunk(activityContent("High at six.")), activityFinish("stop")))
-	emit, _ := recordingEmitter()
-	// The handler started the run two seconds before the runner did.
-	rec := &assistantRunRecorder{startedAt: time.Now().Add(-2 * time.Second)}
-	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &fakeToolExecutor{}, emit: emit}
-	if _, err := runner.run(withAssistantRunRecorder(context.Background(), rec), "system", "", nil); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	rounds, _ := rec.result()
-	if ms := rounds[0].ContentStartMs; ms == nil || *ms < 2000 {
-		t.Fatalf("content_start_ms = %v, want at least 2000 (the gap before the runner started counts)", ms)
-	}
-}
-
 func TestActivity_ACaptureWithNoLiveCallbackDoesNotPanic(t *testing.T) {
-	c := newAssistantRoundCapture(nil, time.Now())
+	c := newAssistantRoundCapture(nil, time.Now(), 0, false)
 	c.hooks().Content("text")
 	var tr assistantTraceRound
 	c.finish(&tr)

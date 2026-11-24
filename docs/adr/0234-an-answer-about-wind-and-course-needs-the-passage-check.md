@@ -69,8 +69,8 @@ with `course_deg`, or drop the statements.
   trigger it still had.
 - If no round is left to send the draft back in, the run accepts it and logs
   that the round cap was reached.
-- Text already streamed to the browser is withdrawn with the existing `retract`
-  event, the same one a tool round uses.
+- Text already streamed to the browser is taken out of the answer with the
+  `draft_sent_back` event, which carries the whole draft (ADR 0305).
 
 ### The live prompt states whether the limits are set
 

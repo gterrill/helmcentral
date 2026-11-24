@@ -441,7 +441,7 @@ describe('AssistantThread', () => {
   // ADR 0105: the streamed draft renders as its own assistant item inside
   // the message log while a round is still being written, and the status
   // marker (which otherwise reads "Thinking…"/tool activity) steps aside
-  // for it - reappearing once a retract clears the draft but the run keeps
+  // for it - reappearing once an answer_withdrawn clears the draft but the run keeps
   // going (e.g. the round turned into tool calls).
   describe('streamed draft (ADR 0105)', () => {
     it('renders the draft inside the message log while sending, and hides the status marker', () => {
@@ -474,7 +474,7 @@ describe('AssistantThread', () => {
       expect(screen.getByRole('button', { name: 'Stop asking' })).toBeInTheDocument()
     })
 
-    it('shows the status marker again once a retract clears the draft but sending continues', () => {
+    it('shows the status marker again once the answer is withdrawn and the draft clears but sending continues', () => {
       const session = fakeMateSession({ messages: [] })
 
       const { rerender } = render(
@@ -486,7 +486,7 @@ describe('AssistantThread', () => {
 
       expect(screen.queryByText('Working out the answer…')).not.toBeInTheDocument()
 
-      // A retract clears the draft (use-assistant-chat.ts sets it back to
+      // answer_withdrawn clears the draft (use-assistant-chat.ts sets it back to
       // null) while the run is still going - the loop moved on to tool
       // calls.
       rerender(
