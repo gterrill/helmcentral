@@ -74,8 +74,16 @@ preview prompts go through this step again.
 
 Run the check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
-non-zero on any failure. A failure under load needs confirming by rerunning
-that test file alone before you call it a flake. Reproduce a failure this way:
+non-zero on any failure. For frontend tests the check reruns each failed test
+file alone once and labels it in the summary, but the step still fails. The
+labels explain the listed files only. A file is a flake only when all three
+hold: it is labelled "failed under load, passed alone"; the first run's
+`Test Files  N failed` line in the log has N equal to the number of files so
+labelled; and the log shows no other error (unhandled errors, setup or
+teardown errors). Then carry on past it and say so in the PR. Anything else,
+such as "failed alone too", is a real failure to fix. When the check prints
+`no rerun:` or `not confirmed alone:`, confirm the failure by rerunning that
+file alone by hand. Reproduce a failure this way:
 
 - One frontend file: `npm --prefix <worktree>/frontend test --
   src/test/x.test.tsx`. `npx vitest` outside `frontend/` fetches an unrelated
