@@ -263,7 +263,8 @@ sending. Past two minutes of silence, a tile dims, its header gains a
 number is deliberate: a stale reading shown as current is worse than none.
 
 - Solar tracks this per controller as well as for the array as a whole. One
-  MPPT dropping off marks only that row.
+  MPPT dropping off hatches only its slice of the bar, names it under the bar,
+  and shows `—` on its row when you tap the bar.
 - A gauge group or engine cluster badges the one reading that stopped and
   keeps reporting the rest. The tile as a whole only goes stale once every
   reading on it has.

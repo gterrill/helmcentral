@@ -33,7 +33,6 @@ export interface SolarController {
   mode: string | null
   error: string | null
   lastUpdateAgeS: number | null
-  contributionPct: number | null
 }
 
 function normalizeNumber(value: unknown): number | null {
@@ -81,14 +80,13 @@ function parseController(controller: SolarControllerState): SolarController {
     mode: normalizeText(controller.mode),
     error: normalizeText(controller.error),
     lastUpdateAgeS: normalizeNumber(controller.last_update_age_s),
-    contributionPct: normalizeNumber(controller.contribution_pct),
   }
 }
 
 function sameController(a: SolarController, b: SolarController): boolean {
   return a.id === b.id && a.label === b.label && a.currentW === b.currentW && a.todayKWh === b.todayKWh
     && a.yesterdayKWh === b.yesterdayKWh && a.mode === b.mode && a.error === b.error
-    && a.contributionPct === b.contributionPct && shownAge(a.lastUpdateAgeS) === shownAge(b.lastUpdateAgeS)
+    && shownAge(a.lastUpdateAgeS) === shownAge(b.lastUpdateAgeS)
 }
 
 /*

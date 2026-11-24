@@ -176,6 +176,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the reason, where it showed an arrival before. Nothing needs doing to keep the
   rest of the plan. To get the ETA back, record a passage under engine with the
   engine feed on. The current isn't in the arrival yet.
+- **The Solar tile shows one bar split by array instead of a card for each.**
+  Each array's slice of the bar is its share of today's yield, and an array that
+  has gone quiet shows as a hatched slice. Under the bar, a line reads "4 arrays
+  · no faults", or names an array with a controller error or one that has gone
+  quiet, for example "Array 290 · error 38". Tap the bar to see each array's
+  power now, yield today and yesterday, and mode.
+
 - **A suggested departure on a passage plan now goes to the calmest ride, then
   the fairest stream.** Among the Go times for a leg, or the Marginal ones when
   none is Go, Helmcentral works out how each would feel and picks the time whose
