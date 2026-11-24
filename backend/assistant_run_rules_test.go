@@ -665,11 +665,11 @@ func TestAssistantRun_APerReplyTimeoutIsNotReportedAsTheReviewsDeadline(t *testi
 // draftingTools sends the first draft back once.
 type draftingTools struct{ fakeToolExecutor }
 
-func (*draftingTools) checkDraft(draft string, run mateRunRecord) (string, string) {
+func (*draftingTools) checkDraftTriggers(draft string, run mateRunRecord) ([]string, string) {
 	if draft == "first draft" {
-		return "wind claim", "Check the wind first."
+		return []string{"wind claim"}, "Check the wind first."
 	}
-	return "", ""
+	return nil, ""
 }
 
 func TestAssistantRun_ACorrectionDoesNotUseUpALookupRound(t *testing.T) {

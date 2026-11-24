@@ -68,7 +68,7 @@ func TestPassageGuardTrigger(t *testing.T) {
 		if tc.limitsSet {
 			limits = pwLimitsAll()
 		}
-		if got, _ := pwToolDeps(limits).checkDraft(tc.text, nil); got != tc.want {
+		if got, _ := joinedDraftTrigger(pwToolDeps(limits), tc.text, nil); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -354,16 +354,16 @@ func TestPassageLimitsStatusIsInTheLivePartNotTheStable(t *testing.T) {
 func TestPassageGuard_AFailedPassageCheckDoesNotSatisfyIt(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
 	claim, wind := "Set passage limits in Settings.", "A northerly gives you a head sea."
-	if got, _ := d.checkDraft(claim, runOf(assessCall(), []string{""})); got != "passage limits claim" {
+	if got, _ := joinedDraftTrigger(d, claim, runOf(assessCall(), []string{""})); got != "passage limits claim" {
 		t.Errorf("failed check, limits claim: trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(wind, runOf(assessCall(), []string{""})); got != "relative wind" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(assessCall(), []string{""})); got != "relative wind" {
 		t.Errorf("failed check, relative wind: trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(claim, runOf(assessCall(), okResults(assessCall()))); got != "" {
+	if got, _ := joinedDraftTrigger(d, claim, runOf(assessCall(), okResults(assessCall()))); got != "" {
 		t.Errorf("a check that ran satisfies the claim, trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(wind, runOf(assessCall(), okResults(assessCall()))); got != "" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(assessCall(), okResults(assessCall()))); got != "" {
 		t.Errorf("a check that ran satisfies the wind judgement, trigger = %q", got)
 	}
 }
@@ -377,28 +377,28 @@ func TestPassageGuard_AFailedAngledForecastDoesNotSatisfyIt(t *testing.T) {
 	c.Function.Arguments = `{"lat":-19,"lon":147,"course_deg":152}`
 	calls := []openRouterToolCall{c}
 	wind := "A northerly gives you a head sea."
-	if got, _ := d.checkDraft(wind, runOf(calls, []string{""})); got != "relative wind" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(calls, []string{""})); got != "relative wind" {
 		t.Errorf("failed forecast: trigger = %q", got)
 	}
 	// It ran, but no rel_wind or rel_wave label came back (the direction was
 	// unknown), so nothing gave Mate the angle.
-	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","dir":null}]}`})); got != "relative wind" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","dir":null}]}`})); got != "relative wind" {
 		t.Errorf("forecast with no labels: trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wind":"head"}]}`})); got != "" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wind":"head"}]}`})); got != "" {
 		t.Errorf("forecast with a rel_wind label: trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wave":"beam"}]}`})); got != "" {
+	if got, _ := joinedDraftTrigger(d, wind, runOf(calls, []string{`{"course_deg":152,"hourly":[{"t":"x","rel_wave":"beam"}]}`})); got != "" {
 		t.Errorf("forecast with a rel_wave label: trigger = %q", got)
 	}
 }
 
 func TestPassageGuardInstructionPerTrigger(t *testing.T) {
-	_, claim := pwToolDeps(pwLimitsAll()).checkDraft("Set passage limits in Settings.", nil)
+	_, claim := joinedDraftTrigger(pwToolDeps(pwLimitsAll()), "Set passage limits in Settings.", nil)
 	if !strings.Contains(claim, "limits are set") {
 		t.Errorf("claim instruction should say the limits are set: %q", claim)
 	}
-	trig, wind := pwToolDeps(passageLimits{}).checkDraft("A northerly gives you a head sea.", nil)
+	trig, wind := joinedDraftTrigger(pwToolDeps(passageLimits{}), "A northerly gives you a head sea.", nil)
 	if trig != "relative wind" {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -528,7 +528,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
 	}
 	for _, tc := range cases {
-		if got, _ := shelterDeps().checkDraft(tc.text, runOf(tc.calls, okResults(tc.calls))); got != tc.want {
+		if got, _ := joinedDraftTrigger(shelterDeps(), tc.text, runOf(tc.calls, okResults(tc.calls))); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -536,7 +536,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 
 func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
 	text := "A northerly gives you a head sea, and the bay is sheltered from the north."
-	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil)
+	trig, ins := joinedDraftTrigger(pwToolDepsWithCoastline(passageLimits{}), text, nil)
 	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -555,13 +555,13 @@ func TestShelterGuard_SentBackOnceAndSecondAnswerWins(t *testing.T) {
 func TestShelterGuard_OffWithoutOfflineCoastline(t *testing.T) {
 	d := shelterDeps()
 	d.offlineCoastline = nil
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+	if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, nil); got != "" {
 		t.Errorf("no Offline coastline on this install: trigger = %q, want none", got)
 	}
 }
 
 func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
-	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
+	_, ins := joinedDraftTrigger(shelterDeps(), thomasIslandAnswer, nil)
 	for _, want := range []string{"find_places", "boat's position", "Otherwise remove"} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
@@ -571,10 +571,10 @@ func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
 
 func TestShelterGuard_AnErroredShelterCallDoesNotSatisfyIt(t *testing.T) {
 	d := shelterDeps()
-	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(shelterCall(t), []string{""})); got != "anchorage shelter" {
+	if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, runOf(shelterCall(t), []string{""})); got != "anchorage shelter" {
 		t.Errorf("a call with no result (it errored) must not satisfy the guard, trigger = %q", got)
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, runOf(shelterCall(t), []string{`{"summary":"ok"}`})); got != "" {
+	if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, runOf(shelterCall(t), []string{`{"summary":"ok"}`})); got != "" {
 		t.Errorf("a call that returned satisfies it, trigger = %q", got)
 	}
 }
@@ -588,13 +588,13 @@ func TestShelterGuard_DisarmedWhileTheCoastlineIsOffOrUnreadable(t *testing.T) {
 	d.offlineCoastline = func() *offlineCoastlineReader {
 		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, nil }}
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+	if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, nil); got != "" {
 		t.Errorf("coastline switched off: trigger = %q, want none", got)
 	}
 	d.offlineCoastline = func() *offlineCoastlineReader {
 		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, errors.New("settings unreadable") }}
 	}
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+	if got, _ := joinedDraftTrigger(d, thomasIslandAnswer, nil); got != "" {
 		t.Errorf("coastline setting unreadable: trigger = %q, want none", got)
 	}
 	if !strings.Contains(buf.String(), "settings unreadable") {

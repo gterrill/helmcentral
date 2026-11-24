@@ -339,7 +339,9 @@ type openRouterReasoningAccum struct {
 	parts []map[string][]string
 }
 
-func (a *openRouterReasoningAccum) add(fragment openRouterReasoningDetail) {
+// add merges one fragment and reports whether it started a new entry (true)
+// or continued the previous one (false).
+func (a *openRouterReasoningAccum) add(fragment openRouterReasoningDetail) (newEntry bool) {
 	if n := len(a.details); n > 0 {
 		prev := a.details[n-1]
 		kind, _ := fragment["type"].(string)
@@ -348,11 +350,11 @@ func (a *openRouterReasoningAccum) add(fragment openRouterReasoningDetail) {
 		case kind == "reasoning.text" && prevKind == kind && reasoningUnset(prev["signature"]):
 			a.join(n-1, fragment, "text")
 			a.fillUnset(n-1, fragment, "signature", "format")
-			return
+			return false
 		case kind == "reasoning.summary" && prevKind == kind:
 			a.join(n-1, fragment, "summary")
 			a.fillUnset(n-1, fragment, "format")
-			return
+			return false
 		}
 	}
 	a.details = append(a.details, openRouterReasoningDetail{})
@@ -365,6 +367,7 @@ func (a *openRouterReasoningAccum) add(fragment openRouterReasoningDetail) {
 			a.details[pos][k] = v
 		}
 	}
+	return true
 }
 
 // join queues the fragment's piece of a joinable key onto entry pos.
@@ -395,6 +398,55 @@ func (a *openRouterReasoningAccum) finish() []openRouterReasoningDetail {
 		}
 	}
 	return a.details
+}
+
+// openRouterStreamHooks are the callbacks openRouterChatCompletion makes as a
+// stream arrives. Every field may be nil.
+//
+// Reasoning gets the visible text of reasoning_details fragments
+// (reasoning.text's text, reasoning.summary's summary). delta.reasoning is
+// never read: it repeats reasoning_details, so reading both would double the
+// text; newBlock is true when the fragment starts a new reasoning entry
+// rather than continuing the previous one, so a caller can keep entries
+// apart. Private fires for each reasoning.encrypted fragment: the model
+// thought, but shares nothing readable. ToolCall fires on the first delta of
+// each new tool-call index. Opened fires once, when a 2xx response is open and
+// before any fragment: a request that fails before that (a refused status, a
+// connect error) never fires it.
+type openRouterStreamHooks struct {
+	Opened    func()
+	Content   func(string)
+	Reasoning func(text string, newBlock bool)
+	Private   func()
+	ToolCall  func(index int)
+}
+
+// noteReasoning routes one reasoning_details fragment to Reasoning or Private.
+// pendingBlock carries a new entry's break across fragments with no text: the
+// next fragment that has some is the one that reports newBlock.
+func (h openRouterStreamHooks) noteReasoning(rd openRouterReasoningDetail, startsEntry bool, pendingBlock *bool) {
+	if startsEntry {
+		*pendingBlock = true
+	}
+	key := ""
+	switch kind, _ := rd["type"].(string); kind {
+	case "reasoning.text":
+		key = "text"
+	case "reasoning.summary":
+		key = "summary"
+	case "reasoning.encrypted":
+		if h.Private != nil {
+			h.Private()
+		}
+		return
+	}
+	if text, _ := rd[key].(string); text != "" {
+		newBlock := *pendingBlock
+		*pendingBlock = false
+		if h.Reasoning != nil {
+			h.Reasoning(text, newBlock)
+		}
+	}
 }
 
 // openRouterAnnotationFileContentPart is one part of an
@@ -881,11 +933,10 @@ func openRouterChatCompletionOnce(ctx context.Context, doer openRouterDoer, apiK
 // (Helmcentral's "token-by-token streaming... deliberately out of scope"
 // note in ADR 0093 §5 is what this function retires).
 //
-// onContent is called once per non-empty content fragment, in the order
+// hooks.Content is called once per non-empty content fragment, in the order
 // OpenRouter sent them, so a caller (assistant_run.go's run) can forward
 // partial text to the operator as it arrives; it is never called for a
-// tool-call-only fragment or an empty content string. Pass a no-op func if
-// a caller has nothing to do with partial text.
+// tool-call-only fragment or an empty content string. Every hook may be nil.
 //
 // The body is read with a bufio.Reader over whole lines
 // (reader.ReadString('\n')), never bufio.Scanner: Scanner's default token
@@ -907,7 +958,7 @@ func openRouterChatCompletionOnce(ctx context.Context, doer openRouterDoer, apiK
 // a *http.Client ties body reads to the request's context, so a read
 // failing because ctx was cancelled comes back wrapping ctx.Err(), and
 // errors.Is(err, context.Canceled) still holds for a caller checking it.
-func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest, onContent func(string)) (openRouterChatResponse, error) {
+func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest, hooks openRouterStreamHooks) (openRouterChatResponse, error) {
 	req.Stream = true
 
 	resp, err := doOpenRouterRequest(ctx, doer, apiKey, req)
@@ -918,6 +969,9 @@ func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openRouterChatResponse{}, openRouterNonSuccessError(resp)
+	}
+	if hooks.Opened != nil {
+		hooks.Opened()
 	}
 
 	var (
@@ -930,6 +984,7 @@ func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey s
 		toolOrder       []int
 		toolCalls       = map[int]*openRouterStreamToolCallAccum{}
 		reasoning       openRouterReasoningAccum
+		pendingBlock    bool
 	)
 
 	// Once a 2xx response is open, a failure may still have been charged for;
@@ -979,10 +1034,12 @@ readLoop:
 				}
 				if fragment := string(choice.Delta.Content); fragment != "" {
 					content.WriteString(fragment)
-					onContent(fragment)
+					if hooks.Content != nil {
+						hooks.Content(fragment)
+					}
 				}
 				for _, rd := range choice.Delta.ReasoningDetails {
-					reasoning.add(rd)
+					hooks.noteReasoning(rd, reasoning.add(rd), &pendingBlock)
 				}
 				for _, tc := range choice.Delta.ToolCalls {
 					acc, ok := toolCalls[tc.Index]
@@ -990,6 +1047,9 @@ readLoop:
 						acc = &openRouterStreamToolCallAccum{}
 						toolCalls[tc.Index] = acc
 						toolOrder = append(toolOrder, tc.Index)
+						if hooks.ToolCall != nil {
+							hooks.ToolCall(tc.Index)
+						}
 					}
 					if tc.ID != "" {
 						acc.id = tc.ID

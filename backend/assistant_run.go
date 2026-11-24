@@ -104,9 +104,19 @@ const assistantMaxToolCallsPerRound = 20
 // A var so a test can shorten it.
 var assistantToolAbandonGrace = 200 * time.Millisecond
 
+// assistantNotRunPrefix starts the error of every call that was refused or
+// withheld rather than run. Every such error is built from it, and the run's
+// lookup count tells them apart by it, so rewording one cannot drift from the
+// other.
+const assistantNotRunPrefix = "not run:"
+
 // assistantRoundFullError is the error recorded on a call refused for the
 // per-round call cap.
-const assistantRoundFullError = "not run: round already at the call limit"
+const assistantRoundFullError = assistantNotRunPrefix + " round already at the call limit"
+
+// assistantToolWithheldError is the error recorded on a call to a tool that is
+// withheld after repeated failures.
+const assistantToolWithheldError = assistantNotRunPrefix + " tool withheld after repeated failures"
 
 // assistantToolPhaseTimeout bounds the tool phase of one reply: when it passes,
 // no tool round starts and one in flight is abandoned (ADR 0240). A var so a
@@ -417,10 +427,12 @@ type assistantCardSource interface {
 
 // assistantDraftChecker is implemented by a tool executor that can judge a
 // final answer against the tool calls made this run (every round so far). A
-// non-empty trigger sends the draft back once with instruction as a user turn
-// labelled as Helmcentral's own check.
+// non-empty list of triggers sends the draft back once, with instruction as a
+// user turn labelled as Helmcentral's own check; an empty list accepts it. Each
+// entry names one trigger and is never "" (checkDraftTriggers appends only
+// named triggers), so the runner counts entries and does not inspect them.
 type assistantDraftChecker interface {
-	checkDraft(draft string, run mateRunRecord) (trigger, instruction string)
+	checkDraftTriggers(draft string, run mateRunRecord) (triggers []string, instruction string)
 }
 
 // assistantRunner drives one assistant reply's agentic tool loop.
@@ -1106,6 +1118,11 @@ forcedLoop:
 			deltaEmitted = true
 		}
 
+		// The capture is where this round's stream is observed: what the trace
+		// keeps beyond the calls, and the live text forwarded to onContent.
+		capture := newAssistantRoundCapture(onContent, recorder.startOr(started))
+		hooks := capture.hooks()
+
 		// The forced final completion starts its own clock, so it never
 		// inherits what is left of the tool phase. A tool-phase completion is
 		// abandoned when the tool phase ends, unless it has started writing
@@ -1136,10 +1153,11 @@ forcedLoop:
 			})
 		}
 		completionStart := time.Now()
-		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req, onContent)
+		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req, hooks)
 		stopAtToolEnd()
 		cancelCompletion()
 		tr.LatencyMs = time.Since(completionStart).Milliseconds()
+		capture.finish(&tr)
 		if err != nil {
 			// A request OpenRouter refused outright cost nothing. Any other
 			// failure may have been charged for what it had generated.
@@ -1207,13 +1225,16 @@ forcedLoop:
 				commit("empty final answer")
 				return assistantReply{}, ferr
 			}
-			trigger, instruction := "", ""
+			var triggers []string
+			instruction := ""
 			// The check is for a conversation with the operator. An unattended
 			// review is a watch or alarm summary, not a passage answer, and
 			// nobody is there to read a corrected draft.
 			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal && !r.options.Unattended {
-				trigger, instruction = checker.checkDraft(content, record)
+				triggers, instruction = checker.checkDraftTriggers(content, record)
 			}
+			// The log carries them as one phrase.
+			trigger := strings.Join(triggers, " and ")
 			// An answer after a correction that led to no lookups may be a fair
 			// question back, so it is accepted; the log says the correction
 			// changed nothing. A second draft that still trips a trigger gets
@@ -1222,14 +1243,16 @@ forcedLoop:
 				log.Printf("assistant: draft check: answer after the %s correction made no lookups; accepted as is", sentBackTrigger)
 			}
 			switch {
-			case trigger == "":
+			case len(triggers) == 0:
 			case sentBackTrigger != "":
 				// The correction was sent and the draft still fails the
 				// check. Accept the answer, but say so in the log.
 				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
+				tr.CheckTriggers = triggers
 			case budgetReason(toolRounds) == "":
 				sentBackTrigger, callsAtSendBack = trigger, len(record)
-				tr.CheckTrigger, tr.CheckDraft = trigger, content
+				// The draft is held in CheckDraft, so it is not also chatter.
+				tr.CheckTriggers, tr.CheckDraft, tr.Chatter = triggers, content, ""
 				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
 				// The draft already streamed in part is withdrawn the same
 				// way a tool round's thinking aloud is.
@@ -1242,6 +1265,7 @@ forcedLoop:
 			default:
 				// No round left to send it back in.
 				log.Printf("assistant: draft check: draft has a %s; accepted as is (budget used up)", trigger)
+				tr.CheckTriggers = triggers
 			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in
@@ -1251,6 +1275,8 @@ forcedLoop:
 			}
 			reply.Content = content
 			reply.ToolRounds = toolRounds
+			// The answer is not chatter.
+			tr.Chatter = ""
 			commit("answer")
 			return reply, nil
 		}
@@ -1583,7 +1609,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
-			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: "not run: tool withheld after repeated failures"}
+			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: assistantToolWithheldError}
 			continue
 		}
 

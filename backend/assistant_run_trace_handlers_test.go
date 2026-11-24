@@ -74,8 +74,17 @@ func TestAssistantRunTrace_AnAnsweredRunIsStoredWithItsRoundsAndAnswer(t *testin
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Runs) != 1 {
 		t.Fatalf("runs = %v, err = %v", body.Runs, err)
 	}
-	if got := body.Runs[0]; len(got) != 2 || got["id"] != run.ID || got["answer_message_id"] != messages[1].ID {
-		t.Fatalf("an answered run should be listed as {id, answer_message_id}, got %v", got)
+	got := body.Runs[0]
+	if got["id"] != run.ID || got["answer_message_id"] != messages[1].ID {
+		t.Fatalf("an answered run should be listed with its id and answer, got %v", got)
+	}
+	for _, key := range []string{"thought_ms", "lookups", "reasoning_kind"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("an answered run should be listed with %q, got %v", key, got)
+		}
+	}
+	if _, ok := got["rounds"]; ok {
+		t.Errorf("a listed run carries no rounds, got %v", got)
 	}
 }
 

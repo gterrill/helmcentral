@@ -147,9 +147,10 @@ func judgesAnchorageShelter(sentences []string) bool {
 	return anySentenceMatchesAll(sentences, anchorageShelterRE, anchorageDirectionRE)
 }
 
-// checkDraft makes assistantToolDeps an assistantDraftChecker. It names what
-// in a draft answer needs the passage check, or returns "" when the draft is
-// fine as it stands:
+// checkDraftTriggers makes assistantToolDeps an assistantDraftChecker. It names
+// what in a draft answer needs the passage check, as a list, or returns none
+// when the draft is fine as it stands. A caller that needs one string (the log
+// and the stored check_trigger) joins the list with " and ":
 //
 //   - "passage limits claim": the draft talks of setting limits that are set,
 //     and assess_passage_window did not run this run (it is the only source
@@ -176,7 +177,7 @@ func judgesAnchorageShelter(sentences []string) bool {
 //
 // A draft that hits more than one trigger gets one message carrying each
 // correction, since the run loop sends a draft back only once.
-func (d assistantToolDeps) checkDraft(draft string, run mateRunRecord) (trigger, instruction string) {
+func (d assistantToolDeps) checkDraftTriggers(draft string, run mateRunRecord) (found []string, instruction string) {
 	var triggers, instructions []string
 	sentences := passageSentenceSplitRE.Split(draft, -1)
 	// Whether anchorage_details can run here reads settings, so it is worked
@@ -192,9 +193,9 @@ func (d assistantToolDeps) checkDraft(draft string, run mateRunRecord) (trigger,
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
 	if len(triggers) == 0 {
-		return "", ""
+		return nil, ""
 	}
-	return strings.Join(triggers, " and "), assistantCheckLabel + strings.Join(instructions, " Also: ") + " " + assistantCheckNotice
+	return triggers, assistantCheckLabel + strings.Join(instructions, " Also: ") + " " + assistantCheckNotice
 }
 
 // forecastDeliveredShelter reports whether a get_wind_forecast result carries

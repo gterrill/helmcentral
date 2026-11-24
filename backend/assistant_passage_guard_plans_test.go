@@ -39,7 +39,7 @@ func TestPassageGuard_APlanWithVerdictsIsThePassageCheck(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := getPlansCall()
-			if got, _ := d.checkDraft(tc.draft, runOf(calls, []string{tc.result})); got != tc.want {
+			if got, _ := joinedDraftTrigger(d, tc.draft, runOf(calls, []string{tc.result})); got != tc.want {
 				t.Errorf("trigger = %q, want %q", got, tc.want)
 			}
 		})

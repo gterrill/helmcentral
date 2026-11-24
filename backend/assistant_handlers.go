@@ -814,17 +814,23 @@ func getAssistantConversationHandler(c echo.Context) error {
 		if run.AnswerMessageID == nil {
 			listed = append(listed, run)
 		} else {
-			listed = append(listed, assistantRunRef{ID: run.ID, AnswerMessageID: *run.AnswerMessageID})
+			listed = append(listed, assistantRunRef{ID: run.ID, AnswerMessageID: *run.AnswerMessageID, ThoughtMs: run.ThoughtMs, Lookups: run.LookupCount, ReasoningKind: run.ReasoningKind})
 		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"conversation": conv, "messages": messages, "runs": listed})
 }
 
-// assistantRunRef is how the conversation lists a run that gave an answer.
+// assistantRunRef is how the conversation lists a run that gave an answer:
+// which answer it belongs to, and what the answer's footer needs without
+// loading the trace. ThoughtMs is null and ReasoningKind empty for a run stored
+// before they were recorded.
 type assistantRunRef struct {
 	ID              string `json:"id"`
 	AnswerMessageID string `json:"answer_message_id"`
+	ThoughtMs       *int64 `json:"thought_ms"`
+	Lookups         int    `json:"lookups"`
+	ReasoningKind   string `json:"reasoning_kind"`
 }
 
 // GET /api/assistant/runs/:id
@@ -1198,9 +1204,11 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	runCtx = withSkipperMessage(runCtx, skipperMessage(messages))
 	// The run's trace (ADR 0240): the runner records its rounds here and the
 	// goroutine below stores it however the run ends.
-	recorder := &assistantRunRecorder{}
-	runCtx = withAssistantRunRecorder(runCtx, recorder)
+	// The recorder carries the start so the rounds' timings and the run's
+	// duration share one clock.
 	runStarted := time.Now()
+	recorder := &assistantRunRecorder{startedAt: runStarted}
+	runCtx = withAssistantRunRecorder(runCtx, recorder)
 	afterSeq := 0
 	if len(messages) > 0 {
 		afterSeq = messages[len(messages)-1].Seq
