@@ -11,6 +11,9 @@
 # print a clean report.
 set -eu
 
+. "$(dirname "$0")/lib/stay-awake.sh"
+stay_awake
+
 if [ $# -ne 1 ]; then
   echo "usage: sh scripts/security-review.sh <worktree-path>" >&2
   exit 2

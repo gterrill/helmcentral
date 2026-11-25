@@ -52,6 +52,12 @@ claims against the code.
 ## 4. Test
 
 Run `make check`: it is the one command a builder runs before reporting done.
+Its summary carries a `tree:` line just after `load:`, the hash of the working
+tree it tested. A builder's hand-back counts as this step's run when the summary
+ends `check-all: all steps passed` (a `check-backend` or `check-frontend`
+summary also has a `tree:` line but does not count) and
+`sh scripts/tree-hash.sh <worktree>` prints that same hash; then do not rerun.
+Any mismatch means run it. A rebase changes the tree, so it needs a run.
 It runs these, in order, and carries on past a failure:
 
 - Backend: `make check-backend`

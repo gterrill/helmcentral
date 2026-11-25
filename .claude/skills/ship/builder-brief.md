@@ -18,7 +18,7 @@ worktree.
 - `backend/` is one Go package: grep for `^func <name>(` before adding a
   helper, test helpers included.
 - Hand back only after your last check has exited. Copy its summary lines into
-  the hand-back exactly.
+  the hand-back exactly, including its `tree:` line.
 - A fix is test-first: write the test, run it, show the failing run in the
   hand-back, then fix.
 - Leave all work in the worktree's working tree; the stash is shared by every
