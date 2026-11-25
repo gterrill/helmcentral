@@ -1085,12 +1085,9 @@ func (r planComfortRun) leg(ctx context.Context, w *planLegWork) *planLegComfort
 	}
 	span, why := legSpan(w, r.env)
 	if why != "" {
-		return &planLegComfort{Text: why + ".", Hours: []planComfortHour{}}
+		return emptyComfort(why + ".")
 	}
-	return legComfort(ctx, legComfortInput{
-		comfortSetup: setup, as: r.as, plan: w.plan, loc: w.fromLoc,
-		from: span.from, tl: span.tl, underway: w.underway,
-	})
+	return legComfort(ctx, newLegComfortInput(setup, r.as, w, span))
 }
 
 // planETAPassed is why a leg under way has no span left: its ETA is behind it.
@@ -1910,5 +1907,12 @@ func planAssessmentHandler(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), planAssessmentDeadline)
 	defer cancel()
 	legs := planLegs(ctx, d)
-	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps, planAssessOptions{Comfort: true}))
+	return c.JSON(http.StatusOK, assessPlan(ctx, d, legs, deps, pagePlanAssessOptions(nil)))
+}
+
+// pagePlanAssessOptions is what the Forecast page asks of an assessment, and so what
+// get_plans asks too: comfort on, so a suggested departure and its chip are the page's.
+// env is the limits and speed already read, or nil to read them.
+func pagePlanAssessOptions(env *planEnv) planAssessOptions {
+	return planAssessOptions{Env: env, Comfort: true}
 }

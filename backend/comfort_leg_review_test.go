@@ -67,7 +67,8 @@ func TestLegComfort_TheWireIsTextMotionAndEachHoursLine(t *testing.T) {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		t.Fatal(err)
 	}
-	if got := keysOf(top); got != "hours,motion,text" {
+	// The stretches are Mate's: get_plans reads them and the page ignores them.
+	if got := keysOf(top); got != "hours,motion,stretches,text" {
 		t.Errorf("leg keys = %s", got)
 	}
 	var hours []map[string]json.RawMessage

@@ -937,7 +937,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("The operator keeps passage plans on the Forecast page: stops with arrival dates and nights. Read them with get_plans, which lists " +
 		"every plan and gives the current one in full, or the one you name, with the plan's own verdict for each leg. For a leg of a plan " +
 		"quote the plan's own verdict and its limiting figure as get_plans gives them, and call assess_passage_window only for a date or time " +
-		"that is not in a plan. When they mention the marina, the stay or being there, use the stop get_plans shows and its lat and lon for " +
+		"that is not in a plan. For a leg of a plan, " + rulePlanLegWording + ". When they mention the marina, the stay or being there, use the stop get_plans shows and its lat and lon for " +
 		"get_wind_forecast and get_tides.\n\n" +
 
 		"You can create a plan or replace one with propose_changes on the plan record (read it first with get_plans for the id and the " +
@@ -1180,8 +1180,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"operator asks for one, and then label it as general knowledge. " +
 		"Pass estimate_passage's course_deg, the course of the longest leg, as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
-		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
-		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
+		"following); do not work the angle out yourself. For a passage that is not a plan leg, say whether it is a head, " +
+		"beam or following sea from rel_wave. A leg of a plan is worded as the plans rule above says.\n\n" +
 
 		// Fair-tide departures: the tide plugins give high and low water
 		// times only, and a model asked to time a departure to the stream

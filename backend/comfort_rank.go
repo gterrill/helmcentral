@@ -20,10 +20,6 @@ import (
 // rest. It is a variable so a test can shorten it.
 var planRankingBudget = 10 * time.Second
 
-// planReportDepartBasis is what get_plans says a suggested departure was chosen on: it
-// ranks by the current alone, where the plan page also ranks by comfort.
-const planReportDepartBasis = "Fairest current, not ranked for comfort."
-
 // comfortReasonCellFailed is why a departure left out after a Go was not ranked.
 const comfortReasonCellFailed = "the forecast couldn't be read for this time"
 
@@ -412,10 +408,7 @@ func (ch *departureChoice) judge(ctx context.Context, rk *departureRanking, w *p
 	if err != nil {
 		return legComfortInput{}, nil, "No ETA: " + err.Error()
 	}
-	in = legComfortInput{
-		comfortSetup: rk.setup, as: rk.run.as, plan: w.plan, loc: w.fromLoc,
-		from: span.from, tl: span.tl,
-	}
+	in = newLegComfortInput(rk.setup, rk.run.as, w, span)
 	if ctx.Err() != nil {
 		return in, nil, comfortReasonOutOfTime
 	}

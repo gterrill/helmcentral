@@ -215,3 +215,17 @@ limit, not by the current, and has no basis.
 - Every departure a No-Go: the least bad one, as before.
 - Comfort that can't be judged for the tier: the fairest current's departure, and a
   basis that says why.
+
+## Amendment 2026-11-26: get_plans ranks as the page does
+
+`get_plans` now ranks a suggested departure for comfort, the same way the plan page
+does, for every caller. The chat, the outside assistant and the alarm and watch
+reviews therefore quote the departure and the `depart_basis` the page shows, where
+before Mate could quote the first Go while the page had chosen a calmer hour.
+
+The fixed line "Fairest current, not ranked for comfort." is gone. `get_plans`
+passes the leg's own basis through: "Chosen for comfort: ...", or the reason
+comfort could not choose. Slips and verdicts-only runs still never rank.
+
+This reverses "Not Mate's" above, and the sentence that keeps `get_plans` out of the
+ranking.

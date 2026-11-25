@@ -21,7 +21,13 @@ const (
 	ruleWindForecast = "This is a model forecast, not observed: figures are model output for the grid point, not measurements at the place. " +
 		ruleForecastHorizon + " Label what comes from it as forecast."
 
-	rulePlans = ruleForecastHorizon + " Use a stop's lat and lon for get_wind_forecast and get_tides."
+	// rulePlanLegWording is how a leg of a plan is worded. The prompt, the get_plans
+	// description and the MCP tool all say it, so one text holds it.
+	rulePlanLegWording = "quote the leg's comfort text or its stretches with their times and place, never describe how the sea will feel yourself, and quote eta_basis with an ETA"
+
+	rulePlans = ruleForecastHorizon + " Use a stop's lat and lon for get_wind_forecast and get_tides. " +
+		"For a leg of a plan, " + rulePlanLegWording + "; " +
+		"a leg with no comfort or no arrival has none: say so and quote the plan's problem or the leg's own text, and never fill it in."
 
 	ruleTides = "These are predicted, not observed: weather and air pressure move the real tide. Heights are metres on the provider's tide-table datum, " +
 		"which is not charted depth. The result's height_datum says what they are measured from, and when it is mean_sea_level its datum_note applies: say so, " +

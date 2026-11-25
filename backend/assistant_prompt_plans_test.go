@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+// An outside assistant reads the same leg wording: the MCP tool takes the registry's
+// description, so the rule reaches it.
+func TestMCPGetPlans_DescriptionCarriesTheLegWording(t *testing.T) {
+	def := mcpToolDefByName("get_plans")
+	if def == nil {
+		t.Fatal("get_plans is not an MCP tool")
+	}
+	if !strings.Contains(def.Description, rulePlanLegWording) {
+		t.Errorf("the MCP get_plans description misses the leg wording rule: %q", def.Description)
+	}
+}
+
 // ADR 0289: Mate reads the plans with get_plans, quotes the plan's own verdict,
 // and proposes a plan only when asked, from places it looked up.
 func TestBuildAssistantSystemPrompt_PlansRule(t *testing.T) {
@@ -14,6 +26,10 @@ func TestBuildAssistantSystemPrompt_PlansRule(t *testing.T) {
 		"get_plans",
 		"quote the plan's own verdict",
 		"assess_passage_window only for a date or time that is not in a plan",
+		// Comfort and the ETA come from the plan, never from the model's own idea of the sea.
+		rulePlanLegWording,
+		// A passage outside any plan still gets its sea from rel_wave.
+		"For a passage that is not a plan leg, say whether it is a head, beam or following sea from rel_wave",
 		// Proposing, only when asked.
 		"propose_changes on the plan record",
 		"only when the operator asks you to change or create a plan, never unprompted",
@@ -47,7 +63,21 @@ func TestBuildAssistantSystemPrompt_PlansRule(t *testing.T) {
 			t.Errorf("the plans rule misses %q", want)
 		}
 	}
-	for _, gone := range []string{"You cannot create or change a plan", "get_planned_stay", "planned stay"} {
+	// The tool's own description says the same, so an outside assistant reads it too.
+	if !strings.Contains(mateToolGetPlans.function.Description, rulePlanLegWording) {
+		t.Errorf("the get_plans description misses the leg wording rule")
+	}
+	// The rule itself still says the three things that keep Mate off its own idea of the sea.
+	for _, want := range []string{
+		"quote the leg's comfort text or its stretches with their times and place",
+		"never describe how the sea will feel yourself",
+		"quote eta_basis with an ETA",
+	} {
+		if !strings.Contains(rulePlanLegWording, want) {
+			t.Errorf("the leg wording rule misses %q", want)
+		}
+	}
+	for _, gone := range []string{"You cannot create or change a plan", "get_planned_stay", "planned stay", "A power catamaran runs comfortably"} {
 		if strings.Contains(prompt, gone) {
 			t.Errorf("the prompt still says %q", gone)
 		}

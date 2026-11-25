@@ -127,11 +127,26 @@ type planComfortHour struct {
 	Line   string `json:"line"`
 }
 
+// planComfortStretch is one stretch of a leg as the chip words it, with its clock
+// times already in the boat's words so a reader never works a time out. Band is
+// "Comfortable", "Lively" or "Rough", and "" when the stretch was not judged or the bands
+// are not learned; Reason is what the chip says after the band, or why the stretch was
+// not judged.
+type planComfortStretch struct {
+	Band       string `json:"band"`
+	FromLabel  string `json:"from_label"`
+	UntilLabel string `json:"until_label"`
+	Where      string `json:"where"`
+	Reason     string `json:"reason"`
+}
+
 // planLegComfort is what a leg's chip says.
 type planLegComfort struct {
 	Text   string            `json:"text"`
 	Motion string            `json:"motion"`
 	Hours  []planComfortHour `json:"hours"`
+	// Stretches are the chip's stretches, in order; the last ends at the arrival.
+	Stretches []planComfortStretch `json:"stretches"`
 }
 
 // legComfortInput is one leg to judge. tl is the leg's progress over its real span,
@@ -145,6 +160,19 @@ type legComfortInput struct {
 	from     time.Time
 	underway bool
 	loc      *time.Location
+	// toLoc is the zone of the stop the leg arrives at, which the leg's Arrive label is
+	// told in; nil for a leg that ends in loc.
+	toLoc *time.Location
+}
+
+// newLegComfortInput is a leg's comfort read over a span, in the zones of the leg's two
+// stops. Every reading of a leg's comfort, the chip of the row and the chip of each
+// candidate departure, is made here so they tell their times alike.
+func newLegComfortInput(setup *comfortSetup, as *passageAssessor, w *planLegWork, span legSpanOf) legComfortInput {
+	return legComfortInput{
+		comfortSetup: setup, as: as, plan: w.plan, loc: w.fromLoc, toLoc: w.toLoc,
+		from: span.from, tl: span.tl, underway: w.underway,
+	}
 }
 
 const (
@@ -277,7 +305,13 @@ func notJudgedText(reason string) string {
 
 // notJudged is a leg's comfort when it could not be judged at all.
 func notJudged(reason string) *planLegComfort {
-	return &planLegComfort{Text: notJudgedText(reason), Hours: []planComfortHour{}}
+	return emptyComfort(notJudgedText(reason))
+}
+
+// emptyComfort is a leg's comfort that says only its text. Hours and Stretches are empty,
+// never nil, so the wire carries [] and no reader has to guard.
+func emptyComfort(text string) *planLegComfort {
+	return &planLegComfort{Text: text, Hours: []planComfortHour{}, Stretches: []planComfortStretch{}}
 }
 
 // comfortSnapScale is how finely a position is snapped: to 0.001 degree, about 110 m,
@@ -564,8 +598,132 @@ func (in legComfortInput) comfortOf(hours []judgedHour) *planLegComfort {
 		out.Hours[i] = h.wire()
 	}
 	out.Motion = motionLine(hours, in.helm, in.helmErr)
-	out.Text = in.text(hours, stretchesOf(hours))
+	stretches := stretchesOf(hours)
+	out.Text = in.text(hours, stretches)
+	out.Stretches = in.stretchesWire(stretches)
 	return out
+}
+
+// stretchesWire words each stretch with its clock times, told as the leg's Depart and
+// Arrive are: the leg's start on the departure stop's clock and its end, the last
+// stretch's until_label, on the arrival stop's clock, so one instant reads alike in both.
+// The first from_label always carries its day (the span of a leg under way starts at now,
+// not at the departure); every later label carries its day only when it falls on another
+// day than the label before it, so a leg through midnight reads whole. A leg whose two
+// zones differ in offset or name tells every label with its day and zone instead, the last
+// until in the arrival's zone. Where is the route between the stretch's own start and end.
+func (in legComfortInput) stretchesWire(stretches []stretch) []planComfortStretch {
+	out := make([]planComfortStretch, len(stretches))
+	if len(stretches) == 0 {
+		return out
+	}
+	arriveLoc := in.toLoc
+	if arriveLoc == nil {
+		arriveLoc = in.loc
+	}
+	prevDay := ""
+	// A leg that changes zone reads its labels in two clocks, which can run backwards past
+	// each other, so each carries its day and zone. A leg in one zone keeps the short form.
+	crossZone := zonesDiffer(stretches[0].start(), in.loc, stretches[len(stretches)-1].end(), arriveLoc)
+	// clock labels t on loc, with its day when it is not the day of the label before.
+	clock := func(t time.Time, loc *time.Location) string {
+		if crossZone {
+			return boatDayClockWithZone(t, loc)
+		}
+		label := boatClockOnDay(t, loc, prevDay)
+		prevDay = boatDay(t, loc)
+		return label
+	}
+	for i, s := range stretches {
+		flag, body := s.reasonParts()
+		untilLoc := in.loc
+		if i == len(stretches)-1 {
+			untilLoc = arriveLoc
+		}
+		from := clock(s.start(), in.loc)
+		// capitalise, not bandWord: bandWord("") says "Not judged", the wire wants "".
+		out[i] = planComfortStretch{Band: capitalise(s.band), FromLabel: from, UntilLabel: clock(s.end(), untilLoc), Where: in.where(s), Reason: joinClauses(flag, body)}
+	}
+	return out
+}
+
+// zonesDiffer says the clock of a on aLoc and of b on bLoc are not the same zone: another
+// offset or another name.
+func zonesDiffer(a time.Time, aLoc *time.Location, b time.Time, bLoc *time.Location) bool {
+	_, aOff := a.In(aLoc).Zone()
+	_, bOff := b.In(bLoc).Zone()
+	return aOff != bOff || zoneAbbreviation(a, aLoc) != zoneAbbreviation(b, bLoc)
+}
+
+// where is the passage segments the route covers between the stretch's start and end, in
+// route order, each once. A segment that ends where the stretch starts, or starts where it
+// ends, is not covered.
+func (in legComfortInput) where(s stretch) string {
+	if !in.tl.known() || len(in.plan.segs) == 0 || in.plan.totalM <= 0 {
+		return ""
+	}
+	from, to := in.tl.fracAt(s.start())*in.plan.totalM, in.tl.fracAt(s.end())*in.plan.totalM
+	var labels []string
+	add := func(label string) {
+		if label != "" && !slices.Contains(labels, label) {
+			labels = append(labels, label)
+		}
+	}
+	for _, seg := range in.plan.segs {
+		if seg.startM+seg.lengthM > from && seg.startM < to {
+			add(seg.label)
+		}
+	}
+	if len(labels) == 0 {
+		// A stretch of no distance is at one point of the route.
+		_, _, seg := in.plan.at(from / in.plan.totalM)
+		add(seg.label)
+	}
+	return strings.Join(labels, " then ")
+}
+
+// reasonParts is what the chip says after the stretch's band: the gap's reason, the sea of a
+// Lively or Rough stretch, or what the steeper-than-recorded sea adds. flag is the
+// beyond-the-record clause that leads, body the rest; the wire joins them with a comma,
+// the sentence sets them off differently.
+func (s stretch) reasonParts() (flag, body string) {
+	steeper, rougher := s.anyBeyond()
+	switch {
+	case s.gap():
+		return "", s.reason
+	case s.band == bandLively || s.band == bandRough:
+		if rougher {
+			return comfortBeyondRough, s.detail()
+		}
+		return "", s.detail()
+	case s.band == bandComfortable:
+		if steeper {
+			return comfortBeyondSteep, ""
+		}
+		return "", ""
+	}
+	// Before the bands are learned: no band word, so the sea says what there is to say.
+	return "", comfortNotLearnedReason + ": " + seaOf([]stretch{s})
+}
+
+// seaOf is the roughest sea of the judged hours of the stretches, as the unlearned chip
+// words it: its leading word and figures ("flat" when it has none), and whether any hour
+// was steeper than the record.
+func seaOf(stretches []stretch) string {
+	var hours []judgedHour
+	for _, s := range stretches {
+		hours = append(hours, s.hours...)
+	}
+	all := stretch{hours: hours}
+	rough := all.roughest()
+	sea := "flat"
+	if rough.figures != "" {
+		sea = joinClauses(rough.lead.Word, rough.figures)
+	}
+	if steeper, _ := all.anyBeyond(); steeper {
+		sea = joinClauses(sea, comfortBeyondSteep)
+	}
+	return sea
 }
 
 // judgeHour judges one forecast stamp of the leg.
@@ -825,20 +983,17 @@ func (s stretch) phrase(i, n int, underway bool) string {
 		// A gap says how long it ran even when it runs to the arrival.
 		head += " for " + durationText(s.length())
 	}
-	steeper, rougher := s.anyBeyond()
+	flag, body := s.reasonParts()
 	switch {
-	case s.gap():
-		return head + ": " + s.reason + "."
-	case s.band == bandComfortable:
-		if steeper {
-			head += " " + comfortBeyondSteep
+	case s.band == bandComfortable && !s.gap():
+		if flag != "" {
+			head += " " + flag
 		}
 		return head + "."
+	case flag != "":
+		head += ", " + flag
 	}
-	if rougher {
-		head += ", " + comfortBeyondRough
-	}
-	return head + ": " + s.detail() + "."
+	return head + ": " + body + "."
 }
 
 // text is the first line of the chip.
@@ -871,16 +1026,7 @@ func (in legComfortInput) text(hours []judgedHour, stretches []stretch) string {
 func (in legComfortInput) unlearnedText(judged []judgedHour, stretches []stretch) string {
 	parts := []string{comfortNotLearnedReason + "."}
 	if len(judged) > 0 {
-		all := stretch{hours: judged}
-		rough := all.roughest()
-		sea := "flat"
-		if rough.figures != "" {
-			sea = joinClauses(rough.lead.Word, rough.figures)
-		}
-		if steeper, _ := all.anyBeyond(); steeper {
-			sea = joinClauses(sea, comfortBeyondSteep)
-		}
-		parts = append(parts, "Roughest sea: "+sea+".")
+		parts = append(parts, "Roughest sea: "+seaOf([]stretch{{hours: judged}})+".")
 	}
 	for _, s := range stretches {
 		if s.gap() {

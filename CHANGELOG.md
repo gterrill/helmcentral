@@ -35,6 +35,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate now quotes each plan leg's comfort and suggested departure exactly as
+  the Forecast page shows them.** Before, Mate could name the first Go time
+  while the page had picked a calmer one. Now Mate, the outside assistants and
+  the reviews Mate writes for alarms and watch reports all pick the departure
+  the page picks, and say what it was chosen on. Each leg also comes with the
+  same Comfort line the page shows, with the clock times and the stretch of the
+  passage each part covers. Mate quotes those words and doesn't guess how the
+  sea will feel. A leg with no ETA, such as a boat with no
+  engine rpm recorded under way, has no comfort either, and Mate says why.
 - **You can now mark a solar charger's input so it stops raising impossible
   readings.** Some solar chargers report the panel's voltage under a battery
   number, and 80 volts from the panels looks like an impossible battery. In

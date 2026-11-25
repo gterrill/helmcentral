@@ -529,6 +529,15 @@ func boatDayClock(t time.Time, loc *time.Location) string {
 	return boatDay(t, loc) + " " + boatClock(t, loc)
 }
 
+// boatClockOnDay is the clock, or the day and clock when t falls on another day than
+// day (a boatDay value), so a run of times through midnight reads whole.
+func boatClockOnDay(t time.Time, loc *time.Location, day string) string {
+	if boatDay(t, loc) != day {
+		return boatDayClock(t, loc)
+	}
+	return boatClock(t, loc)
+}
+
 // boatDayYearClock is boatDayClock with the year named when t is not in
 // currentYear on loc's calendar: "Sat 14 Sep 2024 9.00 AM". A record in the
 // current year reads as boatDayClock does.

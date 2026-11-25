@@ -53,6 +53,15 @@ type planReportStop struct {
 	Timezone        string    `json:"timezone"`
 }
 
+// planReportComfort is how the leg is forecast to feel, as the page's chip words it:
+// the text, the motion line and each stretch with its clock times and place. The page's
+// hour-by-hour lines stay with the page.
+type planReportComfort struct {
+	Text      string               `json:"text"`
+	Motion    string               `json:"motion"`
+	Stretches []planComfortStretch `json:"stretches"`
+}
+
 // planReportLeg is a routed leg with its assessment beside it. Depart and Arrive
 // are finished boat-time labels in the zone of the stop each is at.
 type planReportLeg struct {
@@ -70,8 +79,7 @@ type planReportLeg struct {
 	Note            string   `json:"note,omitempty"`
 	Depart          string   `json:"depart,omitempty"`
 	DepartSuggested bool     `json:"depart_suggested,omitempty"`
-	// DepartBasis says what a suggested departure was chosen on. get_plans does not
-	// rank for comfort, so it says the current alone chose it (ADR 0303).
+	// DepartBasis says what a suggested departure was chosen on, as the page words it.
 	DepartBasis string   `json:"depart_basis,omitempty"`
 	Arrive      string   `json:"arrive,omitempty"`
 	Hours       *float64 `json:"hours,omitempty"`
@@ -81,6 +89,9 @@ type planReportLeg struct {
 	CurrentKn   *float64 `json:"current_kn,omitempty"`
 	CurrentNote string   `json:"current_note,omitempty"`
 	NotChecked  []string `json:"not_checked,omitempty"`
+	// Comfort is how the leg will feel, nil for a leg with no departure and arrival
+	// to judge.
+	Comfort *planReportComfort `json:"comfort,omitempty"`
 	// WindChanges are the changes in the wind between the departure and the
 	// arrival, as the table shows them: Label is already the boat clock.
 	WindChanges planWindChanges `json:"wind_changes"`
@@ -152,6 +163,16 @@ type planReport struct {
 	Slips      *planReportSlips       `json:"slips,omitempty"`
 }
 
+// hasComfortStretches is whether any leg still carries stretches to drop.
+func (r *planReport) hasComfortStretches() bool {
+	for _, l := range r.Legs {
+		if l.Comfort != nil && len(l.Comfort.Stretches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 type getPlansResult struct {
 	Plans []planBrief `json:"plans"`
 	Plan  *planReport `json:"plan,omitempty"`
@@ -164,7 +185,8 @@ type getPlansResult struct {
 
 // shrink drops detail a result too big for Mate cannot carry, one kind at a
 // time, least needed first: the list of the other plans, the slips one by one,
-// the wind changes on the nights, then the warning text. The stops, the version and every leg's verdict stay, and
+// the wind changes on the nights, the warning text, then the stretches of each leg's comfort.
+// The stops, the version, every leg's verdict and every leg's comfort text stay, and
 // the note says what went. It reports false when there is nothing left to drop.
 func (r *getPlansResult) shrink() bool {
 	var dropped string
@@ -183,6 +205,15 @@ func (r *getPlansResult) shrink() bool {
 		r.Plan.NightWinds, dropped = nil, "the wind changes on the nights at stops"
 	case r.Plan != nil && len(r.Plan.Warnings) > 0:
 		r.Plan.Warnings, dropped = nil, "the warnings on the stops"
+	case r.Plan != nil && r.Plan.hasComfortStretches():
+		// Last: the comfort text and motion line stay, so every leg keeps its verdict on
+		// how it will feel; only the times and places behind the text go.
+		for i := range r.Plan.Legs {
+			if c := r.Plan.Legs[i].Comfort; c != nil {
+				c.Stretches = []planComfortStretch{}
+			}
+		}
+		dropped = "the comfort stretches of each leg (its comfort text stays)"
 	default:
 		return false
 	}
@@ -253,7 +284,9 @@ func buildPlanReport(ctx context.Context, p plan, deps planAssessDeps, isCurrent
 	// The limits and the speed are read once and shared with the slips, which run
 	// after the assessment so that they find its forecast kept.
 	env := deps.readEnv(actx, deps.now(), len(p.Stops) > 1)
-	assessment := assessPlan(actx, p, legs, deps, planAssessOptions{Env: &env})
+	// Comfort is asked for as the Forecast page asks, so a suggested departure and its
+	// chip are the page's, whoever reads the plan. The slips stay without it.
+	assessment := assessPlan(actx, p, legs, deps, pagePlanAssessOptions(&env))
 	sctx, scancel := context.WithTimeout(ctx, planSlipsDeadline)
 	defer scancel()
 	slips := slipsWithEnv(sctx, p, deps, &env, func(context.Context) []planLeg { return legs })
@@ -369,10 +402,11 @@ func planReportLegOf(p plan, l planLegAssessment, routed planLeg) (planReportLeg
 		Depart: depart, DepartSuggested: l.DepartSuggested, Arrive: arrive, Hours: l.Hours, SpeedKn: l.SpeedKn, EtaBasis: l.EtaBasis,
 		CurrentKn: l.CurrentKn, CurrentNote: l.CurrentNote, NotChecked: l.NotChecked, WindChanges: l.WindChanges,
 	}
-	// A leg with no Go or Marginal time was chosen closest to its limit, not by the
-	// current, so it has no basis to give.
-	if l.DepartSuggested && (l.Verdict == "go" || l.Verdict == "marginal") {
-		out.DepartBasis = planReportDepartBasis
+	if l.DepartBasis != nil {
+		out.DepartBasis = *l.DepartBasis
+	}
+	if c := l.Comfort; c != nil {
+		out.Comfort = &planReportComfort{Text: c.Text, Motion: c.Motion, Stretches: c.Stretches}
 	}
 	if routed.Error != "" {
 		out.RouteError = routed.Error
@@ -492,7 +526,8 @@ var mateToolGetPlans = mateTool{
 			"and gives the current one in full, the plan the page opens on. Pass id or name to be given another plan in full. A plan in full has its stops " +
 			"(name, lat, lon, arrival, nights, departure, the departure time and arrive-by the operator set, and via places), its legs and the version to quote as base_version. " +
 			"Each leg carries the plan's own verdict (go, marginal, no_go or no_data) with the figure that decided it, the departure and arrival, the modelled current, " +
-			"whether it is done or skipped, and the slack before the tightest arrive-by with what slipping a day at a time would meet. " +
+			"whether it is done or skipped, how it is forecast to feel (comfort: a text, a motion line and stretches, each with its band, from_label, until_label, where and reason), " +
+			"and the slack before the tightest arrive-by with what slipping a day at a time would meet. A suggested departure comes with depart_basis, the reason it was chosen. " +
 			"For a leg of a plan, quote the plan's own verdict and its limiting figure and never judge the leg again. Use assess_passage_window only for a date or time that is not in a plan. " +
 			"Use it when the operator talks about the plan, the next stop, \"the marina\", \"our stay\" or being there, and for the times a stop is reached. " +
 			"Take dates and times from the labels as given and never work out a weekday or a time yourself. Pass a stop's lat and lon to get_wind_forecast and get_tides. " + rulePlans,
