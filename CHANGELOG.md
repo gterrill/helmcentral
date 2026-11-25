@@ -238,6 +238,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   credit showed as white text on a white bar, so it looked empty. It's now
   white text on a dark pill, and folds down to its small icon when the map has
   loaded.
+- **A narrow Depth & Tide tile keeps its readings inside the tile.** On a
+  narrow tile the 3h trend gives way to the depth, and High and Low sit one
+  over the other instead of the Low time running past the edge. The tile is
+  now at least 3 columns wide and 8 rows tall. A Depth & Tide tile saved
+  shorter than 8 rows grows to 8 by itself, and the one in Mate's answers is a
+  row taller.
 - **A narrow Battery & Power, Alternator, Generator or Hot Water tile no longer
   runs its figures out of their boxes.** When the tile is narrow, the figures
   sit one to a row, and the Hot Water buttons sit two by two. On a narrow

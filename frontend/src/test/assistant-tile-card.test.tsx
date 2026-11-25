@@ -69,7 +69,7 @@ describe('AssistantTileCard', () => {
 
   it('holds the place of the lazy card at the card\'s own height, so the thread does not jump', () => {
     const { getByTestId } = render(<AssistantTileCardFallback tile="depth-tide" />)
-    expect(getByTestId('assistant-tile-fallback')).toHaveStyle({ height: `${320 + TILE_CARD_HEADER_PX}px` })
+    expect(getByTestId('assistant-tile-fallback')).toHaveStyle({ height: `${368 + TILE_CARD_HEADER_PX}px` })
     render(<AssistantTileCard card={tileCard()} live={false} />)
     const header = screen.getByTestId('assistant-tile-header')
     expect(header).toHaveStyle({ height: `${TILE_CARD_HEADER_PX}px` })
@@ -82,8 +82,8 @@ describe('AssistantTileCard', () => {
 
   it('gives the tile the height it has on the dashboard by default', () => {
     render(<AssistantTileCard card={tileCard()} live={false} />)
-    // 7 rows of 32px and 6 gaps of 16px.
-    expect(screen.getByTestId('assistant-tile-box')).toHaveStyle({ height: '320px' })
+    // 8 rows of 32px and 7 gaps of 16px.
+    expect(screen.getByTestId('assistant-tile-box')).toHaveStyle({ height: '368px' })
   })
 
   it('is what AssistantCard draws for a tile card, passing the live flag on', async () => {
