@@ -962,14 +962,23 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	// publishes under a known engine/battery quantity.
 	var outOfRangePaths []string
 	outOfRangeValues := map[string]float64{}
+	// Each battery instance is worked out once, not once per path.
+	chargerInstances := map[string]bool{}
 	for _, path := range discoveredEngineBatteryPaths(snapshot) {
 		if ignored[path] {
 			continue
 		}
 		// A battery instance published only by chargers is the charger's own
 		// input (a solar array at 76 V), not a battery: nothing to range-check.
-		if m := sensorBatteryPathRe.FindStringSubmatch(path); m != nil && namer.isChargerInstance(m[1]) {
-			continue
+		if m := sensorBatteryPathRe.FindStringSubmatch(path); m != nil {
+			charger, done := chargerInstances[m[1]]
+			if !done {
+				charger = namer.isChargerInstance(m[1])
+				chargerInstances[m[1]] = charger
+			}
+			if charger {
+				continue
+			}
 		}
 		v, ok := numericFromPath(snapshot, path)
 		if !ok {

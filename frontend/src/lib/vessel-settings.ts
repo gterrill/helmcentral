@@ -116,6 +116,15 @@ export interface DiscoveryRow {
   bus_name: string
   /** A charger's own input (a solar array's voltage), not a battery. */
   charger_input: boolean
+  /**
+   * The operator's mark, judged when read. 'applies' makes it a charger input;
+   * 'item' (an item owns the number), 'not_chargers' (a known non-charger also
+   * reports it) and 'no_publishers' (nothing has reported it since
+   * start-up) are marked but not in effect. Any marked row can be unmarked.
+   */
+  charger_input_mark: 'none' | 'applies' | 'automatic' | 'item' | 'not_chargers' | 'no_publishers'
+  /** The operator may mark this number now (the server's one rule). */
+  can_mark: boolean
   /** False for a source an item owns that the boat has stopped reporting. */
   reporting: boolean
   metrics: DiscoveryMetric[]

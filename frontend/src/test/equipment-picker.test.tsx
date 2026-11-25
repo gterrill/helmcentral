@@ -10,8 +10,8 @@ const discovery = {
   groups: [{
     kind: 'engine', mappable: true,
     rows: [
-      { source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'RPM', text: '0 rpm' }], item: { id: 'x', name: 'Taken' } },
-      { source: 'propulsion.starboard', instance: 'starboard', bus_name: '', charger_input: false, reporting: true, metrics: [], item: null },
+      { source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [{ label: 'RPM', text: '0 rpm' }], item: { id: 'x', name: 'Taken' } },
+      { source: 'propulsion.starboard', instance: 'starboard', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [], item: null },
     ],
   }],
 }

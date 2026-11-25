@@ -50,13 +50,23 @@ type discoveryRow struct {
 	// BusName is what the bus itself calls a battery (its .name path, or its
 	// device's installation or product name); empty when it says nothing.
 	BusName string `json:"bus_name"`
-	// ChargerInput marks a battery instance that is a charger's own input
-	// (published only by chargers that feed another bank), which the
-	// impossible-reading check does not treat as a battery.
-	ChargerInput bool              `json:"charger_input"`
-	Reporting    bool              `json:"reporting"`
-	Metrics      []discoveryMetric `json:"metrics"`
-	Item         *discoveryItemRef `json:"item"`
+	// ChargerInput marks a battery instance that is a charger's own input,
+	// which the impossible-reading check does not treat as a battery: either
+	// published only by chargers that feed another bank, or marked by the
+	// operator (ChargerInputMark).
+	ChargerInput bool `json:"charger_input"`
+	// ChargerInputMark is the operator's mark on this instance, worked out
+	// when read: "none" (not marked), "applies", "item" (an item owns the
+	// number), "not_chargers" (a known non-charger also publishes it) or "no_publishers" (nothing has published it since
+	// start-up). Only "applies" makes the instance a charger input; the rest
+	// leave it checked as a battery. A marked row can always be unmarked.
+	ChargerInputMark string `json:"charger_input_mark"`
+	// CanMark is true when the operator may mark this instance now: the one rule
+	// in sensorNamer.chargerInput, which the PUT handler also uses.
+	CanMark   bool              `json:"can_mark"`
+	Reporting bool              `json:"reporting"`
+	Metrics   []discoveryMetric `json:"metrics"`
+	Item      *discoveryItemRef `json:"item"`
 	// LastSeen is when Helmcentral last saw this source's signature path
 	// reported; null when it never has.
 	LastSeen *time.Time `json:"last_seen"`
@@ -305,6 +315,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	live := discoveredInstances(telemetry, paths)
 	namer := newSensorNamer(snapshot, vessel, globalSourceDevices.get())
 
+	marks := globalChargerInputMarks.all()
 	owner := map[string]sourceItem{}
 	for _, it := range items {
 		owner[it.Source] = it
@@ -333,6 +344,12 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 				ids[it.Instance] = true
 			}
 		}
+		// A marked instance is always listed, even quiet, so it can be unmarked.
+		if group == sourceBattery {
+			for id := range marks {
+				ids[id] = true
+			}
+		}
 		sorted := make([]string, 0, len(ids))
 		for id := range ids {
 			sorted = append(sorted, id)
@@ -354,7 +371,11 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 			}
 			if group == sourceBattery {
 				row.BusName = namer.busBatteryName(id)
-				row.ChargerInput = namer.isChargerInstance(id)
+				_, owned := owner[source]
+				st := namer.chargerInput(id, marks[id], owned)
+				row.ChargerInput = st.Charger
+				row.ChargerInputMark = st.Mark
+				row.CanMark = st.CanMark
 			}
 			if it, ok := owner[source]; ok {
 				row.Item = &discoveryItemRef{ID: it.ID, Name: it.Name, Figures: sourceItemFigures(it)}

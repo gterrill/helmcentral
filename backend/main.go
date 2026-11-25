@@ -297,6 +297,13 @@ func main() {
 	}
 	globalIgnoreStore = ignores
 
+	// The operator's marks on battery instances that are a charger's input.
+	chargerMarks, err := newChargerInputMarkStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open the charger-input marks: %v", err)
+	}
+	globalChargerInputMarks = chargerMarks
+
 	// Offline coastline (ADR 0203): the coverage squares Mate's shelter
 	// estimate reads, in the same file. The worker starts with the others
 	// below and does nothing while the switch is off.

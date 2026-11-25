@@ -98,6 +98,27 @@ chargers also feeds another battery number that a non-charger reports. In that
 case, Helmcentral doesn't treat that number as a battery. A charger on its own
 is still checked, and so is anything Helmcentral can't identify.
 
+A charger on its own is the case you can fix by hand. Say a lone solar charger
+reports its panel voltage under a battery number and keeps raising impossible
+readings. Open **Settings → SignalK → Discovery** and find that battery number.
+Choose **Mark as charger input**. Helmcentral then treats it as a charger's
+input, not a battery, and stops checking it.
+
+- Which rows offer it: Battery numbers that no item owns, that something has
+  reported, and that Helmcentral doesn't already recognise as a charger input.
+  Helmcentral refuses a number that an item owns or that a device known not to be
+  a charger also reports, because it could be a real battery.
+- When the mark stops applying: A mark only counts while no item owns the number
+  and no device known not to be a charger reports it. If you give the number to
+  an item, or a battery monitor starts reporting on it, Helmcentral checks it as a
+  battery again. The row says which, and keeps your mark in case that changes
+  back. A device Helmcentral doesn't recognise yet doesn't cancel your mark.
+- If nothing has reported the number since Helmcentral started, the row says the
+  mark waits.
+- Taking it back: **Unmark charger input** is on every row you marked. A number
+  Helmcentral recognised on its own says **Charger input, not a battery** and has
+  no button.
+
 Say you know a sensor is dead and you don't want it watched, such as a broken
 exhaust temperature sender. You can exclude it from its own alarm card with an
 **Ignore** action named for that sensor. See

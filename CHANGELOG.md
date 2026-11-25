@@ -35,6 +35,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **You can now mark a solar charger's input so it stops raising impossible
+  readings.** Some solar chargers report the panel's voltage under a battery
+  number, and 80 volts from the panels looks like an impossible battery. In
+  **Settings → SignalK → Discovery**, choose **Mark as charger input** on that
+  battery number. Helmcentral then treats it as a charger's input, not a
+  battery, and leaves it out of the impossible-reading check and the list of
+  banks you can pick. **Unmark charger input** puts it back. A number
+  Helmcentral already recognises on its own needs nothing from you.
 - **You can now choose how hard Mate thinks.** Settings → Mate → Chat has a new
   **Thinking** choice next to the model: Model default, Low, Medium or High.
   Model default leaves it to the model, as before. Low, Medium and High ask the

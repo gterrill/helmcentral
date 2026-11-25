@@ -1360,5 +1360,7 @@ func settingsRoutes() []apiRoute {
 		// of live instances for the picker. The vessel.* block itself
 		// loads and saves through /api/settings.
 		{http.MethodGet, "/api/vessel/discovery", tierAdmin, getVesselDiscoveryHandler},
+		// Marks a battery instance as a charger's input, not a battery.
+		{http.MethodPut, "/api/vessel/charger-inputs/:instance", tierAdmin, putChargerInputHandler},
 	}
 }

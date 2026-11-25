@@ -30,17 +30,40 @@ let discoveryBody: Record<string, unknown>
 let settingsBody: Record<string, unknown>
 let putFailsWith: string | null
 let postFailsWith: string | null
+let markFailsWith: string | null
+let discoveryFailsAfterMark: boolean
+let markCalls: { instance: string; marked: boolean }[]
+let postGate: Promise<void> | null
 const fetchMock = vi.fn()
 
 const row = (source: string, instance: string, metrics: { label: string; text: string }[], extra: Record<string, unknown> = {}) => ({
-  source, instance, bus_name: '', charger_input: false, reporting: true, metrics, item: null, ...extra,
+  source, instance, bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics, item: null, ...extra,
 })
 
 function stubFetch() {
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
-    if (u.endsWith('/api/vessel/discovery')) return Promise.resolve({ ok: true, json: async () => discoveryBody })
+    if (u.endsWith('/api/vessel/discovery')) {
+      if (discoveryFailsAfterMark && markCalls.length > 0) return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'down' }) })
+      return Promise.resolve({ ok: true, json: async () => discoveryBody })
+    }
+    const mark = u.match(/\/api\/vessel\/charger-inputs\/([^/?]+)$/)
+    if (mark && method === 'PUT') {
+      if (markFailsWith) return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: markFailsWith }) })
+      const body = JSON.parse(String(init?.body))
+      markCalls.push({ instance: decodeURIComponent(mark[1]), marked: body.marked })
+      discoveryBody = {
+        ...discoveryBody,
+        groups: (discoveryBody.groups as { rows: Record<string, unknown>[] }[]).map((g) => ({
+          ...g,
+          rows: g.rows.map((r) => (r.instance === decodeURIComponent(mark[1])
+            ? { ...r, charger_input: body.marked, charger_input_mark: body.marked ? 'applies' : 'none' }
+            : r)),
+        })),
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ instance: decodeURIComponent(mark[1]), marked: body.marked }) })
+    }
     if (u.endsWith('/api/settings')) return Promise.resolve({ ok: true, json: async () => settingsBody })
     if (u.match(/\/api\/inventory\/equipment\/[^/?]+$/) && method === 'GET') {
       const found = equipmentItems.find((i) => i.id === u.split('/').pop())
@@ -59,7 +82,8 @@ function stubFetch() {
       const body = JSON.parse(String(init?.body))
       const created = item({ id: 'eq-new', ...body, source_kind: String(body.signalk_source).startsWith('electrical.batteries') ? 'battery' : '' })
       equipmentItems.push(created)
-      return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: created }) })
+      const reply = { ok: true, status: 201, json: async () => ({ item: created }) }
+      return postGate ? postGate.then(() => reply) : Promise.resolve(reply)
     }
     if (u.includes('/api/inventory/equipment') && method === 'GET') {
       return Promise.resolve({ ok: true, json: async () => ({ items: equipmentItems }) })
@@ -71,6 +95,10 @@ function stubFetch() {
 beforeEach(() => {
   putFailsWith = null
   postFailsWith = null
+  markFailsWith = null
+  discoveryFailsAfterMark = false
+  markCalls = []
+  postGate = null
   equipmentItems = [
     item({ id: 'eng-1', name: 'Port engine', system: 'propulsion', signalk_source: 'propulsion.port', source_kind: 'engine' }),
     item({ id: 'bank-1', name: 'Lithium bank', system: 'electrical', signalk_source: 'electrical.batteries.512', source_kind: 'battery' }),
@@ -272,6 +300,143 @@ describe('Settings -> SignalK: Discovery', () => {
     expect(rowFor('electrical.batteries.1').getByText('The boat calls it BlueSolar')).toBeInTheDocument()
     expect(rowFor('electrical.batteries.2').getByText('Charger input, not a battery')).toBeInTheDocument()
     expect(rowFor('electrical.batteries.2').queryByText('The boat gives it no name')).toBeNull()
+  })
+
+  it('lets the operator mark a battery as a charger input, and unmark only their own mark', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '80.70 V' }], { can_mark: true }),
+        row('electrical.batteries.2', '2', [{ label: 'Voltage', text: '76.70 V' }], { charger_input: true }),
+        row('electrical.batteries.3', '3', [{ label: 'Voltage', text: '13.10 V' }], { item: { id: 'bat-1', name: 'Starter' } }),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    const rowFor = (source: string) => within(screen.getByText(source).closest('div.grid') as HTMLElement)
+    // Recognised automatically, or owned by an item: nothing to mark.
+    expect(rowFor('electrical.batteries.2').queryByRole('button', { name: /charger input/i })).toBeNull()
+    expect(rowFor('electrical.batteries.3').queryByRole('button', { name: /charger input/i })).toBeNull()
+
+    fireEvent.click(rowFor('electrical.batteries.1').getByRole('button', { name: 'Mark as charger input' }))
+    await waitFor(() => expect(markCalls).toEqual([{ instance: '1', marked: true }]))
+    expect(await rowFor('electrical.batteries.1').findByText('Charger input, not a battery')).toBeInTheDocument()
+
+    fireEvent.click(await rowFor('electrical.batteries.1').findByRole('button', { name: 'Unmark charger input' }))
+    await waitFor(() => expect(markCalls).toEqual([{ instance: '1', marked: true }, { instance: '1', marked: false }]))
+    expect(await rowFor('electrical.batteries.1').findByRole('button', { name: 'Mark as charger input' })).toBeInTheDocument()
+    expect(rowFor('electrical.batteries.1').queryByText('Charger input, not a battery')).toBeNull()
+  })
+
+  it('says why a mark is not in effect, keeps Assign and Create, and always offers Unmark', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.4', '4', [], { charger_input_mark: 'not_chargers' }),
+        row('electrical.batteries.5', '5', [], { charger_input_mark: 'no_publishers', reporting: false }),
+        row('electrical.batteries.6', '6', [], { charger_input_mark: 'item', item: { id: 'bat-1', name: 'Starter' } }),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.4')
+    expect(screen.getByText("Marked as charger input, but a device that isn't a charger also reports this number, so it's checked as a battery")).toBeInTheDocument()
+    expect(screen.getByText('Marked as charger input, but nothing has reported this number since Helmcentral started, so the mark waits')).toBeInTheDocument()
+    expect(screen.getByText("Marked as charger input, but an item uses this number, so it's checked as a battery")).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Unmark charger input' }).length).toBe(3)
+    expect(screen.getAllByRole('button', { name: 'Assign to item' }).length).toBe(2)
+  })
+
+  it('disables the mark button while the same row is creating an item', async () => {
+    let release: () => void = () => {}
+    postGate = new Promise<void>((resolve) => { release = resolve })
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '80.70 V' }], { can_mark: true })] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    fireEvent.click(screen.getByRole('button', { name: 'Create item' }))
+    fireEvent.change(screen.getByLabelText(/Name for the new/), { target: { value: 'Solar bank' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark as charger input' })).toBeDisabled())
+    release()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark as charger input' })).toBeEnabled())
+    expect(markCalls).toEqual([])
+  })
+
+  it('shows only the charger line and Unmark when the mark adds nothing to an automatic charger input', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.2', '2', [], { charger_input: true, charger_input_mark: 'automatic', item: { id: 'bat-1', name: 'Starter' } }),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.2')
+    expect(screen.getByText('Charger input, not a battery')).toBeInTheDocument()
+    expect(screen.queryByText(/checked as a battery/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Unmark charger input' })).toBeInTheDocument()
+  })
+
+  it('offers Mark only where the server says can_mark', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.1', '1', [], { can_mark: true }),
+        row('electrical.batteries.7', '7', []),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.7')
+    expect(screen.getAllByRole('button', { name: 'Mark as charger input' }).length).toBe(1)
+  })
+
+  it('keeps an open Create form when the mark button is used on the same row', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '80.70 V' }], { can_mark: true })] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    fireEvent.click(screen.getByRole('button', { name: 'Create item' }))
+    fireEvent.change(screen.getByLabelText(/Name for the new/), { target: { value: 'Half typed' } })
+    markFailsWith = 'the boat has not reported battery instance 1'
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as charger input' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('has not reported')
+    expect(screen.getByLabelText(/Name for the new/)).toHaveValue('Half typed')
+  })
+
+  it('says so when a mark was saved but the list did not refresh', async () => {
+    discoveryFailsAfterMark = true
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '80.70 V' }], { can_mark: true })] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as charger input' }))
+    expect(await screen.findByText("Saved, but the list didn't refresh. Reload the page.")).toBeInTheDocument()
+    expect(markCalls).toEqual([{ instance: '1', marked: true }])
+  })
+
+  it('shows the server\'s own refusal when a mark is refused', async () => {
+    markFailsWith = 'the boat has not reported battery instance 1'
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '80.70 V' }], { can_mark: true })] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as charger input' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('has not reported battery instance 1')
   })
 
   it('says so when Helmcentral has no SignalK data, instead of an empty list', async () => {

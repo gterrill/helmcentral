@@ -229,29 +229,109 @@ func (n *sensorNamer) publishers(id string) []string {
 	return sources
 }
 
-// isChargerInstance reports whether battery instance id is a charger's own
-// input (a solar array's voltage) and not a battery. Two things must hold.
-// EVERY source that has published it is a known NMEA 2000 charger. And each of
-// those chargers also publishes another instance that has at least one known
-// non-charger publisher, the bank the charger really feeds: a charger on its
-// own, or only alongside other chargers, has no such bank and its instance
-// could be a real battery reading. A source the sources tree does not know, or
-// an instance nothing has published, is not proof of anything: the instance
-// then keeps being checked as a battery, the conservative choice, rather than
-// skipped on a guess.
-func (n *sensorNamer) isChargerInstance(id string) bool {
+// The states of the operator's mark on a battery instance, worked out each time
+// it is read so that no write can leave a stale answer.
+const (
+	// markNone: the operator has not marked it.
+	markNone = "none"
+	// markApplies: marked, no item owns it, and only known chargers publish it.
+	markApplies = "applies"
+	// markAutomatic: marked, but the automatic test already recognises the
+	// number as a charger's input, so the mark adds nothing.
+	markAutomatic = "automatic"
+	// markItem: marked, but an equipment item owns the number.
+	markItem = "item"
+	// markNotChargers: marked, but a known non-charger also publishes it.
+	markNotChargers = "not_chargers"
+	// markNoPublishers: marked, but nothing has published it since start-up.
+	markNoPublishers = "no_publishers"
+)
+
+// chargerInputState is what is known about one battery instance.
+type chargerInputState struct {
+	// Charger is true when the instance is a charger's own input: the automatic
+	// test recognises it, or the mark applies.
+	Charger bool
+	// Mark is one of the mark* states.
+	Mark string
+	// CanMark is true when the operator may mark the instance now: it isn't
+	// marked, the automatic test doesn't recognise it, and a mark would apply.
+	CanMark bool
+}
+
+// chargerInput works out whether battery instance id is a charger's own input
+// (a solar array's voltage) and not a battery. marked is the operator's mark and
+// owned says an equipment item owns the number. The publishers are fetched once.
+// It is the one rule for the mark: the page, the handler and the detector all
+// read it.
+//
+// The automatic test needs two things. EVERY source that has published it is a
+// known NMEA 2000 charger. And each of those chargers also publishes another
+// instance that has at least one known non-charger publisher, the bank the
+// charger really feeds: a charger on its own, or only alongside other
+// chargers, has no such bank and its instance could be a real battery reading.
+// A source the sources tree does not know, or an instance nothing has
+// published, is not proof of anything: the instance then keeps being checked as
+// a battery, the conservative choice, rather than skipped on a guess.
+//
+// The mark is the operator's word that a number is a charger's input, so only
+// evidence lifts it. It applies when no item owns the number, something has
+// published it, and no publisher is a KNOWN non-charger. A publisher the
+// sources tree doesn't know yet (after a restart, say) leaves it in effect.
+func (n *sensorNamer) chargerInput(id string, marked, owned bool) chargerInputState {
 	context := n.snapshot.selfContext()
 	sources := n.snapshot.batteryPublishersFor(context, id)
-	if len(sources) == 0 {
-		return false
-	}
+	automatic := len(sources) > 0
+	knownNonCharger := false
 	for _, source := range sources {
 		device, known := n.devices[source]
-		if !known || !device.isCharger() || !n.feedsAnotherBank(context, source, id) {
-			return false
+		if !known || !device.isCharger() {
+			automatic = false
+		}
+		if known && !device.isCharger() {
+			knownNonCharger = true
 		}
 	}
-	return true
+	for _, source := range sources {
+		if !automatic {
+			break
+		}
+		automatic = n.feedsAnotherBank(context, source, id)
+	}
+	st := chargerInputState{Mark: markNone, Charger: automatic}
+	switch {
+	case !marked:
+		st.CanMark = !automatic && !owned && len(sources) > 0 && !knownNonCharger
+		return st
+	case automatic:
+		st.Mark = markAutomatic
+	case owned:
+		st.Mark = markItem
+	case len(sources) == 0:
+		st.Mark = markNoPublishers
+	case knownNonCharger:
+		st.Mark = markNotChargers
+	default:
+		st.Mark = markApplies
+		st.Charger = true
+	}
+	return st
+}
+
+// ownedByItem reports whether an equipment item owns battery instance id.
+func (n *sensorNamer) ownedByItem(id string) bool {
+	for _, b := range n.vessel.Batteries {
+		if b.Instance == id {
+			return true
+		}
+	}
+	return false
+}
+
+// isChargerInstance reports whether battery instance id is a charger's own
+// input and not a battery, with the operator's mark read now.
+func (n *sensorNamer) isChargerInstance(id string) bool {
+	return n.chargerInput(id, globalChargerInputMarks.has(id), n.ownedByItem(id)).Charger
 }
 
 // feedsAnotherBank reports whether source publishes a battery instance other

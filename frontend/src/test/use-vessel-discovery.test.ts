@@ -5,7 +5,7 @@ import { invalidateQueries } from '@/lib/api-query'
 
 const body = {
   connected: true,
-  groups: [{ kind: 'engine', mappable: true, rows: [{ source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, reporting: true, metrics: null, item: null }] }],
+  groups: [{ kind: 'engine', mappable: true, rows: [{ source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: null, item: null }] }],
   detectors: { frozen: { ready: true }, battery: { ready: false, missing: 'Choose your house bank under Roles' } },
 }
 
