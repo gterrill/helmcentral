@@ -92,6 +92,10 @@ backend | frontend | all) ;;
 	;;
 esac
 
+# Stay awake while this run lives, before the lock so a queued run does too.
+. "$PWD/scripts/lib/stay-awake.sh"
+stay_awake
+
 # One check run at a time across every checkout on this machine: two at once
 # overload it and fail tests at random. The outermost run re-runs itself under
 # the lock with HELMCENTRAL_CHECK_LOCK_HELD set, so the runs it starts skip it.
@@ -99,6 +103,18 @@ esac
 machine_lock_reexec HELMCENTRAL_CHECK_LOCK_HELD "${HELMCENTRAL_CHECK_LOCKFILE:-/tmp/helmcentral-check.lock}" check "make check" sh "$PWD/scripts/check.sh" "$target"
 
 mkdir -p "$logdir"
+
+# The outermost run hashes the tree at start and end; a changed tree fails.
+# HELMCENTRAL_CHECK_TREE_OWNER marks the runs it starts as nested.
+tree_start=
+if [ -z "${HELMCENTRAL_CHECK_TREE_OWNER:-}" ]; then
+	HELMCENTRAL_CHECK_TREE_OWNER=1
+	export HELMCENTRAL_CHECK_TREE_OWNER
+	tree_start=$(sh "$PWD/scripts/tree-hash.sh" "$PWD") || {
+		echo "check: could not hash the working tree" >&2
+		exit 2
+	}
+fi
 
 # The machine's 1-minute load as this run starts, taken once by the outermost
 # run and handed to the nested ones, so vitest's load cap
@@ -141,6 +157,9 @@ all)
 	step hook-tests . sh scripts/hooks/refuse-piped-checks-test.sh
 	step hook-tests-stash . sh scripts/hooks/refuse-git-stash-test.sh
 	step lock-tests . sh scripts/check-lock-test.sh
+	step stay-awake-tests . sh scripts/stay-awake-test.sh
+	step tree-hash-tests . sh scripts/tree-hash-test.sh
+	step hook-tests-gofmt . sh scripts/hooks/gofmt-edited-test.sh
 	step await-check-tests . sh scripts/await-check-test.sh
 	step npm-test-rerun-tests . sh scripts/check-npm-test-test.sh
 	;;
@@ -150,6 +169,17 @@ echo
 echo "== summary ($target)"
 echo "load: $(uptime | sed 's/.*load averages*: *//')"
 failed=0
+if [ -n "$tree_start" ]; then
+	if ! tree_end=$(sh "$PWD/scripts/tree-hash.sh" "$PWD"); then
+		failed=1
+		echo "tree: could not hash the tree at the end of the run"
+	elif [ "$tree_end" = "$tree_start" ]; then
+		echo "tree: $tree_start"
+	else
+		failed=1
+		echo "tree: changed during the run ($tree_start -> $tree_end)"
+	fi
+fi
 for result in $results; do
 	name=${result%:*}
 	code=${result##*:}

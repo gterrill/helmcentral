@@ -151,7 +151,7 @@ grep -q waiting "$work/bogus.out" && bad "invalid target waited for the lock"
 
 # 5. With the held variable set, check.sh does not take the lock: it runs to
 # its summary while the lock is held elsewhere.
-HELMCENTRAL_CHECK_LOCK_HELD=1 sh "$fake/scripts/check.sh" backend >"$work/inner.out" 2>&1 &
+HELMCENTRAL_CHECK_TREE_OWNER=1 HELMCENTRAL_CHECK_LOCK_HELD=1 sh "$fake/scripts/check.sh" backend >"$work/inner.out" 2>&1 &
 inner=$!
 pids="$pids $inner"
 poll "grep -q '^load: ' '$work/inner.out'" || bad "nested run did not reach its summary (or has no load line)"
