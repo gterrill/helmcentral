@@ -618,6 +618,21 @@ func (s *passageStore) LastTrackPointBetween(from, to time.Time) (*recordedTrack
 	return &p, nil
 }
 
+// LastRecordedTrackPointBetween is LastTrackPointBetween over the points the recorder
+// took itself: an imported point is never the boat's latest fix.
+func (s *passageStore) LastRecordedTrackPointBetween(from, to time.Time) (*recordedTrackPoint, error) {
+	row := s.db.QueryRow(`SELECT `+trackPointColumns+` FROM track_points WHERE source = ? AND t_ms >= ? AND t_ms <= ? ORDER BY t_ms DESC, id DESC LIMIT 1`,
+		trackSourceRecorded, from.UnixMilli(), to.UnixMilli())
+	p, err := scanTrackPoint(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("last recorded track point between: %w", err)
+	}
+	return &p, nil
+}
+
 // FirstTrackPointBetween returns the oldest point with from <= time <= to, or nil
 // when there is none.
 func (s *passageStore) FirstTrackPointBetween(from, to time.Time) (*recordedTrackPoint, error) {

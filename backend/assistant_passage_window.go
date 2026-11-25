@@ -840,13 +840,21 @@ func (as *passageAssessor) walkLegHours(plan passageLegPlan, tl legTimeline, fro
 	return nil
 }
 
-// cell judges one leg leaving at depart, reading its days in loc. Its errors
-// carry no tool name; the caller adds its own.
+// cell judges one leg leaving at depart on the plan's own pace, reading its days in
+// loc. Its errors carry no tool name; the caller adds its own.
 func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time, loc *time.Location) (passageWindowCell, error) {
 	tl, err := plan.timeline(depart)
 	if err != nil {
 		return passageWindowCell{}, fmt.Errorf("%s: %w", plan.name, err)
 	}
+	return as.cellOn(ctx, idx, plan, tl, loc)
+}
+
+// cellOn judges one leg on the timeline it is given, which is the progress of a
+// departure the caller has run, and reads nothing of the plan's pace. A plan that
+// is run on several timelines at once is judged on each one's own.
+func (as *passageAssessor) cellOn(ctx context.Context, idx int, plan passageLegPlan, tl legTimeline, loc *time.Location) (passageWindowCell, error) {
+	depart := tl.depart()
 	arrive := tl.arrive()
 	cell := passageWindowCell{
 		Leg: idx, Date: depart.Format("2006-01-02"),

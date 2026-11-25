@@ -44,6 +44,11 @@ type planPassageEnd struct {
 // leaving there is under way.
 type planUnderway struct {
 	Lat, Lon float64
+	// Start is when the passage began, and FixLat, FixLon and FixAt the latest
+	// recorded fix of it.
+	Start          time.Time
+	FixLat, FixLon float64
+	FixAt          time.Time
 }
 
 // withinArrivedNm says whether two places are close enough to count as the same
@@ -121,7 +126,7 @@ func (d planAssessDeps) readProgress(ctx context.Context, p plan, out *planAsses
 	copy(res, got)
 	var underway *planUnderway
 	if d.underway != nil {
-		if underway, err = d.underway(ctx); err != nil {
+		if underway, err = d.underway(ctx, d.now()); err != nil {
 			log.Printf("plans: passage under way not read: %v", err)
 			out.ProgressError = err.Error()
 			return make([]string, len(res)), nil
@@ -241,7 +246,7 @@ func (d planAssessDeps) pastDepartureHour(p plan, i int, w *planLegWork, zone pl
 // readUnderway is where the passage being recorded now began, nil when the boat
 // is not on one. Only a passage that has ended is in the record and counts for
 // Done or Skipped; this one says only that the leg leaving there is under way.
-func readUnderway(ctx context.Context, store *passageStore) (*planUnderway, error) {
+func readUnderway(ctx context.Context, store *passageStore, now time.Time) (*planUnderway, error) {
 	if store == nil {
 		return nil, fmt.Errorf("the passage record is not available")
 	}
@@ -262,7 +267,15 @@ func readUnderway(ctx context.Context, store *passageStore) (*planUnderway, erro
 	if begin == nil {
 		return nil, fmt.Errorf("the passage under way has no fix at its start")
 	}
-	return &planUnderway{Lat: begin.Lat, Lon: begin.Lon}, nil
+	// A point stamped after now is not the latest fix; the fix before it is.
+	last, err := store.LastRecordedTrackPointBetween(open.start, now)
+	if err != nil {
+		return nil, fmt.Errorf("the passage record could not be read: %w", err)
+	}
+	if last == nil {
+		return nil, fmt.Errorf("the passage under way has no fix")
+	}
+	return &planUnderway{Lat: begin.Lat, Lon: begin.Lon, Start: open.start, FixLat: last.Lat, FixLon: last.Lon, FixAt: last.At}, nil
 }
 
 // visiblePassagesSince is the visible recorded passages that ended since the

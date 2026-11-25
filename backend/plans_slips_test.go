@@ -141,7 +141,7 @@ func TestSlipPlan_ADoneLegIsLeftOutAndTheShiftStartsAtTheFirstLegToDo(t *testing
 // named as the worst leg.
 func TestSlipPlan_ALegUnderWayIsNotSlippedOrNamed(t *testing.T) {
 	p, legs := slipPlan2(t, "2026-11-16T12:00") // slack 1
-	f := &paFake{fc: slipWind(), underway: &planUnderway{Lat: p.Stops[0].Lat + 0.3/60, Lon: p.Stops[0].Lon}}
+	f := &paFake{fc: slipWind(), underway: paUnderwayFrom(p, paAt(14, 3, 0), paAt(14, 3, 10))}
 	got := slipsOf(context.Background(), p, legs, paDeps(f))
 	if got.Problem != "" || got.SlackDays != 1 || len(got.Slips) != 2 {
 		t.Fatalf("slips = %+v", got)
@@ -190,8 +190,8 @@ func TestSlipPlan_ReadsNeitherTheCurrentNorTheWarnings(t *testing.T) {
 	p.Stops[1].Nights = 1
 	f := &paFake{}
 	slipsOf(context.Background(), p, legs, paDeps(f))
-	if len(f.currentCalls) != 0 || f.warningsOpen != 0 {
-		t.Fatalf("%d current reads, %d warnings opens: a slip needs only verdicts", len(f.currentCalls), f.warningsOpen)
+	if f.reads != 0 || f.warningsOpen != 0 {
+		t.Fatalf("%d current reads, %d warnings opens: a slip needs only verdicts", f.reads, f.warningsOpen)
 	}
 }
 
@@ -386,7 +386,7 @@ func TestSlipPlan_SlipsAreAssessedAFewAtATime(t *testing.T) {
 	p.Stops[2].ArriveBy = "2026-11-20T12:00"
 	var mu sync.Mutex
 	running, most := 0, 0
-	f := &paFake{departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{departures: func() ([]tidalDeparture, error) {
 		mu.Lock()
 		running++
 		most = max(most, running)
@@ -395,7 +395,7 @@ func TestSlipPlan_SlipsAreAssessedAFewAtATime(t *testing.T) {
 		mu.Lock()
 		running--
 		mu.Unlock()
-		return []tidalDeparture{{Depart: q.Earliest, Current: planCurrentReading{Have: true}}}, nil
+		return []tidalDeparture{paDeparture(5, 15, 0)}, nil // first light
 	}}
 	got := slipsOf(context.Background(), p, legs, paDeps(f))
 	if len(got.Slips) != 6 {

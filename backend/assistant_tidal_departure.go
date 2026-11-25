@@ -345,16 +345,55 @@ type tidalPointCurrents struct {
 // request that fails, are errors; the tool never splits the route or drops to
 // another method because a request failed.
 func (d assistantToolDeps) fetchTidalCurrents(ctx context.Context, samples []tidalSample, now, need time.Time) (tidalPointCurrents, error) {
-	var cells []tidalGridPoint
-	var query []currentsPoint
-	seen := map[tidalGridPoint]bool{}
-	for _, s := range samples {
-		if !seen[s.cell] {
-			seen[s.cell] = true
-			cells = append(cells, s.cell)
-			query = append(query, currentsPoint{Lat: s.pos.Lat, Lon: s.pos.Lon})
+	cells, query, _ := distinctCellQuery(len(samples), func(i int) (tidalGridPoint, float64, float64, bool) {
+		return samples[i].cell, samples[i].pos.Lat, samples[i].pos.Lon, true
+	})
+	return d.fetchCellCurrents(ctx, cells, query, tidalCurrentDays(now, need))
+}
+
+// distinctCellQuery is what one request for the current along n points asks: the
+// first point in each distinct cell of the model, in order, and the cell's place in
+// that list for every point. at gives point i's cell and position, and false to
+// leave the point out (its place is -1).
+func distinctCellQuery(n int, at func(i int) (cell tidalGridPoint, lat, lon float64, ok bool)) (cells []tidalGridPoint, query []currentsPoint, index []int) {
+	index = make([]int, n)
+	place := map[tidalGridPoint]int{}
+	for i := range n {
+		cell, lat, lon, ok := at(i)
+		if !ok {
+			index[i] = -1
+			continue
 		}
+		pos, seen := place[cell]
+		if !seen {
+			pos = len(cells)
+			place[cell] = pos
+			cells = append(cells, cell)
+			query = append(query, currentsPoint{Lat: lat, Lon: lon})
+		}
+		index[i] = pos
 	}
+	return cells, query, index
+}
+
+// trackCourse is a course with its sine and cosine worked out once, for reading a
+// current along it many times.
+type trackCourse struct{ sin, cos float64 }
+
+func courseOf(deg float64) trackCourse {
+	rad := deg * math.Pi / 180
+	return trackCourse{sin: math.Sin(rad), cos: math.Cos(rad)}
+}
+
+// alongKnots is a current of e m/s east and n m/s north along a course, in knots,
+// positive with the boat.
+func alongKnots(e, n float64, c trackCourse) float64 {
+	return (e*c.sin + n*c.cos) * metersPerSecondToKnots
+}
+
+// fetchCellCurrents asks for the series at each of the cells in one request, days of
+// forecast long. The cells and their points are in the same order.
+func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalGridPoint, query []currentsPoint, days int) (tidalPointCurrents, error) {
 	if len(cells) > maxCurrentsPoints {
 		return tidalPointCurrents{}, fmt.Errorf("the route needs the model at %d distinct cells, more than the %d one request carries; give a shorter route", len(cells), maxCurrentsPoints)
 	}
@@ -382,7 +421,6 @@ func (d assistantToolDeps) fetchTidalCurrents(ctx context.Context, samples []tid
 	if !ok {
 		return gapAll(fmt.Sprintf("plugin %q: %v", id, errNoCurrentsExport))
 	}
-	days := tidalCurrentDays(now, need)
 	if days > assistantTidalMaxDays {
 		return gapAll(fmt.Sprintf("the passage ends too far ahead for the Open-Meteo current model's %d-day forecast", assistantTidalMaxDays))
 	}
@@ -454,8 +492,7 @@ func alongCourse(cur tidalPointCurrents, samples []tidalSample, distNm []float64
 			continue
 		}
 		covered[k] = true
-		rad := s.course * math.Pi / 180
-		a := (e*math.Sin(rad) + nn*math.Cos(rad)) * metersPerSecondToKnots
+		a := alongKnots(e, nn, courseOf(s.course))
 		sum += a
 		run.covered++
 		if a > 0 {

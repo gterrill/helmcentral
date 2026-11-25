@@ -171,23 +171,6 @@ func TestSpanTimeline_RunsBetweenTwoInstantsAndRefusesAnArrivalBeforeTheDepartur
 	}
 }
 
-func TestLegTimeline_EndingAtShiftsEveryKnot(t *testing.T) {
-	tl, _ := newLegTimeline([]legKnot{
-		{t: ltDepart, frac: 0},
-		{t: ltDepart.Add(time.Hour), frac: 0.5},
-		{t: ltDepart.Add(5 * time.Hour), frac: 1},
-	})
-	eta := ltDepart.Add(48 * time.Hour)
-	got, err := tl.endingAt(eta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.arrive().Equal(eta) || got.duration() != 5*time.Hour {
-		t.Errorf("arrive %v duration %v", got.arrive(), got.duration())
-	}
-	ltClose(t, "frac an hour in", got.fracAt(eta.Add(-4*time.Hour)), 0.5)
-}
-
 func TestRoundedTimeline_KeepsWholeMinutes(t *testing.T) {
 	tl, _ := linearTimeline(ltDepart, 6.2)
 	got, err := tl.roundedTo(time.Minute)

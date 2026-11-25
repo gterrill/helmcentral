@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -159,8 +158,8 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 			}
 			return planProgressOf(p, ends)
 		},
-		underway: func(ctx context.Context) (*planUnderway, error) {
-			return readUnderway(ctx, globalPassageStore)
+		underway: func(ctx context.Context, now time.Time) (*planUnderway, error) {
+			return readUnderway(ctx, globalPassageStore, now)
 		},
 		position: func() (float64, float64, error) {
 			state, err := tideVesselState()
@@ -189,10 +188,9 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 			loader:     func() *coastlineLoader { return offlineCoastlineReaderFor(settingsPath)().newLoader() },
 			memo:       legShoreRays,
 		},
-		sun:          sunTimes,
-		dawn:         civilDawn,
-		departures:   d.planDepartures,
-		currentAlong: d.planCurrentAlong,
+		sun:         sunTimes,
+		dawn:        civilDawn,
+		legCurrents: d.readLegCurrents,
 		warnings: func(now time.Time) (planWarningsReader, error) {
 			provider, id, err := resolveForecastWarningsProvider(settingsPath)
 			if err != nil {
@@ -290,70 +288,4 @@ func (c *planReadCache[K, V]) drop() {
 	c.mu.Lock()
 	c.m = nil
 	c.mu.Unlock()
-}
-
-// planDepartures ranks the departures in a leg's window as plan_tidal_departure
-// does, on the Open-Meteo modelled current along the route, and hands them back
-// as they are, not as the tool's JSON. Where the model has none for the run there
-// is no ranking, and that is the error: the plan has no flood direction to time
-// the tide by.
-func (d assistantToolDeps) planDepartures(ctx context.Context, q planDepartureQuery) ([]tidalDeparture, error) {
-	if len(q.Route) < 2 {
-		return nil, fmt.Errorf("the leg has no route")
-	}
-	start, next := q.Route[0], q.Route[1]
-	ranking, err := d.rankTidalDepartures(ctx, tidalRankQuery{
-		Lat: start.Lat, Lon: start.Lon,
-		CourseDeg: bearingDeg(start.Lat, start.Lon, next.Lat, next.Lon),
-		Pace:      q.Pace,
-		Route:     q.Route,
-		Earliest:  q.Earliest, Latest: q.Latest,
-		Now: d.now(),
-	})
-	var none errTidalNothingToRank
-	if errors.As(err, &none) {
-		return nil, fmt.Errorf("the Open-Meteo model has no current for the run: %s", none.reason)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return ranking.departures()
-}
-
-// planCurrentAlong is the modelled total current along a leg's course for a
-// departure at dep, as the ranking reads it: the mean along the course, positive
-// with the boat. It is for a departure the operator set; a suggested one is read
-// with the ranking.
-func (d assistantToolDeps) planCurrentAlong(ctx context.Context, q planDepartureQuery, dep time.Time) (planCurrentReading, error) {
-	if len(q.Route) < 2 {
-		return planCurrentReading{Why: "the leg has no route"}, nil
-	}
-	start, next := q.Route[0], q.Route[1]
-	// The run on the timeline of this departure, in whole minutes so the arithmetic
-	// is exact.
-	if q.Pace == nil {
-		return planCurrentReading{}, errors.New("the leg has no pace")
-	}
-	tl, err := q.Pace(dep)
-	if err != nil {
-		return planCurrentReading{}, err
-	}
-	tl, err = tl.roundedTo(time.Minute)
-	if err != nil {
-		return planCurrentReading{}, err
-	}
-	n := int(math.Ceil(float64(tl.duration()) / float64(assistantTidalSampleStep)))
-	samples, err := tidalSamples(q.Route, start.Lat, start.Lon, bearingDeg(start.Lat, start.Lon, next.Lat, next.Lon), n)
-	if err != nil {
-		return planCurrentReading{}, err
-	}
-	cur, err := d.fetchTidalCurrents(ctx, samples, d.now(), tl.arrive())
-	if err != nil {
-		return planCurrentReading{}, err
-	}
-	distNm := make([]float64, len(samples))
-	for k, s := range samples {
-		distNm[k] = s.distNm
-	}
-	return currentReading(alongCourse(cur, samples, distNm, tl), cur, samples), nil
 }

@@ -241,7 +241,7 @@ func TestReadUnderway_APassageStillBeingRecordedIsNotAnEndButIsWhereItBegan(t *t
 	if err != nil || len(ends) != 0 {
 		t.Fatalf("ends = %+v (%v): a passage still being recorded marks nothing", ends, err)
 	}
-	got, err := readUnderway(context.Background(), store)
+	got, err := readUnderway(context.Background(), store, passageEpoch.AddDate(1, 0, 0))
 	if err != nil || got == nil {
 		t.Fatalf("underway = %+v (%v), want the open run", got, err)
 	}
@@ -257,14 +257,14 @@ func TestReadUnderway_ABoatAtRestIsNotUnderway(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := readUnderway(context.Background(), store)
+	got, err := readUnderway(context.Background(), store, passageEpoch.AddDate(1, 0, 0))
 	if err != nil || got != nil {
 		t.Fatalf("underway = %+v (%v), want none", got, err)
 	}
 }
 
 func TestReadUnderway_NoStoreIsAnErrorNotNoPassage(t *testing.T) {
-	if _, err := readUnderway(context.Background(), nil); err == nil {
+	if _, err := readUnderway(context.Background(), nil, passageEpoch); err == nil {
 		t.Fatal("no passage store must be an error")
 	}
 }

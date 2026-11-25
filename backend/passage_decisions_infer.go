@@ -410,6 +410,15 @@ func minDistanceToTrack(lat, lon float64, pts []recordedTrackPoint) float64 {
 // local equirectangular plane centred on the point, which is exact enough for
 // the few nautical miles this is used at.
 func pointToSegmentMeters(lat, lon, aLat, aLon, bLat, bLon float64) float64 {
+	_, _, m := segmentFoot(lat, lon, aLat, aLon, bLat, bLon)
+	return m
+}
+
+// segmentFoot is where the perpendicular from (lat, lon) meets the segment a-b, on the
+// same local plane: t is the share of the way from a to b, held to the segment, raw
+// is the same share before it was held (outside 0 to 1 the foot is off the segment),
+// and meters is the distance from the point to the nearest point of the segment.
+func segmentFoot(lat, lon, aLat, aLon, bLat, bLon float64) (t, raw, meters float64) {
 	const earth = 6371000.0
 	k := math.Cos(lat * math.Pi / 180)
 	xy := func(la, lo float64) (float64, float64) {
@@ -418,9 +427,9 @@ func pointToSegmentMeters(lat, lon, aLat, aLon, bLat, bLon float64) float64 {
 	ax, ay := xy(aLat, aLon)
 	bx, by := xy(bLat, bLon)
 	dx, dy := bx-ax, by-ay
-	t := 0.0
 	if l2 := dx*dx + dy*dy; l2 > 0 {
-		t = math.Max(0, math.Min(1, -(ax*dx+ay*dy)/l2))
+		raw = -(ax*dx + ay*dy) / l2
+		t = math.Max(0, math.Min(1, raw))
 	}
-	return math.Hypot(ax+t*dx, ay+t*dy)
+	return t, raw, math.Hypot(ax+t*dx, ay+t*dy)
 }

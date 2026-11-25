@@ -164,6 +164,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **On a passage plan, the leg you're on now gets its arrival time from where
+  the boat is, and the Current figure is one average over the open water.** The
+  arrival for the leg under way is worked out from your latest recorded
+  position, found on the route, with the rest of the route timed from the time
+  of that position. The row shows when the boat left and that arrival, with no
+  suggested departure and no new verdict. It no longer depends on the departure
+  time you set, so a leg you left without setting one has an arrival too. If
+  the latest position is more than 15 minutes old or is more than a mile off the
+  route, the leg says "No ETA" and why, rather than
+  timing from the wrong place. The Current cell now
+  shows one figure for the leg: the model's current along your course, averaged
+  by distance over the open water, each stretch read for the time you'd be
+  there. Berths and fairways are left out, and so is a stretch the model has no
+  figure for. A leg the model covers only in part now shows its figure, where
+  the cell used to show a dash when under half the leg was covered. The arrival
+  doesn't use the current yet. Nothing needs doing on upgrade.
 - **A passage plan's arrival time now uses the speed your boat makes at its
   usual cruising revs, and slows for water where it has been seen crawling.**
   Helmcentral learns your cruising revs and speed from your recorded passages,

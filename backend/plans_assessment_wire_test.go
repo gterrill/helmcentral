@@ -16,13 +16,6 @@ import (
 // the same modelled current as Mate's plan_tidal_departure. The fixtures are
 // that tool's own (assistant_tidal_departure_test.go).
 
-func southboundQuery(hours float64) planDepartureQuery {
-	return planDepartureQuery{
-		Route: []assistantLatLon{{Lat: -27.0, Lon: 153.0}, {Lat: -27.3, Lon: 153.0}},
-		Pace:  linearPace(hours),
-	}
-}
-
 func TestPlanForecastMemo_ReadersMissingOnTheSamePointAtOnceShareOneRead(t *testing.T) {
 	m := newPlanForecastMemo(planForecastMemoTTL)
 	var calls atomic.Int32
@@ -164,21 +157,31 @@ func TestPlanForecastMemo_ReadsAPointOncePerTenMinutesAndNeverKeepsAFailure(t *t
 	}
 }
 
-func TestPlanDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *testing.T) {
-	// The current sets south from 06:00Z and north before it: a southbound run is
-	// helped only after 06:00Z.
-	p := steadyCurrent(0)
-	p.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) {
+// A southbound leg's current sets south from 06:00Z and north before it: the run is
+// helped only after 06:00Z. The departures come out fairest first, each with the one
+// figure of its own run, and each is run on the pace's own timeline.
+func TestOrderDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *testing.T) {
+	prov := steadyCurrent(0)
+	prov.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) {
 		if ts.Before(time.Date(2026, 9, 12, 6, 0, 0, 0, time.UTC)) {
 			return 0.5, 0, true
 		}
 		return 0.5, 180, true
 	}
-	deps := tidalDepsWithProvider(p)
-	q := southboundQuery(3)
-	q.Earliest = time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
-	q.Latest = time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	got, err := deps.planDepartures(context.Background(), q)
+	hours := 3.0
+	p, err := (&legPaceModel{CruiseKn: 10, Slow: map[paceCell]float64{}}).profile(lpLeg(-27.0, -27.0-lpDeg(10*hours)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	field, err := tidalDepsWithProvider(prov).readLegCurrents(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deps []time.Time
+	for d := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC); !d.After(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)); d = d.Add(planDepartureStep) {
+		deps = append(deps, d)
+	}
+	got, err := orderDepartures(runsOf(p, field, deps...), field)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,32 +198,43 @@ func TestPlanDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *test
 		if i > 0 && c.Current.MeanKn > got[i-1].Current.MeanKn {
 			t.Fatalf("departure %d (%.2f kn) is fairer than the one before it (%.2f kn)", i, c.Current.MeanKn, got[i-1].Current.MeanKn)
 		}
+		if want := c.Depart.Add(hoursDuration(hours)); !c.tl.arrive().Equal(want) {
+			t.Fatalf("departure %s arrives %s, want %s", c.Depart, c.tl.arrive(), want)
+		}
 	}
 	if best := got[0].Current.MeanKn; math.Abs(best-0.5*1.943844) > 0.05 {
 		t.Fatalf("the best departure's current is %.2f kn, want about %.2f", best, 0.5*1.943844)
 	}
 }
 
-// A leg whose hours are not whole minutes (12.3 nm at 5.7 kn is 129 min 28 s) has
-// one arrival per departure: the ranking scores on whole minutes, but the timeline
-// it hands on is the pace's own.
-func TestPlanDepartures_CarriesThePacesOwnTimelineNotTheMinuteRoundedOne(t *testing.T) {
-	hours := 12.3 / 5.7
-	deps := tidalDepsWithProvider(steadyCurrent(180))
-	q := southboundQuery(hours)
-	q.Earliest = time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
-	q.Latest = time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC)
-	got, err := deps.planDepartures(context.Background(), q)
+// A departure the model covers less than half of is left out when another is
+// covered better, and with none well covered the best of them is ranked.
+func TestOrderDepartures_ADepartureUnderHalfCoveredYieldsToABetterCoveredOne(t *testing.T) {
+	p, err := (&legPaceModel{CruiseKn: 10, Slow: map[paceCell]float64{}}).profile(lpLeg(-27.0, -27.0-lpDeg(10)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) == 0 {
-		t.Fatal("no departures")
-	}
-	for _, c := range got {
-		if want := c.Depart.Add(hoursDuration(hours)); !c.tl.arrive().Equal(want) {
-			t.Fatalf("departure %s arrives %s, want %s", c.Depart, c.tl.arrive(), want)
+	// The first of three departures has a current for a fifth of the run and the
+	// strongest of them; the second for all of it.
+	early, later := lpNow, lpNow.Add(time.Hour)
+	offset := paStillWater(p)
+	field := crField{along: func(k int, t time.Time) (float64, bool) {
+		dep := t.Add(-offset[k])
+		switch {
+		case dep.Equal(early):
+			return 3, k < len(p.steps)/5
+		case dep.Equal(later):
+			return 1, true
 		}
+		return 0, false
+	}}
+	got, err := orderDepartures(runsOf(p, field, early, later), field)
+	if err != nil || len(got) != 1 || !got[0].Depart.Equal(later) {
+		t.Fatalf("got %+v, %v: the one with the better cover alone is ranked", got, err)
+	}
+	got, err = orderDepartures(runsOf(p, field, early), field)
+	if err != nil || len(got) != 1 || !got[0].Depart.Equal(early) {
+		t.Fatalf("got %+v, %v: with none well covered the best of them is ranked", got, err)
 	}
 }
 
@@ -233,7 +247,7 @@ func TestAssessPlan_ASuggestedDepartureArrivesWhenThePaceSaysNotAtTheMinute(t *t
 	ranking.now = func() time.Time { return paNow }
 	f := &paFake{speed: 5.7}
 	d := paDeps(f)
-	d.departures = ranking.planDepartures
+	d.legCurrents = ranking.readLegCurrents
 	l := assessPlan(context.Background(), p, legs, d, planAssessOptions{}).Legs[0]
 	if !l.DepartSuggested {
 		t.Fatalf("leg = %+v", l)
@@ -248,16 +262,27 @@ func TestAssessPlan_ASuggestedDepartureArrivesWhenThePaceSaysNotAtTheMinute(t *t
 	}
 }
 
-func TestPlanDepartures_ARankingThatCannotBeDoneIsItsError(t *testing.T) {
-	// No current at any point and no flood direction: the ranking has nothing to
-	// go by, and the plan says so in its own words. Nothing is made up.
-	p := steadyCurrent(0)
-	p.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) { return 0, 0, false }
-	deps := tidalDepsWithProvider(p)
-	q := southboundQuery(3)
-	q.Earliest = time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
-	q.Latest = time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	got, err := deps.planDepartures(context.Background(), q)
+// southbound is a leg of nm nautical miles south from -27, on lon 149.
+func southbound(t *testing.T, nm float64) *legPaceProfile {
+	t.Helper()
+	p, err := (&legPaceModel{CruiseKn: 10, Slow: map[paceCell]float64{}}).profile(lpLeg(-27.0, -27.0-lpDeg(nm)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestOrderDepartures_NoCurrentAtAnyPointIsTheErrorInTheOperatorsWords(t *testing.T) {
+	// No current at any point: the ranking has nothing to go by, and the plan says
+	// so in its own words. Nothing is made up.
+	prov := steadyCurrent(0)
+	prov.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) { return 0, 0, false }
+	p := southbound(t, 30)
+	field, err := tidalDepsWithProvider(prov).readLegCurrents(context.Background(), p)
+	if err != nil || field.none() == "" {
+		t.Fatalf("field none = %q, err %v: the reason the model has nothing", field.none(), err)
+	}
+	got, err := orderDepartures(runsOf(p, field, time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)), field)
 	if err == nil {
 		t.Fatalf("ranked %d departures with nothing to rank by", len(got))
 	}
@@ -266,14 +291,10 @@ func TestPlanDepartures_ARankingThatCannotBeDoneIsItsError(t *testing.T) {
 	}
 }
 
-func TestPlanDepartures_ErrorsCarryNoToolName(t *testing.T) {
-	p := steadyCurrent(0)
-	p.fail = context.DeadlineExceeded
-	deps := tidalDepsWithProvider(p)
-	q := southboundQuery(3)
-	q.Earliest = time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
-	q.Latest = time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	_, err := deps.planDepartures(context.Background(), q)
+func TestReadLegCurrents_AFailedRequestIsAnErrorWithNoToolName(t *testing.T) {
+	prov := steadyCurrent(0)
+	prov.fail = context.DeadlineExceeded
+	_, err := tidalDepsWithProvider(prov).readLegCurrents(context.Background(), southbound(t, 30))
 	if err == nil || strings.Contains(err.Error(), "plan_tidal_departure") {
 		t.Fatalf("error = %v", err)
 	}
@@ -299,48 +320,58 @@ func TestPlanWarningsFrom_AStaleServedBundleIsAnErrorNotNoWarnings(t *testing.T)
 	}
 }
 
-func TestPlanCurrentAlong_HelpingIsPositiveAndHinderingNegative(t *testing.T) {
+func TestRunReading_HelpingIsPositiveAndHinderingNegative(t *testing.T) {
 	const kn = 0.5 * 1.943844
 	dep := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
+	p := southbound(t, 30)
 
-	south := tidalDepsWithProvider(steadyCurrent(180))
-	got, err := south.planCurrentAlong(context.Background(), southboundQuery(3), dep)
-	if err != nil || !got.Have || math.Abs(got.MeanKn-kn) > 0.05 {
-		t.Fatalf("with the current: %+v %v, want about %.2f", got, err, kn)
-	}
-
-	north := tidalDepsWithProvider(steadyCurrent(0))
-	got, err = north.planCurrentAlong(context.Background(), southboundQuery(3), dep)
-	if err != nil || !got.Have || math.Abs(got.MeanKn+kn) > 0.05 {
-		t.Fatalf("against the current: %+v %v, want about -%.2f", got, err, kn)
+	for _, tc := range []struct {
+		name string
+		set  float64
+		want float64
+	}{{"with the current", 180, kn}, {"against the current", 0, -kn}} {
+		field, err := tidalDepsWithProvider(steadyCurrent(tc.set)).readLegCurrents(context.Background(), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := p.run(dep, field)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := runReading(r, field)
+		if !got.Have || math.Abs(got.MeanKn-tc.want) > 0.05 || r.modelledNm < 29.9 || r.unmodelledNm != 0 {
+			t.Fatalf("%s: %+v, want about %.2f over the whole leg (%+v)", tc.name, got, tc.want, r)
+		}
 	}
 }
 
-// A leg under half a minute rounds to a run of no length, with one sample at its
-// start: it reads the current there, and does not divide by its no samples.
-func TestPlanCurrentAlong_ALegUnderHalfAMinuteReadsTheCurrentAtItsStart(t *testing.T) {
-	const kn = 0.5 * 1.943844
-	dep := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)
-	got, err := tidalDepsWithProvider(steadyCurrent(180)).planCurrentAlong(context.Background(), southboundQuery(20.0/3600), dep)
-	if err != nil || !got.Have || math.Abs(got.MeanKn-kn) > 0.05 {
-		t.Fatalf("got %+v %v, want about %.2f", got, err, kn)
+func TestRunReading_NoModelCurrentIsNoReadingWithItsReason(t *testing.T) {
+	prov := steadyCurrent(0)
+	prov.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) { return 0, 0, false }
+	p := southbound(t, 30)
+	field, err := tidalDepsWithProvider(prov).readLegCurrents(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestPlanCurrentAlong_NoModelCurrentIsNoReadingWithItsReason(t *testing.T) {
-	p := steadyCurrent(0)
-	p.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) { return 0, 0, false }
-	got, err := tidalDepsWithProvider(p).planCurrentAlong(context.Background(), southboundQuery(3), time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC))
-	if err != nil || got.Have || got.Why == "" || got.MeanKn != 0 {
+	r, err := p.run(time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC), field)
+	if got := runReading(r, field); err != nil || got.Have || got.Why == "" || got.MeanKn != 0 {
 		t.Fatalf("got %+v %v: a leg the model has nothing for is not 0 kn", got, err)
 	}
 }
 
-func TestPlanCurrentAlong_AFailedRequestIsAnError(t *testing.T) {
-	p := steadyCurrent(0)
-	p.fail = context.DeadlineExceeded
-	if _, err := tidalDepsWithProvider(p).planCurrentAlong(context.Background(), southboundQuery(3), time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC)); err == nil {
-		t.Fatal("a failed request is not a reading")
+// A departure whose hours the series does not reach has a reason of its own, and is
+// not read as slack.
+func TestRunReading_AnHourTheSeriesDoesNotReachIsSaidSo(t *testing.T) {
+	p := southbound(t, 30)
+	field, err := tidalDepsWithProvider(steadyCurrent(180)).readLegCurrents(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stub's series ends five days after 11 September.
+	r, err := p.run(time.Date(2026, 9, 30, 2, 0, 0, 0, time.UTC), field)
+	got := runReading(r, field)
+	if err != nil || got.Have || got.Why != noCurrentAtTheHours {
+		t.Fatalf("got %+v %v", got, err)
 	}
 }
 
@@ -363,9 +394,9 @@ func TestPlanAssessmentLatency_ColdAndWarm(t *testing.T) {
 			}
 			return base
 		}(),
-		departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+		departures: func() ([]tidalDeparture, error) {
 			time.Sleep(delay)
-			return []tidalDeparture{{Depart: q.Earliest.Add(time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}}}, nil
+			return []tidalDeparture{paDeparture(6, 15, 0.4)}, nil
 		},
 		warnings: func(lat, lon float64) (forecastWarningsBundle, error) {
 			time.Sleep(delay)

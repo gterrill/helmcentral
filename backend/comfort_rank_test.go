@@ -131,7 +131,7 @@ func rkSetup(t *testing.T, cfg rkCfg) *rkRun {
 			return pf, err
 		}
 	}
-	f := &paFake{fc: fc, departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: fc, departures: func() ([]tidalDeparture, error) {
 		var out []tidalDeparture
 		for i, c := range cfg.cands {
 			out = append(out, paDeparture(c.Hour(), c.Minute(), 1-0.1*float64(i)))
@@ -348,11 +348,11 @@ func TestRankKey_CountsWholeHoursRoundedUp(t *testing.T) {
 func TestRankComfort_ACandidateThatErrorsAfterAGoIsLeftOut(t *testing.T) {
 	fail := func(bad time.Time) {
 		old := departureCell
-		departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, depart time.Time) (passageWindowCell, error) {
-			if depart.Equal(bad) {
+		departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, c tidalDeparture) (passageWindowCell, error) {
+			if c.Depart.Equal(bad) {
 				return passageWindowCell{}, errors.New("the forecast broke")
 			}
-			return old(ctx, as, w, depart)
+			return old(ctx, as, w, c)
 		}
 		t.Cleanup(func() { departureCell = old })
 	}
@@ -891,7 +891,7 @@ func TestChooseDeparture_ARunOutOfTimeStopsTheLoopAndLogsNothing(t *testing.T) {
 	defer cancel()
 	calls := 0
 	old := departureCell
-	departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, depart time.Time) (passageWindowCell, error) {
+	departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, c tidalDeparture) (passageWindowCell, error) {
 		calls++
 		if calls == 3 {
 			cancel()
@@ -923,12 +923,12 @@ func TestRankComfort_ARequestThatRanOutOfTimeAfterAGoKeepsTheVerdict(t *testing.
 	defer cancel()
 	calls := 0
 	old := departureCell
-	departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, depart time.Time) (passageWindowCell, error) {
+	departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, c tidalDeparture) (passageWindowCell, error) {
 		if calls++; calls == 3 {
 			cancel()
 			return passageWindowCell{}, ctx.Err()
 		}
-		return old(ctx, as, w, depart)
+		return old(ctx, as, w, c)
 	}
 	t.Cleanup(func() { departureCell = old })
 	l := assessPlan(ctx, r.p, r.legs, r.d, planAssessOptions{Comfort: true}).Legs[0]

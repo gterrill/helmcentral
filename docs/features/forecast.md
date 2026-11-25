@@ -342,7 +342,12 @@ Current or Verdict:
   runs at the speed you made there. A small line under the times says what it
   used, for example "Cruise 10.3 kn, 40 min in slow water." A river running
   against you at cruising revs isn't treated as slow water, and the modelled
-  current isn't in the arrival yet. The speed comes from your recorded
+  current isn't in the arrival yet. For the leg you're on, the row shows when the
+  boat left, not a suggested time, and an arrival timed from where the boat is
+  now. Helmcentral takes your latest recorded position, finds the nearest point
+  on the route, and times the rest of the route from the time of that position.
+  The leg gets no new verdict. The row says "No ETA" and why when that position
+  is more than 15 minutes old or is more than a mile off the route. The speed comes from your recorded
   passages, not the engine log, so it's a different source from the speed Mate
   uses for its own estimate. A boat with no engine revs recorded under way, such
   as one that has only sailed, has no arrival until a passage is recorded under
@@ -398,12 +403,14 @@ Current or Verdict:
   time and no verdict. If the departures can't be ranked, for example because
   the current model has no figures near the shore, the row says no departure was
   suggested and why. It doesn't pick a time for you.
-- **Current.** The current along your course when you leave, as "0.8 kn
-  hindering" or "1.2 kn helping". It's the Open-Meteo model's total current,
-  tide and ocean current together. Near the shore the model often has no
-  figures, and then the cell shows a dash with the reason when you hover over
-  it. A missing reading is never shown as zero. The model covers about sixteen
-  days, and the figure is read for the time you leave.
+- **Current.** The current along your course over the open water of the leg, as
+  "0.8 kn hindering" or "1.2 kn helping". It's the Open-Meteo model's total
+  current, tide and ocean current together, averaged over the leg by distance,
+  each stretch read for the time you'd be there. Berths, fairways and other slow
+  water are left out, because the model has no figures there. Near the shore the
+  model often has no figures at all, and then the cell shows a dash with the
+  reason when you hover over it. A missing reading is never shown as zero. The
+  model covers about sixteen days.
 - **Comfort.** Under a passage row that has a verdict, a line says how the leg
   should feel at the time it's judged for, for example "Lively for the first 2
   h: roll, swell 0.6 m 4 s on the port bow. Then Comfortable." It comes from how

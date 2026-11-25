@@ -514,7 +514,7 @@ func TestLegComfort_ALegUnderWayIsReadFromNowAndSaysSo(t *testing.T) {
 	}
 	// Past its ETA the leg has no span left, and says so.
 	r := planComfortRun{env: planEnv{now: paAt(14, 13, 30)}, ready: func() (*comfortSetup, string) { return &comfortSetup{}, "" }}
-	c = r.leg(context.Background(), &planLegWork{underway: true, windReady: true, eta: paAt(14, 13, 0), pace: linearPace(5), fromLoc: paLoc})
+	c = r.leg(context.Background(), &planLegWork{underway: true, windReady: true, eta: paAt(14, 13, 0), fromLoc: paLoc})
 	if c == nil || c.Text != "The leg is under way and its ETA has passed." || len(c.Hours) != 0 {
 		t.Fatalf("ETA passed = %+v", c)
 	}
@@ -728,10 +728,10 @@ func equalJSON(t *testing.T, a, b any) bool {
 func TestAssessPlan_ComfortIsWorkedOutOnceForEachLegAtTheChosenDeparture(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	var calls atomic.Int32
-	f := &paFake{fc: lcForecast(), departures: func(q planDepartureQuery) ([]tidalDeparture, error) {
+	f := &paFake{fc: lcForecast(), departures: func() ([]tidalDeparture, error) {
 		var out []tidalDeparture
 		for i := range 5 {
-			out = append(out, tidalDeparture{Depart: q.Earliest.Add(time.Duration(i+1) * time.Hour), Current: planCurrentReading{Have: true, MeanKn: 0.4}})
+			out = append(out, paDeparture(6+i, 15, 0.4)) // an hour after first light, and four more
 		}
 		return out, nil
 	}}
