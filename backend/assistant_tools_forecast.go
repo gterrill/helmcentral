@@ -52,6 +52,9 @@ var mateToolGetWindForecast = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetWindForecast),
+	subject: func(args json.RawMessage) string {
+		return fmt.Sprintf("wind forecast for %s", assistantLocationLabel(args))
+	},
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Fetching wind forecast for %s…", assistantLocationLabel(args))
 	},
@@ -78,6 +81,9 @@ var mateToolGetTides = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetTides),
+	subject: func(args json.RawMessage) string {
+		return fmt.Sprintf("tides near %s", assistantLocationLabel(args))
+	},
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Fetching tides near %s…", assistantLocationLabel(args))
 	},
@@ -119,6 +125,13 @@ var mateToolEstimatePassage = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeEstimatePassage),
+	subject: func(args json.RawMessage) string {
+		var a assistantEstimatePassageArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.ToLat == nil || a.ToLon == nil {
+			return "the passage estimate"
+		}
+		return fmt.Sprintf("route to %.3f, %.3f", *a.ToLat, *a.ToLon)
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantEstimatePassageArgs
 		if err := json.Unmarshal(args, &a); err != nil {

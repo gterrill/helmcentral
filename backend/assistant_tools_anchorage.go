@@ -53,6 +53,9 @@ var mateToolAnchorageDetails = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeAnchorageDetails),
+	subject: func(args json.RawMessage) string {
+		return fmt.Sprintf("the anchorage at %s", assistantLocationLabel(args))
+	},
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Assessing the anchorage at %s…", assistantLocationLabel(args))
 	},

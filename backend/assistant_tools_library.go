@@ -34,6 +34,15 @@ var mateToolReadHelp = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeReadHelp),
+	subject: func(args json.RawMessage) string {
+		var a assistantReadHelpArgs
+		if json.Unmarshal(args, &a) == nil {
+			if page := strings.TrimSpace(a.Page); page != "" {
+				return "help: " + page
+			}
+		}
+		return "the help"
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantReadHelpArgs
 		page := ""
@@ -79,6 +88,13 @@ var mateToolSearchDocuments = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeSearchDocuments),
+	subject: quotedSubject("documents", func(args json.RawMessage) string {
+		var a assistantSearchDocumentsArgs
+		if json.Unmarshal(args, &a) != nil {
+			return ""
+		}
+		return a.Query
+	}),
 	describe: func(args json.RawMessage) string {
 		var a assistantSearchDocumentsArgs
 		query := ""
@@ -117,6 +133,15 @@ var mateToolReadDocument = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeReadDocument),
+	subject: func(args json.RawMessage) string {
+		var a assistantReadDocumentArgs
+		if json.Unmarshal(args, &a) == nil {
+			if id := strings.TrimSpace(a.DocumentID); id != "" {
+				return "document " + id
+			}
+		}
+		return "a document"
+	},
 	describe: func(args json.RawMessage) string {
 		// No access to the document store here (describeAssistantToolCall is
 		// a pure function of name+args, the same as read_help's case just

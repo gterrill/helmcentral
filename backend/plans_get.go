@@ -505,6 +505,7 @@ var mateToolGetPlans = mateTool{
 		}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetPlans),
+	subject: fixedSubject("the plans"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the plans…"
 	},

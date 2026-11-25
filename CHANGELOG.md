@@ -43,6 +43,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   battery, and leaves it out of the impossible-reading check and the list of
   banks you can pick. **Unmark charger input** puts it back. A number
   Helmcentral already recognises on its own needs nothing from you.
+- **Mate now shows its work under your question.** While Mate works, a small
+  box shows what it's thinking, with the section titles the model gave it, and
+  keeps scrolling to the newest step. Each run of lookups is one line naming
+  what Mate looked up, with a count such as "1 failed" when some didn't go well.
+  Tap that line to see each lookup and why one failed. When the answer begins,
+  the box folds into one line above it, such as "Thought 12 s · 4 lookups · 3¢".
+  Tap the line to see every step and what each round cost. A lookup that failed,
+  was cut off by the time limit or was stopped says so. Words Mate wrote before going off to look something up
+  move into the box instead of appearing in the answer and disappearing. A draft
+  that Helmcentral sent back says why, such as "Draft sent back: shelter at the
+  anchorage", and you can read it. A model that keeps its reasoning to itself
+  shows "Thinking…" and says so once. A question that fails or that you stop
+  stays open, ending with the error or "Stopped". This replaces **Run details**
+  and the line of waiting phrases. The cost and the lookup count moved from the
+  reply's footer into the line above the answer, so the footer now names the
+  model and any cached tokens.
 - **You can now choose how hard Mate thinks.** Settings → Mate → Chat has a new
   **Thinking** choice next to the model: Model default, Low, Medium or High.
   Model default leaves it to the model, as before. Low, Medium and High ask the

@@ -120,6 +120,7 @@ var mateToolProposeChanges = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeProposeChanges),
+	subject: fixedSubject("the changes"),
 	describe: func(args json.RawMessage) string {
 		return "Preparing the changes…"
 	},

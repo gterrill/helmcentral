@@ -41,17 +41,23 @@ events, each with a Go struct, a golden frame and a decoder:
   to 32 KiB a round, the same cap the stored copy has. Past it the stream sends
   no more, and `round_end` says how much was written.
 - `chatter {round, text}` carries text written alongside tool calls.
-- `lookup {round, seq, at_ms, text, skipped}` says a tool call is starting.
-  `text` is the operator's wording (`describeAssistantToolCall`), never a tool's
-  name. A call that was not run says why in `skipped`, `"withheld"` or
-  `"round_full"`, and gets no `lookup_done`.
-- `lookup_done {round, seq, at_ms, error, cut}` closes a lookup that ran. Every
-  lookup announced without `skipped` gets one before its round ends. A failure
-  carries its one-line reason here, which is where ADR 0093's failure line went.
-  A call abandoned when the tool phase ended is not a failure: it carries
-  `cut: true` and no error. So does a call that stopped with a context error
-  because the tool phase's own time ran out. `cut` is left out of the frame when false, so every
-  other frame keeps its bytes.
+- `lookup {round, seq, at_ms, text, subject, skipped}` says a tool call is
+  starting. `text` is the operator's wording (`describeAssistantToolCall`),
+  never a tool's name; `subject` is what the call looks at, with no verb
+  (`describeAssistantToolSubject`), for a line that lists several lookups. A
+  call that was not run says why in `skipped`, `"withheld"` or `"round_full"`,
+  and gets no `lookup_done`.
+- `lookup_done {round, seq, at_ms, outcome, reason}` closes a lookup that ran.
+  Every lookup announced without `skipped` gets one before its round ends.
+  `outcome` is `"done"`, `"failed"`, `"cut"` or `"stopped"`, worked out in one
+  place (`assistantCallOutcome`) from the error the call is recorded with.
+  `reason` is the failure's one-line cause without the tool's name, and empty
+  for every other outcome; it is where ADR 0093's failure line went. A call
+  abandoned when the tool phase ended is `"cut"`, not a failure, and so is a
+  call that stopped with a context error because the tool phase's own time ran
+  out. A call stopped by the operator is `"stopped"`. A saved run's calls carry
+  the same `outcome` and `reason`, plus `text` and `subject`, computed when the
+  run is read.
 - `answer_start {round, at_ms}` says the round's text is the answer. Its `at_ms`
   is when the text began, so it equals the trace's thought time.
 - `delta {text}` keeps its shape and bytes and now carries answer text only.

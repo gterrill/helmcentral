@@ -1410,6 +1410,7 @@ var mateToolStartWatch = mateTool{
 			}`),
 	},
 	execute: plainTool(assistantToolDeps.executeStartWatch),
+	subject: fixedSubject("a watch"),
 	describe: func(args json.RawMessage) string {
 		return "Starting a watch…"
 	},

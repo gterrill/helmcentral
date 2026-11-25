@@ -43,6 +43,13 @@ var mateToolRouteDistance = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeRouteDistance),
+	subject: func(args json.RawMessage) string {
+		var a assistantRouteDistanceArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.ToLat == nil || a.ToLon == nil {
+			return "route over water"
+		}
+		return fmt.Sprintf("route to %.3f, %.3f", *a.ToLat, *a.ToLon)
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantRouteDistanceArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.ToLat == nil || a.ToLon == nil {

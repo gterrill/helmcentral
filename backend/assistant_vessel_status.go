@@ -1397,6 +1397,7 @@ var mateToolGetVesselStatus = mateTool{
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetVesselStatus),
+	subject: fixedSubject("the boat's status"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the boat's status…"
 	},

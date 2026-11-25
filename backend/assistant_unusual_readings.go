@@ -230,6 +230,7 @@ var mateToolGetUnusualReadings = mateTool{
 			`"limit": {"type": "integer", "description": "How many stretches to return, 1 to 10. Default 5."}}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetUnusualEngineReadings),
+	subject: fixedSubject("unusual readings"),
 	describe: func(json.RawMessage) string {
 		return "Checking for unusual readings…"
 	},

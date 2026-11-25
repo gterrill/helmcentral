@@ -111,7 +111,7 @@ describe('useAssistantChat', () => {
     expect(result.current.error).toBe('HTTP 500')
   })
 
-  it('shows a lookup\'s text as the status line then resolves with the mapped message', async () => {
+  it('shows a lookup in the activity then resolves with the mapped message', async () => {
     const { stream, push, close } = controllableSseStream()
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: stream })
     vi.stubGlobal('fetch', fetchMock)
@@ -128,7 +128,7 @@ describe('useAssistantChat', () => {
       await flushMicrotasks()
     })
 
-    expect(result.current.statusText).toBe('Looking up Tongue Bay…')
+    expect(result.current.activity?.timeline.steps).toMatchObject([{ kind: 'lookup', text: 'Looking up Tongue Bay…', outcome: 'running' }])
 
     await act(async () => {
       push(`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`)
@@ -154,13 +154,14 @@ describe('useAssistantChat', () => {
       clientKey: expect.stringMatching(/^draft-\d+$/),
     })
     expect(result.current.draftKey).toMatch(/^draft-\d+$/)
-    // statusText clears once the send settles.
-    expect(result.current.statusText).toBeNull()
+    // The activity stays with the reply, which takes over its row.
+    expect(result.current.activity?.key).toBe(reply!.clientKey)
+    expect(result.current.activity?.timeline.phase).toBe('done')
     expect(result.current.sending).toBe(false)
   })
 
-  describe('the status line shows only the lookup that is running', () => {
-    async function statusAfter(frames: string[]): Promise<string | null> {
+  describe('the activity view of a run', () => {
+    async function outcomesAfter(frames: string[]) {
       const { stream, push } = controllableSseStream()
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
       const { result } = renderHook(() => useAssistantChat())
@@ -173,52 +174,149 @@ describe('useAssistantChat', () => {
           await flushMicrotasks()
         })
       }
-      return result.current.statusText
+      return result
     }
-    const lookup = (seq: number, text: string, skipped: string) => sseFrame('lookup', { round: 0, seq, at_ms: 10, text, skipped })
+    const lookup = (seq: number, text: string, skipped: string) => sseFrame('lookup', { round: 0, seq, at_ms: 10, text, subject: text, skipped })
+    const done = (seq: number, extra: object = {}) => sseFrame('lookup_done', { round: 0, seq, at_ms: 20, outcome: 'done', reason: '', ...extra })
+    const outcomes = (result: { current: ReturnType<typeof useAssistantChat> }) =>
+      result.current.activity?.timeline.steps.map((s) => (s.kind === 'lookup' ? s.outcome : s.kind))
 
-    it('shows the lookup that is running', async () => {
-      const status = await statusAfter([lookup(0, 'Looking up the tide…', '')])
-      expect(status).toBe('Looking up the tide…')
+    it('is there from the moment sending begins, before any event arrives', async () => {
+      const result = await outcomesAfter([])
+      expect(result.current.activity?.timeline.phase).toBe('working')
+      expect(result.current.activity?.timeline.steps).toEqual([])
+      expect(result.current.activity?.key).toBe(result.current.draftKey)
     })
 
-    const done = (seq: number, extra: object = {}) => sseFrame('lookup_done', { round: 0, seq, at_ms: 20, error: '', ...extra })
-
-    it('clears the line when the only running lookup fails, is cut off or finishes cleanly', async () => {
-      for (const extra of [{ error: 'station offline' }, { cut: true }, {}]) {
-        const status = await statusAfter([lookup(0, 'Looking up the tide…', ''), done(0, extra)])
-        expect(status).toBeNull()
-      }
-    })
-
-    it('falls back to the lookup still running when the one shown finishes', async () => {
-      const status = await statusAfter([
+    it('marks each lookup running, then how it ended', async () => {
+      const result = await outcomesAfter([
         lookup(0, 'Looking up the tide…', ''),
         lookup(1, 'Looking up the wind…', ''),
-        done(1),
+        lookup(2, 'Looking up the swell…', 'withheld'),
+        done(0, { outcome: 'failed', reason: 'station offline' }),
+        done(1, { outcome: 'cut' }),
       ])
-      expect(status).toBe('Looking up the tide…')
+      expect(outcomes(result)).toEqual(['failed', 'cut', 'withheld'])
     })
 
-    it('keeps the line when a lookup that is not the one shown finishes, then clears it', async () => {
-      expect(await statusAfter([
-        lookup(0, 'Looking up the tide…', ''),
-        lookup(1, 'Looking up the wind…', ''),
-        done(0),
-      ])).toBe('Looking up the wind…')
-      expect(await statusAfter([
-        lookup(0, 'Looking up the tide…', ''),
-        lookup(1, 'Looking up the wind…', ''),
-        done(0),
-        done(1, { cut: true }),
-      ])).toBeNull()
+    it('puts each event time on the run clock the stream gave', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(100_000)
+      const result = await outcomesAfter([sseFrame('clock', { at_ms: 4000 })])
+      expect(result.current.activity?.startedLocal).toBe(96_000)
+      vi.restoreAllMocks()
     })
 
-    it('leaves the status line alone for a lookup that is not run', async () => {
-      for (const skipped of ['withheld', 'round_full']) {
-        const status = await statusAfter([lookup(0, 'Looking up the tide…', ''), lookup(1, 'Looking up the wind…', skipped)])
-        expect(status).toBe('Looking up the tide…')
-      }
+    it('keeps reasoning and chatter out of the draft', async () => {
+      const result = await outcomesAfter([
+        roundFrame(0),
+        sseFrame('reasoning', { round: 0, text: 'The tide first.' }),
+        sseFrame('chatter', { round: 0, text: 'One moment.' }),
+      ])
+      expect(outcomes(result)).toEqual(['reasoning', 'chatter'])
+      expect(result.current.draft).toBeNull()
+    })
+
+    it('puts the stored run on the delivered reply', async () => {
+      const { stream, push, close } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
+      const { result } = renderHook(() => useAssistantChat())
+      let sendPromise!: Promise<AssistantMessage | null>
+      act(() => {
+        sendPromise = result.current.send('c1', 'hello')
+      })
+      await act(async () => {
+        push(sseFrame('message', { message: messageApi, conversation: conversationApi, run: { id: 'run-9', thought_ms: 5300, lookups: 2 } }))
+        close()
+        await flushMicrotasks()
+      })
+      const reply = await sendPromise
+      expect(reply?.run).toEqual({ id: 'run-9', thoughtMs: 5300, lookups: 2, reasoningKind: '' })
+      expect(result.current.activity?.timeline.thoughtMs).toBe(5300)
+    })
+
+    it('drops the activity when the next question starts', async () => {
+      const result = await outcomesAfter([lookup(0, 'Looking up the tide…', '')])
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'busy' }) }))
+      await act(async () => {
+        await result.current.send('c1', 'again')
+      })
+      expect(result.current.activity).toBeNull()
+    })
+
+    it('goes when a send is refused', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'no' }) }))
+      const { result } = renderHook(() => useAssistantChat())
+      await act(async () => {
+        await result.current.send('c1', 'hello')
+      })
+      expect(result.current.activity).toBeNull()
+    })
+
+    it('clears the activity on Stop, leaving the saved run to show what Mate did', async () => {
+      const result = await outcomesAfter([lookup(0, 'Looking up the tide…', '')])
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 }))
+      await act(async () => {
+        await result.current.abort()
+      })
+      expect(result.current.activity).toBeNull()
+    })
+
+    it('ends the timeline failed, open, with the error last', async () => {
+      const result = await outcomesAfter([sseFrame('reasoning', { round: 0, text: 'Hmm' }), sseFrame('error', { error: 'upstream 502', run_id: 'run-2' })])
+      expect(result.current.activity?.timeline.phase).toBe('failed')
+      expect(outcomes(result)).toEqual(['reasoning', 'error'])
+    })
+
+    it('clears the activity once the stream has ended on an error frame, the saved run taking over', async () => {
+      const { stream, push, close } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
+      const { result } = renderHook(() => useAssistantChat())
+      let sendPromise!: Promise<AssistantMessage | null>
+      act(() => {
+        sendPromise = result.current.send('c1', 'hello')
+      })
+      await act(async () => {
+        push(sseFrame('reasoning', { round: 0, text: 'Hmm' }))
+        push(sseFrame('error', { error: 'upstream 502', run_id: 'run-2' }))
+        close()
+        await flushMicrotasks()
+      })
+      expect(await sendPromise).toBeNull()
+      expect(result.current.sending).toBe(false)
+      expect(result.current.activity).toBeNull()
+      expect(result.current.error).toBe('upstream 502')
+    })
+
+    it('clears the activity of a rejoined run that ended on an error frame', async () => {
+      const { stream, push, close } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, body: stream }))
+      const { result } = renderHook(() => useAssistantChat())
+      let attachPromise!: Promise<AssistantMessage | null>
+      act(() => {
+        attachPromise = result.current.attach('c1')
+      })
+      await act(async () => {
+        push(sseFrame('reasoning', { round: 0, text: 'Hmm' }))
+        push(sseFrame('error', { error: 'upstream 502', run_id: 'run-2' }))
+        close()
+        await flushMicrotasks()
+      })
+      expect(await attachPromise).toBeNull()
+      expect(result.current.activity).toBeNull()
+    })
+
+    it('still drops the activity of a send that ended with neither an answer nor an error frame', async () => {
+      const { stream, close } = controllableSseStream()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
+      const { result } = renderHook(() => useAssistantChat())
+      act(() => {
+        void result.current.send('c1', 'hello')
+      })
+      await act(async () => {
+        close()
+        await flushMicrotasks()
+      })
+      expect(result.current.activity).toBeNull()
     })
   })
 
@@ -411,15 +509,18 @@ describe('useAssistantChat', () => {
         push(sseFrame('clock', { at_ms: 1200 }))
         push(sseFrame('reasoning', { round: 0, text: 'Cairns is north.' }))
         push(sseFrame('chatter', { round: 0, text: 'Let me look.' }))
-        push(sseFrame('lookup_done', { round: 0, seq: 0, at_ms: 500, error: '' }))
+        push(sseFrame('lookup_done', { round: 0, seq: 0, at_ms: 500, outcome: 'done', reason: '' }))
         push(sseFrame('answer_start', { round: 1, at_ms: 900 }))
         push(sseFrame('round_end', { round: 0, at_ms: 600, reasoning: 'text', reasoning_bytes: 0, prompt_tokens: 1, completion_tokens: 1, cached_tokens: 0, cost_usd: 0 }))
         await flushMicrotasks()
       })
       expect(result.current.error).toBeNull()
       expect(result.current.draft).toBeNull()
-      expect(raf.pending()).toBe(false)
-      expect(result.current.statusText).toBeNull()
+      // Reasoning and chatter reach the view on the next frame, not per event.
+      expect(raf.pending()).toBe(true)
+      act(() => raf.flush())
+      expect(result.current.draft).toBeNull()
+      expect(result.current.activity?.timeline.steps.map((s) => s.kind)).toEqual(['reasoning', 'chatter'])
 
       await act(async () => {
         push(`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`)
@@ -625,7 +726,7 @@ describe('useAssistantChat', () => {
         void result.current.abort()
       })
       expect(result.current.sending).toBe(true)
-      expect(result.current.statusText).toBeNull()
+      expect(result.current.activity).toBeNull()
       expect(result.current.draft).toBeNull()
 
       await act(async () => {
@@ -705,7 +806,7 @@ describe('useAssistantChat', () => {
       })
 
       expect(result.current.sending).toBe(false)
-      expect(result.current.statusText).toBeNull()
+      expect(result.current.activity).toBeNull()
       expect(result.current.draft).toBeNull()
       expect(result.current.isStreamingConversation('c1')).toBe(false)
       await expect(sendPromise).resolves.toBeNull()
@@ -728,7 +829,7 @@ describe('useAssistantChat', () => {
       expect(reply).toBeNull()
       expect(result.current.sending).toBe(false)
       expect(result.current.draft).toBeNull()
-      expect(result.current.statusText).toBeNull()
+      expect(result.current.activity).toBeNull()
       expect(result.current.error).toBeNull()
       expect(String(fetchMock.mock.calls[0][0])).toContain('/api/assistant/conversations/c1/run')
       expect(fetchMock.mock.calls[0][0]).not.toEqual(expect.stringContaining('/run/cancel'))
@@ -751,14 +852,13 @@ describe('useAssistantChat', () => {
         await flushMicrotasks()
       })
       expect(result.current.sending).toBe(true)
-      expect(result.current.statusText).toBe('Looking up Tongue Bay…')
+      expect(result.current.activity?.timeline.steps).toMatchObject([{ kind: 'lookup', text: 'Looking up Tongue Bay…' }])
 
-      // A round opening clears the text so the thread can show its own waiting phrase.
       await act(async () => {
         push(roundFrame(1))
         await flushMicrotasks()
       })
-      expect(result.current.statusText).toBeNull()
+      expect(result.current.activity?.timeline.steps).toHaveLength(1)
 
       await act(async () => {
         push('event: delta\ndata: {"text":"Tongue Bay"}\n\n')

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, memo, Suspense } from 'react'
 
 // The kiosk (WPE WebKit 2.38.5, Safari 16.0 era) loads this module graph as
 // part of the entry chunk even though the kiosk route never mounts
@@ -14,10 +14,12 @@ interface AssistantMarkdownProps {
   content: string
 }
 
-export function AssistantMarkdown({ content }: AssistantMarkdownProps) {
+// Memoised: a settled reply's markdown is not re-parsed when its row renders
+// again for the sake of the activity view above it.
+export const AssistantMarkdown = memo(function AssistantMarkdown({ content }: AssistantMarkdownProps) {
   return (
     <Suspense fallback={<div className="min-w-0 text-sm leading-relaxed text-muted-foreground" />}>
       <AssistantMarkdownImpl content={content} />
     </Suspense>
   )
-}
+})

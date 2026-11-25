@@ -5,7 +5,8 @@ import { AssistantThread } from '@/components/assistant-thread'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
 import { useNotes } from '@/hooks/use-notes'
 import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
-import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
+import { applyMateEvent, emptyTimeline } from '@/lib/mate-activity'
+import type { MateEvent } from '@/lib/mate-events'
 import type { MateSession } from '@/hooks/use-mate-session'
 import { fakeMateSession } from './helpers/fake-mate-session'
 import type { ThreadItem } from '@/hooks/use-assistant-conversations'
@@ -101,6 +102,20 @@ function resolveUpload(
     xhr.onload?.()
   })
 }
+
+// What the session says Mate has done on the run in flight (use-assistant-chat.ts).
+const round = (n: number): MateEvent => ({ type: 'round', round: n, at_ms: 0, final: false })
+const lookup = (seq: number, text: string): MateEvent => ({ type: 'lookup', round: 0, seq, at_ms: 10, text, subject: text, skipped: '' })
+const lookupDoneEvent = (seq: number): MateEvent => ({ type: 'lookup_done', round: 0, seq, at_ms: 20, outcome: 'done', reason: '' })
+const answerStart = (at_ms: number): MateEvent => ({ type: 'answer_start', round: 0, at_ms })
+const messageEvent = (run: { id: string; thought_ms: number | null; lookups: number }): MateEvent => ({
+  type: 'message', message: { id: 'm9' } as never, conversation: { id: 'c1' } as never, run,
+})
+const activityOf = (key: string, ...events: Array<MateEvent | { type: 'delta'; text: string }>) => ({
+  key,
+  timeline: events.reduce(applyMateEvent, emptyTimeline()),
+  startedLocal: null,
+})
 
 const assistantMessage = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
   id: 'm1',
@@ -323,21 +338,25 @@ describe('AssistantThread', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
-  it('shows the status line while sending', () => {
+  it('shows what Mate is doing in the thread from the moment sending begins', () => {
     render(
       <AssistantThread
         canWrite
-        session={fakeMateSession({ status: { sending: true, statusText: 'Fetching wind forecast for Tongue Bay…' } })}
+        session={fakeMateSession({
+          status: { sending: true, draftKey: 'draft-1', activity: activityOf('draft-1', round(0), lookup(0, 'Fetching wind forecast for Tongue Bay…')) },
+        })}
       />,
     )
 
-    expect(screen.getByText('Fetching wind forecast for Tongue Bay…')).toBeInTheDocument()
+    const log = screen.getByRole('log')
+    expect(within(log).getByLabelText('What Mate is doing')).toHaveTextContent('wind forecast for Tongue Bay…')
+    expect(screen.queryByText('What Mate can check')).not.toBeInTheDocument()
   })
 
   // [P1, impeccable critique 2026-09-12] there was no way for the operator
   // to cancel a question in flight themselves.
   it('shows a Stop button while sending, which stops the session', () => {
-    const session = fakeMateSession({ status: { sending: true, statusText: 'Fetching wind forecast for Tongue Bay…' } })
+    const session = fakeMateSession({ status: { sending: true } })
     render(<AssistantThread canWrite session={session} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
@@ -392,59 +411,91 @@ describe('AssistantThread', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
-  describe('waiting phrase', () => {
-    afterEach(() => {
-      vi.useRealTimers()
-    })
-
-    const shownPhrase = () => {
-      const status = screen.getByRole('status')
-      return MATE_WAITING_PHRASES.find((phrase) => status.textContent?.includes(phrase)) ?? null
-    }
-
-    it('shows a nautical phrase while waiting with no tool status, and rotates it without repeating', () => {
-      vi.useFakeTimers()
-      render(<AssistantThread canWrite session={fakeMateSession({ status: { sending: true, statusText: null } })} />)
-
-      let previous = shownPhrase()
-      expect(previous).not.toBeNull()
-      for (let i = 0; i < 6; i++) {
-        act(() => {
-          vi.advanceTimersByTime(3000)
-        })
-        const next = shownPhrase()
-        expect(next).not.toBeNull()
-        expect(next).not.toBe(previous)
-        previous = next
-      }
-    })
-
-    it('shows the tool status as given, with no phrase, when statusText is set', () => {
-      vi.useFakeTimers()
-      render(
-        <AssistantThread
-          canWrite
-          session={fakeMateSession({ status: { sending: true, statusText: 'Looking up Tongue Bay…' } })}
-        />,
-      )
-
-      expect(screen.getByRole('status')).toHaveTextContent('Looking up Tongue Bay…')
-      expect(shownPhrase()).toBeNull()
-      act(() => {
-        vi.advanceTimersByTime(9000)
+  // The activity view says what Mate is doing; the marker under the thread is
+  // only the way to stop it.
+  describe('the marker under the thread', () => {
+    it('holds the Stop button and nothing else while Mate works', () => {
+      const session = fakeMateSession({
+        status: { sending: true, draftKey: 'draft-1', activity: activityOf('draft-1', round(0), lookup(0, 'Looking up the tide')) },
       })
-      expect(screen.getByRole('status')).toHaveTextContent('Looking up Tongue Bay…')
-      expect(shownPhrase()).toBeNull()
+      const { container } = render(<AssistantThread canWrite session={session} />)
+
+      const stop = screen.getByRole('button', { name: 'Stop asking' })
+      const marker = stop.parentElement as HTMLElement
+      expect(marker.textContent).toBe('')
+      expect(marker.querySelector('svg.animate-spin')).toBeNull()
+      expect(marker).not.toHaveAttribute('role', 'status')
+      // The only status is the activity's own hidden announcement.
+      expect(container.querySelectorAll('[role="status"]')).toHaveLength(1)
+    })
+
+    it('shows no waiting phrase or status line', () => {
+      render(<AssistantThread canWrite session={fakeMateSession({ status: { sending: true } })} />)
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
   })
 
-  // ADR 0105: the streamed draft renders as its own assistant item inside
-  // the message log while a round is still being written, and the status
-  // marker (which otherwise reads "Thinking…"/tool activity) steps aside
-  // for it - reappearing once an answer_withdrawn clears the draft but the run keeps
-  // going (e.g. the round turned into tool calls).
-  describe('streamed draft (ADR 0105)', () => {
-    it('renders the draft inside the message log while sending, and hides the status marker', () => {
+  // The activity view sits above the draft bubble in one row, from the start
+  // of sending until the reply takes the row over.
+  describe('streamed draft (ADR 0105, ADR 0305)', () => {
+    it('puts the activity above the draft in the same row', () => {
+      const session = fakeMateSession({
+        status: {
+          sending: true,
+          draftKey: 'draft-1',
+          draft: 'Blue Pearl Bay',
+          activity: activityOf('draft-1', round(0), lookup(0, 'Looking up the tide'), lookupDoneEvent(0), answerStart(4000)),
+        },
+      })
+      const { container } = render(<AssistantThread canWrite session={session} />)
+
+      const rows = container.querySelectorAll('[data-message-id="draft"]')
+      expect(rows).toHaveLength(1)
+      const row = rows[0] as HTMLElement
+      const toggle = within(row).getByRole('button', { name: /Thought 4 s/ })
+      const bubble = within(row).getByText('Blue Pearl Bay')
+      expect(toggle.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('keeps one row from the activity alone, through the first words, to the delivered reply', () => {
+      const session = fakeMateSession({ messages: [assistantMessage({ id: 'm0', content: 'Earlier answer' })] })
+      const waiting: MateSession = {
+        ...session,
+        status: { ...session.status, sending: true, draftKey: 'draft-1', activity: activityOf('draft-1', round(0)) },
+      }
+      const { container, rerender } = render(<AssistantThread canWrite session={waiting} />)
+      const row = container.querySelector('[data-message-id="draft"]')
+      expect(row).not.toBeNull()
+
+      const drafting: MateSession = {
+        ...waiting,
+        status: { ...waiting.status, draft: 'Blue Pearl Bay', activity: activityOf('draft-1', round(0), answerStart(2000)) },
+      }
+      rerender(<AssistantThread canWrite session={drafting} />)
+      expect(container.querySelector('[data-message-id="draft"]')).toBe(row)
+
+      const reply = assistantMessage({ id: 'm9', content: 'Blue Pearl Bay first.', clientKey: 'draft-1', run: { id: 'run-9', thoughtMs: 2000, lookups: 0, reasoningKind: '' } })
+      const delivered: MateSession = {
+        ...session,
+        messages: [...session.messages, reply],
+        timeline: [...session.timeline, { kind: 'message', message: reply }],
+        status: {
+          ...session.status,
+          sending: true,
+          draft: null,
+          draftKey: 'draft-2',
+          deliveredMessageId: 'm9',
+          activity: activityOf('draft-1', round(0), answerStart(2000), messageEvent({ id: 'run-9', thought_ms: 2000, lookups: 0 })),
+        },
+      }
+      rerender(<AssistantThread canWrite session={delivered} />)
+      expect(container.querySelector('[data-message-id="m9"]')).toBe(row)
+      // The activity is above the delivered bubble, folded, and not mounted again.
+      const toggle = within(row as HTMLElement).getByRole('button', { name: /Thought 2 s/ })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('renders the draft inside the message log while sending, with Stop still there', () => {
       const session = fakeMateSession({
         messages: [
           {
@@ -461,43 +512,43 @@ describe('AssistantThread', () => {
       render(
         <AssistantThread
           canWrite
-          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Thinking…', draft: 'A bowline forms a fixed loop' } }}
+          session={{ ...session, status: { ...session.status, sending: true, draft: 'A bowline forms a fixed loop' } }}
         />,
       )
 
       const log = screen.getByRole('log')
       expect(within(log).getByText(/A bowline forms a fixed loop/)).toBeInTheDocument()
-      // The status text steps aside while the draft itself is on screen, but
-      // Stop stays: a long answer can still be streaming and spending tokens,
-      // and the operator must be able to cut it off mid-sentence.
-      expect(screen.queryByText('Thinking…')).not.toBeInTheDocument()
+      // A long answer can still be streaming and spending tokens, and the
+      // operator must be able to cut it off mid-sentence.
       expect(screen.getByRole('button', { name: 'Stop asking' })).toBeInTheDocument()
     })
 
-    it('shows the status marker again once the answer is withdrawn and the draft clears but sending continues', () => {
+    it('takes the withdrawn answer out of the bubble and shows it in the activity, with nothing lost', () => {
       const session = fakeMateSession({ messages: [] })
+      const answering = activityOf('draft-1', round(0), answerStart(900), { type: 'delta', text: 'Let me check the wind' })
 
       const { rerender } = render(
         <AssistantThread
           canWrite
-          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Working out the answer…', draft: 'Let me check the wind' } }}
+          session={{ ...session, status: { ...session.status, sending: true, draftKey: 'draft-1', draft: 'Let me check the wind', activity: answering } }}
         />,
       )
-
-      expect(screen.queryByText('Working out the answer…')).not.toBeInTheDocument()
+      expect(screen.getByText('Let me check the wind')).toBeInTheDocument()
 
       // answer_withdrawn clears the draft (use-assistant-chat.ts sets it back to
-      // null) while the run is still going - the loop moved on to tool
-      // calls.
+      // null) while the run is still going - the loop moved on to tool calls.
+      const withdrawn = {
+        ...answering,
+        timeline: applyMateEvent(answering.timeline, { type: 'answer_withdrawn', round: 0, at_ms: 1000, reason: 'lookups' }),
+      }
       rerender(
         <AssistantThread
           canWrite
-          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Fetching wind forecast…', draft: null } }}
+          session={{ ...session, status: { ...session.status, sending: true, draftKey: 'draft-1', draft: null, activity: withdrawn } }}
         />,
       )
 
-      expect(screen.getByText('Fetching wind forecast…')).toBeInTheDocument()
-      expect(screen.queryByText(/Let me check the wind/)).not.toBeInTheDocument()
+      expect(screen.getByLabelText('What Mate is doing')).toHaveTextContent('Let me check the wind')
     })
 
     it('does not render a footer on the in-progress draft item', () => {
@@ -1424,6 +1475,9 @@ const run = (overrides: Partial<AssistantRun> = {}): AssistantRun => ({
   error: 'read openrouter stream: context deadline exceeded',
   roundCount: 11,
   budget: runBudget,
+  thoughtMs: null,
+  lookupCount: 0,
+  reasoningKind: '',
   ...overrides,
 })
 const question = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
@@ -1437,6 +1491,14 @@ const question = (overrides: Partial<AssistantMessage> = {}): AssistantMessage =
 })
 
 describe('AssistantThread unanswered runs', () => {
+  // The open activity view reads the run's trace; these tests are about the row.
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   const failedRun = (overrides: Partial<AssistantRun> = {}): ThreadItem => ({ kind: 'failed-run', run: run(overrides) })
   const messageItem = (message: AssistantMessage): ThreadItem => ({ kind: 'message', message })
 
@@ -1447,7 +1509,9 @@ describe('AssistantThread unanswered runs', () => {
     expect(within(row).getByText('Mate stopped before answering: it ran out of time after 11 rounds.')).toBeInTheDocument()
     expect(within(row).queryByText('read openrouter stream: context deadline exceeded')).not.toBeInTheDocument()
     expect(screen.queryByText(/anthropic\/claude-sonnet-4.5 ·/)).not.toBeInTheDocument()
-    expect(within(row).getByRole('button', { name: 'Run details' })).toBeInTheDocument()
+    // The run stays open: what Mate did up to the stop is the first thing to read.
+    expect(within(row).getByRole('button', { name: /How Mate worked this out/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(row).getByLabelText('What Mate is doing')).toBeInTheDocument()
   })
 
   it('keeps the quiet row for a run the operator stopped', () => {
@@ -1488,19 +1552,83 @@ describe('AssistantThread unanswered runs', () => {
     expect(screen.getByText('Mate is switched off.')).toBeInTheDocument()
   })
 
-  it('offers run details under an answer that carries a run id', () => {
-    mockedUseNotes.mockReturnValue(makeNotesMock())
-    const session = fakeMateSession({ messages: [question(), assistantMessage({ id: 'm1', seq: 2, runId: 'run-1' })] })
-    render(<AssistantThread canWrite session={session} />)
+  describe('a live run that ended without an answer', () => {
+    it('shows the saved row once, with no live steps and no second copy of the error', () => {
+      render(
+        <AssistantThread
+          canWrite
+          session={fakeMateSession({
+            messages: [question()],
+            timeline: [messageItem(question()), failedRun()],
+            status: { sending: false, draftKey: null, activity: null, error: 'upstream 502' },
+          })}
+        />,
+      )
+      expect(screen.getAllByLabelText('What Mate is doing')).toHaveLength(1)
+      expect(screen.getByTestId('mate-unanswered-run')).toBeInTheDocument()
+      expect(screen.queryByText('upstream 502')).not.toBeInTheDocument()
+    })
 
-    expect(screen.getByRole('button', { name: 'Run details' })).toBeInTheDocument()
-    expect(screen.queryByTestId('mate-unanswered-run')).not.toBeInTheDocument()
+    it('shows the red error when no saved run is there to say it', () => {
+      render(
+        <AssistantThread
+          canWrite
+          session={fakeMateSession({ messages: [question()], timeline: [messageItem(question())], status: { error: 'upstream 502' } })}
+        />,
+      )
+      expect(screen.getByText('upstream 502')).toBeInTheDocument()
+    })
+
+    it('shows only Stopped. for a run stopped before anything was saved', () => {
+      render(
+        <AssistantThread
+          canWrite
+          session={fakeMateSession({ messages: [question()], timeline: [messageItem(question())], status: { stopped: true } })}
+        />,
+      )
+      expect(screen.getByText('Stopped.')).toBeInTheDocument()
+      expect(screen.queryByLabelText('What Mate is doing')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('mate-unanswered-run')).not.toBeInTheDocument()
+    })
+
+    it('does not keep a live run on screen once sending has ended', () => {
+      const ended = activityOf('draft-1', round(0), lookup(0, 'Looking up the tide'), { type: 'error', error: 'upstream 502', run_id: 'run-2' })
+      render(
+        <AssistantThread
+          canWrite
+          session={fakeMateSession({ messages: [question()], status: { sending: false, draftKey: 'draft-1', activity: ended } })}
+        />,
+      )
+      expect(screen.queryByLabelText('What Mate is doing')).not.toBeInTheDocument()
+    })
   })
 
-  it('offers no details under an answer whose run was cleared', () => {
+  it('shows the folded activity line above an answer that carries a run, and drops what it says from the footer', () => {
     mockedUseNotes.mockReturnValue(makeNotesMock())
-    render(<AssistantThread canWrite session={fakeMateSession({ messages: [assistantMessage()] })} />)
+    const answer = assistantMessage({
+      id: 'm1', seq: 2, toolRounds: 2, cachedTokens: 9820,
+      run: { id: 'run-1', thoughtMs: 12000, lookups: 4, reasoningKind: 'text' },
+    })
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [question(), answer] })} />)
 
-    expect(screen.queryByRole('button', { name: 'Run details' })).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: 'Thought 12 s · 4 lookups · 2¢' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('mate-unanswered-run')).not.toBeInTheDocument()
+    // Above the bubble.
+    const bubble = screen.getByText('Blue Pearl Bay first, on the flood.')
+    expect(toggle.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The footer keeps what the line does not say.
+    expect(screen.getByText('anthropic/claude-sonnet-4.5 · 9,820 cached')).toBeInTheDocument()
+    expect(screen.queryByText(/tool round/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$0\.018/)).not.toBeInTheDocument()
+  })
+
+  it('offers no activity under an answer whose run was cleared, and keeps its whole footer', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [assistantMessage({ toolRounds: 1 })] })} />)
+
+    expect(screen.queryByLabelText('What Mate is doing')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Thought|lookup|worked this out/ })).not.toBeInTheDocument()
+    expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 1 tool round')).toBeInTheDocument()
   })
 })

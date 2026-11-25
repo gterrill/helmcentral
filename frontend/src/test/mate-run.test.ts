@@ -27,6 +27,9 @@ function api(overrides: Partial<RunApi> = {}): RunApi {
     error: 'read openrouter stream: context deadline exceeded',
     round_count: 11,
     budget,
+    thought_ms: null,
+    lookups: 0,
+    reasoning_kind: '',
     ...overrides,
   }
 }
@@ -48,19 +51,36 @@ describe('mapRun', () => {
       rounds: [{
         index: 0, kind: 'lookups', start_offset_ms: 0, latency_ms: 4100, prompt_tokens: 900, completion_tokens: 40, cached_tokens: 600,
         cost_usd: 0.004, forced_final: false, progress: true, error: '',
-        check_trigger: 'anchorage shelter', check_draft: 'A rejected draft.',
-        calls: [{ seq: 0, name: 'find_places', args: '{"query":"Cairns"}', elapsed_ms: 2300, result_bytes: 812, error: '', cache: 'miss' }],
+        check_trigger: 'anchorage shelter', check_draft: 'A rejected draft.', check_triggers: ['anchorage shelter'],
+        reasoning: 'Thinking.', reasoning_kind: 'text', reasoning_bytes: 9, chatter: 'One moment.', content_start_ms: 1500,
+        calls: [{ seq: 0, name: 'find_places', args: '{"query":"Cairns"}', elapsed_ms: 2300, result_bytes: 812, error: '', cache: 'miss', outcome: 'done' }],
       }],
+      thought_ms: 12000,
+      lookups: 1,
+      reasoning_kind: 'text',
     }))
     expect(trace.roundCount).toBe(1)
-    expect(trace.rounds[0]).toMatchObject({ checkTrigger: 'anchorage shelter', checkDraft: 'A rejected draft.' })
+    expect(trace).toMatchObject({ thoughtMs: 12000, lookupCount: 1, reasoningKind: 'text' })
+    expect(trace.rounds[0]).toMatchObject({
+      checkTrigger: 'anchorage shelter',
+      checkDraft: 'A rejected draft.',
+      checkTriggers: ['anchorage shelter'],
+      reasoning: 'Thinking.',
+      reasoningKind: 'text',
+      reasoningBytes: 9,
+      chatter: 'One moment.',
+      contentStartMs: 1500,
+    })
     expect(trace.rounds[0].calls[0]).toMatchObject({ name: 'find_places', cache: 'miss', error: '', durationMs: 2300 })
   })
 
-  it('splits a conversation\'s runs into those without an answer and the answers\' run ids', () => {
-    const split = splitConversationRuns([api(), { id: 'run-2', answer_message_id: 'm1' }])
+  it('splits a conversation\'s runs into those without an answer and the answers\' stored runs', () => {
+    const split = splitConversationRuns([
+      api(),
+      { id: 'run-2', answer_message_id: 'm1', thought_ms: 5300, lookups: 3, reasoning_kind: 'private' },
+    ])
     expect(split.unanswered.map((r) => r.id)).toEqual(['run-1'])
-    expect(split.idByAnswer.get('m1')).toBe('run-2')
+    expect(split.runByAnswer.get('m1')).toEqual({ id: 'run-2', thoughtMs: 5300, lookups: 3, reasoningKind: 'private' })
   })
 })
 

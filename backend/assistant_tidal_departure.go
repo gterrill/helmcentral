@@ -791,6 +791,9 @@ var mateToolPlanTidalDeparture = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executePlanTidalDeparture),
+	subject: func(args json.RawMessage) string {
+		return fmt.Sprintf("departure tide near %s", assistantLocationLabel(args))
+	},
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Timing the departure to the tide near %s…", assistantLocationLabel(args))
 	},

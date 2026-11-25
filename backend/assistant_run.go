@@ -127,6 +127,54 @@ const assistantToolCutError = "cut off: the tool phase ran out of time"
 // it is an error, not a cut.
 const assistantLookupStoppedText = "stopped"
 
+// How a call ended, as the browser is told on the stream (lookup_done) and in a
+// saved run (the call's outcome). A call that was never run is "withheld" or
+// "round_full" and gets no lookup_done, so those two reach the stream on the
+// lookup event's skipped field, with the same words.
+const (
+	assistantOutcomeDone      = "done"
+	assistantOutcomeFailed    = "failed"
+	assistantOutcomeCut       = "cut"
+	assistantOutcomeStopped   = "stopped"
+	assistantOutcomeWithheld  = "withheld"
+	assistantOutcomeRoundFull = "round_full"
+)
+
+// assistantCallOutcome sorts the error a call was recorded with into how it
+// ended. The one place that reads those errors, so the live stream and a saved
+// run cannot disagree.
+func assistantCallOutcome(errText string) string {
+	switch {
+	case errText == "":
+		return assistantOutcomeDone
+	case errText == assistantToolCutError:
+		return assistantOutcomeCut
+	case errText == assistantLookupStoppedText:
+		return assistantOutcomeStopped
+	// Calls saved before the outcome was recorded hold the tool's own context
+	// error: the time limit cut them, or the operator stopped them.
+	case strings.HasSuffix(errText, context.DeadlineExceeded.Error()):
+		return assistantOutcomeCut
+	case strings.HasSuffix(errText, context.Canceled.Error()):
+		return assistantOutcomeStopped
+	case errText == assistantToolWithheldError:
+		return assistantOutcomeWithheld
+	case strings.HasPrefix(errText, assistantNotRunPrefix):
+		return assistantOutcomeRoundFull
+	default:
+		return assistantOutcomeFailed
+	}
+}
+
+// assistantCallReason is why a failed call failed, without the tool's name the
+// error starts with. Every other outcome says enough in itself and has none.
+func assistantCallReason(name, errText string) string {
+	if assistantCallOutcome(errText) != assistantOutcomeFailed {
+		return ""
+	}
+	return strings.TrimPrefix(errText, name+": ")
+}
+
 // assistantToolPhaseTimeout bounds the tool phase of one reply: when it passes,
 // no tool round starts and one in flight is abandoned (ADR 0240). A var so a
 // test can shorten it.
@@ -392,28 +440,30 @@ const (
 )
 
 // mateLookupEvent says a tool call is starting. Text is the operator's wording
-// of it (describeAssistantToolCall), never the tool's name. Skipped is "" for
-// a call that runs, and names why for one that was refused or withheld; such a
-// call gets no lookup_done. Seq is the call's place in its round.
+// of it (describeAssistantToolCall), never the tool's name; Subject is what it
+// looked at, for a line that lists several. Skipped is "" for a call that runs,
+// and names why for one that was refused or withheld (the same words as a
+// lookup_done outcome); such a call gets no lookup_done. Seq is the call's place
+// in its round.
 type mateLookupEvent struct {
 	Round   int    `json:"round"`
 	Seq     int    `json:"seq"`
 	AtMs    int64  `json:"at_ms"`
 	Text    string `json:"text"`
+	Subject string `json:"subject"`
 	Skipped string `json:"skipped"`
 }
 
-// mateLookupDoneEvent says a lookup finished. Error is the one-line reason
-// when it failed, and empty when it succeeded. Cut says the lookup was
-// abandoned at the tool phase's time limit: it did not fail, it was not let
-// finish. A cut lookup has no Error. The field is left out when false, so every
-// other frame keeps its bytes.
+// mateLookupDoneEvent says a lookup finished. Outcome is how it ended (done,
+// failed, cut, stopped); Reason is the bare one-line cause of a failure and is
+// empty otherwise. Cut means the lookup was abandoned at the tool phase's time
+// limit: it did not fail, it was not let finish.
 type mateLookupDoneEvent struct {
-	Round int    `json:"round"`
-	Seq   int    `json:"seq"`
-	AtMs  int64  `json:"at_ms"`
-	Error string `json:"error"`
-	Cut   bool   `json:"cut,omitempty"`
+	Round   int    `json:"round"`
+	Seq     int    `json:"seq"`
+	AtMs    int64  `json:"at_ms"`
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason"`
 }
 
 // mateAnswerStartEvent says a round's text has been taken for the answer: the
@@ -1745,7 +1795,11 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			elapsed := time.Since(toolStart).Round(time.Millisecond)
 			rec := assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), ElapsedMs: elapsed.Milliseconds(), Cache: outcome.Cache}
 			if terr != nil {
-				failures.record(call.Function.Name)
+				// A call cut off by the time limit, or stopped by the operator, did
+				// not fail and does not count against the tool's failure budget.
+				if !errors.Is(terr, context.DeadlineExceeded) && !errors.Is(terr, context.Canceled) || ctx.Err() == nil {
+					failures.record(call.Function.Name)
+				}
 				oneLine := firstErrorLine(terr)
 				log.Printf("assistant: tool %s failed after %s: %v", call.Function.Name, elapsed, terr)
 				errBody, merr := json.Marshal(map[string]string{"error": oneLine})
@@ -1757,12 +1811,13 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 					// The call is stored with the failure before it is closed, as
 					// on every other path, so the trace and the stream agree.
 					if !abandoned {
+						// One value for the saved call and the live reason, so they agree.
 						rec.Error = oneLine
 						records[i] = rec
 						results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(oneLine), ToolCallID: call.ID}
 						if running[i] {
 							running[i] = false
-							capture.lookupDone(i, "the lookup failed and its error could not be recorded")
+							capture.lookupDone(i, call.Function.Name, rec.Error)
 						}
 					}
 					mu.Unlock()
@@ -1781,6 +1836,13 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			timedOut := toolEnded && errors.Is(ctx.Err(), context.DeadlineExceeded)
 			stopped := toolEnded && errors.Is(ctx.Err(), context.Canceled)
 			rec.Result, rec.ResultBytes = result, len(result)
+			// The saved error says what the live lookup_done says.
+			switch {
+			case timedOut:
+				rec.Error = assistantToolCutError
+			case stopped:
+				rec.Error = assistantLookupStoppedText
+			}
 			// One critical section stores the call and says it is done, the
 			// record first: a round abandoned at the end of the tool phase has
 			// taken both or neither, so the stream and the trace agree. What a
@@ -1790,13 +1852,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(result), ToolCallID: call.ID}
 			if !abandoned && running[i] {
 				running[i] = false
-				if timedOut {
-					capture.lookupCut(i)
-				} else if stopped {
-					capture.lookupDone(i, assistantLookupStoppedText)
-				} else {
-					capture.lookupDone(i, rec.Error)
-				}
+				capture.lookupDone(i, call.Function.Name, rec.Error)
 			}
 			mu.Unlock()
 		}(i, call, args)
@@ -1835,11 +1891,10 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			rec := assistantToolCall{Seq: i, Name: calls[i].Function.Name, Args: string(calls[i].Function.Arguments)}
 			if timeLimit {
 				rec.Error = assistantToolCutError
-				capture.lookupCut(i)
 			} else {
 				rec.Error = assistantLookupStoppedText
-				capture.lookupDone(i, assistantLookupStoppedText)
 			}
+			capture.lookupDone(i, rec.Name, rec.Error)
 			records[i] = rec
 		}
 		heldResults := append([]openRouterMessage(nil), results...)

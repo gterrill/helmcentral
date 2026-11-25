@@ -47,6 +47,15 @@ var mateToolSavePlace = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeSavePlace),
+	subject: func(args json.RawMessage) string {
+		var a assistantSavePlaceArgs
+		if json.Unmarshal(args, &a) == nil {
+			if name := strings.TrimSpace(a.Name); name != "" {
+				return name
+			}
+		}
+		return "a place"
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantSavePlaceArgs
 		if json.Unmarshal(args, &a) == nil {

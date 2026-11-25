@@ -49,8 +49,9 @@ Open the Mate panel and try the question it's built around:
 > We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first
 > over the next two days?
 
-Expect a few status lines while it looks each place up and fetches wind and
-tides for both, then a short answer with a comparison table.
+Expect a small box under your question that lists each lookup as Mate looks
+each place up and fetches wind and tides for both, then a short answer with a
+comparison table.
 
 ## If it says "No endpoints found that support tool use"
 
@@ -67,6 +68,6 @@ switched on, a read-only account can open the panel and read past
 conversations but can't send a new message, since sending one spends your
 OpenRouter key.
 
-Every reply's footer shows what it cost. Keep an eye on it the same way you'd
+Every reply shows what it cost, in the line above the answer. Keep an eye on it the same way you'd
 watch any other pay-as-you-go service. That matters most if login is off and
 more than one person on the boat has access to the dashboard.

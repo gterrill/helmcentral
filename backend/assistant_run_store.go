@@ -277,6 +277,7 @@ func scanAssistantCall(row assistantRunScanner, extra ...any) (assistantToolCall
 	}
 	c.Truncated = truncated != 0
 	c.OriginalBytes = int(original.Int64)
+	c.Outcome, c.Reason = assistantCallOutcome(c.Error), assistantCallReason(c.Name, c.Error)
 	return c, nil
 }
 
@@ -330,8 +331,10 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 
 	// The details show the start of the arguments and never the result, so the
 	// result column (up to 64 kB a call) is not read.
-	callRows, err := s.db.Query(`SELECT round, seq, name, substr(args, 1, ?), '', elapsed_ms, result_bytes, error, truncated, original_bytes, cache
-		FROM assistant_run_calls WHERE run_id = ? ORDER BY round, seq`, assistantTraceArgsMaxBytes, id)
+	// The arguments are read whole so the call's text is worked out from them,
+	// then cut for the details.
+	callRows, err := s.db.Query(`SELECT round, seq, name, args, '', elapsed_ms, result_bytes, error, truncated, original_bytes, cache
+		FROM assistant_run_calls WHERE run_id = ? ORDER BY round, seq`, id)
 	if err != nil {
 		return assistantRunTrace{}, false, fmt.Errorf("get run calls: %w", err)
 	}
@@ -345,6 +348,8 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 		if !ok {
 			return assistantRunTrace{}, false, fmt.Errorf("run %s has a call in round %d, which is not recorded", id, c.Round)
 		}
+		c.Text = describeAssistantToolCall(c.Name, json.RawMessage(c.Args))
+		c.Subject = describeAssistantToolSubject(c.Name, json.RawMessage(c.Args))
 		c.Args, c.Result = cutUTF8(c.Args, assistantTraceArgsMaxBytes), ""
 		run.Rounds[i].Calls = append(run.Rounds[i].Calls, c)
 	}

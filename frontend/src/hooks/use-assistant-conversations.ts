@@ -3,7 +3,7 @@ import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQ
 import type { MessageApi } from '@/lib/mate-api'
 import { onPassageDecisionSaved } from '@/lib/passage-decisions-api'
 import { decodeMateCards, type MateCard, type PassageDecision } from '@/lib/mate-cards'
-import { splitConversationRuns, type AssistantRun, type RunApi, type RunRefApi } from '@/lib/mate-run'
+import { splitConversationRuns, type AssistantRun, type AssistantRunRef, type RunApi, type RunRefApi } from '@/lib/mate-run'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
@@ -175,8 +175,8 @@ export interface AssistantMessage {
    * stored, so it stays as typed through a re-read of the thread. */
   refused?: boolean
   /** The run that wrote this answer, when the server still holds it: what its
-   * Run details view reads. Set by reading the thread, not by a live answer. */
-  runId?: string
+   * activity view's folded line says, and the trace it opens. */
+  run?: AssistantRunRef
 }
 
 /** What the thread shows, in order: the messages, and after the question it
@@ -278,11 +278,11 @@ interface ConversationReadApi {
 // A conversation's messages as read, each answer carrying the id of the run
 // that wrote it, and the runs that gave no answer.
 function readThread(data: ConversationReadApi): { messages: AssistantMessage[]; unanswered: AssistantRun[] } {
-  const { unanswered, idByAnswer } = splitConversationRuns(Array.isArray(data.runs) ? data.runs : [])
+  const { unanswered, runByAnswer } = splitConversationRuns(Array.isArray(data.runs) ? data.runs : [])
   const messages = (Array.isArray(data.messages) ? data.messages : []).map((api) => {
     const message = mapMessage(api)
-    const runId = idByAnswer.get(message.id)
-    return runId === undefined ? message : { ...message, runId }
+    const run = runByAnswer.get(message.id)
+    return run === undefined ? message : { ...message, run }
   })
   return { messages, unanswered }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { applyMateEvent, emptyTimeline, type MateTimeline } from '@/lib/mate-activity'
 import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import { mapMessage, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
@@ -11,6 +12,29 @@ import { errorMessage } from '@/lib/errors'
 function streamErrorText(err: unknown): string {
   if (err instanceof MateEventError) return MATE_REPLY_NOT_SHOWN
   return err instanceof Error ? err.message : String(err)
+}
+
+/** The events that change which steps the view lists, so the view shows them at once; the rest wait for the next frame. */
+const STRUCTURAL_EVENTS: ReadonlySet<string> = new Set([
+  'round',
+  'lookup',
+  'lookup_done',
+  'answer_start',
+  'answer_withdrawn',
+  'draft_sent_back',
+  'message',
+  'error',
+])
+
+/**
+ * What Mate has done on the run this hook is reading (ADR 0305): the steps so
+ * far, under the row key the reply will keep, and where the run's own clock
+ * began on this page's clock (null until the stream says).
+ */
+export interface ChatActivity {
+  key: string
+  timeline: MateTimeline
+  startedLocal: number | null
 }
 
 function mapConversation(api: ConversationApi): AssistantConversation {
@@ -83,12 +107,11 @@ async function readErrorMessage(response: Response): Promise<string> {
  * outlives the page").
  *
  * `send` posts one message and reads the reply back as SSE (the event set in
- * lib/mate-events.ts, ADR 0305): a `round` frame as each round opens and a
- * `lookup` frame as each lookup starts, `delta` frames carrying the answer
- * text as it is written, an `answer_withdrawn` or `draft_sent_back` when text
- * already shown turns out not to be the answer, then exactly one `message` or
- * `error` frame. Reasoning, chatter and timing frames are decoded and left for
- * the activity view. `attach` rejoins
+ * lib/mate-events.ts, ADR 0305): `delta` frames carry the answer text as it is
+ * written, an `answer_withdrawn` or `draft_sent_back` says text already shown
+ * turns out not to be the answer, and exactly one `message` or `error` frame
+ * ends it. Every other frame (rounds, reasoning, chatter, lookups, timing) is
+ * folded into `activity`, the steps the activity view shows. `attach` rejoins
  * whatever reply is already being written server-side - after a navigation
  * away and back, a reload, or an iPad's screen lock having killed the
  * original `send`'s fetch outright - by reading the same event shape off
@@ -110,7 +133,10 @@ const nextDraftKey = () => `draft-${++draftKeyCounter}`
 
 export function useAssistantChat() {
   const [sending, setSending] = useState(false)
-  const [statusText, setStatusText] = useState<string | null>(null)
+  // The run's steps, from the moment sending begins. It outlives the stream
+  // so the delivered reply (same row key) can show it; the next send or attach
+  // replaces it.
+  const [activity, setActivity] = useState<ChatActivity | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
   // Id of the last reply whose final frame arrived on this hook's streams;
   // the thread scrolls to the start of it once it is in the DOM.
@@ -133,12 +159,16 @@ export function useAssistantChat() {
   // markdown re-parse) instead of one each.
   const draftBufferRef = useRef('')
   const draftRafRef = useRef<number | null>(null)
+  const draftDirtyRef = useRef(false)
+  const activityFlushRef = useRef<(() => void) | null>(null)
 
   const cancelDraftFlush = useCallback(() => {
     if (draftRafRef.current !== null) {
       cancelAnimationFrame(draftRafRef.current)
       draftRafRef.current = null
     }
+    draftDirtyRef.current = false
+    activityFlushRef.current = null
   }, [])
 
   // Discards whatever draft text has been shown (or buffered) so far: used
@@ -154,13 +184,40 @@ export function useAssistantChat() {
   // Schedules (at most once at a time) copying the buffer into `draft`
   // state on the next animation frame, so a burst of deltas within one
   // frame flushes once rather than once per token.
-  const scheduleDraftFlush = useCallback(() => {
+  const scheduleFrame = useCallback(() => {
     if (draftRafRef.current !== null) return
     draftRafRef.current = requestAnimationFrame(() => {
       draftRafRef.current = null
-      setDraft(draftBufferRef.current)
+      if (draftDirtyRef.current) {
+        draftDirtyRef.current = false
+        setDraft(draftBufferRef.current)
+      }
+      const flushActivity = activityFlushRef.current
+      activityFlushRef.current = null
+      flushActivity?.()
     })
   }, [])
+
+  const scheduleDraftFlush = useCallback(() => {
+    draftDirtyRef.current = true
+    scheduleFrame()
+  }, [scheduleFrame])
+
+  // The activity view rides the same frame: reasoning and chatter come in many
+  // small pieces, so they reach state once a frame with the draft. The events
+  // that change what the view lists (STRUCTURAL_EVENTS) go in at once and
+  // drop whatever was waiting.
+  const cancelActivityFlush = useCallback(() => {
+    activityFlushRef.current = null
+  }, [])
+
+  const scheduleActivityFlush = useCallback(
+    (flush: () => void) => {
+      activityFlushRef.current = flush
+      scheduleFrame()
+    },
+    [scheduleFrame],
+  )
 
   // Reads one SSE body - a send()'s POST response or an attach()'s GET
   // response, the two only differ in how `body` was obtained - through the
@@ -170,41 +227,40 @@ export function useAssistantChat() {
   const consumeStream = useCallback(async (
     body: ReadableStream<Uint8Array>,
     controller: AbortController,
+    firstKey: string,
     onConversation?: (conversation: AssistantConversation) => void,
     onMessage?: (message: AssistantMessage) => void,
   ): Promise<AssistantMessage | null> => {
     const isCurrent = () => abortRef.current === controller
     let resolved: AssistantMessage | null = null
-    let streamKey = nextDraftKey()
+    let streamKey = firstKey
+    // The row the activity belongs to is the one the reply takes over, so its
+    // key stays put when streamKey moves on after the message.
+    const activityKey = firstKey
+    let timeline = emptyTimeline()
+    let startedLocal: number | null = null
     setDraftKey(streamKey)
-    // The lookups announced and not yet done, by seq, in announcement order.
-    const running = new Map<number, string>()
+    setActivity({ key: activityKey, timeline, startedLocal })
 
     await readMateEvents(body, (event) => {
       if (!isCurrent()) return
 
+      // Deltas are the answer's text, which the draft buffer keeps; the
+      // timeline is not rebuilt for each one. A withdrawal takes the text
+      // from the buffer, which is cleared only after the activity has it.
+      if (event.type !== 'delta') {
+        if (event.type === 'clock') startedLocal = Date.now() - event.at_ms
+        if (event.type === 'answer_withdrawn') timeline = { ...timeline, answer: draftBufferRef.current }
+        timeline = applyMateEvent(timeline, event)
+        if (STRUCTURAL_EVENTS.has(event.type)) {
+          cancelActivityFlush()
+          setActivity({ key: activityKey, timeline, startedLocal })
+        } else {
+          scheduleActivityFlush(() => (isCurrent() ? setActivity({ key: activityKey, timeline, startedLocal }) : undefined))
+        }
+      }
+
       switch (event.type) {
-        case 'round':
-          // A round opens: the model is being waited on, no lookup running.
-          running.clear()
-          setStatusText(null)
-          break
-        case 'lookup':
-          // The line shows the lookup Mate is doing now. A call that is not run
-          // is not doing anything, so it is never added and leaves the line as it was.
-          if (event.skipped === '') {
-            running.set(event.seq, event.text)
-            setStatusText(event.text)
-          }
-          break
-        case 'lookup_done':
-          // However it ended, the lookup is no longer running. The line shows the
-          // latest one still running, or nothing when none are.
-          if (running.delete(event.seq)) {
-            const remaining = [...running.values()]
-            setStatusText(remaining.length > 0 ? remaining[remaining.length - 1] : null)
-          }
-          break
         case 'delta':
           if (event.text !== '') {
             draftBufferRef.current += event.text
@@ -215,21 +271,26 @@ export function useAssistantChat() {
         case 'draft_sent_back':
           // Text already shown as the answer was not it: the round went on to
           // lookups, was cut off, or its draft failed Helmcentral's check and
-          // went back to the model (ADR 0093 §2, ADR 0305). The draft holds
-          // only the current round's answer, so removing it removes exactly
-          // that text.
+          // went back to the model (ADR 0305). The draft holds only the current
+          // round's answer, so removing it removes exactly that text, and the
+          // activity above has taken the same text into the round's step.
           clearDraft()
           break
         case 'clock':
+        case 'round':
         case 'reasoning':
         case 'chatter':
+        case 'lookup':
+        case 'lookup_done':
         case 'answer_start':
         case 'round_end':
-          // The activity view reads these (a failed, skipped or cut-off lookup
-          // included); the thread does not yet.
+          // Steps of the activity view, folded in above; the draft is only the answer.
           break
         case 'message':
           resolved = { ...mapMessage(event.message), clientKey: streamKey }
+          if (event.run) {
+            resolved.run = { id: event.run.id, thoughtMs: event.run.thought_ms, lookups: event.run.lookups, reasoningKind: '' }
+          }
           refreshMemoriesForReply(resolved.proposals)
           deliveredRef.current = true
           setDeliveredMessageId(resolved.id)
@@ -252,7 +313,7 @@ export function useAssistantChat() {
     }, controller.signal)
 
     return resolved
-  }, [clearDraft, scheduleDraftFlush])
+  }, [clearDraft, scheduleDraftFlush, cancelActivityFlush, scheduleActivityFlush])
 
   // The Stop button (ADR 0105): unlike a superseding send()/attach() or an
   // unmount, this actually tells the server to give up on the run - POSTing
@@ -264,7 +325,10 @@ export function useAssistantChat() {
     const conversationId = currentConversationIdRef.current
     abortRef.current?.abort()
     abortRef.current = null
-    setStatusText(null)
+    cancelActivityFlush()
+    // The live steps go; the thread re-reads the run once the cancel answers,
+    // and the saved row shows what Mate did.
+    setActivity(null)
     clearDraft()
     if (conversationId === null) {
       setSending(false)
@@ -283,7 +347,7 @@ export function useAssistantChat() {
       // `sending` now; leave it alone.
       if (abortRef.current === null) setSending(false)
     }
-  }, [clearDraft])
+  }, [clearDraft, cancelActivityFlush])
 
   // Whether this hook's live local stream belongs to conversationId. The
   // thread uses it to tell "rejoin a different conversation" apart from
@@ -301,7 +365,8 @@ export function useAssistantChat() {
   useEffect(() => () => {
     abortRef.current?.abort()
     cancelDraftFlush()
-  }, [cancelDraftFlush])
+    cancelActivityFlush()
+  }, [cancelDraftFlush, cancelActivityFlush])
 
   const send = useCallback(async (
     conversationId: string,
@@ -318,9 +383,13 @@ export function useAssistantChat() {
     currentConversationIdRef.current = conversationId
     const isCurrent = () => abortRef.current === controller
 
+    // The activity row opens now, under the key the reply will keep, so the
+    // operator sees Mate at work before the first event arrives.
+    const rowKey = nextDraftKey()
     setSending(true)
     setError(null)
-    setStatusText(null)
+    setDraftKey(rowKey)
+    setActivity({ key: rowKey, timeline: emptyTimeline(), startedLocal: null })
     clearDraft()
 
     // mate-answer-toast plan: registered here, before the fetch below is
@@ -369,19 +438,25 @@ export function useAssistantChat() {
         // The server's wording is for engineers.
         const message = response.status === 409 ? MATE_BUSY_MESSAGE : await readErrorMessage(response)
         removeMateWatch(conversationId)
-        if (isCurrent()) setError(message)
+        if (isCurrent()) {
+          setError(message)
+          setActivity(null)
+        }
         options?.onRefused?.()
         return null
       }
 
       if (response.body === null) {
         removeMateWatch(conversationId)
-        if (isCurrent()) setError('streaming not supported')
+        if (isCurrent()) {
+          setError('streaming not supported')
+          setActivity(null)
+        }
         options?.onRefused?.()
         return null
       }
 
-      return await consumeStream(response.body, controller, options?.onConversation, options?.onMessage)
+      return await consumeStream(response.body, controller, rowKey, options?.onConversation, options?.onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       if (err instanceof MateEventError) {
@@ -399,11 +474,17 @@ export function useAssistantChat() {
     } finally {
       if (isCurrent()) {
         setSending(false)
-        setStatusText(null)
+        // A delivered reply keeps its steps. A send that ended without one
+        // (an error frame, a dropped stream) has no row left for them: the
+        // session re-reads the thread and the saved run shows them.
+        if (!deliveredRef.current) {
+          cancelActivityFlush()
+          setActivity(null)
+        }
         abortRef.current = null
       }
     }
-  }, [clearDraft, consumeStream])
+  }, [clearDraft, consumeStream, cancelActivityFlush])
 
   // Rejoins whatever reply is already being written for conversationId
   // (ADR 0105): GETs .../run, which answers 204 when nothing is in flight
@@ -427,7 +508,7 @@ export function useAssistantChat() {
     // its status, draft and error must not carry over to this one.
     deliveredRef.current = false
     setSending(false)
-    setStatusText(null)
+    setActivity(null)
     setError(null)
     clearDraft()
 
@@ -453,10 +534,9 @@ export function useAssistantChat() {
 
       setSending(true)
       setError(null)
-      setStatusText(null)
       clearDraft()
 
-      return await consumeStream(response.body, controller, onConversation, onMessage)
+      return await consumeStream(response.body, controller, nextDraftKey(), onConversation, onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
       if (err instanceof MateEventError && isCurrent()) console.error(err.message)
@@ -468,15 +548,18 @@ export function useAssistantChat() {
     } finally {
       if (isCurrent()) {
         setSending(false)
-        setStatusText(null)
+        if (!deliveredRef.current) {
+          cancelActivityFlush()
+          setActivity(null)
+        }
         abortRef.current = null
       }
     }
-  }, [clearDraft, consumeStream])
+  }, [clearDraft, consumeStream, cancelActivityFlush])
 
   const answerDelivered = useCallback(() => deliveredRef.current, [])
 
   const clearError = useCallback(() => setError(null), [])
 
-  return { send, sending, statusText, draft, error, clearError, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId, draftKey }
+  return { send, sending, activity, draft, error, clearError, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId, draftKey }
 }

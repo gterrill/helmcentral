@@ -1052,6 +1052,13 @@ var mateToolCheckSignalKPaths = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeCheckSignalKPaths),
+	subject: quotedSubject("SignalK", func(args json.RawMessage) string {
+		var a assistantCheckSignalKPathsArgs
+		if json.Unmarshal(args, &a) != nil {
+			return ""
+		}
+		return a.Filter
+	}),
 	describe: func(args json.RawMessage) string {
 		var a assistantCheckSignalKPathsArgs
 		filter := ""
@@ -1095,6 +1102,20 @@ var mateToolGetLastRecorded = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetLastRecorded),
+	subject: func(args json.RawMessage) string {
+		var a assistantGetLastRecordedArgs
+		label := ""
+		if json.Unmarshal(args, &a) == nil {
+			label = strings.TrimSpace(a.PathPrefix)
+			if label == "" {
+				label = strings.TrimSpace(a.Source)
+			}
+		}
+		if label == "" {
+			label = "the log"
+		}
+		return fmt.Sprintf("when %s last reported", label)
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantGetLastRecordedArgs
 		label := ""
@@ -1144,6 +1165,15 @@ var mateToolGetPathHistory = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetPathHistory),
+	subject: func(args json.RawMessage) string {
+		var a assistantGetPathHistoryArgs
+		if json.Unmarshal(args, &a) == nil {
+			if path := strings.TrimSpace(a.Path); path != "" {
+				return "history for " + path
+			}
+		}
+		return "history for that path"
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantGetPathHistoryArgs
 		path := ""
