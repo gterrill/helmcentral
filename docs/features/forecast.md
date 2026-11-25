@@ -341,11 +341,30 @@ Current or Verdict:
   the boat crawling on low revs, such as a berth, a fairway or a lock, which it
   runs at the speed you made there. A small line under the times says what it
   used, for example "Cruise 10.3 kn, 40 min in slow water." A river running
-  against you at cruising revs isn't treated as slow water, and the modelled
-  current isn't in the arrival yet. For the leg you're on, the row shows when the
+  against you at cruising revs isn't treated as slow water.
+  The arrival also includes the modelled current in open water, hour by hour:
+  the speed over each stretch is the cruise speed plus the current along your
+  course when you get there, so each departure time has its own arrival. The line
+  under the times says so, for example "Cruise 10.1 kn, current against you 0.4
+  kn, current not modelled for 2 nm, 5 min in slow water." Stretches the model has
+  no current for run at the cruise speed, and miles are named when they come to
+  half a mile or more. Slow water takes no current. Any leg with a time, one you
+  set or the leg you're on, has its arrival worked out with the current, even when
+  the leg can't be judged because your passage limits aren't set. If the model
+  can't be read, or the current against you leaves the boat under 0.5 kn
+  somewhere on the leg, the leg has no arrival for that time and the row says "No
+  ETA" and why. Each cause has its own words. A request that failed says the
+  current could not be read, and looking again later may work. A leg that needs
+  more than the 100 places one request to the model carries says it's too long
+  for one request, and that never clears until the leg is split. A wave plugin
+  that couldn't be loaded says no modelled current is set up. Helmcentral leaves such times out of its suggestions. A
+  suggested time that can't read the current says "No departure suggested" and
+  why, before it looks at any daylight window. A row with no time or no arrival
+  shows no hours or speed. For the leg you're on, the row shows when the
   boat left, not a suggested time, and an arrival timed from where the boat is
   now. Helmcentral takes your latest recorded position, finds the nearest point
-  on the route, and times the rest of the route from the time of that position.
+  on the route, and times the rest of the route from the time of that position,
+  counting only the slow water still ahead of the boat.
   The leg gets no new verdict. The row says "No ETA" and why when that position
   is more than 15 minutes old or is more than a mile off the route. The speed comes from your recorded
   passages, not the engine log, so it's a different source from the speed Mate

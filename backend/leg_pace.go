@@ -503,6 +503,13 @@ type legPaceProfile struct {
 	cellIdx []int
 }
 
+// currentKey tells the leg by what one request asks, so assessments that share a
+// request know a leg when they meet it. The answer holds only the series of that
+// request's cells, which each leg reads along its own steps (cellIdx), so the points
+// asked for are all there is to tell. It is built where the memo looks a leg up, not
+// with every profile.
+func (p *legPaceProfile) currentKey() string { return fmt.Sprint(p.query) }
+
 // slowHours is the time the leg spends in slow water at the model's speeds. No
 // departure changes it yet.
 func (p *legPaceProfile) slowHours() float64 {
@@ -575,15 +582,20 @@ func (m *legPaceModel) profile(leg planLeg) (*legPaceProfile, error) {
 		return p, nil
 	}
 	p.pace = func(depart time.Time) (legTimeline, error) {
-		return newLegTimeline(p.integrate(depart, 0, 1, nil).knots)
+		w, err := p.integrate(depart, 0, 1, nil)
+		if err != nil {
+			return legTimeline{}, err
+		}
+		return newLegTimeline(w.knots)
 	}
 	return p, nil
 }
 
 // legWalk is a leg walked from one departure by integrate.
 type legWalk struct {
-	// knots are where the boat is along the leg and when; consecutive steps of equal
-	// speed are one stretch, so a leg through no slow water has two knots.
+	// knots are where the boat is along the leg and when: the departure, a knot each
+	// time half a percent of the leg has gone by or the water changes between slow
+	// and open, and the arrival. The arrival is the sum of every step's time.
 	knots []legKnot
 	// alongKn is the mean current along the track, positive with the boat, weighted
 	// by the distance of each step, over the open-water steps the field has a
@@ -593,14 +605,25 @@ type legWalk struct {
 	// a current for and has none for. Slow water is in neither: the model has none
 	// at a berth or a fairway and the boat is not timed by it there.
 	modelledNm, unmodelledNm float64
+	// slowHours is the time spent in slow water over the part walked, at the steps'
+	// own speeds: for a walk from a fix, only the slow water ahead of it.
+	slowHours float64
 }
+
+// legKnotMinFrac is the share of the leg that must go by before a step in open water
+// gets a knot of its own: the arrival is the sum of every step, and the knots between
+// only place the boat along the way.
+const legKnotMinFrac = 0.005
 
 // integrate walks the leg from step from, with the share left of that step still to
 // go, setting out at depart. A walk from the start (from 0, left 1) is the leg's
 // pace. It is the one place the steps are added up: the knots, and the current each
-// open-water step meets at the time the boat enters it. With no field (nil) the
-// current is left out and the walk is the still-water pace.
-func (p *legPaceProfile) integrate(depart time.Time, from int, left float64, f legCurrentField) legWalk {
+// open-water step meets at the time the boat enters it, which is added to the step's
+// speed. A slow step and a step the field has no current for run at their own speed.
+// With no field (nil) the current is left out and the walk is the still-water pace.
+// A step the current holds the boat to under legCurrentStallKn is no run at all: the
+// walk stops there with errCurrentAgainst.
+func (p *legPaceProfile) integrate(depart time.Time, from int, left float64, f legCurrentField) (legWalk, error) {
 	steps := p.steps
 	nm := 0.0
 	if from > 0 || left != 1 {
@@ -609,48 +632,68 @@ func (p *legPaceProfile) integrate(depart time.Time, from int, left float64, f l
 		}
 		nm += steps[from].nm * (1 - left)
 	}
-	w := legWalk{knots: make([]legKnot, 1, 4)}
+	// A still-water walk has a knot only where slow and open water meet; a
+	// walk with a current can have one every 0.5% of the leg, so it gets room
+	// for that many up front rather than growing step by step.
+	knotCap := 4
+	if f != nil {
+		knotCap = min(len(steps), 200) + 2
+	}
+	w := legWalk{knots: make([]legKnot, 1, knotCap)}
 	w.knots[0] = legKnot{t: depart, frac: nm / p.distNm}
-	var hours, along float64
-	for i := from; i < len(steps); {
-		kn := steps[i].kn
-		j, runNm := i, 0.0
-		for ; j < len(steps) && steps[j].kn == kn; j++ {
-			s := steps[j]
-			stepNm := s.nm
-			if j == from {
-				stepNm *= left
-			}
-			switch {
-			case s.slow:
-			case f != nil:
-				if cur, ok := f.alongAt(j, depart.Add(hoursDuration(hours+runNm/kn))); ok {
-					w.modelledNm += stepNm
-					along += stepNm * cur
-				} else {
-					w.unmodelledNm += stepNm
-				}
-			}
-			runNm += stepNm
+	var hours, along, segKn float64
+	first, varied := true, false // first step since the last knot; its speed has varied
+	for j := from; j < len(steps); j++ {
+		s := steps[j]
+		stepNm := s.nm
+		if j == from {
+			stepNm *= left
 		}
-		nm += runNm
-		hours += runNm / kn
-		frac := nm / p.distNm
-		i = j
-		if i == len(steps) {
-			w.knots = append(w.knots, legKnot{t: depart.Add(hoursDuration(hours)), frac: 1})
+		kn := s.kn
+		// A step with no length (the boat is at its end, or the step has none) takes no
+		// time and meets no current: it cannot stall the boat.
+		if !s.slow && f != nil && stepNm > 0 {
+			// The boat meets the current at the moment it enters the step.
+			if cur, ok := f.alongAt(p, j, depart.Add(hoursDuration(hours))); ok {
+				if kn += cur; kn < legCurrentStallKn {
+					return legWalk{}, errCurrentAgainst
+				}
+				w.modelledNm += stepNm
+				along += stepNm * cur
+			} else {
+				w.unmodelledNm += stepNm
+			}
+		}
+		nm += stepNm
+		hours += stepNm / kn
+		if s.slow {
+			w.slowHours += stepNm / kn
+		}
+		if j == len(steps)-1 {
 			break
 		}
-		// A run too short to be a stretch of its own (its end is within a
-		// billionth of the last knot or of the arrival) leaves no knot; its time
-		// is in the next one.
-		if frac >= 1-legPaceKnotEps || frac <= w.knots[len(w.knots)-1].frac+legPaceKnotEps {
-			continue
+		// The speed has varied since the last knot when a step ran at another speed than
+		// the one after it (the current moves it from step to step).
+		if first {
+			segKn, first = kn, false
+		} else if kn != segKn {
+			varied = true
 		}
-		w.knots = append(w.knots, legKnot{t: depart.Add(hoursDuration(hours)), frac: frac})
+		// A knot where the boat's own speed changes (slow water to open or the reverse),
+		// and, while its speed varies, once half a percent of the leg has gone by since
+		// the last: between knots the timeline is a straight line, and the arrival is the
+		// sum of every step. A step that ends within a billionth of the last knot or of
+		// the arrival leaves none; its time is in the next one.
+		frac := nm / p.distNm
+		last := w.knots[len(w.knots)-1].frac
+		if (steps[j+1].kn != s.kn || (varied && frac-last >= legKnotMinFrac)) && frac < 1-legPaceKnotEps && frac > last+legPaceKnotEps {
+			w.knots = append(w.knots, legKnot{t: depart.Add(hoursDuration(hours)), frac: frac})
+			first, varied = true, false
+		}
 	}
+	w.knots = append(w.knots, legKnot{t: depart.Add(hoursDuration(hours)), frac: 1})
 	if w.modelledNm > 0 {
 		w.alongKn = along / w.modelledNm
 	}
-	return w
+	return w, nil
 }

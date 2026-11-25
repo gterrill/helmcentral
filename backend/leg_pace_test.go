@@ -798,7 +798,7 @@ func TestLegPace_ABerthCellAtTheStartAddsRealMinutesAndTheBasisSaysSo(t *testing
 		}
 		slowMin := int(math.Round(p.slowHours()*60/5)) * 5
 		want := fmt.Sprintf("Cruise %.1f kn, %d min in slow water.", b.cruiseKn, slowMin)
-		if got := etaBasisText(p.cruiseKn, hoursDuration(p.slowHours())); got != want {
+		if got := etaBasisText(p.cruiseKn, hoursDuration(p.slowHours()), ""); got != want {
 			t.Errorf("basis = %q, want %q", got, want)
 		}
 		if n := len(tl.knots); n != 3 {
@@ -819,7 +819,7 @@ func TestLegPace_NoSlowWaterIsAnOrdinaryTwoKnotLeg(t *testing.T) {
 		if len(tl.knots) != 2 || math.Abs(tl.hours()-leg.DistanceNm/b.cruiseKn) > 1e-9 {
 			t.Errorf("knots %d, hours %v, want 2 and %v", len(tl.knots), tl.hours(), leg.DistanceNm/b.cruiseKn)
 		}
-		if got, want := etaBasisText(p.cruiseKn, hoursDuration(p.slowHours())), fmt.Sprintf("Cruise %.1f kn.", b.cruiseKn); got != want {
+		if got, want := etaBasisText(p.cruiseKn, hoursDuration(p.slowHours()), ""), fmt.Sprintf("Cruise %.1f kn.", b.cruiseKn); got != want {
 			t.Errorf("basis = %q, want %q", got, want)
 		}
 	})
@@ -877,7 +877,7 @@ func TestLegPace_BasisWording(t *testing.T) {
 		{8, 2 * time.Minute, "Cruise 8.0 kn."},
 	}
 	for _, c := range cases {
-		if got := etaBasisText(c.kn, c.slow); got != c.want {
+		if got := etaBasisText(c.kn, c.slow, ""); got != c.want {
 			t.Errorf("etaBasisText(%v, %v) = %q, want %q", c.kn, c.slow, got, c.want)
 		}
 	}
@@ -1163,7 +1163,9 @@ func TestLegPace_ALegWithNoArrivalHasNoBasis(t *testing.T) {
 	// With the operator's departure the arrival shows, and the basis with it.
 	p.Stops[0].DepartTime = "08:00"
 	with := paAssess(t, p, legs, &paFake{}).Legs[0]
-	if with.Arrive == "" || with.EtaBasis == nil || *with.EtaBasis != "Cruise 6.0 kn." {
+	// The default stub has no current at 8 AM, so the whole leg is open water the model
+	// did not cover.
+	if with.Arrive == "" || with.EtaBasis == nil || *with.EtaBasis != "Cruise 6.0 kn, current not modelled for 30 nm." {
 		t.Errorf("a leg with an arrival: arrive %q, basis %v", with.Arrive, with.EtaBasis)
 	}
 }

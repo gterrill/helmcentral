@@ -124,8 +124,9 @@ func TestAssessPlan_ALegWithNoDepartureTimeReadsTheWholeDay(t *testing.T) {
 	}{{paAt(14, 23, 0), 1}, {paAt(14, 8, 0), 1}, {paAt(15, 1, 0), 0}} {
 		f := &paFake{
 			fc: pwcStep(tc.at, 0, 12, 135, 18),
-			departures: func() ([]tidalDeparture, error) {
-				return nil, context.DeadlineExceeded
+			// The model has no current for the leg, so there is nothing to rank by.
+			currents: func(*legPaceProfile) (legCurrentField, error) {
+				return crField{along: func(int, time.Time) (float64, bool) { return 0, false }, why: "none"}, nil
 			},
 		}
 		p, legs := paPlan(t, "2026-11-14", 0, 0)

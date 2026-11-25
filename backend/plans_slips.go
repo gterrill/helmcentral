@@ -187,6 +187,9 @@ func priceSlips(ctx context.Context, p plan, legs []planLeg, d planAssessDeps, s
 		return out
 	}
 	d.warmForecast(ctx, p, legs, s.progress, s.first)
+	// A slip's ETA is worked out with the current, which depends on the leg alone: the
+	// slips share one request for each leg.
+	d.legCurrents = sharedLegCurrents(d.legCurrents)
 
 	opts := planAssessOptions{VerdictsOnly: true, Progress: s.progress, Env: &env}
 	slips := make([]planSlip, s.count)

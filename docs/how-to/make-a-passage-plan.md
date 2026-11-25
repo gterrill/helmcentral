@@ -99,9 +99,22 @@ page says the limits aren't set and shows no verdicts.
    seen crawling on low revs, such as a berth, a fairway or a lock. A small
    line under the times says what the arrival was worked out on, for example
    "Cruise 10.3 kn, 40 min in slow water." When the leg has no slow water, it
-   says "Cruise 10.3 kn." Current isn't in the arrival yet. For the leg you're
+   says "Cruise 10.3 kn."
+   The arrival includes the modelled current in open water, for the hour the boat
+   is there, so leaving a quarter of an hour later can change the arrival by more
+   than a quarter of an hour. The line under the times says what the current did:
+   - "Current with you 0.4 kn" or "current against you 0.4 kn" is the average
+     along your course, the same figure as the **Current** column.
+   - "No current along the course" means that average rounds to nothing.
+   - "Current not modelled for 2 nm" means the model had no current for those
+     miles, often near shore. They're timed at the cruise speed.
+   - Slow water takes no current, since the model has none at a berth or a
+     fairway.
+
+   For the leg you're
    on, the row shows when the boat left and an arrival timed from where the boat
    is now, using your latest recorded position, and not from the time you set.
+   Its slow water counts only the part still ahead of the boat.
    If that position is more than 15 minutes old or is more than a mile
    off the route, the row says "No ETA" and why.
    When Helmcentral can't work out an arrival, the row says "No ETA" and why:
@@ -114,7 +127,40 @@ page says the limits aren't set and shows no verdicts.
    - Cruise speed not learned yet: Helmcentral needs 2 hours at cruising revs
      over 3 passages, and the row says how many it has. Record more passages
      under engine.
-   Helmcentral doesn't make up a speed to fill the gap.
+   - The modelled current could not be read: the current is part of the
+     arrival, so without it there's no arrival. Look again in a few minutes.
+     This applies to every leg with a time, whether you set it or the boat is
+     under way, even when the leg has no verdict because your passage limits
+     aren't set. A leg with a suggested time says "No departure suggested" and
+     the same reason, and works out no times at all. A suggested leg says it
+     before it looks at any daylight window, so you see this reason and not
+     "No daylight window".
+   - The leg is too long for one request to the current model: the model takes
+     up to 100 places along a leg in one request, and this leg needs more.
+     Looking again later doesn't help. Split the leg with a stop partway along
+     it.
+   - No modelled current is set up: the wave plugin that brings the current
+     couldn't be loaded, so there's no arrival. Check that the wave plugin
+     you've chosen is installed, then look again.
+   - The ETA from the latest position could not be worked out: for the leg
+     you're on, the arrival from the boat's latest position couldn't be timed.
+     Look again after the next position comes in.
+   - The current against the boat leaves it under 0.5 kn part of the way: at that
+     time the boat would hardly make way, so there's no arrival. Helmcentral
+     leaves such times out of its suggestions. If every time ahead is out, the
+     row names the most common reason, and when two are equally common it names
+     this one first, then the overnight one.
+   - Overnight legs are not assessed yet: with the current the leg takes more
+     than a day. A suggestion with that is left out, and a time you set shows its
+     arrival and this note.
+
+   A leg that can't be judged still shows an arrival with the current in it,
+   next to its own note. For example, when your passage limits aren't set, the
+   row says so and still shows the arrival.
+   A row with no time or no arrival shows no hours or speed either, so a note
+   such as "No daylight window", "Today's window has passed" or "No forecast
+   yet" has no arrival beside it. Helmcentral doesn't make up a speed to fill the
+   gap.
 3. If the row says "No daylight window", no departure fits the leg's daylight.
    When your passage limits ask for a daylight arrival, Helmcentral looks from
    first light to the last departure that still arrives in daylight. When they

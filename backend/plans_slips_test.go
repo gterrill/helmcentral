@@ -185,13 +185,13 @@ func TestSlipPlan_DoesNotChangeThePlanItWasGiven(t *testing.T) {
 	}
 }
 
-func TestSlipPlan_ReadsNeitherTheCurrentNorTheWarnings(t *testing.T) {
+func TestSlipPlan_ReadsNoWarnings(t *testing.T) {
 	p, legs := slipPlan2(t, "2026-11-16T12:00")
 	p.Stops[1].Nights = 1
 	f := &paFake{}
 	slipsOf(context.Background(), p, legs, paDeps(f))
-	if f.reads != 0 || f.warningsOpen != 0 {
-		t.Fatalf("%d current reads, %d warnings opens: a slip needs only verdicts", f.reads, f.warningsOpen)
+	if f.warningsOpen != 0 {
+		t.Fatalf("%d warnings opens: a slip needs only verdicts and the current its ETA is worked out with", f.warningsOpen)
 	}
 }
 

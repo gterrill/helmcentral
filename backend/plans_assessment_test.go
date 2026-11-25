@@ -87,6 +87,22 @@ type paFake struct {
 	// above; run replaces how a leg is run from a departure.
 	currents func(p *legPaceProfile) (legCurrentField, error)
 	run      func(p *legPaceProfile, depart time.Time, f legCurrentField) (legRun, error)
+	// realRun lets the current stubs act on the speed. Without it (and without run)
+	// a departure keeps its still-water timeline and takes only the current's
+	// figures from the field, so the tests that stub a ranking by current read the
+	// arrivals they always did.
+	realRun bool
+}
+
+// stillWaterRun is the run with the field's figures and the still-water timeline.
+func stillWaterRun(p *legPaceProfile, dep time.Time, f legCurrentField) (legRun, error) {
+	r, err := p.run(dep, f)
+	if err != nil {
+		return r, err
+	}
+	still, err := p.run(dep, nil)
+	r.tl = still.tl
+	return r, err
 }
 
 func paDeps(f *paFake) planAssessDeps {
@@ -109,6 +125,10 @@ func paDeps(f *paFake) planAssessDeps {
 	}
 	if f.limits == (passageLimits{}) {
 		f.limits = pwLimitsAll()
+	}
+	run := f.run
+	if run == nil && !f.realRun {
+		run = stillWaterRun
 	}
 	return planAssessDeps{
 		now:    func() time.Time { return paNow },
@@ -151,7 +171,7 @@ func paDeps(f *paFake) planAssessDeps {
 		legCurrents: func(ctx context.Context, p *legPaceProfile) (legCurrentField, error) {
 			return f.readCurrents(p)
 		},
-		run: f.run,
+		run: run,
 		warnings: func(now time.Time) (planWarningsReader, error) {
 			f.mu.Lock()
 			f.warningsOpen++
@@ -518,8 +538,9 @@ func TestAssessPlan_AnOperatorTimeIsNeverReplaced(t *testing.T) {
 
 func TestAssessPlan_ARankingThatFailsSaysSoAndGivesNoTime(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
-	f := &paFake{departures: func() ([]tidalDeparture, error) {
-		return nil, errors.New("no current and no flood set")
+	// The model reads, and has no current for the leg: the ranking has nothing to go by.
+	f := &paFake{currents: func(*legPaceProfile) (legCurrentField, error) {
+		return crField{along: func(int, time.Time) (float64, bool) { return 0, false }, why: "no current and no flood set"}, nil
 	}}
 	l := paAssess(t, p, legs, f).Legs[0]
 	if !strings.HasPrefix(l.Note, "No departure suggested") || !strings.Contains(l.Note, "no current and no flood set") || l.Depart != "" || l.Verdict != "" || l.NoteKind != planKindNoDeparture {
@@ -545,8 +566,10 @@ func TestAssessPlan_ALegBeyondTheForecastHasNoForecastAndNoVerdict(t *testing.T)
 	if l.Note != "No forecast yet" || l.NoteKind != planKindNoForecast || l.Verdict != "" {
 		t.Fatalf("leg = %+v", l)
 	}
-	if f.fetches != 0 || f.reads != 0 {
-		t.Fatalf("fetched %d, read %d: a day past the horizon buys nothing", f.fetches, f.reads)
+	// The leg has a departure, so its ETA includes the current: it is read (once,
+	// and cached), though a day past the horizon buys no forecast.
+	if f.fetches != 0 || f.reads != 1 || l.Arrive == "" {
+		t.Fatalf("fetched %d, read %d, arrive %q: a day past the horizon buys no forecast, and its ETA has the current", f.fetches, f.reads, l.Arrive)
 	}
 	if !paParse(t, l.Depart).Equal(time.Date(2026, 11, 30, 8, 0, 0, 0, paLoc)) {
 		t.Fatalf("the operator's time still shows: %s", l.Depart)
@@ -655,11 +678,11 @@ func TestAssessPlan_NoCurrentReadingIsNilWithItsReasonNeverZero(t *testing.T) {
 	}
 	f = &paFake{currentErr: errors.New("the Open-Meteo current request failed")}
 	l = paAssess(t, p, legs, f).Legs[0]
-	if l.CurrentKn != nil || !strings.Contains(l.CurrentNote, "request failed") {
+	if l.CurrentKn != nil || l.Note != planNoEtaNoCurrent {
 		t.Fatalf("leg = %+v", l)
 	}
-	if l.Verdict != "go" {
-		t.Fatalf("a current that cannot be read does not stop the verdict: %+v", l)
+	if l.Verdict != "" || l.Arrive != "" {
+		t.Fatalf("a current that cannot be read leaves no ETA, so no verdict: %+v", l)
 	}
 }
 

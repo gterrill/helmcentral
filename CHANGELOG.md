@@ -188,6 +188,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **On a passage plan, the arrival now includes the modelled current.** Each
+  stretch of open water is timed at your cruise speed plus the current along
+  your course when you get there, so leaving a quarter of an hour later can move
+  the arrival by more or less than a quarter of an hour. A fair current lets you
+  leave later and still arrive in daylight, and a foul one makes you leave
+  earlier. The line under the times now says what the current did, for example
+  "Cruise 10.1 kn, current against you 0.4 kn, current not modelled for 2 nm, 5
+  min in slow water." Slow water takes no current, and a stretch the model has no
+  current for is timed at cruise speed. Two things now leave a leg with no
+  arrival: the current couldn't be read ("No ETA: the modelled current could not
+  be read", or a leg too long for one request to the model, or no wave plugin to
+  bring the current), or the current against you leaves the boat under 0.5 kn
+  somewhere on the leg. A suggested time with either is left out, and a time you set or the
+  leg you're on says "No ETA". Every leg with a time has its arrival worked out
+  with the current, even when it has no verdict because your passage limits aren't
+  set. A suggested leg that can't read the current says so before it looks for a
+  daylight window. When every time ahead is out, the note names the most common
+  reason. A row with no time or no arrival shows no hours or speed. A run the
+  current stretches past a day gets the overnight note. The slips on the plan now
+  use the same arrivals.
 - **On a passage plan, the leg you're on now gets its arrival time from where
   the boat is, and the Current figure is one average over the open water.** The
   arrival for the leg under way is worked out from your latest recorded
