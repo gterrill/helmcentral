@@ -17,7 +17,7 @@ type crCount struct {
 	minT time.Time
 }
 
-func (c *crCount) alongAt(_ int, t time.Time) (float64, bool) {
+func (c *crCount) alongAt(_ *legPaceProfile, _ int, t time.Time) (float64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.n++
@@ -154,8 +154,9 @@ func TestAssessPlan_TheLegUnderWayRunsWithTheCurrent(t *testing.T) {
 	}
 }
 
-// Review 7: a departure before now only says whether the day had a window, with no field.
-func TestAssessPlan_PastDeparturesAreRunWithoutTheCurrent(t *testing.T) {
+// Review 7: a departure before now is run with the field like the rest, so the window
+// state comes from the same arrivals as the suggestion.
+func TestAssessPlan_PastDeparturesAreRunWithTheCurrent(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	cnt := &crCount{}
 	f := &paFake{currents: crCounting(cnt)}
@@ -165,7 +166,7 @@ func TestAssessPlan_PastDeparturesAreRunWithoutTheCurrent(t *testing.T) {
 	if out.Legs[0].Depart == "" {
 		t.Fatalf("leg = %+v", out.Legs[0])
 	}
-	if cnt.n == 0 || cnt.minT.Before(paAt(14, 13, 15)) {
-		t.Fatalf("%d lookups from %s: a past departure was run with the current", cnt.n, cnt.minT)
+	if cnt.n == 0 || cnt.minT.After(paAt(14, 6, 0)) {
+		t.Fatalf("%d lookups from %s: the grid's past departures (first light on) are run with the current too", cnt.n, cnt.minT)
 	}
 }

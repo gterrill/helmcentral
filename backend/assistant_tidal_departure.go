@@ -391,11 +391,32 @@ func alongKnots(e, n float64, c trackCourse) float64 {
 	return (e*c.sin + n*c.cos) * metersPerSecondToKnots
 }
 
+// currentTooLongError is a route that needs the model at more cells than one request
+// carries. It never clears: the leg stays as long as it is.
+type currentTooLongError struct{ cells int }
+
+func (e currentTooLongError) Error() string {
+	return fmt.Sprintf("the route needs the model at %d distinct cells, more than the %d one request carries; give a shorter route", e.cells, maxCurrentsPoints)
+}
+
+// errCurrentNoProvider marks a wave provider that cannot be resolved, so there is no
+// current model to ask.
+var errCurrentNoProvider = errors.New("no current provider")
+
+// noProviderError is the failure to resolve the wave provider, said as before and
+// recognised as errCurrentNoProvider.
+type noProviderError struct{ err error }
+
+func (e noProviderError) Error() string {
+	return fmt.Sprintf("the wave provider could not be resolved: %v", e.err)
+}
+func (e noProviderError) Unwrap() []error { return []error{errCurrentNoProvider, e.err} }
+
 // fetchCellCurrents asks for the series at each of the cells in one request, days of
 // forecast long. The cells and their points are in the same order.
 func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalGridPoint, query []currentsPoint, days int) (tidalPointCurrents, error) {
 	if len(cells) > maxCurrentsPoints {
-		return tidalPointCurrents{}, fmt.Errorf("the route needs the model at %d distinct cells, more than the %d one request carries; give a shorter route", len(cells), maxCurrentsPoints)
+		return tidalPointCurrents{}, currentTooLongError{cells: len(cells)}
 	}
 	gapAll := func(reason string) (tidalPointCurrents, error) {
 		out := tidalPointCurrents{series: map[tidalGridPoint]tidalCurrents{}, reason: map[tidalGridPoint]string{}}
@@ -415,7 +436,7 @@ func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalG
 		return gapAll("no wave plugin is installed, and the Open-Meteo current model comes through it")
 	}
 	if err != nil {
-		return tidalPointCurrents{}, fmt.Errorf("the wave provider could not be resolved: %w", err)
+		return tidalPointCurrents{}, noProviderError{err: err}
 	}
 	cp, ok := provider.(currentsProvider)
 	if !ok {

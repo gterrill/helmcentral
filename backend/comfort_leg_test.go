@@ -885,7 +885,7 @@ func benchRank(b *testing.B, legs [][2]shorelinePoint) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			choice.cands = append(choice.cands, tidalDeparture{Depart: d, tl: tl})
+			choice.cands = append(choice.cands, tidalDeparture{Depart: d, run: legRun{tl: tl}})
 			choice.cells = append(choice.cells, passageWindowCell{State: "go"})
 		}
 		work = append(work, rankedLeg{&planLegWork{plan: plan, fromLoc: paLoc}, choice})

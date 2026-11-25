@@ -301,11 +301,12 @@ func (r *tidalRanking) worst() tidalScored {
 // tidalDeparture is one departure a plan may take, with the modelled current
 // along the run at that time (orderDepartures makes them; Mate's ranking does not).
 type tidalDeparture struct {
-	Depart time.Time
-	// tl is the leg's own timeline from Depart, which every arrival the plan shows is
-	// read from (the ranking scored it on this rounded to whole minutes).
-	tl      legTimeline
+	Depart  time.Time
 	Current planCurrentReading
+	// run is the leg run from Depart: its timeline (run.tl) is the one every arrival
+	// the plan shows is read from, and its words of the current are made for the one
+	// departure the row shows (setDeparture), not for every candidate.
+	run legRun
 }
 
 // candidate is one departure as plan_tidal_departure's result gives it.

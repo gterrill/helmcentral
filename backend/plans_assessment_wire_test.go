@@ -159,7 +159,7 @@ func TestPlanForecastMemo_ReadsAPointOncePerTenMinutesAndNeverKeepsAFailure(t *t
 
 // A southbound leg's current sets south from 06:00Z and north before it: the run is
 // helped only after 06:00Z. The departures come out fairest first, each with the one
-// figure of its own run, and each is run on the pace's own timeline.
+// figure of its own run, and each is run on a timeline the current has moved.
 func TestOrderDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *testing.T) {
 	prov := steadyCurrent(0)
 	prov.at = func(lat, lon float64, ts time.Time) (float64, float64, bool) {
@@ -198,8 +198,14 @@ func TestOrderDepartures_IsEveryDepartureFairestStreamFirstWithItsCurrent(t *tes
 		if i > 0 && c.Current.MeanKn > got[i-1].Current.MeanKn {
 			t.Fatalf("departure %d (%.2f kn) is fairer than the one before it (%.2f kn)", i, c.Current.MeanKn, got[i-1].Current.MeanKn)
 		}
-		if want := c.Depart.Add(hoursDuration(hours)); !c.tl.arrive().Equal(want) {
-			t.Fatalf("departure %s arrives %s, want %s", c.Depart, c.tl.arrive(), want)
+		// The current is in the speed: a run it helps arrives before the still-water
+		// time, one it hinders after it.
+		still := c.Depart.Add(hoursDuration(hours))
+		switch {
+		case c.Current.MeanKn > 0.3 && !c.run.tl.arrive().Before(still):
+			t.Fatalf("departure %s helped by %.2f kn arrives %s, not before %s", c.Depart, c.Current.MeanKn, c.run.tl.arrive(), still)
+		case c.Current.MeanKn < -0.3 && !c.run.tl.arrive().After(still):
+			t.Fatalf("departure %s hindered by %.2f kn arrives %s, not after %s", c.Depart, c.Current.MeanKn, c.run.tl.arrive(), still)
 		}
 	}
 	if best := got[0].Current.MeanKn; math.Abs(best-0.5*1.943844) > 0.05 {
@@ -216,14 +222,15 @@ func TestOrderDepartures_ADepartureUnderHalfCoveredYieldsToABetterCoveredOne(t *
 	}
 	// The first of three departures has a current for a fifth of the run and the
 	// strongest of them; the second for all of it.
+	// The current is in the speed, so the departures are told apart by the hour their
+	// steps are entered in: the early run is over within the hour, the later one is at
+	// sea in the next.
 	early, later := lpNow, lpNow.Add(time.Hour)
-	offset := paStillWater(p)
 	field := crField{along: func(k int, t time.Time) (float64, bool) {
-		dep := t.Add(-offset[k])
 		switch {
-		case dep.Equal(early):
+		case t.Before(later):
 			return 3, k < len(p.steps)/5
-		case dep.Equal(later):
+		case t.Before(later.Add(time.Hour)):
 			return 1, true
 		}
 		return 0, false

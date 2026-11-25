@@ -49,7 +49,19 @@ const (
 	planNoteDepartPast   = "Departure time has passed"
 	planNoteOvernight    = "Overnight legs are not assessed yet"
 	planNoteGap          = "Forecast missing for part of the leg"
-	planNoteNoTimeline   = "No departure suggested: the leg's timeline could not be worked out"
+	// The reasons a run has no ETA, which noEtaNote puts after "No ETA: " or "No
+	// departure suggested: ". The current is in the speed, so there is no ETA without
+	// it; the detail of a failed read, or of a run that could not be made, is logged.
+	planReasonNoCurrent  = "the modelled current could not be read"
+	planReasonNoTimeline = "the leg's timeline could not be worked out"
+	planNoEtaNoCurrent   = "No ETA: " + planReasonNoCurrent
+	// planReasonNoProvider is no current model to ask: the wave provider could not be
+	// resolved.
+	planReasonNoProvider = "no modelled current is set up"
+	// planNoEtaUnderway is the leg under way whose run failed for a reason other than
+	// the current.
+	planNoEtaUnderway  = "No ETA: the ETA from the latest position could not be worked out"
+	planNoteNoTimeline = "No departure suggested: " + planReasonNoTimeline
 )
 
 // planNoteKind says what sort of note a leg carries, so the table does not read
@@ -255,12 +267,12 @@ type planLegWork struct {
 	// profile is the leg walked once for the learned pace, nil until setPace has
 	// run: the leg's pace for any departure, and the words on the wire, are read from
 	// it. tl is the timeline of the departure the row shows (the operator's, the one
-	// chosen, or a reference until one is), which the wire's hours are read from.
+	// chosen), which the wire's hours are read from: only a run gives one, so a row
+	// with no departure or no ETA has none. shown is the run it came from, whose
+	// current and slow water the row's eta basis carries.
 	profile *legPaceProfile
 	tl      legTimeline
-	// routed is true once the leg has its route and passes every check before the
-	// departures: only such a leg is read for its current.
-	routed bool
+	shown   legRun
 	// grid is the departures a suggestion is looked for among, the quarter hours from
 	// first light to the latest that could still be in the window, and arriveBy is
 	// the arrival the daylight limit asks for, zero when there is none. Which of them
@@ -286,7 +298,13 @@ type planLegWork struct {
 	windReady bool
 	// etaWhy is why a leg under way has no readable ETA, "" when it has one.
 	etaWhy string
-	eta    time.Time
+	// noPace says the leg's still-water pace failed (setHours): its note is that No ETA
+	// and the current is not read for it.
+	noPace bool
+	// windowless says a suggested leg has everything but a daylight window: it is still
+	// read for its current, so a failed read is the reason given.
+	windowless bool
+	eta        time.Time
 	// chosenDepart and chosenArrive are the departure and arrival the leg's row
 	// shows, as instants: zero until set. They are set with res.Depart and
 	// res.Arrive, never apart.
@@ -344,32 +362,40 @@ func (w *planLegWork) setPace(leg planLeg, m *legPaceModel) error {
 func (w *planLegWork) setDeparture(c tidalDeparture, suggested bool) {
 	w.putDepart(c.Depart)
 	w.res.DepartSuggested = suggested
-	w.tl = c.tl
-	w.putArrive(c.tl.arrive())
+	w.show(c.run)
+}
+
+// show makes r the run the row shows: its timeline and arrival, and the words of its
+// eta basis.
+func (w *planLegWork) show(r legRun) {
+	w.tl, w.shown = r.tl, r
+	w.putArrive(r.tl.arrive())
 }
 
 // putEtaBasis words what the hours shown were worked out on, as depart_basis words
 // what the departure was chosen on. It is put once, when the row is finished, on a
-// leg that shows an arrival still ahead. The pace does not
-// yet depend on the departure, so the words are the same whichever one is shown;
-// the current of the chosen hour is what will change them.
+// leg that shows an arrival still ahead. The words are those of the run the row
+// shows: the current it met, and the slow water over the part of the leg it covers.
 func (w *planLegWork) putEtaBasis() {
 	if w.profile == nil {
 		return // a leg with no pace has no hours to give a basis to
 	}
-	text := etaBasisText(w.profile.cruiseKn, hoursDuration(w.profile.slowHours()))
+	text := etaBasisText(w.profile.cruiseKn, hoursDuration(w.shown.slowHours), w.shown.currentWords())
 	w.res.EtaBasis = &text
 }
 
 // etaBasisText is the sentence a leg's hours were worked out on: the cruise speed,
-// and the time in slow water rounded to five minutes, left out when it rounds to
-// none.
-func etaBasisText(cruiseKn float64, slow time.Duration) string {
-	text := fmt.Sprintf("Cruise %.1f kn", cruiseKn)
-	if m := int(math.Round(slow.Minutes()/5)) * 5; m > 0 {
-		text += ", " + durationText(time.Duration(m)*time.Minute) + " in slow water"
+// what its run says of the current (legRun.currentWords, "" for none), and the time
+// in slow water rounded to five minutes, left out when it rounds to none.
+func etaBasisText(cruiseKn float64, slow time.Duration, current string) string {
+	parts := []string{fmt.Sprintf("Cruise %.1f kn", cruiseKn)}
+	if current != "" {
+		parts = append(parts, current)
 	}
-	return text + "."
+	if m := int(math.Round(slow.Minutes()/5)) * 5; m > 0 {
+		parts = append(parts, durationText(time.Duration(m)*time.Minute)+" in slow water")
+	}
+	return strings.Join(parts, ", ") + "."
 }
 
 // putDepart and putArrive set the departure and arrival the row shows, in their
@@ -575,9 +601,12 @@ func (d planAssessDeps) prepareLeg(w *planLegWork, leg planLeg, env planEnv) {
 		},
 		func() (planNoteKind, string) { return d.setSuggestionWindow(w, env) },
 	}
-	for _, step := range steps {
+	for i, step := range steps {
 		if kind, note := step(); note != "" {
 			w.fail(kind, note)
+			// A suggested leg that has all else but a window is still read for its
+			// current, which comes first: a failed read says why there is no departure.
+			w.windowless = i == len(steps)-1 && kind == planKindNoWindow
 			return
 		}
 	}
@@ -613,9 +642,7 @@ func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv, under *planUnder
 	}
 	// The row shows the boat's own departure, when the passage began, and no ETA
 	// until one is worked out from the fix.
-	w.tl = legTimeline{}
 	w.res.DepartSuggested = false
-	w.chosenArrive, w.res.Arrive = time.Time{}, ""
 	if under != nil && !under.Start.IsZero() {
 		w.putDepart(under.Start)
 	}
@@ -633,37 +660,58 @@ func (w *planLegWork) prepareUnderway(leg planLeg, env planEnv, under *planUnder
 	return ""
 }
 
-// noEta says why a leg under way has no readable ETA, and that its wind changes are
-// not read for it.
+// noEta says why a leg has no readable ETA. A leg under way keeps the reason and its
+// wind changes are not read for it. For any other leg the operator's departure stays
+// on the row with no arrival, hours or timeline, and the note says why.
 func (w *planLegWork) noEta(why string, env planEnv) {
-	w.etaWhy = why
-	if env.limitsProblem == "" {
-		w.res.WindChanges.NotChecked, w.changesRead = why, true
+	if w.underway {
+		w.etaWhy = why
+		if env.limitsProblem == "" {
+			w.res.WindChanges.NotChecked, w.changesRead = why, true
+		}
+		return
 	}
+	w.noDeparture(planKindOther, why, env)
+}
+
+// takeEta is where a leg with a departure (the operator's, or the leg under way) gets
+// its ETA from its run, or none. A run with an ETA is shown, with its current, whether
+// or not the leg can be judged: an overnight run has its timeline too. Any other run
+// has no ETA, and the leg says why in place of whatever note it had, since "No ETA"
+// is the more specific. It says whether the leg has an ETA.
+func (w *planLegWork) takeEta(r departureRun, f legCurrentField, env planEnv) bool {
+	fate := r.outcome()
+	if fate == fateOK || fate == fateOvernight {
+		w.show(r.run)
+		w.setCurrent(runReading(r.run, f), nil)
+		return true
+	}
+	if fate == fateNotRun {
+		log.Printf("plans: ETA for %s to %s not worked out: %v", w.from.Name, w.to.Name, r.err)
+	}
+	_, note := noEtaNote(fate, false, r.err)
+	if fate == fateNotRun && w.underway {
+		// A run from the fix that failed for a reason other than the current.
+		note = planNoEtaUnderway
+	}
+	w.noEta(note, env)
+	return false
 }
 
 // readUnderway runs the leg under way from its fix, at the time of the fix, with the
 // current the leg read, nil when it read none (readErr says why). The row's current
 // is the run's figure over the open water still ahead.
 func (w *planLegWork) readUnderway(env planEnv, f legCurrentField, readErr error) {
-	r, err := w.profile.runFrom(w.fix.start, w.fix.at, w.fix.step, w.fix.left, f)
-	if err != nil {
-		log.Printf("plans: ETA for %s to %s not worked out from the latest fix: %v", w.from.Name, w.to.Name, err)
-		w.noEta("No ETA: the ETA from the latest position could not be worked out", env)
+	r := departureRun{run: legRun{fate: fateUnreadable}, err: readErr}
+	if readErr == nil {
+		r.run, r.err = w.profile.runFrom(w.fix.start, w.fix.at, w.fix.step, w.fix.left, f)
+	}
+	if !w.takeEta(r, f, env) {
 		return
 	}
 	// The row's times are the passage's: it began at the start and arrives at the ETA
 	// from the fix, so the hours are the ones between them.
-	w.underTl = r.tl
-	w.eta = r.tl.arrive()
-	w.tl = r.tl
-	w.putArrive(w.eta)
-	w.windReady = true
-	if readErr != nil {
-		w.setCurrent(planCurrentReading{}, readErr)
-		return
-	}
-	w.setCurrent(runReading(r, f), nil)
+	w.underTl, w.eta, w.windReady = r.run.tl, r.run.tl.arrive(), true
 }
 
 func (w *planLegWork) checkRouted(leg planLeg) (planNoteKind, string) {
@@ -713,10 +761,12 @@ func (w *planLegWork) setOperatorDeparture(now time.Time) (planNoteKind, string)
 	return planKindNone, ""
 }
 
-// setHours works out the time under way at the boat's learned pace, and the
-// arrival at the operator's time.
+// setHours gives the leg its pace and checks, in still water, that it is not an
+// overnight leg. The still-water timeline is only that check: no row shows it, and the
+// leg's ETA is a run with the current (readLeg).
 func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) {
 	if env.speedErr != nil {
+		w.noPace = true
 		return planKindOther, "No ETA: " + env.speedErr.Error()
 	}
 	ref := w.depart
@@ -724,17 +774,13 @@ func (w *planLegWork) setHours(leg planLeg, env planEnv) (planNoteKind, string) 
 		ref = env.now
 	}
 	if err := w.setPace(leg, env.pace); err != nil {
+		w.noPace = true
 		return planKindOther, "No ETA: " + err.Error()
 	}
 	tl, err := w.profile.pace(ref)
 	if err != nil {
+		w.noPace = true
 		return planKindOther, "No ETA: " + err.Error()
-	}
-	w.tl = tl
-	// The arrival is known from the timeline of the operator's departure, so it
-	// shows even for a leg that is not judged.
-	if !w.depart.IsZero() {
-		w.putArrive(tl.arrive())
 	}
 	if tl.hours() > planAssessMaxLegHours {
 		return planKindOvernight, planNoteOvernight
@@ -757,7 +803,6 @@ func (w *planLegWork) checkHorizon(now time.Time) (planNoteKind, string) {
 func (w *planLegWork) setRoute(leg planLeg) (planNoteKind, string) {
 	w.plan = planLegPassage(w.i, w.from, w.to, leg, w.profile.pace)
 	w.course = float64(leg.CourseDeg)
-	w.routed = true
 	return planKindNone, ""
 }
 
@@ -845,7 +890,7 @@ func (d planAssessDeps) readAndJudge(ctx context.Context, p plan, work []*planLe
 	for _, w := range work {
 		// A leg is read for its current and for the departures its verdict is chosen
 		// from, and a leg under way for its ETA from the fix.
-		if !w.readsCurrent(env) && w.fix == nil {
+		if !w.readsCurrent() && w.fix == nil {
 			continue
 		}
 		sem <- struct{}{}
@@ -1210,41 +1255,121 @@ func runReading(r legRun, f legCurrentField) planCurrentReading {
 	return planCurrentReading{Why: noCurrentWhy(f)}
 }
 
-// readsCurrent says the leg is read for its current: the leg is routed, is not under
-// way, and is either suggested a departure, which its verdict is then chosen from, or
-// has the operator's, which a verdicts-only assessment leaves out.
-func (w *planLegWork) readsCurrent(env planEnv) bool {
-	if !w.routed || w.underway {
-		return false // a leg under way is timed from its fix, and is given no departure
+// readsCurrent says the leg is read for its current: it has its pace, is not under
+// way, and has a departure: the operator's, whether or not the leg can be judged, or
+// the grid a suggestion is looked for among, which its verdict is then chosen from.
+// The current is in the speed, so a verdicts-only assessment (a slip) reads it too:
+// its ETA is the one the page shows.
+func (w *planLegWork) readsCurrent() bool {
+	// A leg under way is timed from its fix, and is given no departure.
+	if w.profile == nil || w.underway || w.noPace {
+		return false
 	}
-	if w.depart.IsZero() {
-		return w.assessable
-	}
-	return !env.verdictsOnly
+	return !w.depart.IsZero() || w.assessable || w.windowless
 }
 
-// departureRun is the leg run from one departure of its grid.
+// departureRun is the leg run from one departure.
 type departureRun struct {
 	dep time.Time
 	run legRun
 	err error
 }
 
+// outcome is what became of the departure: its run's fate, or fateNotRun when the run
+// could not be made.
+func (r departureRun) outcome() runFate {
+	if r.run.fate == fateOK && r.err != nil {
+		return fateNotRun
+	}
+	return r.run.fate
+}
+
+// failed says the departure has no ETA a leg is judged on.
+func (r departureRun) failed() bool { return r.outcome() != fateOK }
+
+// noEtaNote is the note of a leg whose run ended as fate says, "" kind for a run with
+// an ETA. It is the one place that words it: the leg is suggested a departure, which
+// has none ("No departure suggested: ..."), or has the operator's, or is under way,
+// which have no ETA ("No ETA: ..."). A run that takes more than a day says the leg
+// is not assessed, either way.
+func noEtaNote(fate runFate, suggested bool, readErr error) (planNoteKind, string) {
+	kind, prefix := planKindOther, "No ETA: "
+	if suggested {
+		kind, prefix = planKindNoDeparture, "No departure suggested: "
+	}
+	switch fate {
+	case fateOK:
+		return planKindNone, ""
+	case fateOvernight:
+		return planKindOvernight, planNoteOvernight
+	case fateUnreadable:
+		return kind, prefix + currentReadReason(readErr)
+	case fateStalled:
+		return kind, prefix + errCurrentAgainst.Error()
+	}
+	return kind, prefix + planReasonNoTimeline
+}
+
+// currentReadReason words why a leg's current could not be had, by what the error is:
+// a leg too long for one request never clears, no provider is a setup fault, and any
+// other failure is a request that may succeed later.
+func currentReadReason(err error) string {
+	var long currentTooLongError
+	switch {
+	case errors.As(err, &long):
+		return fmt.Sprintf("the leg is too long for one request to the current model (%d cells, up to %d)", long.cells, maxCurrentsPoints)
+	case errors.Is(err, errCurrentNoProvider):
+		return planReasonNoProvider
+	}
+	return planReasonNoCurrent
+}
+
+// fateCount counts the departures with no ETA by what became of them.
+type fateCount struct{ stalled, overnight, other int }
+
+func (c *fateCount) add(fate runFate) {
+	switch fate {
+	case fateStalled:
+		c.stalled++
+	case fateOvernight:
+		c.overnight++
+	default:
+		c.other++
+	}
+}
+
+func (c fateCount) total() int { return c.stalled + c.overnight + c.other }
+
+// dominant is the most common cause; ties go to the current against the boat, then
+// to a day's passage, then to the generic one.
+func (c fateCount) dominant() runFate {
+	switch {
+	case c.stalled >= c.overnight && c.stalled >= c.other:
+		return fateStalled
+	case c.overnight >= c.other:
+		return fateOvernight
+	}
+	return fateNotRun
+}
+
+func (c fateCount) String() string {
+	return fmt.Sprintf("%d stalled, %d overnight, %d not run", c.stalled, c.overnight, c.other)
+}
+
 // readLeg reads one leg's current once, first, because every run needs it, then runs
 // each departure once with it: the operator's alone, or the grid a suggestion is
-// looked for among. The leg under way is run from its fix. A failed read leaves the
-// runs on the pace alone and the figure blank.
+// looked for among, every one with the current in its speed. The leg under way is run
+// from its fix. A failed read leaves the operator's departure and the leg under way
+// with no ETA, and a suggested leg with no departure, before any window is worked out.
 func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork, env planEnv) {
-	reads := w.readsCurrent(env)
+	reads := w.readsCurrent()
 	var field legCurrentField
 	var readErr error
 	// The leg under way reads the current too, for its run from the fix.
 	if reads || w.fix != nil {
 		if field, readErr = d.legCurrents(ctx, w.profile); readErr != nil {
 			field = nil
-			if !reads {
-				log.Printf("plans: current not read for %s to %s: %v", w.from.Name, w.to.Name, readErr)
-			}
+			log.Printf("plans: current not read for %s to %s: %v", w.from.Name, w.to.Name, readErr)
 		}
 	}
 	if w.fix != nil {
@@ -1253,60 +1378,51 @@ func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork, env planEnv
 	if !reads {
 		return
 	}
-	deps := w.grid
-	if !w.depart.IsZero() {
-		deps = []time.Time{w.depart}
-	}
-	// A departure before now only says whether the day had a window, so it is run
-	// without the current.
-	soonest := ceilToStep(env.now, planDepartureStep)
-	runs := make([]departureRun, len(deps))
-	for i, dep := range deps {
-		runs[i] = departureRun{dep: dep}
-		f := field
-		if w.depart.IsZero() && dep.Before(soonest) {
-			f = nil
-		}
-		runs[i].run, runs[i].err = d.runDeparture(w.profile, dep, f)
-	}
 	if !w.depart.IsZero() {
 		// The operator's departure is the one run; its timeline is the one the row
 		// shows and the verdict is judged on.
-		r := runs[0]
-		if r.err == nil {
-			w.tl = r.run.tl
+		r := departureRun{dep: w.depart, run: legRun{fate: fateUnreadable}, err: readErr}
+		if readErr == nil {
+			r = d.runAt(w.profile, w.depart, field)
 		}
-		switch {
-		case readErr != nil:
-			w.setCurrent(planCurrentReading{}, readErr)
-		case r.err != nil:
-			w.setCurrent(planCurrentReading{}, r.err)
-		default:
-			w.setCurrent(runReading(r.run, field), nil)
+		if w.takeEta(r, field, env) && r.outcome() == fateOvernight && w.assessable {
+			// The arrival shows; a leg that was to be judged is not, as for one the
+			// still-water check refuses. A leg that was not keeps its own note.
+			w.noDeparture(planKindOvernight, planNoteOvernight, env)
 		}
 		return
 	}
-	failed := 0
-	for _, r := range runs {
-		if r.err != nil {
-			if failed++; failed == 1 {
-				log.Printf("plans: leg %s to %s could not be run from %s: %v", w.from.Name, w.to.Name, r.dep.Format(time.RFC3339), r.err)
-			}
-		}
-	}
-	if failed > 1 {
-		log.Printf("plans: leg %s to %s: %d of %d departures could not be run", w.from.Name, w.to.Name, failed, len(runs))
-	}
-	fits, kind, note := departureCandidates(runs, env.now, w.arriveBy)
-	if kind != planKindNone {
+	if readErr != nil {
+		// No current, no run: nothing is worked out on a still-water grid, and no
+		// window or overnight note stands in for the reason.
+		kind, note := noEtaNote(fateUnreadable, true, readErr)
 		w.noDeparture(kind, note, env)
 		return
 	}
-	var cands []tidalDeparture
-	err := readErr
-	if err == nil {
-		cands, err = orderDepartures(fits, field)
+	if w.windowless {
+		return // the current was read; the window's own note stands
 	}
+	// Every departure is run with the current, one before now too: whether the day had
+	// a window is judged on the same arrivals as the suggestion.
+	runs := make([]departureRun, len(w.grid))
+	var gone fateCount
+	for i, dep := range w.grid {
+		runs[i] = d.runAt(w.profile, dep, field)
+		if fate := runs[i].outcome(); fate != fateOK {
+			if gone.add(fate); fate == fateNotRun && gone.other == 1 {
+				log.Printf("plans: leg %s to %s could not be run from %s: %v", w.from.Name, w.to.Name, dep.Format(time.RFC3339), runs[i].err)
+			}
+		}
+	}
+	fits, kind, note := departureCandidates(runs, env.now, w.arriveBy)
+	if kind != planKindNone {
+		if gone.total() > 0 {
+			log.Printf("plans: leg %s to %s has no departure to suggest, departures without an ETA: %v", w.from.Name, w.to.Name, gone)
+		}
+		w.noDeparture(kind, note, env)
+		return
+	}
+	cands, err := orderDepartures(fits, field)
 	if err != nil {
 		log.Printf("plans: no departure ranked for %s to %s: %v", w.from.Name, w.to.Name, err)
 		w.fail(planKindNoDeparture, "No departure suggested: "+err.Error())
@@ -1315,17 +1431,76 @@ func (d planAssessDeps) readLeg(ctx context.Context, w *planLegWork, env planEnv
 	w.cands = cands
 }
 
-// runDeparture runs the leg from a departure with the current.
-func (d planAssessDeps) runDeparture(p *legPaceProfile, dep time.Time, f legCurrentField) (legRun, error) {
-	if d.run != nil {
-		return d.run(p, dep, f)
+// sharedLegCurrents remembers what a leg's current read gave for one assessment of the
+// slips of a plan, which run side by side: what is asked depends on the leg alone (the
+// points asked for, legPaceProfile.currentKey), and the field holds only the series,
+// which every slip reads along its own profile. The slips of one leg take turns, so
+// the first reads and the others find its answer; the provider behind the read already
+// answers a request made twice at once and keeps what it fetched. Each slip reads on
+// its own context. A failure is shared for the assessment, a provider's own timeout
+// included, but not one the slip's own context ended (it was cancelled or timed out):
+// that is no answer for the others, and the next slip in turn reads for itself.
+func sharedLegCurrents(read func(context.Context, *legPaceProfile) (legCurrentField, error)) func(context.Context, *legPaceProfile) (legCurrentField, error) {
+	if read == nil {
+		return nil
 	}
-	return p.run(dep, f)
+	// turn holds one token: the slip that takes it may read or find the answer; the
+	// answer is only touched with it.
+	type memo struct {
+		turn  chan struct{}
+		done  bool
+		field legCurrentField
+		err   error
+	}
+	var (
+		mu    sync.Mutex
+		memos = map[string]*memo{}
+	)
+	return func(ctx context.Context, p *legPaceProfile) (legCurrentField, error) {
+		key := p.currentKey()
+		mu.Lock()
+		m := memos[key]
+		if m == nil {
+			m = &memo{turn: make(chan struct{}, 1)}
+			m.turn <- struct{}{}
+			memos[key] = m
+		}
+		mu.Unlock()
+		select {
+		case <-m.turn:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { m.turn <- struct{}{} }()
+		if m.done {
+			return m.field, m.err
+		}
+		f, err := read(ctx, p)
+		// Nothing is stored when the slip's own context ended: that is its cancellation,
+		// no answer for the others. A timeout the provider hit with the slip's context
+		// still live is the provider's own, and the answer for every slip.
+		if err != nil && ctx.Err() != nil {
+			return nil, err
+		}
+		m.field, m.err, m.done = f, err, true
+		return f, err
+	}
 }
 
-// noDeparture leaves a suggested leg with no window, or one that has passed. A leg
-// that is not under way has no wind changes either: it is left as one that was never
-// assessed, and its changes are not read.
+// runAt runs the leg from a departure with the current.
+func (d planAssessDeps) runAt(p *legPaceProfile, dep time.Time, f legCurrentField) departureRun {
+	r := departureRun{dep: dep}
+	if d.run != nil {
+		r.run, r.err = d.run(p, dep, f)
+	} else {
+		r.run, r.err = p.run(dep, f)
+	}
+	return r
+}
+
+// noDeparture leaves a suggested leg with no window, or one that has passed, or the
+// operator's with no arrival to judge. A leg that is not under way has no wind changes
+// either: it is left as one that was never assessed, and its changes are not read.
 func (w *planLegWork) noDeparture(kind planNoteKind, note string, env planEnv) {
 	w.fail(kind, note)
 	if w.fix == nil {
@@ -1345,20 +1520,23 @@ func (w *planLegWork) noDeparture(kind planNoteKind, note string, env planEnv) {
 // be run is never in the window, past or to come: it has no arrival to fit. The ones
 // before now say only whether the day had a window: when none from now on is in it
 // the kind is the window having passed, or there never having been one, with the
-// note to say so; when every departure from now on failed to run, the note says the
-// timeline could not be worked out. A kind of planKindNone says the leg has
-// candidates.
+// note to say so; when every departure from now on has no ETA, the note names the most
+// common cause (noEtaNote, fateCount.dominant). A kind of planKindNone says the leg
+// has candidates.
 func departureCandidates(runs []departureRun, now, arriveBy time.Time) (fits []departureRun, kind planNoteKind, note string) {
 	soonest := ceilToStep(now, planDepartureStep)
 	hadWindow := false
-	ahead, failedAhead := 0, 0
+	// failedAhead counts the departures from now on that have no ETA, by what became
+	// of them.
+	ahead := 0
+	var failedAhead fateCount
 	for _, r := range runs {
 		if !r.dep.Before(soonest) {
 			ahead++
 		}
-		if r.err != nil {
+		if r.failed() {
 			if !r.dep.Before(soonest) {
-				failedAhead++
+				failedAhead.add(r.outcome())
 			}
 			continue
 		}
@@ -1370,11 +1548,14 @@ func departureCandidates(runs []departureRun, now, arriveBy time.Time) (fits []d
 			fits = append(fits, r)
 		}
 	}
+	// When every departure from now on has no ETA the note names the most common
+	// cause (fateCount.dominant). The tally of fates is logged (readLeg).
 	switch {
 	case len(fits) > 0:
 		return fits, planKindNone, ""
-	case ahead > 0 && failedAhead == ahead:
-		return nil, planKindNoDeparture, planNoteNoTimeline
+	case ahead > 0 && failedAhead.total() == ahead:
+		kind, note := noEtaNote(failedAhead.dominant(), true, nil)
+		return nil, kind, note
 	case hadWindow:
 		return nil, planKindWindowPassed, planNoteWindowPassed
 	}
@@ -1414,7 +1595,7 @@ func orderDepartures(runs []departureRun, field legCurrentField) ([]tidalDepartu
 		if wellCovered && g.run.covered() < assistantTidalMinCoveredFraction {
 			continue
 		}
-		out = append(out, tidalDeparture{Depart: g.dep, tl: g.run.tl, Current: runReading(g.run, field)})
+		out = append(out, tidalDeparture{Depart: g.dep, Current: runReading(g.run, field), run: g.run})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("the Open-Meteo model has no current for the run: %s", noCurrentWhy(field))
@@ -1518,7 +1699,7 @@ const cellUnjudged = "unjudged"
 // departureCell judges the leg at one departure, on the timeline that departure was
 // run on. It is a variable so a test can make one departure fail.
 var departureCell = func(ctx context.Context, as *passageAssessor, w *planLegWork, c tidalDeparture) (passageWindowCell, error) {
-	return as.cellOn(ctx, w.i, w.plan, c.tl, w.toLoc)
+	return as.cellOn(ctx, w.i, w.plan, c.run.tl, w.toLoc)
 }
 
 // chooseDeparture judges the ranked departures, fairest current first, and finds

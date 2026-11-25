@@ -18,8 +18,10 @@ type crField struct {
 	why   string
 }
 
-func (f crField) alongAt(k int, t time.Time) (float64, bool) { return f.along(k, t) }
-func (f crField) none() string                               { return f.why }
+func (f crField) alongAt(_ *legPaceProfile, k int, t time.Time) (float64, bool) {
+	return f.along(k, t)
+}
+func (f crField) none() string { return f.why }
 
 // runsOf runs the leg from each departure with the field, as readLeg does.
 func runsOf(p *legPaceProfile, f legCurrentField, deps ...time.Time) []departureRun {
@@ -53,7 +55,7 @@ type paStubField struct {
 	why    string
 }
 
-func (s paStubField) alongAt(k int, t time.Time) (float64, bool) {
+func (s paStubField) alongAt(_ *legPaceProfile, k int, t time.Time) (float64, bool) {
 	kn, ok := s.means[paClockKey(t.Add(-s.offset[k]))]
 	return kn, ok
 }
@@ -195,17 +197,18 @@ func TestLegCurrent_WhenNoDepartureEverFitsThereIsNoWindow(t *testing.T) {
 	}
 }
 
-// 7: a current request that fails blanks the current and leaves the verdict and the ETA.
-func TestLegCurrent_AFailedRequestBlanksTheCurrentNotTheVerdictOrTheEta(t *testing.T) {
+// 7: a current request that fails leaves the operator's departure with no ETA, since
+// the current is in the speed (leg_current_speed_test.go has the full cases).
+func TestLegCurrent_AFailedRequestLeavesTheOperatorsDepartureWithNoEtaAndNoCurrent(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	p.Stops[0].DepartTime = "08:00"
 	f := &paFake{currentErr: errors.New("the Open-Meteo current request failed")}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if l.CurrentKn != nil || !strings.Contains(l.CurrentNote, "request failed") {
-		t.Fatalf("current %v, note %q", l.CurrentKn, l.CurrentNote)
+	if l.CurrentKn != nil || l.Note != "No ETA: the modelled current could not be read" {
+		t.Fatalf("current %v, note %q", l.CurrentKn, l.Note)
 	}
-	if l.Verdict != "go" || !paParse(t, l.Arrive).Equal(paAt(14, 13, 0)) || l.Hours == nil || *l.Hours != 5 {
-		t.Fatalf("a failed current read does not touch the ETA or the verdict: %+v", l)
+	if l.Verdict != "" || l.Arrive != "" || l.Hours != nil {
+		t.Fatalf("no ETA means no verdict: %+v", l)
 	}
 }
 
@@ -214,7 +217,7 @@ func TestLegCurrent_AFailedRequestLeavesASuggestedLegWithNoDeparture(t *testing.
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	f := &paFake{currentErr: errors.New("the Open-Meteo current request failed")}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if l.NoteKind != planKindNoDeparture || !strings.Contains(l.Note, "request failed") || l.Depart != "" {
+	if l.NoteKind != planKindNoDeparture || l.Note != "No departure suggested: the modelled current could not be read" || l.Depart != "" {
 		t.Fatalf("leg = %+v", l)
 	}
 }
@@ -310,34 +313,35 @@ func TestLegRun_AStepPastTheSeriesOrInAGapOfOverAnHourIsNotModelled(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(r.modelledNm-8) > 0.2 || math.Abs(r.unmodelledNm-24) > 0.2 {
-		t.Fatalf("modelled %.2f, unmodelled %.2f: want the first hour (8 nm) and no more", r.modelledNm, r.unmodelledNm)
+	// The current is in the speed: the first hour is covered at 9 kn, 9 nm of it.
+	if math.Abs(r.modelledNm-9) > 0.2 || math.Abs(r.unmodelledNm-23) > 0.2 {
+		t.Fatalf("modelled %.2f, unmodelled %.2f: want the first hour (9 nm) and no more", r.modelledNm, r.unmodelledNm)
 	}
 	if math.Abs(r.alongKn-1) > 1e-6 {
 		t.Fatalf("mean = %v over the covered part", r.alongKn)
 	}
 }
 
-// At zero current in the speed the run is the pace's own timeline, and a leg of
-// steps with no current figures says so.
-func TestLegRun_IsThePacesTimelineWithNoCurrentInTheSpeed(t *testing.T) {
+// With no current modelled anywhere the run is the pace's own timeline; with one it
+// is not (leg_current_speed_test.go).
+func TestLegRun_IsThePacesTimelineWhenTheModelHasNoCurrent(t *testing.T) {
 	p, _ := crLeg(t, lpModel(lpBoats[0]), 3)
 	want, err := p.pace(lpNow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []legCurrentField{crUniform(2), crUniform(-3), crField{along: func(int, time.Time) (float64, bool) { return 0, false }, why: "none"}} {
+	for _, f := range []legCurrentField{crUniform(0), crField{along: func(int, time.Time) (float64, bool) { return 0, false }, why: "none"}} {
 		r, err := p.run(lpNow, f)
 		if err != nil || len(r.tl.knots) != len(want.knots) || !r.tl.arrive().Equal(want.arrive()) {
 			t.Fatalf("run %+v err %v, want the pace's %v", r.tl, err, want.arrive())
 		}
 	}
 	none := crField{along: func(int, time.Time) (float64, bool) { return 0, false }}
-	w := p.integrate(lpNow, 0, 1, none)
-	if w.modelledNm != 0 || p.slowHours() <= 0 {
-		t.Fatalf("a field with no current models nothing, and the slow water is timed: %+v", w)
+	w, err := p.integrate(lpNow, 0, 1, none)
+	if err != nil || w.modelledNm != 0 || p.slowHours() <= 0 {
+		t.Fatalf("a field with no current models nothing, and the slow water is timed: %+v, %v", w, err)
 	}
-	if still := p.integrate(lpNow, 0, 1, nil); len(still.knots) != len(w.knots) {
+	if still, err := p.integrate(lpNow, 0, 1, nil); err != nil || len(still.knots) != len(w.knots) {
 		t.Fatalf("no field is the still-water walk: %+v against %+v", still, w)
 	}
 }
@@ -456,8 +460,8 @@ func TestAssessPlan_ACandidateIsJudgedOnItsOwnTimeline(t *testing.T) {
 	}
 }
 
-// 14: a suggested leg with no chosen departure shows the still-water hours and no basis.
-func TestAssessPlan_ASuggestedLegWithNoDepartureShowsStillWaterHoursAndNoBasis(t *testing.T) {
+// 14: a suggested leg with no chosen departure shows no hours, no speed and no basis.
+func TestAssessPlan_ASuggestedLegWithNoDepartureShowsNoHoursAndNoBasis(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 1, 0)
 	f := &paFake{currents: func(*legPaceProfile) (legCurrentField, error) {
 		return crField{along: func(int, time.Time) (float64, bool) { return 0, false }, why: "no current near shore"}, nil
@@ -469,8 +473,8 @@ func TestAssessPlan_ASuggestedLegWithNoDepartureShowsStillWaterHoursAndNoBasis(t
 	if l.Depart != "" || l.Arrive != "" || l.EtaBasis != nil {
 		t.Fatalf("a leg with no departure shows no time and no basis: %+v", l)
 	}
-	if l.Hours == nil || *l.Hours != 5 || l.SpeedKn == nil || *l.SpeedKn != 6 {
-		t.Fatalf("hours %v speed %v: the still-water figures stay", l.Hours, l.SpeedKn)
+	if l.Hours != nil || l.SpeedKn != nil {
+		t.Fatalf("hours %v speed %v: no still-water reference reaches the wire", l.Hours, l.SpeedKn)
 	}
 }
 
@@ -521,7 +525,7 @@ func BenchmarkLegRunCurrent(b *testing.B) {
 	for h := range 16 * 24 {
 		series = append(series, tidalCurrentPoint{t: lpNow.Add(time.Duration(h-24) * time.Hour), e: 0.2 * math.Sin(float64(h)/2), n: 0.6 * math.Cos(float64(h)/2)})
 	}
-	field := legCellField{p: p, series: make([]tidalCurrents, len(p.cells))}
+	field := legCellField{series: make([]tidalCurrents, len(p.cells))}
 	for i := range field.series {
 		field.series[i] = series
 	}

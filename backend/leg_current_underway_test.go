@@ -205,7 +205,7 @@ func TestAssessPlan_TheLegUnderWayShowsItsCurrentFromTheRunFromTheFix(t *testing
 	}
 }
 
-func TestAssessPlan_TheLegUnderWayWhoseCurrentReadFailsIsBlankWithTheReason(t *testing.T) {
+func TestAssessPlan_TheLegUnderWayWhoseCurrentReadFailsHasNoEtaAndSaysWhy(t *testing.T) {
 	p, legs := paPlan(t, "2026-11-14", 0, 0)
 	a, b := p.Stops[0], p.Stops[1]
 	f := &paFake{
@@ -213,11 +213,11 @@ func TestAssessPlan_TheLegUnderWayWhoseCurrentReadFailsIsBlankWithTheReason(t *t
 		underway:   uwFix(p, paAt(14, 4, 0), paAt(14, 4, 20), (a.Lat+b.Lat)/2, (a.Lon+b.Lon)/2),
 	}
 	l := paAssess(t, p, legs, f).Legs[0]
-	if l.CurrentKn != nil || !strings.Contains(l.CurrentNote, "request failed") {
-		t.Fatalf("current %v note %q", l.CurrentKn, l.CurrentNote)
+	if l.CurrentKn != nil || l.WindChanges.NotChecked != planNoEtaNoCurrent {
+		t.Fatalf("current %v, not checked %q", l.CurrentKn, l.WindChanges.NotChecked)
 	}
-	if l.Arrive == "" {
-		t.Fatalf("a failed current read does not take the ETA: %+v", l)
+	if l.Arrive != "" {
+		t.Fatalf("the current is in the speed, so a failed read takes the ETA: %+v", l)
 	}
 }
 
