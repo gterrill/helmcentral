@@ -88,7 +88,23 @@ type signalKSnapshot struct {
 	// positionHeardKeepFor to bound the map.
 	positionHeard   map[string]time.Time
 	distressCleared map[string]struct{}
+
+	// emptyPathObjectDropLog and emptyPathValueDropLog rate-limit the K-4
+	// guard's log line in applyDelta. They are separate so routine object
+	// drops cannot hide a non-object one.
+	emptyPathObjectDropLog rateLimitedLog
+	emptyPathValueDropLog  rateLimitedLog
 }
+
+// signalKEmptyPathLogInterval is how often the routine K-4 drop (an object
+// over a branch) may write a log line. AIS static data repeats every few
+// seconds, so each drop would flood the log.
+const signalKEmptyPathLogInterval = 10 * time.Minute
+
+// signalKEmptyPathValueLogInterval is how often a non-object K-4 drop may
+// write a log line. A non-object over a branch is malformed or hostile and
+// should stay visible.
+const signalKEmptyPathValueLogInterval = time.Minute
 
 // signalKSentenceSeenMaxDistinct caps how many distinct sentence type strings
 // sentenceSeen may hold, the same "count cap survives a flood, ordinary boats
@@ -307,6 +323,9 @@ func newSignalKSnapshot() *signalKSnapshot {
 		contextHeard:      make(map[string]time.Time),
 		positionHeard:     make(map[string]time.Time),
 		distressCleared:   make(map[string]struct{}),
+
+		emptyPathObjectDropLog: rateLimitedLog{now: time.Now, logf: log.Printf, interval: signalKEmptyPathLogInterval},
+		emptyPathValueDropLog:  rateLimitedLog{now: time.Now, logf: log.Printf, interval: signalKEmptyPathValueLogInterval},
 	}
 }
 
@@ -477,7 +496,14 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 						// hostile or malformed {"path":"","value":{"navigation":0}}
 						// delta quietly destroying everything navigation ever held.
 						if _, isBranch := tree[k].(map[string]any); isBranch {
-							log.Printf("signalk snapshot: dropping empty-path merge of %q under %s: would overwrite an existing branch with a scalar", k, d.Context)
+							const held = " (%d more since the last line)"
+							if _, isObject := v.(map[string]any); isObject {
+								s.emptyPathObjectDropLog.log(held,
+									"signalk snapshot: dropping empty-path merge of %q under %s: an object would replace an existing branch", k, d.Context)
+							} else {
+								s.emptyPathValueDropLog.log(held,
+									"signalk snapshot: dropping empty-path merge of %q under %s: a non-object value would replace an existing branch (malformed or hostile payload)", k, d.Context)
+							}
 							continue
 						}
 						tree[k] = v

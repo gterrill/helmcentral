@@ -258,6 +258,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Settings → Logs no longer fills with a repeated SignalK warning about
+  boats' AIS details.** The same warning came in every few seconds and pushed
+  everything else out, so the log only reached back a few minutes. It now
+  appears only now and then, and the log covers hours again.
 - **The bar across the bottom of a passage's map is readable again.** The map
   credit showed as white text on a white bar, so it looked empty. It's now
   white text on a dark pill, and folds down to its small icon when the map has

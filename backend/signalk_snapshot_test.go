@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1526,6 +1527,86 @@ func TestApplyDeltaEmptyPathDoesNotOverwriteExistingBranch(t *testing.T) {
 	// A genuine top-level scalar in the same delta must still merge normally.
 	if got := lookupString(tree, "name"); got != "Pikorua" {
 		t.Fatalf("expected name to merge normally alongside the refused navigation key, got %q", got)
+	}
+}
+
+// TestEmptyPathDropLogsOncePerInterval: AIS static data repeats every few
+// seconds, so the K-4 drop must not write a log line each time. Fifty object
+// drops inside the interval give one line; the first drop after the interval
+// says how many it held back. A non-object value over a branch is the case K-4
+// exists for: it keeps its own limiter, so routine AIS drops cannot hide it.
+// No branch is ever overwritten.
+func TestEmptyPathDropLogsOncePerInterval(t *testing.T) {
+	const ais = "vessels.urn:mrn:imo:mmsi:111"
+	snapshot := newSignalKSnapshot()
+	clock := testNow
+	var lines []string
+	fakeNow := func() time.Time { return clock }
+	fakeLogf := func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}
+	snapshot.emptyPathObjectDropLog.now, snapshot.emptyPathObjectDropLog.logf = fakeNow, fakeLogf
+	snapshot.emptyPathValueDropLog.now, snapshot.emptyPathValueDropLog.logf = fakeNow, fakeLogf
+
+	snapshot.applyDelta(signalKDelta{
+		Context: ais,
+		Updates: []signalKUpdate{{
+			Timestamp: "2026-08-12T10:00:00.000Z",
+			Values:    []signalKValue{{Path: "communication.callsignVhf", Value: "VK1"}},
+		}},
+	}, testNow)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: "2026-08-12T10:00:00.000Z",
+			Values:    []signalKValue{{Path: "navigation.state", Value: "moored"}},
+		}},
+	}, testNow)
+
+	apply := func(context string, value map[string]any) {
+		snapshot.applyDelta(signalKDelta{
+			Context: context,
+			Updates: []signalKUpdate{{
+				Timestamp: "2026-08-12T10:00:01.000Z",
+				Values:    []signalKValue{{Path: "", Value: value}},
+			}},
+		}, clock)
+	}
+	objectDrop := func() {
+		apply(ais, map[string]any{"communication": map[string]any{"callsignVhf": "VK1"}})
+	}
+
+	for i := range 50 {
+		objectDrop()
+		if i == 10 {
+			apply("vessels.self", map[string]any{"navigation": 0.0})
+		}
+		clock = clock.Add(time.Second)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("50 object drops and one non-object drop wrote %d lines, want 2: %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], ais) || !strings.Contains(lines[0], "an object would replace an existing branch") {
+		t.Errorf("first line = %q, want the AIS object wording", lines[0])
+	}
+	if !strings.Contains(lines[1], "vessels.self") || !strings.Contains(lines[1], "non-object") {
+		t.Errorf("second line = %q, want it to name vessels.self and say non-object", lines[1])
+	}
+
+	clock = clock.Add(signalKEmptyPathLogInterval)
+	objectDrop()
+	if len(lines) != 3 {
+		t.Fatalf("a drop after the interval wrote %d lines in total, want 3: %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[2], "(49 more since the last line)") {
+		t.Errorf("third line = %q, want it to say 49 more since the last line", lines[2])
+	}
+
+	if got := lookupString(snapshot.treeFor(ais), "communication", "callsignVhf", "value"); got != "VK1" {
+		t.Fatalf("communication branch was overwritten: got %q, want %q", got, "VK1")
+	}
+	if got := lookupString(snapshot.treeFor("vessels.self"), "navigation", "state", "value"); got != "moored" {
+		t.Fatalf("navigation branch was overwritten: got %q, want %q", got, "moored")
 	}
 }
 
