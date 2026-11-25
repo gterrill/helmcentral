@@ -119,15 +119,15 @@ const discoveryBody = {
   connected: true,
   groups: [
     { kind: 'engine', mappable: true, rows: [
-      { source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'RPM', text: '1800 rpm' }], item: null },
+      { source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [{ label: 'RPM', text: '1800 rpm' }], item: null },
     ] },
     { kind: 'battery', mappable: true, rows: [
-      { source: 'electrical.batteries.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'Voltage', text: '27.20 V' }], item: null },
-      { source: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'Voltage', text: '13.10 V' }], item: { id: 'eq-9', name: 'Lithium bank' } },
+      { source: 'electrical.batteries.0', instance: '0', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [{ label: 'Voltage', text: '27.20 V' }], item: null },
+      { source: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [{ label: 'Voltage', text: '13.10 V' }], item: { id: 'eq-9', name: 'Lithium bank' } },
     ] },
     { kind: 'generator', mappable: true, rows: [
-      { source: 'electrical.generator.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'State', text: 'stopped' }], item: null },
-      { source: 'electrical.generator.7', instance: '7', bus_name: '', charger_input: false, reporting: false, metrics: [], item: { id: 'eq-1', name: 'Generator' } },
+      { source: 'electrical.generator.0', instance: '0', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: true, metrics: [{ label: 'State', text: 'stopped' }], item: null },
+      { source: 'electrical.generator.7', instance: '7', bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: false, metrics: [], item: { id: 'eq-1', name: 'Generator' } },
     ] },
   ],
   detectors: {},

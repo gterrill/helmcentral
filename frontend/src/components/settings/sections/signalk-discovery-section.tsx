@@ -15,7 +15,7 @@ import {
   type EquipmentItem,
 } from '@/hooks/use-inventory'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
-import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
+import { markChargerInput, useVesselDiscovery } from '@/hooks/use-vessel-discovery'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { selectTimeZone } from '@/lib/vessel-time'
 import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
@@ -70,6 +70,8 @@ export function SignalKDiscoverySection() {
             instance: item.signalk_source.split('.').slice(1).join('.'),
             bus_name: '',
             charger_input: false,
+            charger_input_mark: 'none',
+            can_mark: false,
             reporting: false,
             metrics: [],
             item: { id: item.id, name: item.name },
@@ -144,6 +146,9 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The mark button has its own state, so it never resets an open assign or create form.
+  const [markBusy, setMarkBusy] = useState(false)
+  const [markError, setMarkError] = useState<string | null>(null)
 
   const warning = signatureWarning({ row, label: signatureLabel })
   const timeZone = useVesselStateSelector(selectTimeZone)
@@ -162,6 +167,19 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
       setError(err instanceof Error ? err.message : 'Request failed')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const toggleMark = async () => {
+    setMarkBusy(true)
+    setMarkError(null)
+    try {
+      const refreshed = await markChargerInput(row.instance, row.charger_input_mark === 'none')
+      if (!refreshed) setMarkError("Saved, but the list didn't refresh. Reload the page.")
+    } catch (err) {
+      setMarkError(err instanceof Error ? err.message : 'Request failed')
+    } finally {
+      setMarkBusy(false)
     }
   }
 
@@ -195,7 +213,11 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
         {kind === 'battery' && row.charger_input && (
           <p className="text-xs text-muted-foreground">Charger input, not a battery</p>
         )}
+        {kind === 'battery' && markedNote(row.charger_input_mark) !== '' && (
+          <p className="text-xs text-muted-foreground">{markedNote(row.charger_input_mark)}</p>
+        )}
         {busName !== '' && <p className="truncate text-xs text-muted-foreground">{busName}</p>}
+        {markError && <p role="alert" className="text-xs text-destructive">{markError}</p>}
       </div>
 
       <div className="flex min-w-0 flex-col items-start gap-2 sm:items-end">
@@ -228,7 +250,7 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
               <option value="">Choose an item…</option>
               {unassigned.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
             </select>
-            <Button type="button" size="sm" onClick={assign} disabled={busy || pickedId === ''}>Assign</Button>
+            <Button type="button" size="sm" onClick={assign} disabled={busy || markBusy || pickedId === ''}>Assign</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setMode('idle')} disabled={busy}>Cancel</Button>
           </div>
         ) : (
@@ -240,14 +262,31 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
-            <Button type="button" size="sm" onClick={create} disabled={busy || newName.trim() === ''}>Create</Button>
+            <Button type="button" size="sm" onClick={create} disabled={busy || markBusy || newName.trim() === ''}>Create</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setMode('idle')} disabled={busy}>Cancel</Button>
           </div>
+        )}
+        {kind === 'battery' && (row.charger_input_mark !== 'none' || row.can_mark) && (
+          <Button type="button" variant="ghost" size="sm" disabled={markBusy || busy} onClick={toggleMark}>
+            {row.charger_input_mark !== 'none' ? 'Unmark charger input' : 'Mark as charger input'}
+          </Button>
         )}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
     </div>
   )
+}
+
+// What a mark that is not in effect says. A mark that applies, or that adds
+// nothing because the number is recognised automatically, is the "Charger
+// input, not a battery" line, so it has no note of its own.
+function markedNote(mark: DiscoveryRow['charger_input_mark']): string {
+  switch (mark) {
+    case 'item': return "Marked as charger input, but an item uses this number, so it's checked as a battery"
+    case 'not_chargers': return "Marked as charger input, but a device that isn't a charger also reports this number, so it's checked as a battery"
+    case 'no_publishers': return 'Marked as charger input, but nothing has reported this number since Helmcentral started, so the mark waits'
+    default: return ''
+  }
 }
 
 // An item's name sits beside the row, so a missing bus name only matters until

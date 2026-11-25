@@ -14,7 +14,7 @@ const YOUNG_NOTE = 'Helmcentral has been watching the boat since 18 Oct. A sourc
 // not offer .0/.1 as new choices, and warn about the current choice.
 
 const row = (source: string, extra: Partial<DiscoveryRow>): DiscoveryRow => ({
-  source, instance: source.split('.')[1], bus_name: '', charger_input: false, reporting: false, metrics: [],
+  source, instance: source.split('.')[1], bus_name: '', charger_input: false, charger_input_mark: 'none', can_mark: false, reporting: false, metrics: [],
   item: null, last_seen: null, signature: 'carried', ...extra,
 })
 
