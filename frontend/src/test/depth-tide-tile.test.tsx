@@ -264,3 +264,25 @@ test('shows -- for the tide times until the boat has reported a zone', () => {
   expect(container.textContent).not.toContain('AM')
   expect(container.textContent).not.toContain('PM')
 })
+
+// The tile answers its own width: a two-column tile (112-155px) cannot hold
+// the 3h trend beside the depth, or High and Low on one line.
+test('a narrow tile drops the trend, shrinks the figures and stacks High over Low', () => {
+  const { container } = render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={{ points: [0, 1, 2].map((i) => ({ time: new Date(Date.now() - (3 - i) * 600_000).toISOString(), depth_m: 4 + i / 10 })), since: 'window' }}
+      tide={baseTide}
+      lastUpdateAgeS={null}
+      timeZone="UTC"
+    />,
+  )
+  expect(container.querySelector('.\\@container')).not.toBeNull()
+  const high = screen.getByText((_, el) => el?.tagName === 'P' && (el.textContent ?? '').startsWith('High')).closest('div')!
+  expect(high.className).toContain('@max-sm:flex-col')
+  expect(high.className).not.toMatch(/(^|\s)md:/)
+  expect(screen.getByText(/trend/i).closest('.\\@max-2xs\\:hidden')).not.toBeNull()
+  expect(screen.getByText(/Test Station/)).toHaveClass('truncate')
+})

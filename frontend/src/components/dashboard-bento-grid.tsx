@@ -122,7 +122,7 @@ export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
  * saved, and other tiles deliberately keep their saved heights. The phone and
  * tablet cell uses minHeight and grows with its content, so it needs no lift.
  */
-const LIFTED_TO_FLOOR: ReadonlySet<string> = new Set(['today-now', 'battery-power', 'solar', 'alternator', 'generator', 'hot-water'])
+const LIFTED_TO_FLOOR: ReadonlySet<string> = new Set(['today-now', 'depth-tide', 'battery-power', 'solar', 'alternator', 'generator', 'hot-water'])
 
 export function liftToFloor(id: string, h: number): number {
   const floor = LIFTED_TO_FLOOR.has(id) ? WIDGET_CONSTRAINTS[id as BuiltinWidgetId]?.minH : undefined
@@ -146,6 +146,8 @@ export const BATTERY_POWER_TILE_H = 464
 export const ALTERNATOR_TILE_H = 310
 export const GENERATOR_TILE_H = 297
 export const HOT_WATER_TILE_H = 176
+/** Depth & Tide at 325px (four columns on a 1280px board) in feet: the 3h trend beside the depth, High over Low. */
+export const DEPTH_TIDE_TILE_H = 333
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
@@ -153,7 +155,9 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'anchor-watch': { minW: 3, minH: 6 },
   'battery-power': { minW: 3, minH: rowsForHeight(BATTERY_POWER_TILE_H) },
   'solar': { minW: 3, minH: rowsForHeight(SOLAR_TILE_H) },
-  'depth-tide': { minW: 2, minH: 4 },
+  // Three columns: at two the trend, the units and the tide times all have to
+  // wrap, and the tile needs nine rows.
+  'depth-tide': { minW: 3, minH: rowsForHeight(DEPTH_TIDE_TILE_H) },
   'position': { minW: 2, minH: 3 },
   // Five rows: the barometer row sits below the weather row, and four rows
   // (136px of content) cannot hold both.

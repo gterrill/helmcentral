@@ -186,7 +186,7 @@ export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> 
 export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number; h: number }> = {
   'vessel': { w: 12, h: 3 },
   'wind': { w: 4, h: 8 },
-  'depth-tide': { w: 4, h: 7 },
+  'depth-tide': { w: 4, h: 8 },
   'position': { w: 4, h: 5 },
   'today-now': { w: 4, h: 5 },
   'anchor-watch': { w: 4, h: 10 },

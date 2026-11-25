@@ -456,9 +456,9 @@ type dashboardPoiMapConfig struct {
 var defaultDashboardLayout = []dashboardLayoutItem{
 	{ID: "vessel", X: 0, Y: 0, W: 12, H: 3},
 	{ID: "wind", X: 0, Y: 3, W: 4, H: 8},
-	{ID: "depth-tide", X: 0, Y: 11, W: 4, H: 7},
-	{ID: "position", X: 0, Y: 18, W: 4, H: 5},
-	{ID: "today-now", X: 0, Y: 23, W: 4, H: 5},
+	{ID: "depth-tide", X: 0, Y: 11, W: 4, H: 8},
+	{ID: "position", X: 0, Y: 19, W: 4, H: 5},
+	{ID: "today-now", X: 0, Y: 24, W: 4, H: 5},
 	// H:10 fits the always-on map at full height plus the rode readout and
 	// Drop/Raise button (ADR 0059); at H:8 the tile's map has to shrink.
 	{ID: "anchor-watch", X: 4, Y: 3, W: 4, H: 10},
