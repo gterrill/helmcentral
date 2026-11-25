@@ -245,7 +245,12 @@ to make changes sees the buttons to add, change or delete one.
 
 Mate can read your plans, make one for you and change one. It reads each leg's
 Go, Marginal or No-Go from the plan itself, so it gives you the same answer the
-plan shows. It only judges a day that isn't in a plan afresh.
+plan shows. It also reads the departure the plan suggests, and what it was
+chosen on, and how each leg should feel: the same **Comfort** line you see on
+the page, with the times and the stretch of the passage each part covers.
+Mate quotes those words and doesn't guess at the sea itself. If a leg has no
+ETA, so there's no comfort to give, Mate says so and says why. It only judges a
+day that isn't in a plan afresh.
 
 To have Mate make a plan, describe it or paste it in, such as a day-by-day list
 from an email.

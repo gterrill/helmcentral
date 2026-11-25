@@ -245,3 +245,44 @@ the hours as lines, and the row holds whether it is open, as it does for the rou
 - The coastline off or missing a square: every hour says so, and nothing reads
   Comfortable.
 - A model fitted on another wave model: the leg says which it was learned on.
+
+## Amendment 2026-11-26: Mate reads each leg's comfort
+
+`get_plans` now asks for comfort exactly as the plan page does, for every caller:
+the chat, the outside assistant and the alarm and watch reviews. A leg's comfort
+reaches Mate as `comfort`, with the chip's `text`, its `motion` line and the
+`stretches` behind the text. The hour-by-hour lines stay on the page.
+
+Each stretch carries:
+
+- `band`: Comfortable, Lively or Rough, or empty when the stretch was not judged
+  or the bands are not learned.
+- `from_label` and `until_label`: the boat clock. The first `from_label` always
+  carries its day, since a leg under way starts at now, not at its departure; a
+  later label carries its day only when it falls on another day than the label
+  before it. The first stretch starts at the departure on the departure stop's
+  clock, and the last ends at the arrival on the arrival stop's clock. When the
+  two stops' zones differ in offset or name, every label carries its day and zone
+  abbreviation ("Fri 27 Nov 12.30 AM AEDT"), the departure's zone for all but the
+  last until, which is in the arrival's. Two clocks run through such a leg, and
+  without the zone the labels could read out of order. The leg's own Arrive names
+  no zone, so the last until reads as it does with the zone added.
+- `where`: the passage segments the route covers between the stretch's own start
+  and end, in route order, each once, taken from the plan's own stop names.
+  Nothing is looked up to name them. A leg under way starts at now, so the first
+  stretch does not name a segment the boat has already passed, and a short
+  segment crossed between two hourly forecast stamps is still named.
+- `reason`: what the chip says after the band, or why the stretch was not judged.
+  It carries the words "rougher than any recorded passage" or "in seas steeper
+  than any recorded passage" when they apply; there is no separate flag.
+
+A leg with no departure and arrival, such as one on a boat with no engine rpm
+recorded, carries no comfort and no ETA, and the plan's `problem` says why. The
+size cap in `get_plans` never drops a leg's comfort text; as a last step, and
+saying so in the result's note, it drops the stretches behind it.
+
+The ranking budget (10 s) and the 90 s assessment deadline now apply to a Mate
+read too. Slips still price without comfort.
+
+This reverses "Not Mate's" below and the sentence above that keeps `get_plans` and
+Mate away from comfort.

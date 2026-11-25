@@ -996,28 +996,17 @@ func TestRankBasis_ReasonsKeepAnAcronymsCapitals(t *testing.T) {
 }
 
 // 14
-func TestPlanReportLeg_SaysGetPlansDoesNotRankForComfort(t *testing.T) {
+func TestPlanReportLeg_PassesTheLegsDepartBasisThrough(t *testing.T) {
 	p, _ := paPlan(t, "2026-11-14", 0, 0)
-	for _, verdict := range []string{"go", "marginal"} {
-		suggested, err := planReportLegOf(p, planLegAssessment{Date: "2026-11-14", DepartSuggested: true, Verdict: verdict}, planLeg{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if suggested.DepartBasis != planReportDepartBasis {
-			t.Errorf("a suggested %s departure's basis = %q, want %q", verdict, suggested.DepartBasis, planReportDepartBasis)
-		}
+	basis := "Chosen for comfort: Comfortable throughout."
+	l, err := planReportLegOf(p, planLegAssessment{Date: "2026-11-14", DepartSuggested: true, Verdict: "go", DepartBasis: &basis}, planLeg{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A leg with no Go or Marginal time was chosen closest to its limit, not by the
-	// fairest current.
-	for _, verdict := range []string{"no_go", "no_data", ""} {
-		l, err := planReportLegOf(p, planLegAssessment{Date: "2026-11-14", DepartSuggested: true, Verdict: verdict}, planLeg{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if l.DepartBasis != "" {
-			t.Errorf("a %q leg's basis = %q, want none", verdict, l.DepartBasis)
-		}
+	if l.DepartBasis != basis {
+		t.Errorf("basis = %q, want the leg's own %q", l.DepartBasis, basis)
 	}
+	// A leg with no basis (the operator's own departure) has none to give.
 	set, err := planReportLegOf(p, planLegAssessment{Date: "2026-11-14"}, planLeg{})
 	if err != nil {
 		t.Fatal(err)

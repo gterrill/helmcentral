@@ -67,7 +67,20 @@ type getPlansWire struct {
 			Verdict    string  `json:"verdict"`
 			Depart     string  `json:"depart"`
 			Progress   string  `json:"progress"`
+
+			DepartSuggested bool    `json:"depart_suggested"`
+			DepartBasis     string  `json:"depart_basis"`
+			Arrive          string  `json:"arrive"`
+			Hours           float64 `json:"hours"`
+			EtaBasis        *string `json:"eta_basis"`
+			Comfort         *struct {
+				Text      string               `json:"text"`
+				Motion    string               `json:"motion"`
+				Hours     []any                `json:"hours"`
+				Stretches []planComfortStretch `json:"stretches"`
+			} `json:"comfort"`
 		} `json:"legs"`
+		Problem string `json:"problem"`
 	} `json:"plan"`
 }
 
