@@ -601,7 +601,7 @@ func TestEvents_LookupsCarryTheOperatorsWordsAndAreClosed(t *testing.T) {
 	if want := describeAssistantToolCall("get_tides", json.RawMessage(`{"lat":1,"lon":2}`)); l.Text != want || strings.Contains(l.Text, "get_tides") {
 		t.Fatalf("lookup text %q, want %q and never the tool's name", l.Text, want)
 	}
-	if l.Skipped != "" || l.Round != 0 || l.Seq != 0 || d.Round != 0 || d.Seq != 0 || d.Error != "station offline" {
+	if l.Skipped != "" || l.Round != 0 || l.Seq != 0 || d.Round != 0 || d.Seq != 0 || d.Outcome != "failed" || d.Reason != "station offline" || l.Subject == "" {
 		t.Fatalf("lookup %+v done %+v", l, d)
 	}
 }
@@ -985,8 +985,8 @@ func TestEvents_AnAbandonedLookupIsClosedAsCutNotAsAnError(t *testing.T) {
 		t.Fatalf("events = %v: want lookup, lookup_done, round_end", tape.names())
 	}
 	d := tape.all()[done].(mateLookupDoneEvent)
-	if d.Seq != 0 || !d.Cut || d.Error != "" {
-		t.Fatalf("lookup_done = %+v, want cut with no error", d)
+	if d.Seq != 0 || d.Outcome != "cut" || d.Reason != "" {
+		t.Fatalf("lookup_done = %+v, want cut with no reason", d)
 	}
 }
 
@@ -1016,8 +1016,8 @@ func TestEvents_AToolThatReturnsTheTimeLimitsErrorIsCutNotFailed(t *testing.T) {
 		t.Fatalf("events = %v: want a lookup_done", tape.names())
 	}
 	d := tape.all()[done].(mateLookupDoneEvent)
-	if !d.Cut || d.Error != "" {
-		t.Fatalf("lookup_done = %+v, want cut with no error", d)
+	if d.Outcome != "cut" || d.Reason != "" {
+		t.Fatalf("lookup_done = %+v, want cut with no reason", d)
 	}
 }
 
@@ -1031,7 +1031,7 @@ func TestEvents_ALookupSaidDoneIsInTheTrace(t *testing.T) {
 	tools := &lateTools{fakeToolExecutor: &fakeToolExecutor{}}
 	tape := &eventTape{}
 	emit := func(ev mateEvent) {
-		if d, ok := ev.(mateLookupDoneEvent); ok && !d.Cut {
+		if d, ok := ev.(mateLookupDoneEvent); ok && d.Outcome != "cut" {
 			// The emit runs under the runner's lock: hold it past the grace so the
 			// abandonment is waiting for it.
 			time.Sleep(100 * time.Millisecond)
@@ -1049,7 +1049,7 @@ func TestEvents_ALookupSaidDoneIsInTheTrace(t *testing.T) {
 	inTrace := len(rounds) > 0 && len(rounds[0].Calls) == 1
 	var done, cut bool
 	for _, ev := range tape.named("lookup_done") {
-		if ev.(mateLookupDoneEvent).Cut {
+		if ev.(mateLookupDoneEvent).Outcome == "cut" {
 			cut = true
 		} else {
 			done = true

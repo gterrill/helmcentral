@@ -7,7 +7,7 @@ import { AssistantAnswerFeedback } from '@/components/assistant-answer-feedback'
 import { AssistantCard } from '@/components/assistant-card'
 import { AssistantFormDraftCard } from '@/components/assistant-form-draft-card'
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
-import { AssistantRunDetails } from '@/components/assistant-run-details'
+import { MateActivity } from '@/components/mate-activity'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
 import { MateSummaryNoteDialog } from '@/components/mate-summary-note-dialog'
@@ -32,7 +32,6 @@ import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
 import { isComposing } from '@/lib/keyboard'
 import { runOutcomeText, type AssistantRun } from '@/lib/mate-run'
-import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/errors'
 
@@ -53,20 +52,6 @@ const MATE_CAPABILITIES = [
   'What you and Mate worked out in earlier conversations',
 ] as const
 
-// While Mate is waiting on the model with no tool running, the status line
-// shows a nautical phrase that changes every few seconds, never repeating
-// the one before.
-function useWaitingPhrase(active: boolean): string {
-  const [phrase, setPhrase] = useState(() => pickWaitingPhrase(null))
-  useEffect(() => {
-    if (!active) return
-    setPhrase((previous) => pickWaitingPhrase(previous))
-    const timer = setInterval(() => setPhrase((previous) => pickWaitingPhrase(previous)), MATE_WAITING_ROTATE_MS)
-    return () => clearInterval(timer)
-  }, [active])
-  return phrase
-}
-
 // ADR 0093: every reply's footer names what it cost, in full - which model
 // answered, how many tokens it used, and the price - so the running cost of
 // asking questions is never a surprise. Any part the server didn't report
@@ -79,16 +64,21 @@ function useWaitingPhrase(active: boolean): string {
 // decide anything. formatMessageFooter leads with cost (plus a tool-round
 // count when the reply made one), and formatMessageFooterTitle carries the
 // model/tokens detail into the footer's `title` tooltip instead.
-function formatMessageFooter(message: AssistantMessage): string {
-  const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(3)}` : '--'
+//
+// With the activity view above the answer (ADR 0305), its folded line says
+// what the reply cost and how many lookups it made, so the footer keeps only
+// what that line leaves out: the model, and what the provider served from cache.
+function formatMessageFooter(message: AssistantMessage, activityShown: boolean): string {
   const model = message.model && message.model !== '' ? message.model : '--'
+  const cached =
+    typeof message.cachedTokens === 'number' && message.cachedTokens > 0 ? `${message.cachedTokens.toLocaleString()} cached` : null
+  if (activityShown) return [model, cached].filter((part) => part !== null).join(' · ')
+  const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(3)}` : '--'
   const parts = [cost, model]
   if (typeof message.toolRounds === 'number') {
     parts.push(`${message.toolRounds} tool round${message.toolRounds === 1 ? '' : 's'}`)
   }
-  if (typeof message.cachedTokens === 'number' && message.cachedTokens > 0) {
-    parts.push(`${message.cachedTokens.toLocaleString()} cached`)
-  }
+  if (cached !== null) parts.push(cached)
   return parts.join(' · ')
 }
 
@@ -203,16 +193,17 @@ function SaveAsNoteButton({ content }: { content: string }) {
 
 /**
  * A question that got no answer, in its place in the thread: what stopped Mate
- * and how far it got, with the run's details beneath. It is not a message from
- * Mate and says so plainly (ADR 0240).
+ * and how far it got, with what Mate did beneath, open. It is not a message
+ * from Mate and says so plainly (ADR 0240).
  */
 function FailedRunRow({ run }: { run: AssistantRun }) {
   return (
     <div className="flex min-w-0 flex-col gap-1" data-testid="mate-unanswered-run">
-      <div role="status" className="min-w-0 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs">
-        <p className={run.stopReason === 'cancelled' ? 'text-muted-foreground' : 'text-destructive'}>{runOutcomeText(run)}</p>
-      </div>
-      <AssistantRunDetails runId={run.id} />
+      <MateActivity
+        run={{ id: run.id, thoughtMs: run.thoughtMs, lookups: run.lookupCount }}
+        startOpen
+        headline={{ text: runOutcomeText(run), tone: run.stopReason === 'cancelled' ? 'quiet' : 'error' }}
+      />
     </div>
   )
 }
@@ -502,8 +493,18 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
   // tool calls, or its draft went back to the model) clears it back to null
   // and the marker returns, even though `sending` is still true.
   const showDraft = status.sending && Boolean(status.draft)
-  const showStatusMarker = status.sending && !showDraft
-  const waitingPhrase = useWaitingPhrase(showStatusMarker && status.statusText === null)
+  // The activity view opens in the draft's row as sending begins, and the draft
+  // joins it below once the answer starts (ADR 0305).
+  const liveActivity = status.activity !== null && status.activity.key === status.draftKey ? status.activity : null
+  // The live steps go when sending ends. A run that failed or was stopped is
+  // read back from the server at once, and its saved row takes over.
+  const showActivity = liveActivity !== null && status.sending
+  const showDraftRow = showDraft || showActivity
+  // That saved row already says what went wrong, so the red bubble below
+  // shows only when no saved run is there to say it.
+  const lastItem = session.timeline[session.timeline.length - 1]
+  const savedRowShown = lastItem !== undefined && lastItem.kind === 'failed-run'
+  const liveError = savedRowShown ? null : status.error
 
   // ADR 0106 F2: Send's own disabled reasons, beyond the plain "nothing
   // typed and nothing attached" case. uploads.ready requires every staged
@@ -550,7 +551,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
             onPointerDown={() => { operatorScrolledRef.current = true }}
           >
             <MessageScrollerContent className="gap-6">
-              {!hasMessages && !showDraft ? (
+              {!hasMessages && !showDraftRow ? (
                 <section aria-label="What Mate can check" className="min-w-0 space-y-2">
                   <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">What Mate can check</h3>
                   <ul className="space-y-1 text-xs text-muted-foreground">
@@ -577,6 +578,15 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                       )
                     }
                     const { message } = item
+                    // What Mate did for this answer: its steps as they streamed
+                    // when this view saw the run, else the stored run, read when
+                    // opened. An answer whose run is gone shows neither.
+                    const liveSteps =
+                      message.role === 'assistant' && message.clientKey !== undefined && status.activity?.key === message.clientKey
+                        ? status.activity
+                        : null
+                    const activityShown = message.role === 'assistant' && (liveSteps !== null || message.run !== undefined)
+                    const footer = formatMessageFooter(message, activityShown)
                     return (
                     <MessageScrollerItem
                       key={message.clientKey ?? message.id}
@@ -609,6 +619,13 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                       ) : (
                         <Message>
                           <MessageContent>
+                            {activityShown && (
+                              <MateActivity
+                                live={liveSteps !== null ? { timeline: liveSteps.timeline, startedLocal: liveSteps.startedLocal } : undefined}
+                                run={message.run}
+                                costUsd={message.costUsd}
+                              />
+                            )}
                             <Bubble variant="ghost">
                               <BubbleContent>
                                 <AssistantMarkdown content={message.content} />
@@ -650,7 +667,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                                 className="tabular-nums"
                                 title={formatMessageFooterTitle(message)}
                               >
-                                {formatMessageFooter(message)}
+                                {footer}
                               </MessageFooter>
                               {/* The small answer to what a draft_note tool
                                   would have done (plan phase 6, cut): Mate
@@ -669,7 +686,6 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                                 <SaveAsNoteButton content={message.content} />
                               )}
                             </div>
-                            {message.runId !== undefined && <AssistantRunDetails runId={message.runId} />}
                             {/* Rate in the live chat; a rating stays with
                                 the answer. A rated answer always shows its
                                 verdict; one read back unrated is not offered. */}
@@ -687,15 +703,22 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                     </MessageScrollerItem>
                     )
                   }),
-                  ...(showDraft ? [
+                  ...(showDraftRow ? [
                     <MessageScrollerItem key={status.draftKey ?? 'draft'} messageId="draft">
                       <Message>
                         <MessageContent>
-                          <Bubble variant="ghost">
-                            <BubbleContent>
-                              <AssistantMarkdown content={status.draft ?? ''} />
-                            </BubbleContent>
-                          </Bubble>
+                          {/* Same position as the delivered reply's activity, so
+                              the fold the operator chose carries over. */}
+                          {liveActivity !== null && (
+                            <MateActivity live={{ timeline: liveActivity.timeline, startedLocal: liveActivity.startedLocal }} />
+                          )}
+                          {showDraft && (
+                            <Bubble variant="ghost">
+                              <BubbleContent>
+                                <AssistantMarkdown content={status.draft ?? ''} />
+                              </BubbleContent>
+                            </Bubble>
+                          )}
                         </MessageContent>
                       </Message>
                     </MessageScrollerItem>,
@@ -711,17 +734,10 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
       {watch && <MateWatchChip watch={watch} canWrite={canWrite} />}
 
       {status.sending && (
-        <Marker role={showStatusMarker ? 'status' : undefined}>
-          {showStatusMarker && (
-            <>
-              <MarkerIcon>
-                <Loader2 className="animate-spin" />
-              </MarkerIcon>
-              <MarkerContent className="shimmer">{status.statusText ?? waitingPhrase}</MarkerContent>
-            </>
-          )}
-          {/* Stop outlives the status text: a streaming answer is still
-              spending tokens and can be cut off mid-sentence. */}
+        <Marker>
+          {/* What Mate is doing is in the thread, in the activity view. This
+              is only the way to stop it: a streaming answer is still spending
+              tokens and can be cut off mid-sentence. */}
           <Button variant="ghost" size="icon" className="ml-auto" aria-label="Stop asking" onClick={stop}>
             <Square className="h-4 w-4" />
           </Button>
@@ -730,9 +746,9 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
 
       {status.stopped && !status.sending && <Marker className="text-xs">Stopped.</Marker>}
 
-      {(status.error || session.errorMessage) && (
+      {(liveError || session.errorMessage) && (
         <Bubble variant="destructive">
-          <BubbleContent>{status.error ?? session.errorMessage}</BubbleContent>
+          <BubbleContent>{liveError ?? session.errorMessage}</BubbleContent>
         </Bubble>
       )}
 

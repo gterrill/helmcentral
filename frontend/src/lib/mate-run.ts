@@ -2,6 +2,8 @@
 // run ended. The wire shape is snake_case from the server; it is mapped to
 // camelCase here so nothing else thinks about the wire.
 
+import type { MateReasoningKind } from '@/lib/mate-events'
+
 export type MateStopReason = 'answered' | 'stalled' | 'round_ceiling' | 'time_ceiling' | 'cancelled' | 'error'
 
 export interface RunBudgetApi {
@@ -20,9 +22,17 @@ export interface RunCallApi {
   error: string
   /** Whether the place search cache answered a find_places lookup; empty for every other call. */
   cache: 'hit' | 'miss' | ''
+  /** The operator's wording for the call; left out when the server's describer has none. */
+  text?: string
+  /** What the call looked at, with no verb; left out when the server's describer has none. */
+  subject?: string
+  /** How the call ended. */
+  outcome: 'done' | 'failed' | 'cut' | 'stopped' | 'withheld' | 'round_full'
+  /** Why a failed call failed, without the tool's name. */
+  reason?: string
 }
 
-/** What a round was: lookups, a draft sent back for correction, the answer, the
+/**What a round was: lookups, a draft sent back for correction, the answer, the
  * final answer after the tools were withdrawn, a round cut off by the tool phase
  * running out of time, or one that failed. */
 export type RunRoundKind = 'lookups' | 'correction' | 'answer' | 'final' | 'cut' | 'failed'
@@ -43,6 +53,17 @@ export interface RunRoundApi {
   /** On a correction round, what the check found and the draft it sent back; empty otherwise. */
   check_trigger: string
   check_draft: string
+  /** The checks that sent the draft back, by key; null on a run stored before they were listed. */
+  check_triggers: string[] | null
+  /** What the model showed of its reasoning, capped; reasoning_bytes is the size it wrote. */
+  reasoning: string
+  /** "" for a round stored before reasoning was kept. */
+  reasoning_kind: MateReasoningKind
+  reasoning_bytes: number
+  /** Text written alongside the round's tool calls. */
+  chatter: string
+  /** When the round's text began, from the run's start; null when it wrote none. */
+  content_start_ms: number | null
 }
 
 export interface RunApi {
@@ -57,6 +78,12 @@ export interface RunApi {
   error: string
   round_count: number
   budget: RunBudgetApi
+  /** Time until the answer began; null on a run stored before it was kept. */
+  thought_ms: number | null
+  /** Lookups that ran. */
+  lookups: number
+  /** The most the model showed across the run's rounds; "" when not recorded. */
+  reasoning_kind: MateReasoningKind
   rounds?: RunRoundApi[]
 }
 
@@ -64,6 +91,18 @@ export interface RunApi {
 export interface RunRefApi {
   id: string
   answer_message_id: string
+  thought_ms: number | null
+  lookups: number
+  reasoning_kind: MateReasoningKind
+}
+
+/** The stored run behind an answer: enough for the folded line without reading its trace. */
+export interface AssistantRunRef {
+  id: string
+  /** Time until the answer began; null when not recorded. */
+  thoughtMs: number | null
+  lookups: number
+  reasoningKind: MateReasoningKind
 }
 
 export interface RunBudget {
@@ -81,6 +120,13 @@ export interface RunCall {
   resultBytes: number
   error: string
   cache: 'hit' | 'miss' | ''
+  /** The operator's wording; empty only for a tool the server's describer does not know. */
+  text: string
+  /** What the call looked at; empty only for a tool the server does not know. */
+  subject: string
+  outcome: RunCallApi['outcome']
+  /** Why a failed call failed; empty for every other outcome. */
+  reason: string
 }
 
 export interface RunRound {
@@ -98,6 +144,13 @@ export interface RunRound {
   calls: RunCall[]
   checkTrigger: string
   checkDraft: string
+  /** The checks that sent the draft back; the old single trigger when that is all the run kept. */
+  checkTriggers: string[]
+  reasoning: string
+  reasoningKind: MateReasoningKind
+  reasoningBytes: number
+  chatter: string
+  contentStartMs: number | null
 }
 
 /** One run, without its rounds. */
@@ -115,6 +168,11 @@ export interface AssistantRun {
   /** Rounds of lookups, which is what the server's own error text counts. */
   roundCount: number
   budget: RunBudget
+  /** Time until the answer began; null when not recorded. */
+  thoughtMs: number | null
+  /** Lookups that ran. */
+  lookupCount: number
+  reasoningKind: MateReasoningKind
 }
 
 /** One run with its rounds, from the run's own endpoint. */
@@ -139,6 +197,9 @@ export function mapRun(api: RunApi): AssistantRun {
       toolPhaseMs: api.budget.tool_phase_ms,
       finalReserveMs: api.budget.final_reserve_ms,
     },
+    thoughtMs: api.thought_ms,
+    lookupCount: api.lookups,
+    reasoningKind: api.reasoning_kind,
   }
 }
 
@@ -157,6 +218,12 @@ export function mapRunTrace(api: RunApi): AssistantRunTrace {
     error: r.error,
     checkTrigger: r.check_trigger,
     checkDraft: r.check_draft,
+    checkTriggers: r.check_triggers ?? (r.check_trigger !== '' ? [r.check_trigger] : []),
+    reasoning: r.reasoning,
+    reasoningKind: r.reasoning_kind,
+    reasoningBytes: r.reasoning_bytes,
+    chatter: r.chatter,
+    contentStartMs: r.content_start_ms,
     calls: r.calls.map((c): RunCall => ({
       seq: c.seq,
       name: c.name,
@@ -165,6 +232,10 @@ export function mapRunTrace(api: RunApi): AssistantRunTrace {
       resultBytes: c.result_bytes,
       error: c.error,
       cache: c.cache,
+      text: c.text ?? '',
+      subject: c.subject ?? '',
+      outcome: c.outcome,
+      reason: c.reason ?? '',
     })),
   }))
   return { ...mapRun(api), rounds }
@@ -179,14 +250,15 @@ function isAnsweredRun(api: RunApi | RunRefApi): api is RunRefApi {
   return api.answer_message_id !== null
 }
 
-export function splitConversationRuns(apiRuns: Array<RunApi | RunRefApi>): { unanswered: AssistantRun[]; idByAnswer: Map<string, string> } {
+export function splitConversationRuns(apiRuns: Array<RunApi | RunRefApi>): { unanswered: AssistantRun[]; runByAnswer: Map<string, AssistantRunRef> } {
   const unanswered: AssistantRun[] = []
-  const idByAnswer = new Map<string, string>()
+  const runByAnswer = new Map<string, AssistantRunRef>()
   for (const api of apiRuns) {
-    if (isAnsweredRun(api)) idByAnswer.set(api.answer_message_id, api.id)
-    else unanswered.push(mapRun(api))
+    if (isAnsweredRun(api)) {
+      runByAnswer.set(api.answer_message_id, { id: api.id, thoughtMs: api.thought_ms, lookups: api.lookups, reasoningKind: api.reasoning_kind })
+    } else unanswered.push(mapRun(api))
   }
-  return { unanswered, idByAnswer }
+  return { unanswered, runByAnswer }
 }
 
 /** "1 round", "11 rounds". */
@@ -194,12 +266,17 @@ export function rounds(n: number): string {
   return `${n} round${n === 1 ? '' : 's'}`
 }
 
-/** "4.1 s", "2 min 13 s". */
-export function formatRunDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`
-  const seconds = ms / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)} s`
-  const whole = Math.round(seconds)
+/** "4.1 s", "2 min 13 s". With `wholeSeconds`: "<1 s", "4 s", "2 min 13 s". */
+export function formatRunDuration(ms: number, options: { wholeSeconds?: boolean } = {}): string {
+  if (options.wholeSeconds === true) {
+    const rounded = Math.round(ms / 1000)
+    if (rounded < 1) return '<1 s'
+    if (rounded < 60) return `${rounded} s`
+  } else {
+    if (ms < 1000) return `${Math.round(ms)} ms`
+    if (ms / 1000 < 60) return `${(ms / 1000).toFixed(1)} s`
+  }
+  const whole = Math.round(ms / 1000)
   return `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, '0')} s`
 }
 

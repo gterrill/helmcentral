@@ -67,8 +67,8 @@ func TestEvents_StopClosesARunningLookupAsStoppedNotCut(t *testing.T) {
 				t.Fatalf("events = %v: want exactly one lookup_done", tape.names())
 			}
 			d := dones[0].(mateLookupDoneEvent)
-			if d.Cut || d.Error != assistantLookupStoppedText {
-				t.Fatalf("lookup_done = %+v, want not cut and error %q", d, assistantLookupStoppedText)
+			if d.Outcome != "stopped" || d.Reason != "" {
+				t.Fatalf("lookup_done = %+v, want stopped with no reason", d)
 			}
 		})
 	}

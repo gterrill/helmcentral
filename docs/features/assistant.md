@@ -13,14 +13,14 @@ with a short answer and a comparison table, in the units and time zone the rest
 of the dashboard uses.
 
 The answer appears as Mate writes it, rather than after the whole reply is
-ready. While it's still looking something up, you see what it's doing
-("Looking up Tongue Bay…"). That gives way to the words themselves as soon as
-there's an answer to show. Mate holds back its first paragraph until it knows
-whether those words are the answer or only something it said before going to
-look something up, so a short answer appears whole and a long one starts a
-moment after Mate begins writing. While Mate is simply thinking, with nothing to
-look up, the line shows a nautical phrase ("Coming about…", "Trimming the
-sails…") that changes every few seconds.
+ready. While Mate is still working, a small box under your question shows what
+it's doing: what it's thinking, and a line naming what it's looking up ("Tongue
+Bay · tides at Mackay…"). When the answer begins, the box folds into one line
+above it. See
+[What Mate did](#what-mate-did). Mate holds back its first paragraph until it
+knows whether those words are the answer or only something it said before going
+to look something up, so a short answer appears whole and a long one starts a
+moment after Mate begins writing.
 
 A new conversation opens with a short list of what Mate can check, so you can
 see what to ask about. The list covers position and wind, instrument history,
@@ -1352,9 +1352,9 @@ can look those up online through OpenRouter.
 
 It's off by default. Each search costs a small extra amount on your OpenRouter
 account on top of the reply itself, so Mate only searches when your documents
-and instruments can't answer. When it does, the status line says it's searching
-the web, and the sources it used appear in the answer as links that open in a
-new tab. Open them to check what a page actually says before you rely on it,
+and instruments can't answer. When it does, the box under your question shows
+it's searching the web, and the sources it used appear in the answer as links
+that open in a new tab. Open them to check what a page actually says before you rely on it,
 especially for safety, regulations or anything about the boat.
 
 Under the switch, **Search model** picks which OpenRouter model carries the
@@ -1525,21 +1525,25 @@ get answered in light of yesterday's passage. The sheet and the full panel share
 the same conversations, so a question asked from the sheet is still there if you
 later open the full Mate panel.
 
-Every reply's footer leads with what OpenRouter charged for that exact reply,
-for example `$0.056`. A question that also had Mate read the help shows a
-tool-round count alongside it (`$0.056 · 1 tool round`), which is one extra
-round trip to the model before the answer comes back. So the running cost of
-asking questions is on the screen every time you ask one. Hover over the footer
-(or long-press on a touchscreen) to see which model answered and how many
-tokens the question and answer used.
+Every reply shows what OpenRouter charged for that exact reply, so the running
+cost of asking questions is on the screen every time you ask one. The cost is in
+the line above the answer, for example `Thought 12 s · 4 lookups · 3¢`. See
+[What Mate did](#what-mate-did). The footer under the answer names the model
+that wrote it. Hover over the footer (or long-press on a touchscreen) to see how
+many tokens the question and answer used.
+
+An answer whose details Helmcentral no longer keeps has no line above it, so its
+footer shows the cost itself, for example `$0.056`, and a count of tool rounds
+if Mate made any (`$0.056 · 1 tool round`). A tool round is one extra round trip
+to the model before the answer comes back.
 
 Sometimes part of what Mate sends to the model comes from the provider's
 cache instead of being read afresh. When that happens, the footer adds the
-count, for example `$0.012 · 9,820 cached`. Those tokens are billed at a
-fraction of the usual price, so a high figure on a follow-up question is a good
-sign. Nothing is shown when none are cached. Follow-up questions in one
-conversation stay with the same provider, which is what lets the cache be
-reused.
+count, for example `anthropic/claude-sonnet-4.5 · 9,820 cached`. Those tokens
+are billed at a fraction of the usual price, so a high figure on a follow-up
+question is a good sign. Nothing is shown when none are cached. Follow-up
+questions in one conversation stay with the same provider, which is what lets
+the cache be reused.
 
 ## How long Mate keeps looking
 
@@ -1567,27 +1571,71 @@ If Mate runs out of time before it can write an answer, or something goes wrong,
 your question stays in the conversation with a plain line beneath it. For
 example: "Mate stopped before answering: it ran out of time after 11 rounds." It
 stays there when you close and reopen the conversation. The error behind it is
-in **Run details**, under the line. A question you stopped yourself shows "You
-stopped Mate before it answered."
+in the box beneath it, which stays open so you can read what Mate did up to that
+point. A question you stopped yourself shows "You stopped Mate before it
+answered."
 
-### Run details
+### What Mate did
 
-Under every answer, and under a line like that, **Run details** shows what Mate
-did. For a question with no answer, it also shows the error. For each round, it
-gives when the round started, how long the model took to reply, the tokens used,
-the cost, and whether the round found anything new. Under each round are the
-lookups it made, how long each took and how big the answer was. A place search
-also says whether the answer was already in memory or had to be looked up. Each
-round says what it was: lookups, a draft sent back for correction, the answer,
-the final answer, or cut off by time. A draft sent back shows its text under
-that round, along with the check that stopped it, so you can read what Mate
-wrote before it was withdrawn. Details saved before this was kept show the round
-without the text. The top of the details says how the run ended and what limits
-it was given.
+Under your question, Mate shows its work. It's a small box that follows along as
+Mate goes. It starts with a few lines of what Mate is thinking and grows to
+about a third of the screen, so it doesn't push the thread around. It scrolls
+to the newest step by itself. If you scroll up to read an earlier
+step, it stays where you left it until you scroll back to the end.
+
+- **While Mate works:** The box is open. It shows what Mate is thinking, in
+  plain grey text with the section titles the model gave it, and anything Mate
+  says along the way, such as "Let me check the tide." While Mate waits on the
+  model, it says "Thinking…" with the seconds counting.
+- **Lookups:** Each run of lookups Mate makes together is one line naming what
+  it looked up, such as "Tongue Bay · tides at Mackay · wind forecast". When some
+  didn't go well the line says so, such as "1 failed" or "1 cut off". Tap the
+  line to see each lookup on its own and why one failed.
+- **When the answer begins:** The box folds into one line above the answer, such
+  as `Thought 12 s · 4 lookups · 3¢`. That's how long Mate thought before it
+  started writing, how many lookups it made and what the reply cost. A part
+  Helmcentral didn't record is left out, so an older answer shows no time. If
+  you opened or closed the box yourself while Mate was working, it stays as you
+  left it.
+- **Opened afterwards:** Tap the line to see every step, with the cost of each
+  round and how the run ended at the bottom. A round shows when it started, how
+  long the model took to reply, the tokens used, the cost, and whether it found
+  anything new. A lookup shows how long it took and how big the answer was, and
+  a place search says whether the answer was already in memory.
+- **A lookup that didn't finish:** A lookup that failed shows why. One that was
+  still running when the time for lookups ran out says "cut off at the time
+  limit". One you stopped says "stopped". A lookup Mate didn't make, because
+  that kind had failed too often or it asked for too many at once, says it was
+  skipped.
+- **A draft sent back:** Before Mate shows an answer, Helmcentral checks it for
+  things Mate often gets wrong. When a draft fails, it goes back to Mate and the
+  box opens again with a step such as "Draft sent back: shelter at the
+  anchorage". The draft itself is there to read, so you can see what Mate wrote
+  before it was withdrawn. The checks are wind angle wrong for the course, a
+  claim about your passage limits, shelter at the anchorage and depth at the
+  anchorage. A draft is sent back once. The box folds again when the new answer
+  begins, and the time on the line is how long Mate took to start that one.
+- **An answer taken back:** When Mate starts writing and then goes off to look
+  something up, the words it had written move into the box as a step. They don't
+  vanish.
+- **Reasoning Mate keeps private:** Some models think without showing what they
+  thought. The box says "Thinking…" while they do, and the open view says once
+  that the model keeps its reasoning private. If a model showed no reasoning at
+  all for the whole answer, the open view says so. When a model wrote more
+  reasoning than Helmcentral keeps, the step says the rest was cut.
+- **When Mate doesn't finish:** A question that fails stays open, with the error
+  as the last step. If you press the stop button, the box stays open and ends
+  with "Stopped".
+
+The reasoning is shown as written, with no formatting. It's there to read, not
+to rely on: it's Mate's working, and the answer is what Mate stands behind.
 
 Helmcentral keeps an answer's details for a week, unless you've rated it.
 Then they stay as long as the rating does. Helmcentral keeps the details of a
-question with no answer for 30 days.
+question with no answer for 30 days. An answer whose details have gone has no
+line above it. When you open an answer from a past conversation, each round
+shows its steps in a fixed order: the reasoning, what Mate said, its lookups and
+then any draft sent back. The order within a round wasn't kept.
 
 To have Helmcentral also write a line to its log for every round of every run,
 turn on **Verbose run log** in Settings → Mate. It's meant for working out why

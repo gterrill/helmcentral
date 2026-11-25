@@ -18,7 +18,7 @@ export function roundFrame(round = 0, final = false): string {
 
 /** The frame that says a lookup has started, with the operator's wording of it. */
 export function lookupFrame(text: string, seq = 0, round = 0): string {
-  return sseFrame('lookup', { round, seq, at_ms: 10, text, skipped: '' })
+  return sseFrame('lookup', { round, seq, at_ms: 10, text, subject: text, skipped: '' })
 }
 
 /** A body that delivers every chunk at once and closes. */

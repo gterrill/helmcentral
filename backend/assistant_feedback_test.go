@@ -101,6 +101,33 @@ func TestAssistantStore_ToolCallsDeleteWithConversation(t *testing.T) {
 	}
 }
 
+// Every call the feedback listing returns says how it ended, so a reader never
+// has to guess that a missing outcome means success.
+func TestAssistantStore_FeedbackCallsAlwaysCarryAnOutcome(t *testing.T) {
+	store := newTestAssistantStore(t)
+	_, answer := feedbackFixture(t, store)
+	if _, err := store.SetMessageFeedback(answer.ID, "up", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err := store.ListFeedback(0, "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %d, err %v", len(list), err)
+	}
+	raw, err := json.Marshal(list[0].ToolCalls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []map[string]any
+	if err := json.Unmarshal(raw, &calls); err != nil || len(calls) == 0 {
+		t.Fatalf("calls = %s, err %v", raw, err)
+	}
+	for _, c := range calls {
+		if o, ok := c["outcome"].(string); !ok || o == "" {
+			t.Fatalf("call %v has no outcome", c)
+		}
+	}
+}
+
 func TestAssistantStore_FeedbackSetReplaceClear(t *testing.T) {
 	store := newTestAssistantStore(t)
 	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)

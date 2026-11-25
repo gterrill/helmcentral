@@ -38,6 +38,7 @@ var mateToolMarinaDetails = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeMarinaDetails),
+	subject: fixedSubject("the marina"),
 	describe: func(args json.RawMessage) string {
 		return "Looking up the marina…"
 	},

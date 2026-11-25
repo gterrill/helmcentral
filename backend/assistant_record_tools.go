@@ -205,6 +205,7 @@ var mateToolDescribeRecordType = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeDescribeRecordType),
+	subject: fixedSubject("what can be recorded"),
 	describe: func(args json.RawMessage) string {
 		return "Checking what can be recorded…"
 	},
@@ -229,6 +230,7 @@ var mateToolListRecords = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeListRecords),
+	subject: fixedSubject("the records"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the records…"
 	},
@@ -250,6 +252,7 @@ var mateToolGetRecord = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetRecord),
+	subject: fixedSubject("a record"),
 	describe: func(args json.RawMessage) string {
 		return "Reading a record…"
 	},

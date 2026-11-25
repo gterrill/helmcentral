@@ -94,6 +94,7 @@ var mateToolListWatches = mateTool{
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeListWatches),
+	subject: fixedSubject("the watches"),
 	describe: func(args json.RawMessage) string {
 		return "Checking the watches…"
 	},
@@ -205,6 +206,7 @@ var mateToolGetWatchRuns = mateTool{
 		}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetWatchRuns),
+	subject: fixedSubject("the watch's runs"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the watch's runs…"
 	},
@@ -263,6 +265,7 @@ var mateToolRunWatchNow = mateTool{
 		}`),
 	},
 	execute: plainTool(assistantToolDeps.executeRunWatchNow),
+	subject: fixedSubject("the watch"),
 	describe: func(args json.RawMessage) string {
 		return "Running the watch…"
 	},

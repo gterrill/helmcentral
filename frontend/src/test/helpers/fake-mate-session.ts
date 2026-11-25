@@ -43,7 +43,7 @@ export function fakeMateSession(overrides: FakeMateSessionOverrides = {}): MateS
     ...rest,
     status: {
       sending: false,
-      statusText: null,
+      activity: null,
       draft: null,
       error: null,
       stopped: false,

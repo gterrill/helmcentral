@@ -283,6 +283,13 @@ var mateToolSearchWeb = mateTool{
 			}`),
 	},
 	execute: plainTool(assistantToolDeps.executeSearchWeb),
+	subject: quotedSubject("the web", func(args json.RawMessage) string {
+		var a assistantSearchWebArgs
+		if json.Unmarshal(args, &a) != nil {
+			return ""
+		}
+		return a.Query
+	}),
 	describe: func(args json.RawMessage) string {
 		var a assistantSearchWebArgs
 		query := ""

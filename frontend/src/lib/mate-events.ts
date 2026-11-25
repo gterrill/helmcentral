@@ -9,6 +9,10 @@ export type MateReasoningKind = (typeof REASONING_KINDS)[number]
 const SKIPPED = ['', 'withheld', 'round_full'] as const
 export type MateSkipped = (typeof SKIPPED)[number]
 
+/** How a lookup ended, as lookup_done says it. A lookup that was not run is "withheld" or "round_full" on the lookup event's skipped field, in the same words. */
+const LOOKUP_ENDS = ['done', 'failed', 'cut', 'stopped'] as const
+export type MateLookupEnd = (typeof LOOKUP_ENDS)[number]
+
 /** Why text already shown as the answer was taken back. */
 const WITHDRAWN_REASONS = ['lookups', 'cut_off', 'failed'] as const
 export type MateWithdrawnReason = (typeof WITHDRAWN_REASONS)[number]
@@ -32,8 +36,10 @@ export type MateEvent =
   | { type: 'round'; round: number; at_ms: number; final: boolean }
   | { type: 'reasoning'; round: number; text: string }
   | { type: 'chatter'; round: number; text: string }
-  | { type: 'lookup'; round: number; seq: number; at_ms: number; text: string; skipped: MateSkipped }
-  | { type: 'lookup_done'; round: number; seq: number; at_ms: number; error: string; cut: boolean }
+  /** `text` is Mate's wording ("Fetching tides near Mackay…"); `subject` is what it looked at ("tides near Mackay"), empty for a tool the server does not know. */
+  | { type: 'lookup'; round: number; seq: number; at_ms: number; text: string; subject: string; skipped: MateSkipped }
+  /** `reason` is the bare cause of a failure and empty otherwise. */
+  | { type: 'lookup_done'; round: number; seq: number; at_ms: number; outcome: MateLookupEnd; reason: string }
   | { type: 'answer_start'; round: number; at_ms: number }
   | { type: 'delta'; text: string }
   | { type: 'answer_withdrawn'; round: number; at_ms: number; reason: MateWithdrawnReason }
@@ -146,17 +152,17 @@ function decodeMateEvent(name: string, data: string): MateEvent {
         seq: f.num('seq'),
         at_ms: f.num('at_ms'),
         text: f.str('text'),
+        subject: f.str('subject'),
         skipped: f.oneOf('skipped', SKIPPED),
       }
     case 'lookup_done':
-      // cut is left out of the frame when false.
       return {
         type: 'lookup_done',
         round: f.num('round'),
         seq: f.num('seq'),
         at_ms: f.num('at_ms'),
-        error: f.str('error'),
-        cut: parsed.cut === undefined ? false : f.bool('cut'),
+        outcome: f.oneOf('outcome', LOOKUP_ENDS),
+        reason: f.str('reason'),
       }
     case 'answer_start':
       return { type: 'answer_start', round: f.num('round'), at_ms: f.num('at_ms') }

@@ -639,6 +639,7 @@ var mateToolRememberFact = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeRememberFact),
+	subject: fixedSubject("a fact about the boat"),
 	describe: func(args json.RawMessage) string {
 		return "Keeping a fact about the boat…"
 	},

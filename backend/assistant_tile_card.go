@@ -331,6 +331,17 @@ var mateToolShowTile = mateTool{
 	execute: plainTool(func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, error) {
 		return d.executeShowTile(ctx, args)
 	}),
+	subject: func(args json.RawMessage) string {
+		var in struct {
+			Tile string `json:"tile"`
+		}
+		if json.Unmarshal(args, &in) == nil {
+			if spec, ok := mateTileTable[in.Tile]; ok {
+				return "the " + spec.title + " tile"
+			}
+		}
+		return "a tile"
+	},
 	describe: func(args json.RawMessage) string {
 		var in struct {
 			Tile string `json:"tile"`

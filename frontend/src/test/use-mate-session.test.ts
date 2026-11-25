@@ -259,8 +259,10 @@ describe('useMateSession', () => {
       await act(async () => {
         await result.current.send('Check the passage')
       })
-      // The live notice shows until the thread's own row is there to replace it.
+      // The live notice shows until the thread's own row is there to replace it;
+      // the live steps are gone, the saved row will show them.
       expect(result.current.status.error).toBe('timed out')
+      expect(result.current.status.activity).toBeNull()
       await act(async () => {
         openGate()
         await flushMicrotasks()
@@ -674,6 +676,7 @@ describe('useMateSession', () => {
       expect(server.cancels).toEqual(['c1'])
       await waitFor(() => expect(result.current.status.sending).toBe(false))
       expect(result.current.status.stopped).toBe(true)
+      expect(result.current.status.activity).toBeNull()
 
       server.onSend = (id) => server.answer(id, 'Aye.')
       await act(async () => {

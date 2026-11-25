@@ -503,6 +503,9 @@ type mateTool struct {
 	execute func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, assistantToolOutcome, error)
 	// describe renders the one-line status shown while the call runs.
 	describe func(args json.RawMessage) string
+	// subject says what the call looks at, in a few words with no verb, for a
+	// line that lists several lookups ("tides near Mackay"). Every tool has one.
+	subject func(args json.RawMessage) string
 	// collect, when set, lifts something out of the tool's result into the
 	// run's reply after the round (propose_changes, fill_form). A result it
 	// cannot read is an error, never skipped.
@@ -727,6 +730,31 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return t.describe(args)
 	}
 	return fmt.Sprintf("Running %s…", name)
+}
+
+// describeAssistantToolSubject is what a call looks at, from its tool's
+// subject; empty for a tool the registry does not know.
+func describeAssistantToolSubject(name string, args json.RawMessage) string {
+	if t := lookupMateTool(name); t != nil && t.subject != nil {
+		return t.subject(args)
+	}
+	return ""
+}
+
+// fixedSubject is the subject of a tool whose arguments do not change it.
+func fixedSubject(s string) func(json.RawMessage) string {
+	return func(json.RawMessage) string { return s }
+}
+
+// quotedSubject is the subject of a tool that searches for something: the
+// noun alone, or the noun for the query the model gave.
+func quotedSubject(noun string, query func(args json.RawMessage) string) func(json.RawMessage) string {
+	return func(args json.RawMessage) string {
+		if q := strings.TrimSpace(query(args)); q != "" {
+			return noun + " for “" + q + "”"
+		}
+		return noun
+	}
 }
 
 // assistantLocationArgs is the {lat, lon, name} shape shared by

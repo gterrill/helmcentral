@@ -51,6 +51,15 @@ var mateToolFindPlaces = mateTool{
 				}`),
 	},
 	execute: assistantToolDeps.executeFindPlaces,
+	subject: func(args json.RawMessage) string {
+		var a assistantFindPlacesArgs
+		if json.Unmarshal(args, &a) == nil {
+			if query := strings.TrimSpace(a.Query); query != "" {
+				return query
+			}
+		}
+		return "a place"
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantFindPlacesArgs
 		query := ""

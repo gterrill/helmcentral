@@ -59,6 +59,16 @@ type assistantToolCall struct {
 	// Cache is "hit" or "miss" for a find_places lookup, from the place search
 	// cache, and empty for every other call.
 	Cache string `json:"cache"`
+	// Text is the operator's wording for the call, worked out when a run is
+	// read back (never stored) with the describer the live lookup event uses.
+	Text string `json:"text,omitempty"`
+	// Subject is what the call looked at, worked out the same way as Text.
+	Subject string `json:"subject,omitempty"`
+	// Outcome is how the call ended (assistantCallOutcome) and Reason is why a
+	// failed one failed, without the tool's name; both are worked out when a
+	// run is read back, from Error, which stays for the logs.
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // cutUTF8 returns s cut to at most max bytes without splitting a character.

@@ -467,6 +467,7 @@ var mateToolShowWindRose = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeShowWindRose),
+	subject: fixedSubject("a wind rose from the logged wind"),
 	describe: func(args json.RawMessage) string {
 		return "Drawing a wind rose from the logged wind…"
 	},

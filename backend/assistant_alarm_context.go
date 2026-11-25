@@ -604,6 +604,7 @@ var mateToolGetAlarmContext = mateTool{
 		Parameters: json.RawMessage(`{"type": "object", "properties": {"alarm_id": {"type": "string", "description": "The alarm's id: its rule_id, or a log id for an alarm that has cleared."}}, "required": ["alarm_id"]}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetAlarmContext),
+	subject: fixedSubject("the alarm"),
 	describe: func(json.RawMessage) string {
 		return "Looking into the alarm…"
 	},

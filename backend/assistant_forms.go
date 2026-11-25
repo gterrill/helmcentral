@@ -302,6 +302,7 @@ var mateToolInspectForm = mateTool{
 			}`),
 	},
 	execute: plainTool(assistantToolDeps.executeInspectForm),
+	subject: fixedSubject("the form"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the form…"
 	},
@@ -345,6 +346,7 @@ var mateToolFillForm = mateTool{
 			}`),
 	},
 	execute: plainTool(assistantToolDeps.executeFillForm),
+	subject: fixedSubject("the form"),
 	describe: func(args json.RawMessage) string {
 		return "Filling in the form…"
 	},

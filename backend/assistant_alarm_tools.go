@@ -113,6 +113,7 @@ var mateToolListAlarmRules = mateTool{
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeListAlarmRules),
+	subject: fixedSubject("the alarm rules"),
 	describe: func(args json.RawMessage) string {
 		return "Checking the alarm rules…"
 	},

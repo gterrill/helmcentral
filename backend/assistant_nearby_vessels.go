@@ -681,6 +681,15 @@ var mateToolGetNearbyVessels = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetNearbyVessels),
+	subject: func(args json.RawMessage) string {
+		var a assistantGetNearbyVesselsArgs
+		if json.Unmarshal(args, &a) == nil {
+			if name := strings.TrimSpace(a.Name); name != "" {
+				return name
+			}
+		}
+		return "nearby vessels"
+	},
 	describe: func(args json.RawMessage) string {
 		var a assistantGetNearbyVesselsArgs
 		vesselName := ""

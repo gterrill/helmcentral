@@ -372,8 +372,9 @@ describe('AssistantDrawer', () => {
     })
 
     await waitFor(() => expect(screen.getByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument())
-    // Cost leads the visible footer; model/tokens moved to its title tooltip.
-    expect(screen.getByTitle('anthropic/claude-sonnet-4.5 · 1,200 tokens')).toHaveTextContent('$0.018')
+    // The cost is in the line above the answer; the footer names the model, with tokens in its tooltip.
+    expect(screen.getByRole('button', { name: '2¢' })).toBeInTheDocument()
+    expect(screen.getByTitle('anthropic/claude-sonnet-4.5 · 1,200 tokens')).toHaveTextContent('anthropic/claude-sonnet-4.5')
     // The optimistic user bubble is also in the thread.
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
     // The composer clears after a successful send.
@@ -401,7 +402,7 @@ describe('AssistantDrawer', () => {
     await waitFor(() => expect(sent).toEqual({ content: 'What about the wind tomorrow?' }))
   })
 
-  it('shows the status line while a lookup frame is pending, then resolves', async () => {
+  it('shows the lookup in the activity box while a lookup frame is pending, then folds it away when the answer lands', async () => {
     const stream = controllableSseStream()
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
@@ -420,7 +421,9 @@ describe('AssistantDrawer', () => {
       await flush()
     })
 
-    expect(await screen.findByText('Fetching wind forecast for Tongue Bay…')).toBeInTheDocument()
+    // The hidden announcement says it in full; the box shows its subject while it runs.
+    expect(await screen.findByRole('status')).toHaveTextContent('Fetching wind forecast for Tongue Bay…')
+    expect(screen.getByLabelText('What Mate is doing')).toHaveTextContent('wind forecast for Tongue Bay…')
 
     await act(async () => {
       stream.push(`data: ${JSON.stringify({

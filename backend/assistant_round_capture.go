@@ -452,16 +452,21 @@ func (c *assistantRoundCapture) end(tr *assistantTraceRound) {
 // lookup announces a call of the round's, or says why it is not run (skipped).
 // The runner's tool phase serialises calls to it and to lookupDone.
 func (c *assistantRoundCapture) lookup(seq int, call openRouterToolCall, args json.RawMessage, skipped string) {
-	c.send(mateLookupEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Text: describeAssistantToolCall(call.Function.Name, args), Skipped: skipped})
+	name := call.Function.Name
+	c.send(mateLookupEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Text: describeAssistantToolCall(name, args), Subject: describeAssistantToolSubject(name, args), Skipped: skipped})
 }
 
-// lookupDone says the call at seq is over, with errText when it failed.
-func (c *assistantRoundCapture) lookupDone(seq int, errText string) {
-	c.send(mateLookupDoneEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Error: errText})
-}
-
-// lookupCut says the call at seq was abandoned at the tool phase's time limit.
-// It did not fail, so it carries no error.
-func (c *assistantRoundCapture) lookupCut(seq int) {
-	c.send(mateLookupDoneEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Cut: true})
+// lookupDone says the call at seq is over. errText is the error the call was
+// recorded with ("" when it succeeded, the tool phase's cut text when it was
+// abandoned); how it ended and why come from it.
+func (c *assistantRoundCapture) lookupDone(seq int, name, errText string) {
+	outcome := assistantCallOutcome(errText)
+	// A call that was never run has no lookup_done of its own, and the stream
+	// carries only these four; anything else reads as failed.
+	switch outcome {
+	case assistantOutcomeDone, assistantOutcomeFailed, assistantOutcomeCut, assistantOutcomeStopped:
+	default:
+		outcome = assistantOutcomeFailed
+	}
+	c.send(mateLookupDoneEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Outcome: outcome, Reason: assistantCallReason(name, errText)})
 }

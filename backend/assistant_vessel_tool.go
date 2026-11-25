@@ -130,6 +130,7 @@ var mateToolGetVesselParticulars = mateTool{
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: plainTool(assistantToolDeps.executeGetVesselParticulars),
+	subject: fixedSubject("the vessel details"),
 	describe: func(args json.RawMessage) string {
 		return "Reading the vessel details…"
 	},

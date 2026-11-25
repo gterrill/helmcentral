@@ -1573,6 +1573,7 @@ var mateToolAssessPassageWindow = mateTool{
 				}`),
 	},
 	execute: plainTool(assistantToolDeps.executeAssessPassageWindow),
+	subject: fixedSubject("the forecast along the route against your passage limits"),
 	describe: func(args json.RawMessage) string {
 		return "Checking the forecast along the route against your passage limits…"
 	},

@@ -327,7 +327,8 @@ export function useMateSession(options: MateSessionOptions = {}) {
   const stopped = stoppedIn !== null && stoppedIn === activeId
   const status = useMemo(() => ({
     sending: chat.sending,
-    statusText: chat.statusText,
+    /** What Mate has done on the run in flight, or the one just delivered (ADR 0305). */
+    activity: chat.activity,
     draft: chat.draft,
     /** A failed or refused question, in words the operator can act on. */
     error,
@@ -337,7 +338,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     deliveredMessageId: chat.deliveredMessageId,
     /** Row key of the streamed draft; the delivered reply carries it too. */
     draftKey: chat.draftKey,
-  }), [chat.sending, chat.statusText, chat.draft, error, stopped, chat.deliveredMessageId, chat.draftKey])
+  }), [chat.sending, chat.activity, chat.draft, error, stopped, chat.deliveredMessageId, chat.draftKey])
 
   return useMemo(() => ({
     conversations: conversations.conversations,

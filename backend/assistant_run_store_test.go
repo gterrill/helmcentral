@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,27 @@ func TestAssistantRunStore_SaveAndGetKeepsEveryRoundAndCall(t *testing.T) {
 	}
 	if r1 := got.Rounds[1]; !r1.ForcedFinal || r1.Error != "context deadline exceeded" || len(r1.Calls) != 0 {
 		t.Fatalf("round 1 = %+v", r1)
+	}
+}
+
+// A saved call carries the operator's words for it, worked out at read time
+// with the same describer the live lookup event uses, never the tool's name.
+func TestAssistantRunStore_GetRunGivesEachCallTheLiveLookupText(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("Passage")
+	saved, err := store.SaveRun(sampleRunTrace(conv.ID, 1, nil, assistantStopTimeCeiling))
+	if err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	got, ok, err := store.GetRun(saved.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetRun: ok=%v err=%v", ok, err)
+	}
+	for _, c := range got.Rounds[0].Calls {
+		want := describeAssistantToolCall(c.Name, json.RawMessage(c.Args))
+		if c.Text == "" || c.Text != want || strings.Contains(c.Text, c.Name) {
+			t.Errorf("call %s text = %q, want %q and never the tool's name", c.Name, c.Text, want)
+		}
 	}
 }
 
