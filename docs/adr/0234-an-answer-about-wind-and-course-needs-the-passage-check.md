@@ -174,3 +174,62 @@ and the stored draft exist so the next occurrence can be counted and read. If
 they show it recurring, the next step is to reject a reply that asks for
 something already in the conversation, which needs a way to tell that from a
 legitimate question.
+
+## Amendment, 2026-11-26: a leg's comfort is quoted, never worked out
+
+### Context
+
+`get_plans` now gives each leg a comfort: a text and stretches, each with a band
+(Comfortable, Lively or Rough, or none when the stretch was not judged or the
+bands are not learned yet). The prompt tells Mate to quote them. A model that
+ignores the rule would describe how the sea will feel from the wind forecast,
+which is the failure this ADR was written for, applied to comfort.
+
+### Decision
+
+The draft check gains one trigger, "comfort band mismatch". It is armed when
+`get_plans` is on offer, whether or not `assess_passage_window` is, and it reads
+words, not meaning.
+
+A sentence is sent back when it does all of these:
+
+- It names both the from stop and the to stop of exactly one leg that a
+  successful `get_plans` returned this run. Stops match as whole names, in any
+  case, for names with accents or punctuation too ("Ōpua", "Pittwater (Refuge
+  Bay)"). Stop names are blanked out, longest first, before band words are read,
+  so a stop called "Rough Point" is no claim and "Russell Wharf" is not
+  "Russell". A sentence that names the stops of two legs, or one stop, is skipped.
+- It contains a band word as `get_plans` writes it, capitalised: Comfortable,
+  Lively or Rough, with emphasis markers stripped, in the clauses (split on
+  semicolons) from the first named stop to the last. A band word within three
+  words after "not", "never", "less", "far from" or a word ending in "n't" is no
+  claim, and a negation does not reach past a comma, colon, semicolon or dash.
+- The leg did not return that band, read from its stretches. A leg that is done
+  or skipped, has no comfort, or lost its stretches to shrink is not checked: its
+  bands are a logged rating, absent, or only the worst one.
+
+Legs are kept by plan. A plan read again replaces its earlier reading, with no
+merging; different plans stay apart. If the two stops match more than one leg
+across the plans read, such as a leg two plans share or an out-and-back, the
+sentence is ambiguous and is not checked. The send-back uses the existing band instruction, and the operator
+sees "comfort the plan did not give for that leg".
+
+### What was tried and dropped
+
+The first version had three triggers: comfort claims with no plan behind them,
+the band mismatch, and clock times the plan did not give. Feel words (bumpy,
+lumpy, rolly) and "the leg" or "the passage" counted as claims, and the
+passage check took a plan's comfort as a source for the sea's angle. Two review
+passes found the English claim detection misfiring both ways: it sent back
+seamanship and anchorage talk, and let through claims phrased a little
+differently. Each fix to one side opened the other. The operator narrowed it to
+the one check above, which turns on two stop names and a band word and so has few
+ways to misread. The passage check is back to how it read before.
+
+### What this does not do
+
+A comfort claim that names no stop, names one stop, or uses a word other than
+the three bands goes unchecked, as does a time. Mate's instructions still tell it
+to quote the leg's comfort, and they carry the rest. A false positive costs one
+more round, as before. Two saved cases hold a bad answer for the check and a
+draft of anchorage and negated remarks that must pass.

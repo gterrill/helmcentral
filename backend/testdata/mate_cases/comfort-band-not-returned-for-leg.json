@@ -1,0 +1,9 @@
+{
+  "name": "comfort-band-not-returned-for-leg",
+  "captured": "2026-11-26",
+  "model": "constructed from the PR 5 design, not a live capture",
+  "user": "How is the second day looking?",
+  "bad_answer": "Hamilton Island to Whitehaven will be Rough until 2 PM.",
+  "tool_calls": ["get_plans"],
+  "why": "get_plans returned that leg Comfortable throughout, and the rough stretch belongs to no leg of the plan. Mate named both stops of the leg and gave it a band the leg did not return. Expect the comfort band mismatch check."
+}

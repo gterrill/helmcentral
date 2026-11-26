@@ -1,0 +1,9 @@
+{
+  "name": "comfort-anchorage-and-negation-not-sent-back",
+  "captured": "2026-11-26",
+  "model": "constructed from the PR 5 operator decision, not a live capture",
+  "user": "Any tips for the Whitehaven leg?",
+  "bad_answer": "Whitehaven is comfortable in a southerly. The leg to Cid Harbour won't be Comfortable until 1 PM.",
+  "tool_calls": ["get_plans"],
+  "why": "The first sentence names one stop and is anchorage talk. The second names one stop and negates the band. Neither names both stops of a leg with a band the leg did not return, so the draft goes through. Expect no comfort check."
+}

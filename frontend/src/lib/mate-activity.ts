@@ -108,6 +108,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   'passage limits claim': 'claim about your passage limits',
   'anchorage shelter': 'shelter at the anchorage',
   'anchorage depth': 'depth at the anchorage',
+  'comfort band mismatch': 'comfort the plan did not give for that leg',
 }
 
 /** What a check found, in the operator's words. A key this does not know is shown as it is. */
