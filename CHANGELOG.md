@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-26
+
 ### Breaking
 
 - **Replace your Open-Meteo Marine plugin again if you placed it by hand, so
@@ -4281,7 +4283,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.68.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.69.0...HEAD
+[0.69.0]: https://github.com/gterrill/helmcentral/compare/v0.68.0...v0.69.0
 [0.68.0]: https://github.com/gterrill/helmcentral/compare/v0.67.0...v0.68.0
 [0.67.0]: https://github.com/gterrill/helmcentral/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/gterrill/helmcentral/compare/v0.65.0...v0.66.0
