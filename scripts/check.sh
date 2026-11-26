@@ -110,6 +110,13 @@ tree_start=
 if [ -z "${HELMCENTRAL_CHECK_TREE_OWNER:-}" ]; then
 	HELMCENTRAL_CHECK_TREE_OWNER=1
 	export HELMCENTRAL_CHECK_TREE_OWNER
+	# A file written and restored leaves the tree hash alone but moves its ctime.
+	# The fingerprint comes first at the start and last at the end, so a write
+	# between the two calls at either end moves it.
+	stat_start=$(sh "$PWD/scripts/tree-hash.sh" --stat "$PWD") || {
+		echo "check: could not fingerprint the working tree" >&2
+		exit 2
+	}
 	tree_start=$(sh "$PWD/scripts/tree-hash.sh" "$PWD") || {
 		echo "check: could not hash the working tree" >&2
 		exit 2
@@ -175,6 +182,13 @@ if [ -n "$tree_start" ]; then
 		echo "tree: could not hash the tree at the end of the run"
 	elif [ "$tree_end" = "$tree_start" ]; then
 		echo "tree: $tree_start"
+		if ! stat_end=$(sh "$PWD/scripts/tree-hash.sh" --stat "$PWD"); then
+			failed=1
+			echo "tree: could not fingerprint the tree at the end of the run"
+		elif [ "$stat_end" != "$stat_start" ]; then
+			failed=1
+			echo "tree: files were written during the run"
+		fi
 	else
 		failed=1
 		echo "tree: changed during the run ($tree_start -> $tree_end)"
