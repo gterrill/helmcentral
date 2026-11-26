@@ -1612,9 +1612,14 @@ step, it stays where you left it until you scroll back to the end.
   box opens again with a step such as "Draft sent back: shelter at the
   anchorage". The draft itself is there to read, so you can see what Mate wrote
   before it was withdrawn. The checks are wind angle wrong for the course, a
-  claim about your passage limits, shelter at the anchorage and depth at the
-  anchorage. A draft is sent back once. The box folds again when the new answer
-  begins, and the time on the line is how long Mate took to start that one.
+  claim about your passage limits, shelter at the anchorage, depth at the
+  anchorage, and a comfort the plan didn't give for a leg. The last one looks
+  only at a sentence that names both stops of one leg and calls it Comfortable,
+  Lively or Rough. If the plan gave that leg a different comfort, the draft
+  is sent back. A sentence that names one stop, or that says something
+  general about the sea or an anchorage, isn't checked. A draft is sent back
+  once. The box folds again when the new answer begins, and the time on the line
+  is how long Mate took to start that one.
 - **An answer taken back:** When Mate starts writing and then goes off to look
   something up, the words it had written move into the box as a step. They don't
   vanish.

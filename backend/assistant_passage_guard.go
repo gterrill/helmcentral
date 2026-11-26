@@ -192,6 +192,9 @@ func (d assistantToolDeps) checkDraftTriggers(draft string, run mateRunRecord) (
 	if t, i := d.checkDepthDraft(sentences, run, armed); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
+	if t, i := d.checkComfortDraft(sentences, run); t != "" {
+		triggers, instructions = append(triggers, t), append(instructions, i)
+	}
 	if len(triggers) == 0 {
 		return nil, ""
 	}

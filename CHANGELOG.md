@@ -44,6 +44,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   passage each part covers. Mate quotes those words and doesn't guess how the
   sea will feel. A leg with no ETA, such as a boat with no
   engine rpm recorded under way, has no comfort either, and Mate says why.
+- **Mate now corrects itself when it gives a plan's leg a comfort the plan
+  didn't.** When a draft names both stops of a leg and says the leg is
+  Comfortable, Lively or Rough, Helmcentral checks that against what the plan
+  gave for that leg. If the plan gave that leg a different comfort, the draft
+  is sent back once and Mate answers again from the plan's own Comfort line.
+  Sentences that name only one stop, or that say something general about the
+  sea, aren't checked. The box under your question shows the step, as "Draft
+  sent back: comfort the plan did not give for that leg".
 - **You can now mark a solar charger's input so it stops raising impossible
   readings.** Some solar chargers report the panel's voltage under a battery
   number, and 80 volts from the panels looks like an impossible battery. In

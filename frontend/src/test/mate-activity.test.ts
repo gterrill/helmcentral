@@ -314,6 +314,7 @@ describe('trigger labels', () => {
     expect(sentBackLabel(['passage limits claim'])).toBe('Draft sent back: claim about your passage limits')
     expect(sentBackLabel(['anchorage shelter'])).toBe('Draft sent back: shelter at the anchorage')
     expect(sentBackLabel(['anchorage depth'])).toBe('Draft sent back: depth at the anchorage')
+    expect(sentBackLabel(['comfort band mismatch'])).toBe('Draft sent back: comfort the plan did not give for that leg')
   })
 
   it('shows an unknown key as it is', () => {
