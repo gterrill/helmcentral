@@ -130,6 +130,169 @@ got=$(PATH=$work/fakebin:$PATH sh "$script" "$repo")
 git -C "$repo" reset -q
 [ "$got" = "$(hash)" ] || bad "no index: hash differs from the one with an index"
 
+# A nested git repository cannot be vouched for: both modes exit 2 naming it,
+# and no "adding embedded git repository" warning prints.
+# expect_nested <label> <repo> <path>
+expect_nested() {
+	for flag in "" --stat; do
+		# $flag is deliberately unquoted: empty, or --stat.
+		sh "$script" $flag "$2" >"$work/n.out" 2>"$work/n.err"
+		code=$?
+		[ "$code" -eq 2 ] || bad "$1 ${flag:-content}: exited $code, want 2"
+		[ "$(cat "$work/n.err")" = "tree-hash: $3 is a nested git repository; this script cannot vouch for its files" ] || bad "$1 ${flag:-content}: message was '$(cat "$work/n.err")'"
+		[ -s "$work/n.out" ] && bad "$1 ${flag:-content}: printed a hash"
+	done
+}
+
+nrepo=$work/nrepo
+mkdir "$nrepo"
+git -C "$nrepo" init -q
+printf 'outer\n' >"$nrepo/o.txt"
+git -C "$nrepo" add o.txt
+git -C "$nrepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+mkdir "$nrepo/inner"
+git -C "$nrepo/inner" init -q
+printf 'in\n' >"$nrepo/inner/i.txt"
+git -C "$nrepo/inner" add i.txt
+git -C "$nrepo/inner" -c user.email=t@example.com -c user.name=t commit -q -m i
+expect_nested "untracked nested repo" "$nrepo" inner
+
+# A freshly initialised nested repo with no commit counts too.
+frepo=$work/frepo
+mkdir "$frepo"
+git -C "$frepo" init -q
+printf 'o\n' >"$frepo/o.txt"
+git -C "$frepo" add o.txt
+git -C "$frepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+mkdir "$frepo/fresh"
+git -C "$frepo/fresh" init -q
+expect_nested "fresh nested repo" "$frepo" fresh
+
+# A committed gitlink counts, even with its directory missing.
+grepo=$work/grepo
+mkdir "$grepo"
+git -C "$grepo" init -q
+printf 'x\n' >"$grepo/x.txt"
+git -C "$grepo" add x.txt
+git -C "$grepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+gsha=$(git -C "$grepo" rev-parse HEAD)
+git -C "$grepo" update-index --add --cacheinfo "160000,$gsha,g"
+git -C "$grepo" -c user.email=t@example.com -c user.name=t commit -q -m gitlink
+expect_nested "committed gitlink" "$grepo" g
+
+# A nested repo that is gitignored does not count.
+irepo=$work/irepo
+mkdir "$irepo"
+git -C "$irepo" init -q
+printf 'skip/\n' >"$irepo/.gitignore"
+git -C "$irepo" add .gitignore
+git -C "$irepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+mkdir "$irepo/skip"
+git -C "$irepo/skip" init -q
+sh "$script" "$irepo" >/dev/null || bad "ignored nested repo: exited $?"
+sh "$script" --stat "$irepo" >/dev/null || bad "ignored nested repo: --stat exited $?"
+
+# Submodules are not handled: fail fast.
+printf '[submodule "x"]\n' >"$nrepo/.gitmodules"
+sh "$script" "$nrepo" >"$work/sub.out" 2>"$work/sub.err"
+code=$?
+[ "$code" -eq 2 ] || bad ".gitmodules: exited $code, want 2"
+grep -q 'submodule' "$work/sub.err" || bad ".gitmodules: message was '$(cat "$work/sub.err")'"
+[ -s "$work/sub.out" ] && bad ".gitmodules: printed a hash"
+rm -f "$nrepo/.gitmodules"
+
+# --stat fingerprints mtime, ctime and size: a same-content rewrite moves it.
+srepo=$work/srepo
+mkdir "$srepo"
+git -C "$srepo" init -q
+printf 'one\n' >"$srepo/t.txt"
+printf 'gone\n' >"$srepo/d.txt"
+git -C "$srepo" add t.txt d.txt
+git -C "$srepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+rm "$srepo/d.txt"
+printf 'u\n' >"$srepo/u.txt"
+s1=$(sh "$script" --stat "$srepo") || bad "--stat exited $?"
+[ -n "$s1" ] || bad "--stat printed nothing"
+[ "$(sh "$script" --stat "$srepo")" = "$s1" ] || bad "--stat changed with no writes"
+sleep 1.1
+printf 'one\n' >"$srepo/t.txt"
+[ "$(sh "$script" --stat "$srepo")" != "$s1" ] || bad "--stat did not change after a same-content rewrite"
+
+# A tracked file named like an option still gets a fingerprint, and a
+# same-bytes rewrite of it moves the fingerprint.
+drepo=$work/drepo
+mkdir "$drepo"
+git -C "$drepo" init -q
+printf 'v\n' >"$drepo/-v.txt"
+git -C "$drepo" add -- -v.txt
+git -C "$drepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+d1=$(sh "$script" --stat "$drepo") || bad "leading-dash name: --stat exited $?"
+[ -n "$d1" ] || bad "leading-dash name: --stat printed nothing"
+sleep 1.1
+printf 'v\n' >"$drepo/-v.txt"
+[ "$(sh "$script" --stat "$drepo")" != "$d1" ] || bad "leading-dash name: --stat did not change after a same-bytes rewrite"
+
+# A tracked file whose parent directory was replaced by a file is gone, not an error.
+trepo=$work/trepo
+mkdir "$trepo"
+git -C "$trepo" init -q
+mkdir "$trepo/a"
+printf 'b\n' >"$trepo/a/b.txt"
+git -C "$trepo" add a/b.txt
+git -C "$trepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+rm -r "$trepo/a"
+printf 'now a file\n' >"$trepo/a"
+t1=$(sh "$script" --stat "$trepo") || bad "Not a directory: --stat exited $?"
+[ -n "$t1" ] || bad "Not a directory: --stat printed nothing"
+
+# An inherited GIT_INDEX_FILE changes neither mode.
+want=$(sh "$script" "$repo")
+wants=$(sh "$script" --stat "$repo")
+got=$(GIT_INDEX_FILE=$work/other-index sh "$script" "$repo")
+[ "$got" = "$want" ] || bad "inherited GIT_INDEX_FILE changed the hash"
+got=$(GIT_INDEX_FILE=$work/other-index sh "$script" --stat "$repo")
+[ "$got" = "$wants" ] || bad "inherited GIT_INDEX_FILE changed --stat"
+
+# --stat covers the ignored /plugins/ files too.
+printf 'wasm\n' >"$prepo/plugins/tides/t.wasm"
+p1=$(sh "$script" --stat "$prepo")
+sleep 1.1
+printf 'wasm\n' >"$prepo/plugins/tides/t.wasm"
+[ "$(sh "$script" --stat "$prepo")" != "$p1" ] || bad "--stat did not change after a same-bytes plugin rewrite"
+
+# A stat or xargs failure with nothing on stderr is still a failure.
+mkdir "$work/xbin"
+printf '#!/bin/sh\nexit 1\n' >"$work/xbin/xargs"
+chmod +x "$work/xbin/xargs"
+PATH=$work/xbin:$PATH sh "$script" --stat "$srepo" >"$work/x.out" 2>"$work/x.err"
+code=$?
+[ "$code" -eq 1 ] || bad "silent xargs failure: --stat exited $code, want 1"
+[ -s "$work/x.out" ] && bad "silent xargs failure: --stat printed a hash"
+
+# A repository cloned under the ignored /plugins/ cannot be vouched for either.
+nprepo=$work/nprepo
+mkdir -p "$nprepo/plugins/x"
+git -C "$nprepo" init -q
+printf '/plugins/*\n' >"$nprepo/.gitignore"
+git -C "$nprepo" add .gitignore
+git -C "$nprepo" -c user.email=t@example.com -c user.name=t commit -q -m i
+git -C "$nprepo/plugins/x" init -q
+printf 'p\n' >"$nprepo/plugins/x/p.txt"
+git -C "$nprepo/plugins/x" add p.txt
+git -C "$nprepo/plugins/x" -c user.email=t@example.com -c user.name=t commit -q -m i
+expect_nested "nested repo under plugins" "$nprepo" plugins/x
+
+# Inherited git location variables change neither mode.
+orepo=$work/orepo
+mkdir "$orepo"
+git -C "$orepo" init -q
+want=$(sh "$script" "$repo")
+wants=$(sh "$script" --stat "$repo")
+got=$(GIT_DIR=$orepo/.git sh "$script" "$repo")
+[ "$got" = "$want" ] || bad "inherited GIT_DIR changed the hash"
+got=$(GIT_DIR=$orepo/.git sh "$script" --stat "$repo")
+[ "$got" = "$wants" ] || bad "inherited GIT_DIR changed --stat"
+
 # A path that is not a git checkout fails with a message.
 mkdir "$work/plain"
 sh "$script" "$work/plain" >"$work/plain.out" 2>"$work/plain.err"
@@ -156,6 +319,12 @@ cat >"$work/gobin/go" <<'EOF'
 # Fake go: exits 0. `go test` first does what the test case asks through env.
 if [ "$1" = test ]; then
 	[ -z "${FAKE_GO_WRITE:-}" ] || echo changed >"$FAKE_GO_WRITE"
+	if [ -n "${FAKE_GO_REWRITE:-}" ]; then
+		# Change a file and put its contents back.
+		orig=$(cat "$FAKE_GO_REWRITE")
+		echo changed >"$FAKE_GO_REWRITE"
+		printf '%s\n' "$orig" >"$FAKE_GO_REWRITE"
+	fi
 	if [ -n "${FAKE_GO_RMGIT:-}" ]; then
 		# Delete only the named .git, and only inside the test's temp dir.
 		case $FAKE_GO_RMGIT in
@@ -197,6 +366,48 @@ unset FAKE_GO_WRITE
 grep -q '^tree: changed during the run' "$work/chk.out" || bad "changed tree: no 'changed during the run' line: $(cat "$work/chk.out")"
 grep -qx 'check-backend: FAILED' "$work/chk.out" || bad "changed tree: run did not end FAILED"
 rm -f "$chk/backend/new.txt"
+
+# A file changed and restored during the run leaves the tree hash alone but
+# moves its ctime: the run fails.
+FAKE_GO_REWRITE=$chk/backend/x.go
+export FAKE_GO_REWRITE
+run_check
+unset FAKE_GO_REWRITE
+[ "$code" -eq 1 ] || bad "rewritten file: exited $code, want 1"
+grep -qx 'tree: files were written during the run' "$work/chk.out" || bad "rewritten file: no 'files were written' line: $(cat "$work/chk.out")"
+grep -qx 'check-backend: FAILED' "$work/chk.out" || bad "rewritten file: run did not end FAILED"
+
+# An untouched run still passes.
+run_check
+[ "$code" -eq 0 ] || bad "untouched rerun exited $code: $(cat "$work/chk.out")"
+grep -qx 'check-backend: all steps passed' "$work/chk.out" || bad "untouched rerun did not pass"
+
+# A tree that hashes but cannot be fingerprinted at the end fails the run and
+# says that, not that files were written. The fake stat fails once the fake go
+# has made the marker file.
+mkdir "$work/statbin"
+cat >"$work/statbin/stat" <<'EOF'
+#!/bin/sh
+if [ -n "${FAKE_STAT_MARK:-}" ] && [ -e "$FAKE_STAT_MARK" ]; then
+	echo "stat: injected failure" >&2
+	exit 1
+fi
+exec /usr/bin/stat "$@"
+EOF
+chmod +x "$work/statbin/stat"
+rm -f "$work/statmark"
+FAKE_STAT_MARK=$work/statmark
+FAKE_GO_WRITE=$work/statmark
+PATH_SAVE=$PATH
+PATH=$work/statbin:$PATH
+export FAKE_STAT_MARK FAKE_GO_WRITE
+run_check
+PATH=$PATH_SAVE
+unset FAKE_STAT_MARK FAKE_GO_WRITE
+[ "$code" -eq 1 ] || bad "unfingerprintable end: exited $code, want 1"
+grep -qx 'tree: could not fingerprint the tree at the end of the run' "$work/chk.out" || bad "unfingerprintable end: no 'could not fingerprint' line: $(cat "$work/chk.out")"
+grep -q 'files were written' "$work/chk.out" && bad "unfingerprintable end: said files were written"
+grep -qx 'check-backend: FAILED' "$work/chk.out" || bad "unfingerprintable end: run did not end FAILED"
 
 # A tree that cannot be hashed at the end fails the run and says so.
 FAKE_GO_RMGIT=$chk/.git
