@@ -118,6 +118,19 @@ func (m *planForecastMemo) keep(key string, now time.Time, f passageForecast) {
 // passages it learns from are not there: the leg says so, and is not "not learned".
 var errPassageStoreNotRunning = errors.New("the passage store is not running")
 
+// errPassageRecordUnavailable is why there is no learned pace when the passage
+// record is not open.
+var errPassageRecordUnavailable = errors.New("the passage record is not available")
+
+// learnedPaceModel is the boat's learned cruise pace at now, the model passage plan
+// legs and estimate_passage are timed on, or why there is none.
+func learnedPaceModel(ctx context.Context, now time.Time) (*legPaceModel, error) {
+	if globalPassageStore == nil {
+		return nil, errPassageRecordUnavailable
+	}
+	return globalPassageStore.pace.model(ctx, now)
+}
+
 // planAssessDepsFromTool wires the providers and the clock d carries, the boat's
 // recorded speed, the fair-tide ranking and the modelled current. A run whose
 // tool deps are pinned or replayed assesses on that clock and those providers.
@@ -138,10 +151,10 @@ func planAssessDepsFromTool(d assistantToolDeps, settingsPath string) planAssess
 			return src, nil
 		},
 		speed: func(ctx context.Context) (*legPaceModel, error) {
-			if globalPassageStore == nil {
-				return nil, errors.New("the passage record is not available")
+			if d.legPace == nil {
+				return nil, errPassageRecordUnavailable
 			}
-			return globalPassageStore.pace.model(ctx, d.now())
+			return d.legPace(ctx, d.now())
 		},
 		progress: func(ctx context.Context, p plan) ([]string, error) {
 			first, err := time.Parse(planDateLayout, p.Stops[0].Arrive)

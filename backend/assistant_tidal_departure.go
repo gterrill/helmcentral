@@ -240,24 +240,17 @@ func roundToTidalGrid(lat, lon float64) tidalGridPoint {
 // String is the cell centre to two decimals, the precision the operator reads.
 func (p tidalGridPoint) String() string { return fmt.Sprintf("%.2f, %.2f", p.lat, p.lon) }
 
-// tidalCurrentDays is the forecast_days to ask for so the last sample, at need,
-// is bracketed by two hours. The request is in GMT with past_days=1, so the
-// hourly series runs from 00:00 UTC yesterday to 23:00 UTC on the last forecast
-// day, and today's UTC midnight can be up to 24 hours before now: the series may
-// end 24 hours short of now + N days. One more hour covers the bracket after
-// need, and one more day is margin. The answer is then raised to 7 days, or 16
-// past that, so nearby windows ask for the same thing. A figure above
-// assistantTidalMaxDays means the passage ends beyond the model's forecast.
-func tidalCurrentDays(now, need time.Time) int {
+// tidalRunBeyondForecast is whether a run whose last sample is at need ends past
+// what the model's forecast of assistantTidalMaxDays days can bracket. The request
+// is in GMT with past_days=1, so the hourly series runs from 00:00 UTC yesterday
+// to 23:00 UTC on the last forecast day, and today's UTC midnight can be up to 24
+// hours before now: the series may end 24 hours short of now + N days. The test
+// adds one hour for the bracket after need and one day of margin. The request
+// itself is always for the model's whole forecast, so every window shares one
+// cached answer.
+func tidalRunBeyondForecast(now, need time.Time) bool {
 	days := int(math.Ceil((need.Sub(now)+time.Hour).Hours()/24)) + 2
-	switch {
-	case days > assistantTidalMaxDays:
-		return days
-	case days <= 7:
-		return 7
-	default:
-		return assistantTidalMaxDays
-	}
+	return days > assistantTidalMaxDays
 }
 
 // tidalSample is one dead-reckoned moment of a run: where the boat is, as a
@@ -348,7 +341,7 @@ func (d assistantToolDeps) fetchTidalCurrents(ctx context.Context, samples []tid
 	cells, query, _ := distinctCellQuery(len(samples), func(i int) (tidalGridPoint, float64, float64, bool) {
 		return samples[i].cell, samples[i].pos.Lat, samples[i].pos.Lon, true
 	})
-	return d.fetchCellCurrents(ctx, cells, query, tidalCurrentDays(now, need))
+	return d.fetchCellCurrents(ctx, cells, query, tidalRunBeyondForecast(now, need))
 }
 
 // distinctCellQuery is what one request for the current along n points asks: the
@@ -412,9 +405,10 @@ func (e noProviderError) Error() string {
 }
 func (e noProviderError) Unwrap() []error { return []error{errCurrentNoProvider, e.err} }
 
-// fetchCellCurrents asks for the series at each of the cells in one request, days of
-// forecast long. The cells and their points are in the same order.
-func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalGridPoint, query []currentsPoint, days int) (tidalPointCurrents, error) {
+// fetchCellCurrents asks for the series at each of the cells in one request, for the
+// model's whole forecast. beyondForecast is a run that ends past it, which leaves
+// every cell with that reason. The cells and their points are in the same order.
+func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalGridPoint, query []currentsPoint, beyondForecast bool) (tidalPointCurrents, error) {
 	if len(cells) > maxCurrentsPoints {
 		return tidalPointCurrents{}, currentTooLongError{cells: len(cells)}
 	}
@@ -442,10 +436,10 @@ func (d assistantToolDeps) fetchCellCurrents(ctx context.Context, cells []tidalG
 	if !ok {
 		return gapAll(fmt.Sprintf("plugin %q: %v", id, errNoCurrentsExport))
 	}
-	if days > assistantTidalMaxDays {
+	if beyondForecast {
 		return gapAll(fmt.Sprintf("the passage ends too far ahead for the Open-Meteo current model's %d-day forecast", assistantTidalMaxDays))
 	}
-	bundle, err := cp.FetchCurrents(ctx, query, days)
+	bundle, err := cp.FetchCurrents(ctx, query, assistantTidalMaxDays)
 	if errors.Is(err, errNoCurrentsExport) {
 		return gapAll(err.Error())
 	}

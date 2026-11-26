@@ -205,6 +205,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Mate now times a passage on the same learned cruise pace as your passage
+  plans, and says how.** Before, Mate worked the time out from the speed your log
+  recorded, so its answer could differ from the plan's. Now it uses your boat's
+  cruise pace and quotes the same words the plan shows, such as "Cruise 7.4 kn.".
+  If you give a speed, Mate uses yours and says so. The fuel still comes from your
+  logged fuel use, read at the rpm of that cruise pace, and every hour is charged
+  at that burn, slow water included. If the speeds your log covers don't reach
+  that rpm, or a speed you give, Mate gives no fuel figure and says so. If no
+  engine rpm has been recorded under way, Mate gives no time and says "No ETA: no
+  engine rpm recorded under way". It doesn't guess a time from some other speed.
+  The distance still shows. Without InfluxDB you now get the time with no fuel
+  figure, and Mate says why.
 - **On a passage plan, the arrival now includes the modelled current.** Each
   stretch of open water is timed at your cruise speed plus the current along
   your course when you get there, so leaving a quarter of an hour later can move

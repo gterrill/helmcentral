@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -179,6 +180,26 @@ func TestEstimateAtSpeed_EmptyTableIsNotOK(t *testing.T) {
 	_, _, ok := estimateAtSpeed(nil, 9.0)
 	if ok {
 		t.Fatalf("expected ok=false for an empty table")
+	}
+}
+
+func TestInterpolateBands_NaNSpeedIsNotOK(t *testing.T) {
+	if _, _, ok := estimateAtSpeed(performanceTableFixture(), math.NaN()); ok {
+		t.Fatalf("expected ok=false for a NaN speed")
+	}
+	if _, ok := estimateAtRPM(performanceTableFixture(), math.NaN()); ok {
+		t.Fatalf("expected ok=false for a NaN rpm")
+	}
+}
+
+func TestInterpolateBands_NaNKeyedBandIsSkipped(t *testing.T) {
+	table := append(performanceTableFixture(), performanceBand{SOGKtsMean: math.NaN(), LPerH: 99, RPM: math.NaN(), Samples: 5})
+	lPerH, _, ok := estimateAtSpeed(table, 9.0)
+	if !ok || lPerH != 37 {
+		t.Errorf("a NaN-keyed band should be left out: got %v ok=%v, want 37", lPerH, ok)
+	}
+	if _, ok := estimateAtRPM([]performanceBand{{RPM: math.NaN(), LPerH: 5}}, 1800); ok {
+		t.Errorf("a table with no readable band is not ok")
 	}
 }
 

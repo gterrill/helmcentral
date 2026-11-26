@@ -142,8 +142,9 @@ verdict. No speed is made up.
 - **The current.** The ETA takes the modelled current in open water, hour by hour,
   which makes each departure its own duration (second amendment below). Slow cells
   add none, and a stretch the model has no current for runs at the cruise speed.
-- **Mate's own estimate.** `estimate_passage` keeps its own speed from the engine
-  history in InfluxDB.
+- **Mate's own estimate.** Out of scope here; `estimate_passage` kept its own speed
+  from the engine history in InfluxDB until the 2026-11-26 amendment at the foot of
+  this record.
 
 ## Rejected
 
@@ -372,3 +373,44 @@ be judged keeps main's still-water arrival.
 One function words every failure (the leg's kind, "No ETA" or "No departure
 suggested", and the cause), and one place (`takeEta`) turns a run into a row's ETA,
 so the operator's departure and the leg under way cannot drift apart.
+
+## Amendment 2026-11-26: Mate's estimate is timed on the learned pace
+
+`estimate_passage` no longer takes its hours from the InfluxDB speed history. It
+times the routed run on the model the plan legs use (`globalPassageStore.pace`),
+walking the route through the slow cells, and returns the plan's own sentence as
+`eta_basis` (`etaBasisText`, with no current clause), so Mate quotes how the time
+was worked out in the plan's words.
+
+- **A speed given overrides the pace.** `speed_kts` times the run as distance over
+  speed, with `eta_basis` "At your speed of 10.0 kn." and `speed_source`
+  `requested`. It needs no learned pace.
+- **No pace is no hours.** A boat with no rpm recorded under way, or too little of
+  it to learn from, gets no `hours`, no `litres` and no `eta_basis`; `no_eta_reason`
+  carries the plan page's wording ("No ETA: no engine rpm recorded under way").
+  The distance stays. There is no fall back to the logged speed, as the fallback
+  policy asks.
+- **Fuel is still the Influx history, read at the cruise band's rpm.** The burn is
+  interpolated by rpm between the logged bands at the middle of the learned band,
+  not at the speed the log favours, so the litres match the rpm the time is based
+  on. Every hour is charged at that one burn, slow water included. The table's rpm
+  is the first engine's, as before: twin engines run matched revs under way, and
+  a twin run at split revs reads the wrong band. A band rpm outside the rpm range
+  the history's speed bands cover (the range of the bands' mean rpms, not the
+  rpm the boat logged) is not clamped to the nearest band: there is no fuel
+  figure, and `fuel_missing_reason` says the speed bands don't reach that rpm.
+  With a speed given, the burn is read at that speed, interpolated between the
+  bands; a speed below the lowest or above the highest band's mean speed gets no
+  fuel figure by the same rule, and the reason says the bands don't reach it. With no pace, the
+  most-sampled logged band's burn is given as `l_per_h` alone. When the history
+  cannot be read (InfluxDB off, engines not set up, a silent engine path) the
+  figures are left out and `fuel_missing_reason` says why. The time never waits on
+  Influx, which stays optional.
+- **The tidal departure asks for the whole forecast.** `plan_tidal_departure`
+  requests `assistantTidalMaxDays` (16) days of current in every case, where it
+  asked for 7 when the run ended within about five days and 16 otherwise, so every
+  window shares one cached answer. How far ahead a run can end is unchanged. The cache
+  key already carries the points and the days.
+
+The cruise speed it times on is a record of the boat's own passages, current
+included, as above; head seas still add time and fuel.

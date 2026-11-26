@@ -657,17 +657,25 @@ func TestPlanTidalDeparture_ACancelledCallStopsWaitingAndReturnsTheContextError(
 
 // The currents request is in GMT with past_days=1, so the series runs from
 // 00:00 UTC yesterday to 23:00 UTC on the last forecast day. Whatever the time of
-// day now falls in, the days asked for must leave the last sample bracketed.
-func TestTidalCurrentDays_AlwaysBracketTheLastSample(t *testing.T) {
+// day now falls in, a run the predicate accepts must leave the model's last sample
+// bracketing it, and one it refuses must be at the end of that forecast.
+func TestTidalRunBeyondForecast_AcceptsOnlyARunTheForecastBrackets(t *testing.T) {
 	for minute := 0; minute < 24*60; minute += 15 {
 		now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC).Add(time.Duration(minute) * time.Minute)
-		for _, ahead := range []time.Duration{0, 30 * time.Minute, 23*time.Hour + 30*time.Minute, 24 * time.Hour, 47*time.Hour + 30*time.Minute, 5 * 24 * time.Hour} {
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		lastHour := midnight.Add(time.Duration(assistantTidalMaxDays)*24*time.Hour - time.Hour)
+		for _, ahead := range []time.Duration{0, 30 * time.Minute, 23*time.Hour + 30*time.Minute, 24 * time.Hour, 47*time.Hour + 30*time.Minute, 5 * 24 * time.Hour, 13 * 24 * time.Hour} {
 			need := now.Add(ahead)
-			days := tidalCurrentDays(now, need)
-			midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-			lastHour := midnight.Add(time.Duration(days)*24*time.Hour - time.Hour)
+			if tidalRunBeyondForecast(now, need) {
+				t.Fatalf("now %s ahead %s: refused, though the forecast runs to %s", now, ahead, lastHour)
+			}
 			if lastHour.Before(need) {
-				t.Fatalf("now %s ahead %s: %d days end at %s, before %s", now, ahead, days, lastHour, need)
+				t.Fatalf("now %s ahead %s: the forecast ends at %s, before %s", now, ahead, lastHour, need)
+			}
+		}
+		for _, ahead := range []time.Duration{14 * 24 * time.Hour, 16 * 24 * time.Hour, 30 * 24 * time.Hour} {
+			if !tidalRunBeyondForecast(now, now.Add(ahead)) {
+				t.Fatalf("now %s ahead %s: expected it to be past the %d-day forecast", now, ahead, assistantTidalMaxDays)
 			}
 		}
 	}
@@ -678,8 +686,8 @@ func TestPlanTidalDeparture_ForecastDaysCoverALateEvening(t *testing.T) {
 	deps := tidalDepsWithProvider(p)
 	// The run ends at 23:30 UTC, an hour short of two whole days from now.
 	runTidalDeparture(t, deps, tidalArgs(150, 150, 3, `,"earliest":"2026-09-12T03:00:00Z","latest":"2026-09-13T20:30:00Z"`))
-	if p.lastDays != 7 {
-		t.Errorf("a run ending two days on is asked for in the 7 day bucket, asked for %d", p.lastDays)
+	if p.lastDays != assistantTidalMaxDays {
+		t.Errorf("a run ending two days on is asked for the model's whole %d days, asked for %d", assistantTidalMaxDays, p.lastDays)
 	}
 }
 

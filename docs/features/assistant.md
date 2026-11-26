@@ -511,11 +511,24 @@ only link. Remove the tag from a document to unlink it.
 
 ### Passage estimates
 
-When InfluxDB is configured, Mate can estimate how long a passage will take and
-how much fuel it will burn. It works from your own boat's logged speed over
-ground and fuel-rate history, not a manufacturer's polar or fuel curve. It reads
-a burn rate and rpm off what this vessel has actually done at that speed over
-the last few months.
+Mate can estimate how long a passage will take and how much fuel it will burn.
+Both come from your own boat, not a manufacturer's polar or fuel curve.
+
+- **The time:** Mate times the run on your boat's learned cruise pace, the same
+  pace your passage plans use. It says how it worked the time out, for example
+  "Cruise 7.4 kn.", and adds any slow water on the route. If you give a speed,
+  Mate uses yours instead and says "At your speed of 7.0 kn."
+- **No time without engine revs:** The pace is learned from the passages you've
+  recorded, and it needs engine rpm recorded under way. If none has been, Mate
+  gives no time and says "No ETA: no engine rpm recorded under way". It doesn't
+  borrow a speed from somewhere else. The distance still stands.
+- **The fuel:** When InfluxDB is configured, Mate reads the burn from your logged
+  fuel-rate history at the rpm of that cruise pace, and charges every hour at
+  that burn, slow water included. If the speeds your log covers don't reach that
+  rpm, Mate gives no fuel figure and says so. A speed you give that is outside the
+  logged speeds gets no fuel figure either. Without InfluxDB, or if the engines aren't
+  set up, you get the time and distance, and Mate says why there is no fuel
+  figure.
 
 The distance is the way by water. Mate works it out from the boat's position, or
 from a start you name, to the destination. It goes round any island in the way.
@@ -527,8 +540,7 @@ straight line.
 
 It says plainly that this is observed data across whatever conditions occurred,
 not a guarantee. It also says that a head sea will add time and fuel beyond
-what the log shows. Without InfluxDB configured, Mate skips this and reasons
-about the passage in general terms instead.
+what the log shows.
 
 ### Nearby vessels
 

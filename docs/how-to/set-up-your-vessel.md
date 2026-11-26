@@ -9,8 +9,9 @@ what you set up here:
   tiles.
 - **Anchor auto-raise:** It needs to know when an engine is running before it
   lifts the anchor watch for you.
-- **Mate's passage estimates:** Mate works out a passage's time and fuel from
-  the speed and fuel rate your engines have logged.
+- **Mate's passage estimates:** Mate works out a passage's fuel from the fuel
+  rate your engines have logged. The time comes from your boat's learned cruise
+  pace, which needs engine rpm recorded under way.
 - **Anomaly detection:** It catches frozen and impossible sensor readings,
   charging into a full house bank, and twin engines pulling apart.
 

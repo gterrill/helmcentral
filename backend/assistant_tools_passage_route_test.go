@@ -81,8 +81,8 @@ func TestExecuteEstimatePassage_RoutesRoundAnIslandInsteadOfThroughIt(t *testing
 	if res.StraightLineNm > 8 || res.DistanceNm < 12 {
 		t.Fatalf("straight %.1f nm, routed %.1f nm", res.StraightLineNm, res.DistanceNm)
 	}
-	if want := roundTo1(res.DistanceNm / 10); res.Hours != want {
-		t.Errorf("hours %.1f, want %.1f from the routed distance", res.Hours, want)
+	if want := roundTo1(res.DistanceNm / 10); res.Hours == nil || *res.Hours != want {
+		t.Errorf("hours %v, want %.1f from the routed distance", res.Hours, want)
 	}
 	if len(res.Route) < 3 {
 		t.Errorf("a route round an island has bends: %+v", res.Route)
