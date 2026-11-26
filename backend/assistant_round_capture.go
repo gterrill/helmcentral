@@ -461,6 +461,7 @@ func (c *assistantRoundCapture) lookup(seq int, call openRouterToolCall, args js
 // abandoned); how it ended and why come from it.
 func (c *assistantRoundCapture) lookupDone(seq int, name, errText string) {
 	outcome := assistantCallOutcome(errText)
+	reason := assistantCallReason(name, outcome, errText)
 	// A call that was never run has no lookup_done of its own, and the stream
 	// carries only these four; anything else reads as failed.
 	switch outcome {
@@ -468,5 +469,5 @@ func (c *assistantRoundCapture) lookupDone(seq int, name, errText string) {
 	default:
 		outcome = assistantOutcomeFailed
 	}
-	c.send(mateLookupDoneEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Outcome: outcome, Reason: assistantCallReason(name, errText)})
+	c.send(mateLookupDoneEvent{Round: c.round, Seq: seq, AtMs: c.atMs(), Outcome: outcome, Reason: reason})
 }

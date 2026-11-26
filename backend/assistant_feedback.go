@@ -64,9 +64,11 @@ type assistantToolCall struct {
 	Text string `json:"text,omitempty"`
 	// Subject is what the call looked at, worked out the same way as Text.
 	Subject string `json:"subject,omitempty"`
-	// Outcome is how the call ended (assistantCallOutcome) and Reason is why a
-	// failed one failed, without the tool's name; both are worked out when a
-	// run is read back, from Error, which stays for the logs.
+	// Outcome is how the call ended and Reason is why a failed one failed,
+	// without the tool's name. Outcome is stored when the run is saved
+	// (assistantCallOutcome) and read back by assistantStoredCallOutcome, which
+	// sorts a call saved before outcomes were stored by its Error. Reason is
+	// worked out on read from Error, which stays for the logs.
 	Outcome string `json:"outcome"`
 	Reason  string `json:"reason,omitempty"`
 }
@@ -338,7 +340,7 @@ func (s *assistantStore) readFeedbackPage(n int, curUpdated int64, curID string)
 	}
 	marks, args := inPlaceholders(ids)
 	callRows, err := s.db.Query(
-		`SELECT r.answer_message_id, c.round, c.seq, c.name, c.args, c.result, c.elapsed_ms, c.result_bytes, c.error, c.truncated, c.original_bytes, c.cache
+		`SELECT r.answer_message_id, c.round, c.seq, c.name, c.args, c.result, c.elapsed_ms, c.result_bytes, c.error, c.truncated, c.original_bytes, c.cache, c.outcome
 		 FROM assistant_run_calls c JOIN assistant_runs r ON r.id = c.run_id
 		 WHERE r.answer_message_id IN (`+marks+`) ORDER BY r.answer_message_id, c.round, c.seq`, args...)
 	if err != nil {
