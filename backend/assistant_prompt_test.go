@@ -1434,6 +1434,21 @@ func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *test
 	}
 }
 
+// estimate_passage's hours are the only passage hours Mate hands on, and with no
+// hours the tidal and window tools get none, worked out from nothing.
+func TestBuildAssistantSystemPrompt_NoEstimateHoursMeansNoTidalOrWindowHours(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"never its speed_kts",
+		"With no hours from estimate_passage, give no time, do no fair-tide ranking and no hours-based weather window from it",
+		"do not work hours out from the distance and a speed; ask the operator for a speed instead",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the prompt to say %q", want)
+		}
+	}
+}
+
 // ADR 0219: season, cruise and trip questions are answered from the Passages
 // logbook, told as the passages story, with no guessed geography.
 func TestBuildAssistantSystemPrompt_SeasonQuestionsUseTheLogbook(t *testing.T) {

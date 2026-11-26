@@ -166,42 +166,91 @@ func buildPerformanceTable(sog []telemetryPoint, fuelRates [][]telemetryPoint, r
 // extrapolation past what was ever observed. ok is false only when table is
 // empty.
 func estimateAtSpeed(table []performanceBand, speedKts float64) (lPerH float64, rpm float64, ok bool) {
-	if len(table) == 0 {
-		return 0, 0, false
-	}
-
-	sorted := make([]performanceBand, len(table))
-	copy(sorted, table)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SOGKtsMean < sorted[j].SOGKtsMean })
-
-	first, last := sorted[0], sorted[len(sorted)-1]
-	if speedKts <= first.SOGKtsMean {
-		return first.LPerH, first.RPM, true
-	}
-	if speedKts >= last.SOGKtsMean {
-		return last.LPerH, last.RPM, true
-	}
-
-	for i := 0; i < len(sorted)-1; i++ {
-		lower, upper := sorted[i], sorted[i+1]
-		if speedKts < lower.SOGKtsMean || speedKts > upper.SOGKtsMean {
-			continue
-		}
-		span := upper.SOGKtsMean - lower.SOGKtsMean
-		if span <= 0 {
-			return lower.LPerH, lower.RPM, true
-		}
-		frac := (speedKts - lower.SOGKtsMean) / span
-		return lower.LPerH + frac*(upper.LPerH-lower.LPerH), lower.RPM + frac*(upper.RPM-lower.RPM), true
-	}
-
-	// Unreachable given the clamps above, but keeps the function total.
-	return last.LPerH, last.RPM, true
+	return interpolateBands(table, func(b performanceBand) float64 { return b.SOGKtsMean }, speedKts)
 }
 
-// mostSampledBand returns the band with the most joined samples, the
-// estimate_passage tool's stand-in for "the vessel's own cruising speed"
-// when the operator gives a distance but no planned speed. ok is false only
+// estimateAtRPM reads the burn rate off table at rpm, interpolating between the
+// two bands (by their mean rpm) that bracket it and clamping to the table's own
+// ends, as estimateAtSpeed does for a speed. ok is false only when table is
+// empty.
+func estimateAtRPM(table []performanceBand, rpm float64) (lPerH float64, ok bool) {
+	lPerH, _, ok = interpolateBands(table, func(b performanceBand) float64 { return b.RPM }, rpm)
+	return lPerH, ok
+}
+
+// rpmRange is the lowest and highest mean rpm among the table's bands. ok is false
+// when no band has an rpm figure.
+func rpmRange(table []performanceBand) (lo, hi float64, ok bool) {
+	for _, b := range table {
+		if math.IsNaN(b.RPM) {
+			continue
+		}
+		if !ok || b.RPM < lo {
+			lo = b.RPM
+		}
+		if !ok || b.RPM > hi {
+			hi = b.RPM
+		}
+		ok = true
+	}
+	return lo, hi, ok
+}
+
+// sogRange is the lowest and highest mean speed over ground among the table's
+// bands. ok is false when no band has a speed figure.
+func sogRange(table []performanceBand) (lo, hi float64, ok bool) {
+	for _, b := range table {
+		if math.IsNaN(b.SOGKtsMean) {
+			continue
+		}
+		if !ok || b.SOGKtsMean < lo {
+			lo = b.SOGKtsMean
+		}
+		if !ok || b.SOGKtsMean > hi {
+			hi = b.SOGKtsMean
+		}
+		ok = true
+	}
+	return lo, hi, ok
+}
+
+// interpolateBands reads the burn rate and rpm off table at x, where key is the
+// bands' own figure for the axis x is on. It interpolates linearly between the two
+// bands that bracket x and clamps to the ends beyond either. ok is false when x is
+// not a number or no band has a figure on the axis (an empty table, or bands whose
+// key is NaN, which are left out).
+func interpolateBands(table []performanceBand, key func(performanceBand) float64, x float64) (lPerH, rpm float64, ok bool) {
+	if math.IsNaN(x) {
+		return 0, 0, false
+	}
+	sorted := make([]performanceBand, 0, len(table))
+	for _, b := range table {
+		if !math.IsNaN(key(b)) {
+			sorted = append(sorted, b)
+		}
+	}
+	if len(sorted) == 0 {
+		return 0, 0, false
+	}
+	sort.Slice(sorted, func(i, j int) bool { return key(sorted[i]) < key(sorted[j]) })
+
+	first, last := sorted[0], sorted[len(sorted)-1]
+	if x <= key(first) {
+		return first.LPerH, first.RPM, true
+	}
+	if x >= key(last) {
+		return last.LPerH, last.RPM, true
+	}
+	// x is strictly inside the table, so upper is the first band at or past it and
+	// lower, the one before, is strictly short of it: the span is never zero.
+	i := sort.Search(len(sorted), func(i int) bool { return key(sorted[i]) >= x })
+	lower, upper := sorted[i-1], sorted[i]
+	frac := (x - key(lower)) / (key(upper) - key(lower))
+	return lower.LPerH + frac*(upper.LPerH-lower.LPerH), lower.RPM + frac*(upper.RPM-lower.RPM), true
+}
+
+// mostSampledBand returns the band with the most joined samples: the burn rate
+// estimate_passage gives when there is no time to read it at. ok is false only
 // when table is empty.
 func mostSampledBand(table []performanceBand) (performanceBand, bool) {
 	if len(table) == 0 {

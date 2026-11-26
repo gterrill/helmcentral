@@ -485,3 +485,9 @@ rather than falling back to whatever partial text it produced.
   panel to the dashboard shell, whose extraction discipline `assistant-drawer.tsx`
   otherwise has no bearing on but whose panel-registration pattern
   (`PANEL_IDS`, `PANEL_NAV_ITEMS`) this feature's Assistant panel follows.
+
+## Amendment 2026-11-26: the time is no longer from this table
+
+Section 12 describes the speed-to-burn table. `estimate_passage` now reads only the
+fuel off it, at the learned cruise band's rpm, and times the run on the learned
+cruise pace passage plans use. ADR 0304's 2026-11-26 amendment has the decision.

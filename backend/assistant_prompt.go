@@ -1169,8 +1169,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"Whenever the question names where the boat is leaving from and where it is going, or a route, the " +
 		"answer must include a Passage section, even when the question is mainly about the anchorage. For a " +
 		"passage leaving from the boat's position within the forecast range: call estimate_passage with the " +
-		"destination's lat and lon from find_places and the planned speed, and report the distance_nm it " +
-		"returns, with time, fuel burn and fuel margin. If it moved an end to the water, pass on its route_note. If it says a " +
+		"destination's lat and lon from find_places, with speed_kts only when the operator gave a speed, and " +
+		"report the distance_nm it returns, with the time on the boat's learned cruise pace and the eta_basis " +
+		"that says how it was worked out, then fuel burn and fuel margin. If it has no hours, say its " +
+		"no_eta_reason in its words (for one, that no engine rpm was recorded under way) and give no time " +
+		"from any other speed; the distance and the fuel rate still stand. If it moved an end to the water, pass on its route_note. If it says a " +
 		"destination or a given start is on land and that end is a town or another place inland, look up that place's " +
 		"marina, harbour or anchorage, call it again with that, and say which you used; never put a place in for the " +
 		"boat's own position. If estimate_passage still returns an error (a coastline square is not " +
@@ -1194,7 +1197,10 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
 		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg, " +
 		"the estimated hours as passage_hours and its route as route. The tool says where flood_set_source may come from " +
-		"and how to word its answer. " +
+		"and how to word its answer. Pass estimate_passage's hours as the passage hours of any weather window too, never its " +
+		"speed_kts, which is the open-water cruise speed and leaves out slow water. With no hours from estimate_passage, " +
+		"give no time, do no fair-tide ranking and no hours-based weather window from it, and do not work hours out from " +
+		"the distance and a speed; ask the operator for a speed instead. " +
 		"Recommend a " +
 		"departure time from the best candidate and say how much of the run is with the stream (fair_fraction), " +
 		"name the departure time to avoid, and weigh the departure against the forecast wind. Do not use it for the planning " +

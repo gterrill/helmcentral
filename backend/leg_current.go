@@ -312,7 +312,7 @@ func (d assistantToolDeps) readLegCurrents(ctx context.Context, p *legPaceProfil
 		field.why = "the whole leg is in slow water, where the model has no current"
 		return field, nil
 	}
-	cur, err := d.fetchCellCurrents(ctx, p.cells, p.query, assistantTidalMaxDays)
+	cur, err := d.fetchCellCurrents(ctx, p.cells, p.query, false)
 	if err != nil {
 		return nil, err
 	}

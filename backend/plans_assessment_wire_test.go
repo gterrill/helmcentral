@@ -307,6 +307,32 @@ func TestReadLegCurrents_AFailedRequestIsAnErrorWithNoToolName(t *testing.T) {
 	}
 }
 
+// The plan's speed source is the pace the deps carry, the one estimate_passage
+// uses, so the two never time a run on different models.
+func TestPlanAssessDepsFromTool_SpeedIsTheDepsOwnPace(t *testing.T) {
+	want := &legPaceModel{CruiseKn: 7.5}
+	var at time.Time
+	d := assistantToolDeps{
+		now: func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		legPace: func(_ context.Context, now time.Time) (*legPaceModel, error) {
+			at = now
+			return want, nil
+		},
+	}
+	got, err := planAssessDepsFromTool(d, "").speed(context.Background())
+	if err != nil || got != want {
+		t.Fatalf("speed = %v, %v; want the deps' model", got, err)
+	}
+	if !at.Equal(d.now()) {
+		t.Errorf("the pace was fitted at %v, want the deps' clock", at)
+	}
+
+	d.legPace = nil
+	if _, err := planAssessDepsFromTool(d, "").speed(context.Background()); !errors.Is(err, errPassageRecordUnavailable) {
+		t.Fatalf("no pace source is the pace being unavailable, got %v", err)
+	}
+}
+
 // ── the warnings read through the fetch loop's own check ────────────────
 
 func TestPlanWarningsFrom_AStaleServedBundleIsAnErrorNotNoWarnings(t *testing.T) {

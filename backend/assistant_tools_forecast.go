@@ -94,17 +94,21 @@ var mateToolEstimatePassage = mateTool{
 	effect:    effectReads,
 	audiences: audienceMCPOnly,
 	function: openRouterFunctionDef{
-		Description: "Estimate passage distance, time and fuel for a run to a destination, from this vessel's " +
-			"own logged performance (speed over ground against total fuel rate and rpm, from the last N days " +
-			"of telemetry). Give the destination coordinates (from find_places); the run starts at the " +
+		Description: "Estimate passage distance, time and fuel for a run to a destination. The time is on this " +
+			"vessel's learned cruise pace, the same pace passage plans use, and eta_basis says how it was worked " +
+			"out: quote it with the time. With no engine rpm recorded under way, or a pace not yet learned, there " +
+			"are no hours and no_eta_reason says why: give that reason, never a time from some other speed. The fuel " +
+			"is this vessel's logged burn (total fuel rate against rpm, from the last N days of telemetry) at the " +
+			"learned cruise rpm; when it cannot be read, fuel_missing_reason says why and the time stands. Give " +
+			"the destination coordinates (from find_places); the run starts at the " +
 			"vessel's position unless you give from_lat and from_lon (a planned leg between two places). The " +
 			"tool routes the run over water around islands and headlands using the offline coastline and " +
 			"returns that distance as distance_nm, with course_deg (the longest leg's bearing), the legs and the waypoints; the " +
 			"straight line is returned only as straight_line_nm, for comparison. If it cannot route (a " +
 			"coastline square is not downloaded, an end point is on land, or no water connects the two) it " +
 			"returns an error: report that error, never a straight-line distance. Omit speed to use the " +
-			"most-sampled cruising band. Observed data spans whatever conditions occurred; head seas will " +
-			"add time and fuel.",
+			"learned cruise pace; a speed_kts the operator gives overrides it, and eta_basis then says it is their speed. " +
+			"The pace spans whatever conditions occurred; head seas will add time and fuel.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -114,11 +118,11 @@ var mateToolEstimatePassage = mateTool{
 						"from_lon": {"type": "number", "description": "Start longitude. Give both or neither."},
 						"speed_kts": {
 							"type": "number",
-							"description": "Planned speed over ground in knots. Omit to use the vessel's most-sampled cruising band."
+							"description": "Planned speed over ground in knots, only when the operator gave one. Omit to time the run on the vessel's learned cruise pace."
 						},
 						"days": {
 							"type": "integer",
-							"description": "Days of logged telemetry to draw the speed-to-burn table from, 7 to 365 (default 90)."
+							"description": "Days of logged telemetry to draw the fuel burn from, 7 to 365 (default 90)."
 						}
 					},
 					"required": ["to_lat", "to_lon"]
@@ -135,15 +139,15 @@ var mateToolEstimatePassage = mateTool{
 	describe: func(args json.RawMessage) string {
 		var a assistantEstimatePassageArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return "Estimating the passage from the log…"
+			return "Timing the passage…"
 		}
 		if a.ToLat == nil || a.ToLon == nil {
-			return "Estimating the passage from the log…"
+			return "Timing the passage…"
 		}
 		if a.SpeedKts != nil {
-			return fmt.Sprintf("Routing to %.3f, %.3f and estimating at %g kts from the log…", *a.ToLat, *a.ToLon, *a.SpeedKts)
+			return fmt.Sprintf("Routing to %.3f, %.3f and timing the run at %g kts…", *a.ToLat, *a.ToLon, *a.SpeedKts)
 		}
-		return fmt.Sprintf("Routing to %.3f, %.3f and estimating at cruising speed from the log…", *a.ToLat, *a.ToLon)
+		return fmt.Sprintf("Routing to %.3f, %.3f and timing the run…", *a.ToLat, *a.ToLon)
 	},
 }
 
@@ -564,7 +568,7 @@ const (
 
 // assistantEstimatePassageArgs is estimate_passage's argument shape.
 // SpeedKts is a pointer so "the model left it out" (nil, use the
-// most-sampled cruising band) is distinguishable from a genuine zero, which
+// learned cruise pace) is distinguishable from a genuine zero, which
 // is never a valid planned speed anyway.
 //
 // The distance is not an argument: it is routed over water from the two
@@ -580,19 +584,30 @@ type assistantEstimatePassageArgs struct {
 
 type assistantEstimatePassageResult struct {
 	assistantRoutedPassage
-	SpeedKts float64 `json:"speed_kts"`
+	// SpeedKts is the speed the time is worked out at: the learned cruise
+	// speed, or the one asked for. Left out when there is no time.
+	SpeedKts float64 `json:"speed_kts,omitempty"`
 	// SpeedSource is "requested" when speed_kts came from the model, or
-	// "most_sampled_band" when it was omitted and estimate_passage picked
-	// the vessel's most-sampled cruising band instead.
-	SpeedSource string            `json:"speed_source"`
-	Hours       float64           `json:"hours"`
-	Litres      float64           `json:"litres"`
-	LPerH       float64           `json:"l_per_h"`
-	RPM         float64           `json:"rpm"`
-	HistoryDays int               `json:"history_days"`
-	Samples     int               `json:"samples"`
-	Instances   []string          `json:"instances"`
-	Table       []performanceBand `json:"table"`
+	// "learned_cruise" when it was omitted and the time is on the boat's
+	// learned cruise pace (the one passage plans use).
+	SpeedSource string `json:"speed_source,omitempty"`
+	// Hours is nil, and NoEtaReason says why, when the boat has no learned
+	// pace. EtaBasis is the sentence the hours were worked out on, the same
+	// words a passage plan's leg carries.
+	Hours       *float64 `json:"hours,omitempty"`
+	NoEtaReason string   `json:"no_eta_reason,omitempty"`
+	EtaBasis    string   `json:"eta_basis,omitempty"`
+	// Litres, LPerH and RPM come from the logged history alone. When it cannot
+	// be read they are left out and FuelMissingReason says why; the time never
+	// depends on it.
+	Litres            *float64          `json:"litres,omitempty"`
+	LPerH             *float64          `json:"l_per_h,omitempty"`
+	RPM               float64           `json:"rpm,omitempty"`
+	FuelMissingReason string            `json:"fuel_missing_reason,omitempty"`
+	HistoryDays       int               `json:"history_days,omitempty"`
+	Samples           int               `json:"samples,omitempty"`
+	Instances         []string          `json:"instances,omitempty"`
+	Table             []performanceBand `json:"table,omitempty"`
 	// FuelAboardL and FuelAfterL are omitted entirely (nil pointers,
 	// omitempty) when fuelAboardM3 reports the fuel volume as not
 	// currently defined - the note says so instead, rather than the model
@@ -882,14 +897,13 @@ func (d assistantToolDeps) silentEnginePathError(engine vesselEngineSetting, pat
 		engine.Name, path, days)
 }
 
-// executeEstimatePassage joins this vessel's own logged speed over ground,
-// total fuel rate and rpm (buildPerformanceTable, assistant_performance.go)
-// over the requested history window, then reads a burn rate and rpm off
-// that table at the requested speed (or the most-sampled band, when the
-// model left speed out) to turn a bare distance into an hours-and-litres
-// estimate. Every number here is this vessel's own history, not a polar or
-// a fuel curve looked up from a manufacturer spec sheet - see ADR 0093
-// section 12.
+// executeEstimatePassage times a routed run on the boat's learned cruise pace
+// (passageTiming, the model passage plan legs use), or at the speed the model
+// asked for, and reads the fuel off the boat's own logged speed over ground,
+// total fuel rate and rpm (buildPerformanceTable, assistant_performance.go) at
+// the learned band's rpm. Every number here is this vessel's own history, not
+// a polar or a fuel curve looked up from a manufacturer spec sheet - see ADR
+// 0093 section 12 and its 2026-11-26 amendment.
 func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -912,19 +926,50 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	if err != nil {
 		return "", err
 	}
-	distanceNm := routed.rawDistanceNm
 
-	perf, err := d.loggedPerformance(ctx, args.SpeedKts, args.Days)
+	// The time never waits on the fuel history: it is the speed asked for, or
+	// the boat's learned cruise pace, and without either it is no time and a
+	// reason, never a speed read off the log.
+	timing, err := d.passageTiming(ctx, routed, args.SpeedKts)
 	if err != nil {
+		return "", err
+	}
+
+	result := assistantEstimatePassageResult{
+		assistantRoutedPassage: routed,
+		SpeedKts:               roundTo1(timing.speedKn),
+		SpeedSource:            timing.source,
+		NoEtaReason:            timing.noEta,
+		EtaBasis:               timing.basis,
+	}
+	timed := timing.noEta == ""
+	if timed {
+		result.Hours = floatPtr(roundTo1(timing.hours))
+	}
+
+	// The fuel is the logged history read at the rpm the time is based on. When
+	// it cannot be read, the figures are left out and the reason is given.
+	perf, perr := d.loggedPerformance(ctx, args.Days)
+	if perr != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return "", cerr
 		}
-		return "", fmt.Errorf("estimate_passage: %w", err)
+		result.FuelMissingReason = perr.Error()
+	} else {
+		if fuel, reason := perf.fuelFor(timing); reason != "" {
+			result.FuelMissingReason = reason
+		} else {
+			result.LPerH = floatPtr(roundTo1(fuel.lPerH))
+			result.RPM = math.Round(fuel.rpm)
+			if timed {
+				result.Litres = floatPtr(math.Round(fuel.litres(timing.hours)))
+			}
+		}
 	}
-
-	hours := distanceNm / perf.speedKts
-	litres := hours * perf.lPerH
-	litresRounded := math.Round(litres)
+	result.HistoryDays = perf.days
+	result.Samples = perf.samples
+	result.Instances = perf.instances
+	result.Table = perf.table
 
 	// Fuel aboard (helmcentral.fuel.volume, ADR 0084 - the same figure the
 	// Tanks tile shows) turns the burn estimate into a margin. Absent
@@ -936,31 +981,34 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	if d.fuelAboardM3 != nil {
 		aboardM3, aboardOK = d.fuelAboardM3()
 	}
-	note := "observed across whatever conditions occurred in the window; head seas add time and fuel"
+	// The note says only what holds: the time clause follows the eta_basis or the
+	// no_eta_reason, the fuel clause the fuel_missing_reason.
+	timeNote := "the time is the boat's learned cruise pace"
+	switch {
+	case !timed:
+		timeNote = "no time was worked out"
+	case timing.source == "requested":
+		timeNote = "the time is at the speed you gave"
+	}
+	fuelNote := "the fuel its logged history"
+	if timing.fuelRPM > 0 {
+		fuelNote = "the fuel its logged burn at cruise rpm, for every hour, slow water included"
+	}
+	if result.FuelMissingReason != "" {
+		fuelNote = "no fuel figures were read"
+	}
+	note := timeNote + " and " + fuelNote + ", across whatever conditions occurred; head seas add time and fuel"
 	if aboardOK {
 		aboard := math.Round(aboardM3 * 1000)
-		after := aboard - litresRounded
-		fuelAboardL, fuelAfterL = &aboard, &after
+		fuelAboardL = &aboard
+		if result.Litres != nil {
+			after := aboard - *result.Litres
+			fuelAfterL = &after
+		}
 	} else {
 		note += "; fuel aboard unknown"
 	}
-
-	result := assistantEstimatePassageResult{
-		assistantRoutedPassage: routed,
-		SpeedKts:               roundTo1(perf.speedKts),
-		SpeedSource:            perf.speedSource,
-		Hours:                  roundTo1(hours),
-		Litres:                 litresRounded,
-		LPerH:                  roundTo1(perf.lPerH),
-		RPM:                    math.Round(perf.rpm),
-		HistoryDays:            perf.days,
-		Samples:                perf.samples,
-		Instances:              perf.instances,
-		Table:                  perf.table,
-		FuelAboardL:            fuelAboardL,
-		FuelAfterL:             fuelAfterL,
-		Note:                   note,
-	}
+	result.FuelAboardL, result.FuelAfterL, result.Note = fuelAboardL, fuelAfterL, note
 
 	shrink := func() bool {
 		// The route's waypoints are detail: they go before anything that
@@ -987,10 +1035,125 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	return capToolResultJSON(&result, shrink)
 }
 
-// loggedPerformance is the boat's own speed-to-burn history, and the speed read
-// off it, for estimate_passage. requested is the planned speed, nil for the
-// most-sampled cruising band. Its errors carry no tool name.
-func (d assistantToolDeps) loggedPerformance(ctx context.Context, requested *float64, historyDays int) (loggedPerformance, error) {
+// passageTiming is how long a routed run takes. noEta says why there is no time,
+// when the boat has no learned pace and no speed was asked for.
+type passageTiming struct {
+	hours   float64
+	speedKn float64
+	// source is "requested" or "learned_cruise"; basis is the sentence the hours
+	// were worked out on.
+	source, basis string
+	noEta         string
+	// fuelAtSpeed is the speed asked for, which the burn is read at; fuelRPM is the
+	// middle of the learned cruise band, which it is read at otherwise. Both are 0
+	// with no time.
+	fuelAtSpeed, fuelRPM float64
+}
+
+// passageTiming times routed at the speed asked for, or on the boat's learned
+// cruise pace along the route (the model passage plan legs use, with its slow
+// water), with the same words for how the time was worked out. A pace that is
+// not learned is "No ETA: <why>", the plan page's wording: never a speed read off
+// the log. Only a cancelled call is an error.
+func (d assistantToolDeps) passageTiming(ctx context.Context, routed assistantRoutedPassage, requested *float64) (passageTiming, error) {
+	if requested != nil {
+		return passageTiming{
+			hours: routed.rawDistanceNm / *requested, speedKn: *requested, source: "requested",
+			basis:       fmt.Sprintf("At your speed of %.1f kn.", *requested),
+			fuelAtSpeed: *requested,
+		}, nil
+	}
+	noEta := func(err error) (passageTiming, error) {
+		if cerr := ctx.Err(); cerr != nil {
+			return passageTiming{}, cerr
+		}
+		return passageTiming{noEta: "No ETA: " + err.Error()}, nil
+	}
+	if d.legPace == nil {
+		return noEta(errPassageRecordUnavailable)
+	}
+	now := d.now()
+	model, err := d.legPace(ctx, now)
+	if err != nil {
+		return noEta(err)
+	}
+	if model == nil {
+		return noEta(errPassageRecordUnavailable)
+	}
+	leg := planLeg{DistanceNm: routed.rawDistanceNm, Route: make([][2]float64, len(routed.Route))}
+	for i, p := range routed.Route {
+		leg.Route[i] = [2]float64{p.Lat, p.Lon}
+	}
+	profile, err := model.profile(leg)
+	if err != nil {
+		return noEta(err)
+	}
+	tl, err := profile.pace(now)
+	if err != nil {
+		return noEta(err)
+	}
+	return passageTiming{
+		hours: tl.hours(), speedKn: model.CruiseKn, source: "learned_cruise",
+		basis:   etaBasisText(model.CruiseKn, hoursDuration(profile.slowHours()), ""),
+		fuelRPM: (model.BandLowRPM + model.BandHighRPM) / 2,
+	}, nil
+}
+
+// passageFuel is the burn rate and the rpm it was read at.
+type passageFuel struct{ lPerH, rpm float64 }
+
+// litres is the run's fuel: every hour at the one burn rate, slow water included.
+func (f passageFuel) litres(hours float64) float64 {
+	return hours * f.lPerH
+}
+
+// fuelFor reads the burn off the logged history at the rpm the time is based on:
+// the learned band's middle. A speed asked for is not the band's, so the burn is
+// read at that speed; with no time at all, at the most-sampled logged band. A
+// cruise rpm, or a speed asked for, outside the range the history's bands cover
+// gets no burn: it is not read off the nearest band. The reason is why the history cannot give a burn, ""
+// when it does.
+func (p loggedPerformance) fuelFor(t passageTiming) (passageFuel, string) {
+	const unreadable = "the logged history has no burn rate to read at that speed or rpm"
+	switch {
+	case t.fuelAtSpeed > 0:
+		lo, hi, ok := sogRange(p.table)
+		if !ok {
+			return passageFuel{}, unreadable
+		}
+		if t.fuelAtSpeed < lo || t.fuelAtSpeed > hi {
+			return passageFuel{}, fmt.Sprintf("the logged fuel history's speed bands don't reach %.1f kn in the last %d days", t.fuelAtSpeed, p.days)
+		}
+		l, rpm, ok := estimateAtSpeed(p.table, t.fuelAtSpeed)
+		if !ok {
+			return passageFuel{}, unreadable
+		}
+		return passageFuel{lPerH: l, rpm: rpm}, ""
+	case t.fuelRPM > 0:
+		lo, hi, ok := rpmRange(p.table)
+		if !ok {
+			return passageFuel{}, unreadable
+		}
+		if t.fuelRPM < lo || t.fuelRPM > hi {
+			return passageFuel{}, fmt.Sprintf("the logged fuel history's speed bands don't reach the cruise rpm (about %.0f rpm) in the last %d days", t.fuelRPM, p.days)
+		}
+		l, ok := estimateAtRPM(p.table, t.fuelRPM)
+		if !ok {
+			return passageFuel{}, unreadable
+		}
+		return passageFuel{lPerH: l, rpm: t.fuelRPM}, ""
+	default:
+		band, ok := mostSampledBand(p.table)
+		if !ok {
+			return passageFuel{}, unreadable
+		}
+		return passageFuel{lPerH: band.LPerH, rpm: band.RPM}, ""
+	}
+}
+
+// loggedPerformance is the boat's own speed-to-burn history for estimate_passage.
+// Its errors carry no tool name.
+func (d assistantToolDeps) loggedPerformance(ctx context.Context, historyDays int) (loggedPerformance, error) {
 	days := clampAssistantDays(historyDays, assistantEstimatePassageDefaultHistoryDays, assistantEstimatePassageMaxHistoryDays)
 	if days < assistantEstimatePassageMinHistoryDays {
 		days = assistantEstimatePassageMinHistoryDays
@@ -1000,6 +1163,9 @@ func (d assistantToolDeps) loggedPerformance(ctx context.Context, requested *flo
 	start := stop.AddDate(0, 0, -days)
 
 	none := loggedPerformance{}
+	if d.influxRange == nil || d.fuelRateInstances == nil {
+		return none, errors.New("the logged fuel history is not available on this install")
+	}
 	engines, instErr := d.fuelRateInstances()
 	if instErr != nil {
 		return none, fmt.Errorf("the vessel settings could not be read, so the engines are unknown: %w", instErr)
@@ -1038,11 +1204,10 @@ func (d assistantToolDeps) loggedPerformance(ctx context.Context, requested *flo
 		return none, err
 	}
 
-	// rpm comes from one representative instance rather than an average
-	// across every engine: this boat's twin engines run matched revs under
-	// way, and averaging would need its own timestamp join - with its own
-	// "one instance missing" question - for a figure that is illustrative
-	// context, not the thing estimate_passage is actually estimating.
+	// rpm comes from one representative instance rather than an average across
+	// every engine: twin engines run matched revs under way. The learned band is a
+	// mean of the engines running, so a twin run at split revs reads the wrong band
+	// here.
 	rpmPath := fmt.Sprintf("propulsion.%s.revolutions", engines[0].Instance)
 	rpm, err := d.influxRange(rpmPath, start, stop, assistantPerformanceQueryEvery)
 	if err != nil {
@@ -1057,38 +1222,20 @@ func (d assistantToolDeps) loggedPerformance(ctx context.Context, requested *flo
 		return none, fmt.Errorf("no underway history in the last %d days", days)
 	}
 
-	speedKts := 0.0
-	speedSource := "requested"
-	if requested != nil {
-		speedKts = *requested
-	} else {
-		band, _ := mostSampledBand(table)
-		speedKts = band.SOGKtsMean
-		speedSource = "most_sampled_band"
-	}
-
-	lPerH, rpmAtSpeed, ok := estimateAtSpeed(table, speedKts)
-	if !ok {
-		return none, fmt.Errorf("no underway history in the last %d days", days)
-	}
-
 	totalSamples := 0
 	for _, band := range table {
 		totalSamples += band.Samples
 	}
-	return loggedPerformance{days: days, instances: instances, table: table, speedKts: speedKts, speedSource: speedSource, lPerH: lPerH, rpm: rpmAtSpeed, samples: totalSamples}, nil
+	return loggedPerformance{days: days, instances: instances, table: table, samples: totalSamples}, nil
 }
 
 // loggedPerformance is what loggedPerformance reads off the boat's history: the
-// speed-to-burn table and the speed, burn and rpm at the speed asked for.
+// speed-to-burn table.
 type loggedPerformance struct {
-	days        int
-	instances   []string
-	table       []performanceBand
-	speedKts    float64
-	speedSource string
-	lPerH, rpm  float64
-	samples     int
+	days      int
+	instances []string
+	table     []performanceBand
+	samples   int
 }
 
 // roundTo5 rounds a coordinate to five decimals, about a metre.

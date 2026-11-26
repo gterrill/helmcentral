@@ -63,6 +63,9 @@ const assistantFindPlacesMaxQueryRunes = 80
 // policy).
 var assistantFindPlacesQueryPattern = regexp.MustCompile(`^[\p{L}\p{N} .,'&()-]+$`)
 
+// legPaceFunc is the learned pace fitted as at now (learnedPaceModel).
+type legPaceFunc func(ctx context.Context, now time.Time) (*legPaceModel, error)
+
 // assistantToolDeps are every real-world dependency the tools need,
 // injected so tests supply fakes/stubs instead of a live SignalK, WASM
 // plugin registry, place-names provider or InfluxDB connection.
@@ -108,6 +111,11 @@ type assistantToolDeps struct {
 	// freshEnoughToPublish), which estimate_passage reports as "unknown"
 	// rather than a fabricated zero.
 	fuelAboardM3 func() (float64, bool)
+	// legPace is the boat's learned cruise pace, the model passage plan legs are
+	// timed on, or why there is none. estimate_passage times a run on it. Nil
+	// reads as the passage record not being available. It is given the clock the run
+	// is timed at, so the pace is fitted at the same moment.
+	legPace legPaceFunc
 	// help names the embedded help pages read_help serves
 	// (assistant_help.go). Production returns globalHelp, loaded once
 	// at startup; tests inject a fixed slice with no embedding involved.
@@ -368,6 +376,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		fuelRateInstances: configuredEngineInstances(settingsPath),
 		engineSignature:   liveEngineSignature,
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
+		legPace:           learnedPaceModel,
 		help:              func() []helpPage { return globalHelp },
 		documents:         func() *documentStore { return globalDocumentStore },
 		documentSearchReadiness: func() (assistantReadiness, string, error) {

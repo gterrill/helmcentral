@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -859,9 +860,9 @@ func TestExecuteEstimatePassage_UnreadableSettingsIsNotReportedAsNotSetUp(t *tes
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, errors.New("boom") },
 	}
-	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
-	if err == nil || !strings.Contains(err.Error(), "settings could not be read") || strings.Contains(err.Error(), "not set up") {
-		t.Fatalf("expected a settings-unreadable error, got %v", err)
+	result := estimateResult(t, deps, openSeaArgs(20, `"speed_kts":10`))
+	if reason := result.FuelMissingReason; !strings.Contains(reason, "settings could not be read") || strings.Contains(reason, "not set up") {
+		t.Fatalf("expected a settings-unreadable reason, got %q", reason)
 	}
 }
 
@@ -909,10 +910,28 @@ func singleBandPerformanceSeries() map[string][]telemetryPoint {
 	}
 }
 
+// wideSpeedPerformanceSeries logs the same 93.6 L/h at 1815 rpm in two speed
+// bands, 9.7 kn and 10.5 kn, three samples each, so a speed between them reads
+// 93.6 L/h at 1815 rpm.
+func wideSpeedPerformanceSeries() map[string][]telemetryPoint {
+	out := map[string][]telemetryPoint{}
+	for path, pts := range singleBandPerformanceSeries() {
+		out[path] = append([]telemetryPoint{}, pts...)
+		for _, p := range pts {
+			v := p.Value
+			if path == "navigation.speedOverGround" {
+				v = 5.4
+			}
+			out[path] = append(out[path], telemetryPoint{Timestamp: p.Timestamp.Add(time.Hour), Value: v})
+		}
+	}
+	return out
+}
+
 func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		influxRange:       stubInfluxRangeByPath(wideSpeedPerformanceSeries()),
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
@@ -935,13 +954,13 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	if result.SpeedSource != "requested" {
 		t.Errorf("expected speed_source=requested, got %q", result.SpeedSource)
 	}
-	if result.Hours != 2.0 {
+	if result.Hours == nil || *result.Hours != 2.0 {
 		t.Errorf("expected hours=2.0 (20nm at 10kts), got %v", result.Hours)
 	}
-	if result.Litres != 187 {
+	if result.Litres == nil || *result.Litres != 187 {
 		t.Errorf("expected litres=187 (2h at 93.6 L/h, rounded), got %v", result.Litres)
 	}
-	if result.LPerH != 93.6 {
+	if result.LPerH == nil || *result.LPerH != 93.6 {
 		t.Errorf("expected l_per_h=93.6 (two engines summed), got %v", result.LPerH)
 	}
 	if result.RPM != 1815 {
@@ -950,72 +969,344 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	if result.HistoryDays != 90 {
 		t.Errorf("expected the default history_days=90, got %d", result.HistoryDays)
 	}
-	if result.Samples != 3 {
-		t.Errorf("expected samples=3, got %d", result.Samples)
+	if result.Samples != 6 {
+		t.Errorf("expected samples=6, got %d", result.Samples)
 	}
 	if len(result.Instances) != 2 || result.Instances[0] != "port" || result.Instances[1] != "starboard" {
 		t.Errorf("expected instances=[port starboard], got %v", result.Instances)
 	}
-	if len(result.Table) != 1 || result.Table[0].SOGKtsMin != 9 {
-		t.Errorf("expected a single band 9 in the table, got %+v", result.Table)
+	if len(result.Table) != 2 || result.Table[0].SOGKtsMin != 9 || result.Table[1].SOGKtsMin != 10 {
+		t.Errorf("expected bands 9 and 10 in the table, got %+v", result.Table)
 	}
 	if !strings.Contains(result.Note, "head seas add time and fuel") {
 		t.Errorf("expected the observed-conditions note, got %q", result.Note)
 	}
 }
 
-func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
-	deps := assistantToolDeps{
-		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
+// learnedPaceFake is the boat's learned pace: a cruise speed in the band
+// lowRPM to highRPM, no slow water.
+func learnedPaceFake(cruiseKn, lowRPM, highRPM float64) legPaceFunc {
+	return func(context.Context, time.Time) (*legPaceModel, error) {
+		return &legPaceModel{CruiseKn: cruiseKn, Slow: map[paceCell]float64{}, BandLowRPM: lowRPM, BandHighRPM: highRPM}, nil
 	}
+}
 
-	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
-	// the expected value is exact rather than needing its own rounding.
-	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(97, ``))
+// estimateResult runs estimate_passage and decodes what it returns.
+func estimateResult(t *testing.T, deps assistantToolDeps, args json.RawMessage) assistantEstimatePassageResult {
+	t.Helper()
+	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", args)
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
-
 	var result assistantEstimatePassageResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
 	}
+	return result
+}
 
-	if result.SpeedSource != "most_sampled_band" {
-		t.Errorf("expected speed_source=most_sampled_band, got %q", result.SpeedSource)
-	}
-	if result.SpeedKts != 9.7 {
-		t.Errorf("expected speed_kts=9.7 (the single band's mean), got %v", result.SpeedKts)
-	}
-	if result.Hours != 10.0 {
-		t.Errorf("expected hours=10.0, got %v", result.Hours)
-	}
-	if result.Litres != 936 {
-		t.Errorf("expected litres=936 (10h at 93.6 L/h), got %v", result.Litres)
+// estimateDeps is a boat with a logged single band, two engines and the learned pace given.
+func estimateDeps(pace legPaceFunc) assistantToolDeps {
+	return assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
+		legPace:           pace,
 	}
 }
 
-func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
+// twoBandPerformanceSeries logs 9.7 kn at 1815 rpm burning 93.6 L/h in all, and
+// 7.8 kn at 1200 rpm burning 36 L/h in all, three samples of each.
+func twoBandPerformanceSeries() map[string][]telemetryPoint {
+	out := map[string][]telemetryPoint{}
+	add := func(path string, i int, v float64) {
+		out[path] = append(out[path], telemetryPoint{Timestamp: time.Unix(int64(i)*600, 0).UTC(), Value: v})
+	}
+	for i := 0; i < 6; i++ {
+		sog, fuel, rpm := 5.0, 0.000013, 30.25
+		if i >= 3 {
+			sog, fuel, rpm = 4.0, 0.000005, 20.0
+		}
+		add("navigation.speedOverGround", i, sog)
+		add("propulsion.port.fuel.rate", i, fuel)
+		add("propulsion.starboard.fuel.rate", i, fuel)
+		add("propulsion.port.revolutions", i, rpm)
+	}
+	return out
+}
+
+// estimateHours is the hours an estimate_passage result carries, 0 when it has none.
+func estimateHours(r assistantEstimatePassageResult) float64 {
+	if r.Hours == nil {
+		return 0
+	}
+	return *r.Hours
+}
+
+// How estimate_passage times a run: on the learned pace, at a speed asked for, or
+// not at all. The Influx fake holds a 9.7 kn speed history, which is never the
+// time's basis, and a single band at 93.6 L/h that the fuel is read off.
+func TestExecuteEstimatePassage_TimingByPaceOrSpeed(t *testing.T) {
+	noRPM := func(context.Context, time.Time) (*legPaceModel, error) { return nil, errLegPaceNoRPM }
+	notLearned := fmt.Errorf("%w: 1.0 h at cruising revs over 1 passages, needs 2 h over 3", errLegPaceNotLearned)
+	cases := []struct {
+		name     string
+		pace     legPaceFunc
+		nm       float64
+		rest     string
+		hours    float64 // 0: no hours
+		reason   string
+		basis    string
+		source   string
+		speedKts float64
+	}{
+		// 97nm at the learned 9.7 kn is exactly 10.0 hours.
+		{name: "learned pace", pace: learnedPaceFake(9.7, 1715, 1915), nm: 97, hours: 10,
+			basis: etaBasisText(9.7, 0, ""), source: "learned_cruise", speedKts: 9.7},
+		{name: "no rpm under way", pace: noRPM, nm: 97, reason: "No ETA: no engine rpm recorded under way"},
+		{name: "pace not learned", pace: func(context.Context, time.Time) (*legPaceModel, error) { return nil, notLearned }, nm: 97,
+			reason: "No ETA: " + notLearned.Error()},
+		// A pace that would give 10 hours is not read: the speed asked for is used.
+		{name: "requested speed overrides the pace", pace: learnedPaceFake(9.7, 1715, 1915), nm: 20, rest: `"speed_kts":10`,
+			hours: 2, basis: "At your speed of 10.0 kn.", source: "requested", speedKts: 10},
+		{name: "requested speed needs no pace model", pace: noRPM, nm: 20, rest: `"speed_kts":10`,
+			hours: 2, basis: "At your speed of 10.0 kn.", source: "requested", speedKts: 10},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			deps := estimateDeps(c.pace)
+			deps.influxRange = stubInfluxRangeByPath(wideSpeedPerformanceSeries())
+			r := estimateResult(t, deps, openSeaArgs(c.nm, c.rest))
+
+			if got := estimateHours(r); got != c.hours {
+				t.Errorf("hours %v, want %v", got, c.hours)
+			}
+			if r.NoEtaReason != c.reason {
+				t.Errorf("no_eta_reason %q, want %q", r.NoEtaReason, c.reason)
+			}
+			if r.EtaBasis != c.basis || r.SpeedSource != c.source || r.SpeedKts != c.speedKts {
+				t.Errorf("basis %q, source %q, speed %v; want %q, %q, %v", r.EtaBasis, r.SpeedSource, r.SpeedKts, c.basis, c.source, c.speedKts)
+			}
+			if r.DistanceNm != c.nm {
+				t.Errorf("the distance stays, got %v", r.DistanceNm)
+			}
+			if r.LPerH == nil || *r.LPerH != 93.6 {
+				t.Errorf("the fuel rate stays when it is logged, got %v", r.LPerH)
+			}
+			if c.hours == 0 {
+				if r.Litres != nil {
+					t.Errorf("nothing was timed, so no litres, got %v", *r.Litres)
+				}
+			} else if want := math.Round(c.hours * 93.6); r.Litres == nil || *r.Litres != want {
+				t.Errorf("litres %v, want %v (%v h at 93.6 L/h)", r.Litres, want, c.hours)
+			}
+		})
+	}
+}
+
+func TestExecuteEstimatePassage_FuelIsReadAtTheLearnedBandsRPM(t *testing.T) {
+	deps := estimateDeps(learnedPaceFake(8.0, 1100, 1300)) // band mid 1200 rpm
+	deps.influxRange = stubInfluxRangeByPath(twoBandPerformanceSeries())
+	// 20nm at 8 kn is 2.5 h. At 1200 rpm the boat burned 36 L/h; read at 8 kn
+	// off the speed it would be about 42, so only the rpm gives 36.
+	result := estimateResult(t, deps, openSeaArgs(20, ``))
+
+	if result.LPerH == nil || *result.LPerH != 36 {
+		t.Fatalf("expected 36 L/h at the band's 1200 rpm, got %v", result.LPerH)
+	}
+	if result.Litres == nil || *result.Litres != 90 {
+		t.Errorf("expected 90 L (2.5 h at 36 L/h), got %v", result.Litres)
+	}
+	if result.RPM != 1200 {
+		t.Errorf("expected rpm 1200, the band's, got %v", result.RPM)
+	}
+}
+
+// A cruise rpm the log never saw is no fuel figure: nothing is read off the nearest
+// band. The table here spans 1200 to 1815 rpm.
+func TestExecuteEstimatePassage_CruiseRPMOutsideTheLoggedRangeGivesNoFuel(t *testing.T) {
+	for name, c := range map[string]struct{ low, high float64 }{
+		"above the table": {2200, 2400}, // mid 2300
+		"below the table": {800, 1000},  // mid 900
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps := estimateDeps(learnedPaceFake(8.0, c.low, c.high))
+			deps.influxRange = stubInfluxRangeByPath(twoBandPerformanceSeries())
+			result := estimateResult(t, deps, openSeaArgs(20, ``))
+
+			if result.Hours == nil {
+				t.Errorf("the time stands")
+			}
+			if result.LPerH != nil || result.Litres != nil {
+				t.Errorf("no fuel outside the logged rpm range, got l_per_h %v litres %v", result.LPerH, result.Litres)
+			}
+			want := fmt.Sprintf("the logged fuel history's speed bands don't reach the cruise rpm (about %.0f rpm) in the last 90 days", (c.low+c.high)/2)
+			if result.FuelMissingReason != want {
+				t.Errorf("fuel_missing_reason %q, want %q", result.FuelMissingReason, want)
+			}
+		})
+	}
+}
+
+// A speed asked for outside the speeds the log made is no fuel figure: nothing is
+// read off the nearest band. The table here spans 7.8 to 9.7 kn.
+func TestExecuteEstimatePassage_RequestedSpeedOutsideTheLoggedSpeedsGivesNoFuel(t *testing.T) {
+	for name, c := range map[string]struct{ speed, want string }{
+		"above the table": {"12", "the logged fuel history's speed bands don't reach 12.0 kn in the last 90 days"},
+		"below the table": {"3", "the logged fuel history's speed bands don't reach 3.0 kn in the last 90 days"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps := estimateDeps(learnedPaceFake(8.0, 1100, 1300))
+			deps.influxRange = stubInfluxRangeByPath(twoBandPerformanceSeries())
+			result := estimateResult(t, deps, openSeaArgs(20, `"speed_kts":`+c.speed))
+
+			if result.Hours == nil {
+				t.Errorf("the time stands")
+			}
+			if result.LPerH != nil || result.Litres != nil {
+				t.Errorf("no fuel outside the logged speeds, got l_per_h %v litres %v", result.LPerH, result.Litres)
+			}
+			if result.FuelMissingReason != c.want {
+				t.Errorf("fuel_missing_reason %q, want %q", result.FuelMissingReason, c.want)
+			}
+		})
+	}
+	t.Run("inside the table", func(t *testing.T) {
+		deps := estimateDeps(learnedPaceFake(8.0, 1100, 1300))
+		deps.influxRange = stubInfluxRangeByPath(twoBandPerformanceSeries())
+		result := estimateResult(t, deps, openSeaArgs(20, `"speed_kts":8.5`))
+		if result.LPerH == nil || *result.LPerH <= 36 || *result.LPerH >= 93.6 {
+			t.Errorf("expected a burn interpolated between 36 and 93.6 L/h, got %v", result.LPerH)
+		}
+		if result.FuelMissingReason != "" {
+			t.Errorf("unexpected fuel_missing_reason %q", result.FuelMissingReason)
+		}
+	})
+}
+
+// With slow water on the route every hour is charged at the cruise burn.
+func TestExecuteEstimatePassage_SlowWaterIsChargedAtTheCruiseBurn(t *testing.T) {
+	slow := map[paceCell]float64{}
+	for lat := cellOf(-19.84, 160).lat; lat <= cellOf(-19.80, 160).lat; lat++ {
+		for _, lon := range []int{cellOf(-19.8, 160).lon - 1, cellOf(-19.8, 160).lon} {
+			slow[paceCell{lat, lon}] = 7.8
+		}
+	}
+	model := &legPaceModel{CruiseKn: 9.7, Slow: slow, BandLowRPM: 1715, BandHighRPM: 1915}
+	deps := estimateDeps(func(context.Context, time.Time) (*legPaceModel, error) { return model, nil })
+	result := estimateResult(t, deps, openSeaArgs(20, ``))
+
+	if result.Hours == nil || result.LPerH == nil || result.Litres == nil {
+		t.Fatalf("expected hours, l_per_h and litres, got %+v", result)
+	}
+	// The hours are rounded to a tenth, so allow that much. Slow water at its own
+	// burn would be about 15 L off.
+	if want := *result.Hours * *result.LPerH; math.Abs(*result.Litres-want) > 6 {
+		t.Errorf("litres %v, want the whole %v h at %v L/h (%v)", *result.Litres, *result.Hours, *result.LPerH, want)
+	}
+}
+
+func TestExecuteEstimatePassage_NoteSaysOnlyWhatHolds(t *testing.T) {
+	influxDown := func(string, time.Time, time.Time, string) ([]telemetryPoint, error) {
+		return nil, errors.New("InfluxDB is not configured")
+	}
+	t.Run("requested speed", func(t *testing.T) {
+		r := estimateResult(t, estimateDeps(learnedPaceFake(9.7, 1715, 1915)), openSeaArgs(20, `"speed_kts":10`))
+		if strings.Contains(r.Note, "learned cruise pace") || !strings.Contains(r.Note, "speed you gave") {
+			t.Errorf("note %q", r.Note)
+		}
+	})
+	t.Run("no ETA", func(t *testing.T) {
+		r := estimateResult(t, estimateDeps(func(context.Context, time.Time) (*legPaceModel, error) { return nil, errLegPaceNoRPM }), openSeaArgs(20, ``))
+		if strings.Contains(r.Note, "learned cruise pace") || !strings.Contains(r.Note, "no time was worked out") {
+			t.Errorf("note %q", r.Note)
+		}
+	})
+	t.Run("fuel missing", func(t *testing.T) {
+		deps := estimateDeps(learnedPaceFake(9.7, 1715, 1915))
+		deps.influxRange = influxDown
+		r := estimateResult(t, deps, openSeaArgs(20, ``))
+		if strings.Contains(r.Note, "logged history") || !strings.Contains(r.Note, "no fuel figures") || !strings.Contains(r.Note, "learned cruise pace") {
+			t.Errorf("note %q", r.Note)
+		}
+	})
+	t.Run("all there", func(t *testing.T) {
+		r := estimateResult(t, estimateDeps(learnedPaceFake(9.7, 1715, 1915)), openSeaArgs(20, ``))
+		if !strings.Contains(r.Note, "learned cruise pace") || !strings.Contains(r.Note, "logged burn at cruise rpm, for every hour, slow water included") {
+			t.Errorf("note %q", r.Note)
+		}
+	})
+}
+
+// The pace is fitted at the clock the run is timed at, the deps' own.
+func TestExecuteEstimatePassage_PaceIsFittedAtTheDepsClock(t *testing.T) {
+	var got time.Time
+	deps := estimateDeps(func(ctx context.Context, now time.Time) (*legPaceModel, error) {
+		got = now
+		return learnedPaceFake(9.7, 1715, 1915)(ctx, now)
+	})
+	estimateResult(t, deps, openSeaArgs(20, ``))
+	if want := deps.now(); !got.Equal(want) {
+		t.Errorf("the pace was fitted at %v, want the deps' clock %v", got, want)
+	}
+}
+
+// The fuel can be unreadable even with a table: no burn rate, a plain reason.
+func TestFuelFor_UnreadableTableGivesAReasonNotAZeroBurn(t *testing.T) {
+	nan := math.NaN()
+	p := loggedPerformance{table: []performanceBand{{SOGKtsMean: nan, RPM: nan, LPerH: 40, Samples: 5}}}
+	for name, timing := range map[string]passageTiming{
+		"at an rpm":  {fuelRPM: 1800},
+		"at a speed": {fuelAtSpeed: 10},
+	} {
+		if f, reason := p.fuelFor(timing); reason == "" || f.lPerH != 0 {
+			t.Errorf("%s: want a reason and no burn, got %+v %q", name, f, reason)
+		}
+	}
+}
+
+// A pace source that returns neither a model nor an error is no pace, not a crash.
+func TestExecuteEstimatePassage_NilModelIsNoETA(t *testing.T) {
+	r := estimateResult(t, estimateDeps(func(context.Context, time.Time) (*legPaceModel, error) { return nil, nil }), openSeaArgs(20, ``))
+	if r.Hours != nil || r.NoEtaReason != "No ETA: "+errPassageRecordUnavailable.Error() {
+		t.Errorf("hours %v, reason %q", r.Hours, r.NoEtaReason)
+	}
+}
+
+func TestExecuteEstimatePassage_NoInfluxStillTimesTheRun(t *testing.T) {
+	deps := estimateDeps(learnedPaceFake(9.7, 1715, 1915))
+	deps.influxRange = func(string, time.Time, time.Time, string) ([]telemetryPoint, error) {
+		return nil, errors.New("InfluxDB is not configured")
+	}
+	result := estimateResult(t, deps, openSeaArgs(97, ``))
+
+	if result.Hours == nil || *result.Hours != 10.0 {
+		t.Fatalf("the time does not depend on Influx, got %v", result.Hours)
+	}
+	if result.Litres != nil || result.LPerH != nil {
+		t.Errorf("no fuel without the history, got litres %v l_per_h %v", result.Litres, result.LPerH)
+	}
+	if !strings.Contains(result.FuelMissingReason, "InfluxDB is not configured") {
+		t.Errorf("fuel_missing_reason %q", result.FuelMissingReason)
+	}
+}
+
+func TestExecuteEstimatePassage_NoUnderwayHistoryLeavesFuelOut(t *testing.T) {
 	// Every engine path has points but the boat never moved: a genuinely
 	// empty join, which is not a mapping problem.
 	series := singleBandPerformanceSeries()
 	for i := range series["navigation.speedOverGround"] {
 		series["navigation.speedOverGround"][i].Value = 0
 	}
-	deps := assistantToolDeps{
-		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-		influxRange:       stubInfluxRangeByPath(series),
-		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
-	}
+	deps := estimateDeps(learnedPaceFake(9.7, 1715, 1915))
+	deps.influxRange = stubInfluxRangeByPath(series)
 
-	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
-	if err == nil {
-		t.Fatalf("expected an error when there is no underway history in the window")
+	result := estimateResult(t, deps, openSeaArgs(20, `"days":30`))
+	if result.Hours == nil {
+		t.Errorf("the time stands without a fuel history")
 	}
-	if !strings.Contains(err.Error(), "no underway history in the last 30 days") {
-		t.Errorf("expected the error to name the window, got %q", err.Error())
+	if !strings.Contains(result.FuelMissingReason, "no underway history in the last 30 days") {
+		t.Errorf("expected the reason to name the window, got %q", result.FuelMissingReason)
 	}
 }
 
@@ -1024,14 +1315,14 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 // boat) is a mapping problem, and the error says which item and path.
 func TestExecuteEstimatePassage_SilentEnginePathOnAMissingSignatureBlamesTheMapping(t *testing.T) {
 	for _, missing := range []string{"propulsion.starboard.fuel.rate", "propulsion.port.fuel.rate", "propulsion.port.revolutions"} {
-		err := estimatePassageWithout(t, missing, signatureMissing)
+		reason := estimatePassageWithout(t, missing, signatureMissing)
 		for _, want := range []string{"nothing logged for " + missing, "last 30 days", "Cummins QSB 6.7", "never reported RPM", "Settings > SignalK"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: error %q lacks %q", missing, err.Error(), want)
+			if !strings.Contains(reason, want) {
+				t.Errorf("%s: reason %q lacks %q", missing, reason, want)
 			}
 		}
-		if strings.Contains(err.Error(), "no underway history") {
-			t.Errorf("%s: a silent path is not an empty join: %q", missing, err.Error())
+		if strings.Contains(reason, "no underway history") {
+			t.Errorf("%s: a silent path is not an empty join: %q", missing, reason)
 		}
 	}
 }
@@ -1040,21 +1331,23 @@ func TestExecuteEstimatePassage_SilentEnginePathOnAMissingSignatureBlamesTheMapp
 // problem: the error names the engine and the missing figure, without blame.
 func TestExecuteEstimatePassage_SilentEnginePathWithoutProofDoesNotBlameTheMapping(t *testing.T) {
 	for _, state := range []string{signatureCarried, signatureUnknown} {
-		err := estimatePassageWithout(t, "propulsion.starboard.fuel.rate", state)
+		reason := estimatePassageWithout(t, "propulsion.starboard.fuel.rate", state)
 		for _, want := range []string{`"Cummins QSB 6.7"`, "logged nothing for propulsion.starboard.fuel.rate", "last 30 days"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: error %q lacks %q", state, err.Error(), want)
+			if !strings.Contains(reason, want) {
+				t.Errorf("%s: reason %q lacks %q", state, reason, want)
 			}
 		}
 		for _, banned := range []string{"Settings", "set to", "never reported"} {
-			if strings.Contains(err.Error(), banned) {
-				t.Errorf("%s: error %q must not blame the mapping (%q)", state, err.Error(), banned)
+			if strings.Contains(reason, banned) {
+				t.Errorf("%s: reason %q must not blame the mapping (%q)", state, reason, banned)
 			}
 		}
 	}
 }
 
-func estimatePassageWithout(t *testing.T, missing, signature string) error {
+// estimatePassageWithout is the reason the fuel is left out when one logged
+// series is missing; the time stands.
+func estimatePassageWithout(t *testing.T, missing, signature string) string {
 	t.Helper()
 	without := map[string][]telemetryPoint{}
 	for k, v := range singleBandPerformanceSeries() {
@@ -1069,12 +1362,13 @@ func estimatePassageWithout(t *testing.T, missing, signature string) error {
 			return []vesselEngineSetting{{Instance: "port", Name: "Cummins QSB 6.7"}, {Instance: "starboard", Name: "Cummins QSB 6.7"}}, nil
 		},
 		engineSignature: func(string) string { return signature },
+		legPace:         learnedPaceFake(9.7, 1715, 1915),
 	}
-	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
-	if err == nil {
-		t.Fatalf("%s: expected an error", missing)
+	result := estimateResult(t, deps, openSeaArgs(20, `"days":30`))
+	if result.Hours == nil || result.FuelMissingReason == "" {
+		t.Fatalf("%s: expected the time with the fuel left out and why, got %+v", missing, result)
 	}
-	return err
+	return result.FuelMissingReason
 }
 
 func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *testing.T) {
@@ -1084,19 +1378,19 @@ func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *tes
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, nil }, // no vessel.engines
 	}
 
-	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
-	if err == nil {
-		t.Fatalf("expected an error when no engines are configured, not an assumed pair")
+	result := estimateResult(t, deps, openSeaArgs(20, `"speed_kts":10`))
+	if result.Litres != nil || result.LPerH != nil {
+		t.Errorf("no fuel figures for an assumed pair of engines, got %v %v", result.Litres, result.LPerH)
 	}
-	if !strings.Contains(err.Error(), "engines are not set up") {
-		t.Errorf("expected the error to say engines are not set up, got %q", err.Error())
+	if !strings.Contains(result.FuelMissingReason, "engines are not set up") {
+		t.Errorf("expected the reason to say engines are not set up, got %q", result.FuelMissingReason)
 	}
 }
 
 func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		influxRange:       stubInfluxRangeByPath(wideSpeedPerformanceSeries()),
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
 	}
@@ -1116,8 +1410,8 @@ func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 	}
 	// litres=187 (asserted in TestExecuteEstimatePassage_RequestedSpeed for
 	// the same inputs), so fuel_after_l = 600 - 187 = 413.
-	if result.FuelAfterL == nil || *result.FuelAfterL != 600-result.Litres {
-		t.Fatalf("expected fuel_after_l=aboard-litres (%v), got %v", 600-result.Litres, result.FuelAfterL)
+	if result.Litres == nil || result.FuelAfterL == nil || *result.FuelAfterL != 600-*result.Litres {
+		t.Fatalf("expected fuel_after_l=aboard-litres, got litres %v after %v", result.Litres, result.FuelAfterL)
 	}
 	if strings.Contains(result.Note, "fuel aboard unknown") {
 		t.Errorf("expected no 'fuel aboard unknown' note when fuel aboard is known, got %q", result.Note)
@@ -2362,8 +2656,8 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"get_wind_forecast", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching wind forecast for Blue Pearl Bay…"},
 		{"get_wind_forecast", `{"lat":-20.1234,"lon":149.5678}`, "Fetching wind forecast for -20.1234,149.5678…"},
 		{"get_tides", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching tides near Blue Pearl Bay…"},
-		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95,"speed_kts":8.5}`, "Routing to -20.250, 148.950 and estimating at 8.5 kts from the log…"},
-		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95}`, "Routing to -20.250, 148.950 and estimating at cruising speed from the log…"},
+		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95,"speed_kts":8.5}`, "Routing to -20.250, 148.950 and timing the run at 8.5 kts…"},
+		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95}`, "Routing to -20.250, 148.950 and timing the run…"},
 		{"read_help", `{"page":"features/forecast"}`, "Reading the help: features/forecast…"},
 		{"search_documents", `{"query":"impeller"}`, `Searching documents for "impeller"…`},
 		{"read_document", `{"document_id":"doc-1"}`, "Reading document doc-1…"},
