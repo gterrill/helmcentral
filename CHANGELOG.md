@@ -323,6 +323,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A Mate lookup that times out on its own now shows as failed, with the
+  reason.** Before, it showed as cut short, as if Mate had run out of time.
 - **Settings → Logs no longer fills with a repeated SignalK warning about
   boats' AIS details.** The same warning came in every few seconds and pushed
   everything else out, so the log only reached back a few minutes. It now

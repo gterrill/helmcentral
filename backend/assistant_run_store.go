@@ -108,6 +108,11 @@ func createAssistantRunsSchema(db *sql.DB) error {
 			return err
 		}
 	}
+	// How a call ended, stored when a run is saved. A call from before reads
+	// back '' and is sorted by its error text.
+	if err := addColumnIfMissing(db, "assistant_run_calls", "outcome", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	// Worked out once when a run is saved, so reading one is a plain select.
 	// A run from before reads thought_ms NULL, 0 lookups and no reasoning kind.
 	for _, col := range []struct{ name, decl string }{
@@ -169,8 +174,8 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 	}
 	defer roundStmt.Close()
 	callStmt, err := tx.Prepare(`INSERT INTO assistant_run_calls
-		(run_id, round, seq, name, args, result, elapsed_ms, result_bytes, error, truncated, original_bytes, cache)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(run_id, round, seq, name, args, result, elapsed_ms, result_bytes, error, truncated, original_bytes, cache, outcome)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert run call: %w", err)
 	}
@@ -203,7 +208,7 @@ func saveRunTx(tx *sql.Tx, run assistantRunTrace, budget string) error {
 			if truncated {
 				original = sql.NullInt64{Int64: int64(len(c.Args) + len(c.Result)), Valid: true}
 			}
-			if _, err := callStmt.Exec(run.ID, r.Index, c.Seq, c.Name, args, result, c.ElapsedMs, len(c.Result), c.Error, boolToInt(truncated), original, c.Cache); err != nil {
+			if _, err := callStmt.Exec(run.ID, r.Index, c.Seq, c.Name, args, result, c.ElapsedMs, len(c.Result), c.Error, boolToInt(truncated), original, c.Cache, assistantCallOutcome(c.Error)); err != nil {
 				return fmt.Errorf("insert run call %s: %w", c.Name, err)
 			}
 		}
@@ -266,18 +271,20 @@ func (s *assistantStore) ListRuns(conversationID string) ([]assistantRunTrace, e
 
 // assistantCallColumns are the columns of a stored call, in the order
 // scanAssistantCall reads them.
-const assistantCallColumns = `round, seq, name, args, result, elapsed_ms, result_bytes, error, truncated, original_bytes, cache`
+const assistantCallColumns = `round, seq, name, args, result, elapsed_ms, result_bytes, error, truncated, original_bytes, cache, outcome`
 
 func scanAssistantCall(row assistantRunScanner, extra ...any) (assistantToolCall, error) {
 	var c assistantToolCall
 	var truncated int
 	var original sql.NullInt64
-	if err := row.Scan(append(extra, &c.Round, &c.Seq, &c.Name, &c.Args, &c.Result, &c.ElapsedMs, &c.ResultBytes, &c.Error, &truncated, &original, &c.Cache)...); err != nil {
+	var stored string
+	if err := row.Scan(append(extra, &c.Round, &c.Seq, &c.Name, &c.Args, &c.Result, &c.ElapsedMs, &c.ResultBytes, &c.Error, &truncated, &original, &c.Cache, &stored)...); err != nil {
 		return assistantToolCall{}, err
 	}
 	c.Truncated = truncated != 0
 	c.OriginalBytes = int(original.Int64)
-	c.Outcome, c.Reason = assistantCallOutcome(c.Error), assistantCallReason(c.Name, c.Error)
+	c.Outcome = assistantStoredCallOutcome(stored, c.Error)
+	c.Reason = assistantCallReason(c.Name, c.Outcome, c.Error)
 	return c, nil
 }
 
@@ -333,7 +340,7 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 	// result column (up to 64 kB a call) is not read.
 	// The arguments are read whole so the call's text is worked out from them,
 	// then cut for the details.
-	callRows, err := s.db.Query(`SELECT round, seq, name, args, '', elapsed_ms, result_bytes, error, truncated, original_bytes, cache
+	callRows, err := s.db.Query(`SELECT round, seq, name, args, '', elapsed_ms, result_bytes, error, truncated, original_bytes, cache, outcome
 		FROM assistant_run_calls WHERE run_id = ? ORDER BY round, seq`, id)
 	if err != nil {
 		return assistantRunTrace{}, false, fmt.Errorf("get run calls: %w", err)

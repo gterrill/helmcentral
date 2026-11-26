@@ -87,12 +87,19 @@ func refuseChargerInputMark(id string) *chargerInputRefusal {
 		}
 	}
 	namer := newSensorNamer(globalSignalKSnapshot, vesselView{}, globalSourceDevices.get())
-	// The same CanMark the discovery row shows decides whether to refuse; the
-	// marked state below only says why.
-	if namer.chargerInput(id, false, owned).CanMark {
+	// One read of the rule: a mark applies exactly when the discovery row's
+	// CanMark is true, and any other state says why it can't.
+	mark := namer.chargerInput(id, true, owned).Mark
+	if mark == markApplies {
 		return nil
 	}
-	switch namer.chargerInput(id, true, owned).Mark {
+	return chargerInputRefusalFor(id, mark, owner)
+}
+
+// chargerInputRefusalFor words why a mark in state mark can't apply. A state it
+// doesn't know still refuses.
+func chargerInputRefusalFor(id, mark, owner string) *chargerInputRefusal {
+	switch mark {
 	case markAutomatic:
 		return &chargerInputRefusal{http.StatusConflict, "Helmcentral already treats battery instance " + id + " as a charger's input."}
 	case markItem:
@@ -102,5 +109,5 @@ func refuseChargerInputMark(id string) *chargerInputRefusal {
 	case markNotChargers:
 		return &chargerInputRefusal{http.StatusConflict, "A device that isn't a charger also reports battery " + id + ", so it could be a real battery."}
 	}
-	return nil
+	return &chargerInputRefusal{http.StatusConflict, "Helmcentral can't mark battery instance " + id + " as a charger's input right now."}
 }

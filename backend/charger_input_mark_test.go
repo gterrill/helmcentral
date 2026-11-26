@@ -220,6 +220,20 @@ func TestCanMarkOnlyWhereTheMarkWouldApply(t *testing.T) {
 	}
 }
 
+// A mark state the refusal doesn't know must refuse, not allow the mark.
+func TestChargerInputRefusalRefusesAnUnknownMarkState(t *testing.T) {
+	refused := chargerInputRefusalFor("7", "some_future_state", "")
+	if refused == nil || refused.status != http.StatusConflict {
+		t.Fatalf("refusal = %+v, want a 409", refused)
+	}
+	if want := "Helmcentral can't mark battery instance 7 as a charger's input right now."; refused.message != want {
+		t.Fatalf("message = %q, want %q", refused.message, want)
+	}
+	if got := chargerInputRefusalFor("7", markNoPublishers, ""); got == nil || got.status != http.StatusConflict {
+		t.Fatalf("known state refusal = %+v", got)
+	}
+}
+
 func TestMarkedInstanceIsListedEvenWhenQuiet(t *testing.T) {
 	withTempMarkStore(t)
 	if err := markChargerInput("9", true); err != nil {

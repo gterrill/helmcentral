@@ -23,9 +23,8 @@ func TestAssistantCallOutcome_SavedMatchesLive(t *testing.T) {
 		{"stopped", assistantLookupStoppedText, "stopped", ""},
 		{"withheld", assistantToolWithheldError, "withheld", ""},
 		{"round full", assistantRoundFullError, "round_full", ""},
-		// Calls saved before the outcome was recorded hold the tool's own context error.
-		{"old cut by the time limit", "get_tides: context deadline exceeded", "cut", ""},
-		{"old stopped by the operator", "get_tides: context canceled", "stopped", ""},
+		// A tool's own timeout is a failure with its cause, not a cut.
+		{"tool's own timeout", "get_tides: fetch: context deadline exceeded", "failed", "fetch: context deadline exceeded"},
 	}
 
 	store := newTestAssistantStore(t)
@@ -61,6 +60,55 @@ func TestAssistantCallOutcome_SavedMatchesLive(t *testing.T) {
 				t.Fatalf("live lookup_done = %+v, saved call = %q %q: they must agree", d, call.Outcome, call.Reason)
 			}
 		})
+	}
+}
+
+// A live call whose own HTTP client timed out is failed, with its cause.
+func TestAssistantCallOutcome_ToolOwnTimeoutIsFailed(t *testing.T) {
+	errText := "get_forecast: fetch: context deadline exceeded"
+	if got := assistantCallOutcome(errText); got != assistantOutcomeFailed {
+		t.Fatalf("outcome = %q, want failed", got)
+	}
+	if got := assistantCallReason("get_forecast", assistantOutcomeFailed, errText); got != "fetch: context deadline exceeded" {
+		t.Fatalf("reason = %q", got)
+	}
+	tape, c := captureTape()
+	c.lookupDone(0, "get_forecast", errText)
+	d := (*tape)[0].(mateLookupDoneEvent)
+	if d.Outcome != "failed" || d.Reason != "fetch: context deadline exceeded" {
+		t.Fatalf("lookup_done = %+v", d)
+	}
+}
+
+// A new call saved with its own timeout reads back failed; a call saved before
+// the outcome was recorded (no stored outcome) still reads back as cut or stopped.
+func TestAssistantCallOutcome_SavedOwnTimeoutFailedAndLegacyKept(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("Passage")
+	trace := sampleRunTrace(conv.ID, 1, nil, assistantStopTimeCeiling)
+	trace.Rounds[0].Calls = []assistantToolCall{
+		{Seq: 0, Name: "get_forecast", Args: `{}`, Error: "get_forecast: fetch: context deadline exceeded"},
+		{Seq: 1, Name: "get_tides", Args: `{}`, Error: "get_tides: context deadline exceeded"},
+		{Seq: 2, Name: "get_tides", Args: `{}`, Error: "get_tides: context canceled"},
+	}
+	saved, err := store.SaveRun(trace)
+	if err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	// Seq 1 and 2 stand for rows saved before outcomes were stored.
+	if _, err := store.db.Exec(`UPDATE assistant_run_calls SET outcome = '' WHERE run_id = ? AND seq IN (1, 2)`, saved.ID); err != nil {
+		t.Fatalf("blank outcome: %v", err)
+	}
+	got, ok, err := store.GetRun(saved.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetRun: ok=%v err=%v", ok, err)
+	}
+	calls := got.Rounds[0].Calls
+	want := []struct{ out, reason string }{{"failed", "fetch: context deadline exceeded"}, {"cut", ""}, {"stopped", ""}}
+	for i, w := range want {
+		if calls[i].Outcome != w.out || calls[i].Reason != w.reason {
+			t.Errorf("call %d = %q %q, want %q %q", i, calls[i].Outcome, calls[i].Reason, w.out, w.reason)
+		}
 	}
 }
 

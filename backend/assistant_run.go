@@ -141,8 +141,9 @@ const (
 )
 
 // assistantCallOutcome sorts the error a call was recorded with into how it
-// ended. The one place that reads those errors, so the live stream and a saved
-// run cannot disagree.
+// ended. A cut or stopped call is always recorded with its exact sentinel text,
+// so a tool's own error that happens to end in "context deadline exceeded" (its
+// HTTP client timing out) is a failure with that cause.
 func assistantCallOutcome(errText string) string {
 	switch {
 	case errText == "":
@@ -150,12 +151,6 @@ func assistantCallOutcome(errText string) string {
 	case errText == assistantToolCutError:
 		return assistantOutcomeCut
 	case errText == assistantLookupStoppedText:
-		return assistantOutcomeStopped
-	// Calls saved before the outcome was recorded hold the tool's own context
-	// error: the time limit cut them, or the operator stopped them.
-	case strings.HasSuffix(errText, context.DeadlineExceeded.Error()):
-		return assistantOutcomeCut
-	case strings.HasSuffix(errText, context.Canceled.Error()):
 		return assistantOutcomeStopped
 	case errText == assistantToolWithheldError:
 		return assistantOutcomeWithheld
@@ -168,11 +163,28 @@ func assistantCallOutcome(errText string) string {
 
 // assistantCallReason is why a failed call failed, without the tool's name the
 // error starts with. Every other outcome says enough in itself and has none.
-func assistantCallReason(name, errText string) string {
-	if assistantCallOutcome(errText) != assistantOutcomeFailed {
+func assistantCallReason(name, outcome, errText string) string {
+	if outcome != assistantOutcomeFailed {
 		return ""
 	}
 	return strings.TrimPrefix(errText, name+": ")
+}
+
+// assistantStoredCallOutcome is the outcome of a call read back from a saved
+// run. A call saved since outcomes were stored carries its own. A call saved
+// before then has none and holds the tool's own context error: the time limit
+// cut it, or the operator stopped it.
+func assistantStoredCallOutcome(stored, errText string) string {
+	if stored != "" {
+		return stored
+	}
+	switch {
+	case strings.HasSuffix(errText, context.DeadlineExceeded.Error()):
+		return assistantOutcomeCut
+	case strings.HasSuffix(errText, context.Canceled.Error()):
+		return assistantOutcomeStopped
+	}
+	return assistantCallOutcome(errText)
 }
 
 // assistantToolPhaseTimeout bounds the tool phase of one reply: when it passes,

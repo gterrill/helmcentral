@@ -56,8 +56,12 @@ events, each with a Go struct, a golden frame and a decoder:
   abandoned when the tool phase ended is `"cut"`, not a failure, and so is a
   call that stopped with a context error because the tool phase's own time ran
   out. A call stopped by the operator is `"stopped"`. A saved run's calls carry
-  the same `outcome` and `reason`, plus `text` and `subject`, computed when the
-  run is read.
+  the same `outcome` and `reason`, plus `text` and `subject`. The `outcome` is
+  stored when the run is saved; the rest is worked out when the run is read.
+  (Amended 2026-11-26: a cut or stopped call is recorded with its exact
+  sentinel text, so a tool's own error that ends in a context error, such as
+  its HTTP client timing out, is `"failed"` with that cause. Only a call saved
+  before outcomes were stored, which has none, is still sorted by that ending.)
 - `answer_start {round, at_ms}` says the round's text is the answer. Its `at_ms`
   is when the text began, so it equals the trace's thought time.
 - `delta {text}` keeps its shape and bytes and now carries answer text only.
