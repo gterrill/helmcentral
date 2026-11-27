@@ -73,10 +73,14 @@ workflow-lint:
 # session uses the stack the main checkout is already running. Run
 # `make help-stage` in the worktree if it needs a local `go build` to embed
 # the help pages.
+#
+# STACK_ON=<branch> starts the new branch from origin/<branch> instead of
+# origin/main, for a PR stacked on one still open (ship skill, step 8), and
+# records the base mark that scripts/restack.sh moves.
 worktree:
-	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name>"; exit 1; fi
+	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name> [STACK_ON=<branch>]"; exit 1; fi
 	@# One worktree at a time: parallel runs collide on .git/config and skip steps.
-	@sh scripts/worktree.sh "$(NAME)" "$(CURDIR)"
+	@sh scripts/worktree.sh "$(NAME)" "$(CURDIR)" "$(STACK_ON)"
 	@cd "../$(notdir $(CURDIR))-$(NAME)/frontend" && if node "$(CURDIR)/scripts/check-frontend-deps.mjs" .; then \
 		echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"; \
 	else \

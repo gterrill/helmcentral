@@ -52,7 +52,8 @@ claims against the code.
 ## 4. Test
 
 Run `make check`: it is the one command a builder runs before reporting done.
-Its summary carries a `tree:` line just after `load:`, the hash of the working
+Its summary carries a `tree:` line (after `load:` and any `power:` or
+`slept:` line), the hash of the working
 tree it tested. A builder's hand-back counts as this step's run when the summary
 ends `check-all: all steps passed` (a `check-backend` or `check-frontend`
 summary also has a `tree:` line but does not count) and
@@ -211,4 +212,32 @@ which.
 
 The operator merges. The PR is theirs to merge, tag and deploy.
 
-**Done:** the PR state is `MERGED` or `CLOSED`.
+### The next PR's lane
+
+Once the PR is reported, the wait for the operator is build time for the next
+PR, when the plan you are working from names one: start it now, without
+waiting for "go ahead".
+
+- Run its design pass and put its design questions to the operator now.
+- When the next PR builds on this one's code, start its builder in `make
+  worktree NAME=<next> STACK_ON=<this PR's branch>`. That records the branch's
+  **base mark**, the commit it was stacked on. Otherwise use a plain `make
+  worktree NAME=<next>`.
+- Run its steps 1 to 5 as usual, with three changes while it is stacked. Step
+  1's rebase onto `origin/main` waits. Its builder brief says the branch is
+  stacked, so the builder commits on it (unpushed) before handing back. `/simplify` and `/code-review` cover only its
+  own work: pass them "since <mark>", from `sh scripts/restack.sh <next
+  worktree> --mark`.
+- Every move of a stacked branch goes through `sh scripts/restack.sh <next
+  worktree> <new base>`: `<this PR's branch>` after a push here, `main` once
+  this PR merges. It rebases only the branch's own commits and moves the mark.
+  A plain `git rebase` replays this PR's old commits.
+- Hold its step 6 until this PR merges and it is restacked on `main`; then go
+  back to step 4.
+- This PR's watcher keeps running, and its notices come first.
+
+Stay one PR ahead: one PR open and one being built. Checks from both queue
+behind the machine-wide check lock; that wait is expected.
+
+**Done:** the PR state is `MERGED` or `CLOSED`, and the next PR, when the plan
+names one, has its design pass done or its builder running.

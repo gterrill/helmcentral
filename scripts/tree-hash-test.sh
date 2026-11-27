@@ -345,6 +345,7 @@ chmod +x "$work/gobin/caffeinate"
 # run_check: runs check.sh backend in $chk, output in $work/chk.out, status in $code.
 run_check() {
 	env -u HELMCENTRAL_CHECK_LOCK_HELD -u HELMCENTRAL_CHECK_TREE_OWNER -u HELMCENTRAL_CHECK_LOAD_SAMPLED \
+		-u HELMCENTRAL_CHECK_SLEEP_MARK -u HELMCENTRAL_CHECK_ON_BATTERY \
 		PATH="$work/gobin:$PATH" HELMCENTRAL_CHECK_LOCKFILE="$work/chk.lock" \
 		sh "$chk/scripts/check.sh" backend >"$work/chk.out" 2>&1
 	code=$?
