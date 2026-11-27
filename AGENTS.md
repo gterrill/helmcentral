@@ -18,14 +18,18 @@
 - In your own worktree, carry finished work to an open PR without asking:
   commit by path, push the branch, open the PR. The `ship` skill holds the
   steps and watches the PR until it merges.
-- Ask first before merging, tagging, deploying, editing the main checkout,
-  or changing a design the operator agreed.
+- Merge a plan PR, a PR named in a plan file the operator agreed, when the
+  plan-PR rule in the `ship` skill's step 8 says to merge it.
+- Ask first before any other merge, tagging, deploying, editing the main
+  checkout, or changing a design the operator agreed.
   
 ## Checks Before Commit And Release
 
 - Every batch of changes passes `/code-review medium` before its commit and
   `/security-review` before it merges, with or without the `ship` skill, which
-  holds the full steps. Check each finding against the code. From a worktree,
+  holds the full steps. A fix made after the review under that skill's
+  finding-fix rule belongs to the reviewed batch. Check each finding against
+  the code. From a worktree,
   run the security review with `sh scripts/security-review.sh <worktree>`.
   A docs-only change, as the `ship` skill defines it, skips `/security-review`.
 - Tags are SemVer only, such as `v0.3.5`. Every release goes through the
@@ -73,8 +77,10 @@
 - Prefer test-first development (TDD) for behavior changes and bug fixes.
 - Write or update a failing test that reproduces the expected behavior before implementing the fix.
 - Implement the minimal change required to make the test pass.
-- Before building new logic that keeps state over time (windows, clocks,
-  backfill, caches, recompute), run a `Plan` subagent on the design. Its edge
+- Before building a plan PR, or new logic that keeps state over time
+  (windows, clocks, backfill, caches, recompute), run a `Plan` subagent on the
+  design. It names the narrowest version that meets the need and what that
+  leaves out, and the operator chooses the scope before the build. Its edge
   cases become the first tests; any that would change an agreed design go to
   the operator first.
 - Run relevant tests after the change and include the test result summary in your response.

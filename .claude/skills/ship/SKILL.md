@@ -51,15 +51,23 @@ claims against the code.
 
 ## 4. Test
 
-Run `make check`: it is the one command a builder runs before reporting done.
-Its summary carries a `tree:` line (after `load:` and any `power:` or
-`slept:` line), the hash of the working
-tree it tested. A builder's hand-back counts as this step's run when the summary
-ends `check-all: all steps passed` (a `check-backend` or `check-frontend`
-summary also has a `tree:` line but does not count) and
-`sh scripts/tree-hash.sh <worktree>` prints that same hash; then do not rerun.
-Any mismatch means run it. A rebase changes the tree, so it needs a run.
-It runs these, in order, and carries on past a failure:
+This step has two forms:
+
+- **Targeted tests**, for the code touched (`builder-brief.md` lists the
+  commands), after every build or fix. A builder's hand-back shows them.
+- **`make check`**, once step 5 has nothing left to fix: `make -C <worktree>
+  check` in the foreground with a Bash timeout of 600000. When the tool moves
+  it to the background, wait with `sh <worktree>/scripts/await-check.sh <id>`
+  (Bash timeout 200000), rerunning that while it exits 3. A run queued behind
+  the machine-wide lock can take a while; after an hour, tell the operator and
+  keep waiting. No Monitor, `sleep`, `ps` or reads of the task output file.
+
+A fix after that run, for `make check`, CI (step 8) or the security review
+(step 7), is a **finding fix**: test-first, targeted tests, no new review, then
+`make check` again. So is a rebase, minus the test. A docs-only diff runs its
+own checks (step 3) in place of `make check`. The summary's `tree:` line (after
+`load:` and any `power:` or `slept:` line) is the hash of the tree it tested.
+`make check` runs these, in order, and carries on past a failure:
 
 - Backend: `make check-backend`
 - Frontend: `make check-frontend`
@@ -68,6 +76,8 @@ It runs these, in order, and carries on past a failure:
   without a conflict, so this is what catches an entry left in a released section.
 - Commit messages: `sh scripts/check-commit-messages.sh`, which rejects Claude
   attribution.
+- The tooling scripts' own tests (`scripts/*-test.sh`, `scripts/hooks/*-test.sh`):
+  a failure there is a failure like any other.
 
 A change under `.github/workflows/` also needs `make workflow-lint`.
 
@@ -108,7 +118,8 @@ file alone by hand. Reproduce a failure this way:
   the leak predates this change: tell the operator and carry on.
 
 **Done:** every suite you ran is green, and a UI change has been previewed at
-desktop and phone widths. Keep the pass counts for the PR body.
+desktop and phone widths; after the review, that includes `make check` (or a
+docs-only diff's own checks). Keep the pass counts for the PR body.
 
 ## 5. Review
 
@@ -140,17 +151,21 @@ after that, ask the operator.
 A real finding gets fixed in this PR, even when it sits in code the change
 only passes through. Dismiss a finding only when the code proves it wrong.
 
-Any code change made after the review, other than a fix for its findings, goes
-back to step 4 and gets reviewed again. A loop of fixes alone does not.
+Any code change made after the review, other than a fix for its findings or a
+finding fix (step 4), goes back to step 4 and gets reviewed again. A loop of
+fixes alone does not.
 
 **Done:** every finding is fixed or shown wrong against the code, every
 touched standards section has been applied to the diff, step 4 is green on the
-fixed tree, and no code has changed since the review except fixes for its
+fixed tree (its one `make check`, or the docs-only checks), and no code has changed since the review except fixes for its
 findings.
 
 ## 6. Commit and open the PR
 
-Stage by path and commit. Run `sh scripts/check-commit-messages.sh`, since
+First, `sh <worktree>/scripts/tree-hash.sh <worktree>` must print the `tree:`
+hash of the last green `make check`; if it does not, run step 4's `make check`
+again. A docs-only diff instead needs its own checks to have run on the tree
+as it stands. Stage by path and commit. Run `sh scripts/check-commit-messages.sh`, since
 step 4 ran before these commits existed; a hit means reword the commit before
 pushing. Push the branch. Open the PR with `gh pr create
 --body-file <path>`, or, when the branch already has one, the push updates it.
@@ -204,40 +219,50 @@ which.
   the latest main before it merges): rebase onto `origin/main`, go back to
   step 4. The push after a rebase is `git push --force-with-lease`.
 - `CLOSED`: stop and tell the operator.
+- `CLEAN` with `checks done`, on a **plan PR** (a PR named in a plan file the
+  operator agreed), once step 7 covers every pushed commit or the diff is
+  docs-only (a push after step 7, rebase included, means running it again
+  first): merge it with `gh pr merge <N> --merge`, do not start the watcher
+  again, and go on as for `MERGED`. On any other PR, tell the operator it is
+  ready.
 - `MERGED`: tell the operator it merged. Get the merge commit with `gh pr
   view <N> --json mergeCommit`, find its run with `gh run list --workflow CI
   --commit <sha>`, and wait on it with `gh run watch <id> --exit-status`.
   Report a red run to the operator as a real failure before picking up
   whatever comes next in the plan you are working from.
 
-The operator merges. The PR is theirs to merge, tag and deploy.
+Every other merge, and every tag and deploy, is the operator's.
 
 ### The next PR's lane
 
-Once the PR is reported, the wait for the operator is build time for the next
+Once the PR is reported, the wait for CI and the merge is build time for the next
 PR, when the plan you are working from names one: start it now, without
 waiting for "go ahead".
 
-- Run its design pass and put its design questions to the operator now.
+- Run its design pass and put its design questions, scope among them, to the
+  operator now. Its builder starts once the operator has chosen the scope.
 - When the next PR builds on this one's code, start its builder in `make
   worktree NAME=<next> STACK_ON=<this PR's branch>`. That records the branch's
   **base mark**, the commit it was stacked on. Otherwise use a plain `make
   worktree NAME=<next>`.
-- Run its steps 1 to 5 as usual, with three changes while it is stacked. Step
+- Run its steps 1 to 5 as usual, with four changes while it is stacked. Step
   1's rebase onto `origin/main` waits. Its builder brief says the branch is
-  stacked, so the builder commits on it (unpushed) before handing back. `/simplify` and `/code-review` cover only its
-  own work: pass them "since <mark>", from `sh scripts/restack.sh <next
-  worktree> --mark`.
+  stacked, so the builder commits on it (unpushed) before handing back.
+  `/simplify` and `/code-review` cover only its own work: pass them "since
+  <mark>", from `sh scripts/restack.sh <next worktree> --mark`. Its one `make
+  check` waits until it is restacked on `main`, so its step 5 is done without
+  it.
 - Every move of a stacked branch goes through `sh scripts/restack.sh <next
   worktree> <new base>`: `<this PR's branch>` after a push here, `main` once
   this PR merges. It rebases only the branch's own commits and moves the mark.
   A plain `git rebase` replays this PR's old commits.
-- Hold its step 6 until this PR merges and it is restacked on `main`; then go
-  back to step 4.
+- Hold its step 6 until this PR merges and it is restacked on `main`; then
+  run its `make check` and go on.
 - This PR's watcher keeps running, and its notices come first.
 
 Stay one PR ahead: one PR open and one being built. Checks from both queue
 behind the machine-wide check lock; that wait is expected.
 
 **Done:** the PR state is `MERGED` or `CLOSED`, and the next PR, when the plan
-names one, has its design pass done or its builder running.
+names one, has its design questions put to the operator or its builder
+running.
