@@ -134,9 +134,9 @@ check-backend:
 check-frontend:
 	@sh scripts/check.sh frontend
 
-# Everything a builder runs before reporting done: check-backend,
-# check-frontend, docs-lint-changed, the changelog check and the commit-message
-# check, in that order. Continues past a failure and exits non-zero if any step
+# The full pre-PR run (the ship skill, step 4, says when): check-backend,
+# check-frontend, docs-lint-changed, the changelog check, the commit-message
+# check and the tooling scripts' own tests. Continues past a failure and exits non-zero if any step
 # failed. See scripts/check.sh.
 check:
 	@sh scripts/check.sh all
