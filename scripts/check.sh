@@ -15,6 +15,11 @@
 # into a pass. The npm-test step reruns failed test files alone and labels them
 # after a final marker line in its log, which the summary shows, but its exit
 # code is always the first run's.
+# The outermost run warns on stderr when the Mac is on battery. Its summary lines
+# come in this order: `load:`, then `power: on battery` when on battery and
+# `slept:` when present, then `tree:`. The `slept:` line reads either "the Mac
+# slept A min of this run's T min" (60 s or more asleep during the run, queueing
+# included) or "could not read the Mac's clocks". Neither fails the run.
 # Exits 1 if any step failed.
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -96,6 +101,24 @@ esac
 . "$PWD/scripts/lib/stay-awake.sh"
 stay_awake
 
+# The Mac's clocks and power source as the outermost run starts, taken before
+# the lock so a sleep while queued counts and the battery warning is not held
+# back. caffeinate -i does not stop lid sleep (a Mac with no external display
+# sleeps on closing the lid, on AC too), so the warning covers battery only and
+# the summary's "slept:" line catches the rest. The re-exec'd and nested runs
+# get the values through the environment. Only the true outermost call, with
+# neither LOCK_HELD nor TREE_OWNER set, takes them, so a stale value left in
+# the shell is overwritten and never disables the mark.
+if [ -z "${HELMCENTRAL_CHECK_LOCK_HELD:-}" ] && [ -z "${HELMCENTRAL_CHECK_TREE_OWNER:-}" ]; then
+	HELMCENTRAL_CHECK_SLEEP_MARK=$(sleep_mark) || HELMCENTRAL_CHECK_SLEEP_MARK=
+	HELMCENTRAL_CHECK_ON_BATTERY=
+	if on_battery; then
+		HELMCENTRAL_CHECK_ON_BATTERY=1
+		echo "check: on battery: closing the lid will sleep the Mac and stall this run" >&2
+	fi
+	export HELMCENTRAL_CHECK_SLEEP_MARK HELMCENTRAL_CHECK_ON_BATTERY
+fi
+
 # One check run at a time across every checkout on this machine: two at once
 # overload it and fail tests at random. The outermost run re-runs itself under
 # the lock with HELMCENTRAL_CHECK_LOCK_HELD set, so the runs it starts skip it.
@@ -107,6 +130,7 @@ mkdir -p "$logdir"
 # The outermost run hashes the tree at start and end; a changed tree fails.
 # HELMCENTRAL_CHECK_TREE_OWNER marks the runs it starts as nested.
 tree_start=
+outermost=
 if [ -z "${HELMCENTRAL_CHECK_TREE_OWNER:-}" ]; then
 	HELMCENTRAL_CHECK_TREE_OWNER=1
 	export HELMCENTRAL_CHECK_TREE_OWNER
@@ -121,6 +145,7 @@ if [ -z "${HELMCENTRAL_CHECK_TREE_OWNER:-}" ]; then
 		echo "check: could not hash the working tree" >&2
 		exit 2
 	}
+	outermost=1
 fi
 
 # The machine's 1-minute load as this run starts, taken once by the outermost
@@ -166,6 +191,7 @@ all)
 	step lock-tests . sh scripts/check-lock-test.sh
 	step stay-awake-tests . sh scripts/stay-awake-test.sh
 	step tree-hash-tests . sh scripts/tree-hash-test.sh
+	step restack-tests . sh scripts/restack-test.sh
 	step hook-tests-gofmt . sh scripts/hooks/gofmt-edited-test.sh
 	step await-check-tests . sh scripts/await-check-test.sh
 	step npm-test-rerun-tests . sh scripts/check-npm-test-test.sh
@@ -175,6 +201,11 @@ esac
 echo
 echo "== summary ($target)"
 echo "load: $(uptime | sed 's/.*load averages*: *//')"
+if [ -n "$outermost" ]; then
+	# The summary alone reaches await-check.sh, so the start warning repeats here.
+	[ -z "${HELMCENTRAL_CHECK_ON_BATTERY:-}" ] || echo "power: on battery"
+	sleep_report "${HELMCENTRAL_CHECK_SLEEP_MARK:-}"
+fi
 failed=0
 if [ -n "$tree_start" ]; then
 	if ! tree_end=$(sh "$PWD/scripts/tree-hash.sh" "$PWD"); then

@@ -23,4 +23,5 @@ worktree.
   hand-back, then fix.
 - Leave all work in the worktree's working tree; the stash is shared by every
   worktree, so `git stash` is refused.
-- Do not commit, push or open a PR.
+- Do not push or open a PR. Commit only when this brief says the branch is
+  stacked: then stage by path and commit on the branch before handing back.
